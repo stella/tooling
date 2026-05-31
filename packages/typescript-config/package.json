@@ -1,0 +1,24 @@
+{
+  "name": "@stll/typescript-config",
+  "version": "0.1.0",
+  "description": "Shared strict TypeScript configuration for stella packages.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stella/tooling.git",
+    "directory": "packages/typescript-config"
+  },
+  "files": [
+    "*.json"
+  ],
+  "type": "commonjs",
+  "exports": {
+    "./base.json": "./base.json",
+    "./library.json": "./library.json",
+    "./node.json": "./node.json",
+    "./bun.json": "./bun.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

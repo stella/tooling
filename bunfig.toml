@@ -1,0 +1,4 @@
+[install]
+# 5-day quarantine: reject fresh package versions to reduce supply-chain risk.
+minimumReleaseAge = 432_000
+

@@ -1,0 +1,62 @@
+{
+  "name": "@stll/oxlint-config",
+  "version": "0.1.0",
+  "description": "Shared general oxlint configuration for stella packages.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stella/tooling.git",
+    "directory": "packages/oxlint-config"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "dist/index.mjs",
+  "types": "dist/index.d.mts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      },
+      "default": "./dist/index.mjs"
+    },
+    "./plugin": {
+      "import": {
+        "types": "./dist/plugin.d.mts",
+        "default": "./dist/plugin.mjs"
+      },
+      "require": {
+        "types": "./dist/plugin.d.cts",
+        "default": "./dist/plugin.cjs"
+      },
+      "default": "./dist/plugin.mjs"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "format": "oxfmt ."
+  },
+  "devDependencies": {
+    "@stll/typescript-config": "workspace:*",
+    "oxfmt": "0.48.0",
+    "oxlint": "1.67.0",
+    "typescript": "6.0.3"
+  },
+  "peerDependencies": {
+    "oxlint": ">=1.66.0",
+    "oxlint-tsgolint": ">=0.23.0"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  }
+}

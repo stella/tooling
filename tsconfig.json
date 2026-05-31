@@ -1,0 +1,5 @@
+{
+  "extends": "./packages/typescript-config/library.json",
+  "include": ["oxlint.config.ts", "packages/oxlint-config/src/**/*.ts"],
+  "exclude": ["node_modules", "packages/oxlint-config/dist"]
+}
