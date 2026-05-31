@@ -1,6 +1,6 @@
 {
   "name": "@stll/typescript-config",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Shared strict TypeScript configuration for stella packages.",
   "license": "Apache-2.0",
   "repository": {
