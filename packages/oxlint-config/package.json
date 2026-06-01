@@ -1,6 +1,6 @@
 {
   "name": "@stll/oxlint-config",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Shared general oxlint configuration for stella packages.",
   "license": "Apache-2.0",
   "repository": {
@@ -36,6 +36,17 @@
         "default": "./dist/plugin.cjs"
       },
       "default": "./dist/plugin.mjs"
+    },
+    "./no-raw-colors": {
+      "import": {
+        "types": "./dist/no-raw-colors.d.mts",
+        "default": "./dist/no-raw-colors.mjs"
+      },
+      "require": {
+        "types": "./dist/no-raw-colors.d.cts",
+        "default": "./dist/no-raw-colors.cjs"
+      },
+      "default": "./dist/no-raw-colors.mjs"
     }
   },
   "publishConfig": {
@@ -44,6 +55,7 @@
   "scripts": {
     "build": "tsdown",
     "typecheck": "tsc --noEmit",
+    "test": "bun test",
     "format": "oxfmt ."
   },
   "devDependencies": {
