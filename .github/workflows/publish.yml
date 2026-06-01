@@ -26,12 +26,11 @@ env:
 jobs:
   npm:
     runs-on: ubuntu-latest
-    outputs:
-      tag: ${{ steps.version.outputs.tag }}
-      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
 
       - name: Read version
         id: version
@@ -125,6 +124,36 @@ jobs:
           git tag -a "$TAG" -m "$TAG"
           git push origin "$TAG"
 
+      - name: Resolve release notes range
+        if: github.event_name == 'push' || inputs.publish_to_npm == true
+        id: release-notes-range
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          previous_stable="$(
+            git tag --list 'v[0-9]*.[0-9]*.[0-9]*' \
+              --sort=-v:refname \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+              | grep -v -x "$RELEASE_TAG" \
+              | head -n 1
+          )"
+          if [[ -z "$previous_stable" ]]; then
+            first_commit="$(git rev-list --max-parents=0 HEAD | tail -n 1)"
+            echo "args=--tag ${RELEASE_TAG} --strip header ${first_commit}..HEAD" >> "$GITHUB_OUTPUT"
+          else
+            echo "args=--tag ${RELEASE_TAG} --strip header ${previous_stable}..HEAD" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate release notes from Conventional Commits
+        if: github.event_name == 'push' || inputs.publish_to_npm == true
+        uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5 # v4.8.0
+        with:
+          config: cliff.toml
+          args: ${{ steps.release-notes-range.outputs.args }}
+        env:
+          OUTPUT: NOTES.md
+
       - name: Create or update GitHub release
         if: github.event_name == 'push' || inputs.publish_to_npm == true
         env:
@@ -151,16 +180,6 @@ jobs:
           else
             gh release create "$RELEASE_TAG" "${assets[@]}" \
               "${prerelease_flag[@]}" \
-              --title "$RELEASE_TAG"
+              --title "$RELEASE_TAG" \
+              --notes-file NOTES.md
           fi
-
-  update-changelog:
-    name: Update CHANGELOG
-    needs: npm
-    if: github.event_name == 'push' || inputs.publish_to_npm == true
-    uses: stella/.github/.github/workflows/changelog-update.yml@d11bdc933dec609e291f6685f470b039d8342b6a
-    with:
-      tag: ${{ needs.npm.outputs.tag }}
-    permissions:
-      contents: write
-      pull-requests: write
