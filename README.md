@@ -6,7 +6,7 @@ This repo intentionally contains only portable tooling policy:
 
 - `@stll/typescript-config`: strict TypeScript config presets.
 - `@stll/oxlint-config`: general upstream oxlint rules and the shared
-  `stella-lowercase` JS plugin.
+  `stella-lowercase` and `no-raw-colors` JS plugins.
 
 Repo-specific stella rules stay in the consuming repo: custom oxlint plugins,
 security rules, i18n rules, generated native artifacts, benchmark exceptions,

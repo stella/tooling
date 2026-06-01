@@ -13,6 +13,7 @@ export type LibraryOptions = {
 };
 
 export const stellaLowercasePluginSpecifier = "@stll/oxlint-config/plugin";
+export const noRawColorsPluginSpecifier = "@stll/oxlint-config/no-raw-colors";
 
 export const libraryIgnorePatterns = ["node_modules/", "dist/", "coverage/"];
 
@@ -27,6 +28,7 @@ export const libraryRules = {
   "no-nested-ternary": "error",
   "no-void": ["error", { allowAsStatement: true }],
   "stella-lowercase/stella-lowercase": "error",
+  "no-raw-colors/no-raw-colors": "error",
 
   "typescript/no-explicit-any": "error",
   "typescript/no-dynamic-delete": "error",
@@ -120,7 +122,11 @@ export const library = (options: LibraryOptions = {}): OxlintConfig =>
       typeAware: true,
       ...options.options,
     },
-    jsPlugins: [stellaLowercasePluginSpecifier, ...(options.jsPlugins ?? [])],
+    jsPlugins: [
+      stellaLowercasePluginSpecifier,
+      noRawColorsPluginSpecifier,
+      ...(options.jsPlugins ?? []),
+    ],
     ignorePatterns: [
       ...libraryIgnorePatterns,
       ...(options.ignorePatterns ?? []),
