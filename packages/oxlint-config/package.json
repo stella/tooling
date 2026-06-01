@@ -55,6 +55,7 @@
   "scripts": {
     "build": "tsdown",
     "typecheck": "tsc --noEmit",
+    "test": "bun test",
     "format": "oxfmt ."
   },
   "devDependencies": {

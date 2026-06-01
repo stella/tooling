@@ -4,6 +4,10 @@
 // corresponding directive becomes unused and lint fails with
 // report-unused-disable-directives enabled.
 
+// Passes — module specifiers are not class lists.
+import _blueAsset from "bg-blue-500.svg";
+export { default as _redAsset } from "text-red-500.svg";
+
 // Gray-scale neutrals must fire.
 // oxlint-disable-next-line no-raw-colors/no-raw-colors
 const _grayBg = "bg-gray-100";
@@ -46,6 +50,14 @@ const _templatedExpr = (active: boolean): string =>
   // oxlint-disable-next-line no-raw-colors/no-raw-colors
   `px-2 ${active ? "bg-blue-500" : "text-foreground"}`;
 
+// Newer Tailwind color-bearing utilities must fire.
+// oxlint-disable-next-line no-raw-colors/no-raw-colors
+const _dropShadow = "drop-shadow-cyan-500";
+// oxlint-disable-next-line no-raw-colors/no-raw-colors
+const _scrollbar = "scrollbar-thumb-mist-400";
+// oxlint-disable-next-line no-raw-colors/no-raw-colors
+const _textShadow = "text-shadow-red-500";
+
 // Passes — semantic tokens with opacity (success/warning/destructive/etc.)
 const _semanticSuccess = "bg-success/12 text-success";
 const _semanticWarning = "bg-warning/12 text-warning";
@@ -62,6 +74,10 @@ const _whitespaceLike = "bg-whitesmoke";
 // Passes — unrelated utilities.
 const _layout = "flex items-center justify-between gap-2 rounded-md";
 
+const _dynamicImport = (): Promise<unknown> => import("bg-blue-500.svg");
+const _dynamicTemplateImport = (): Promise<unknown> =>
+  import(`bg-blue-500.svg`);
+
 export const __noRawColorsFixture = {
   _grayBg,
   _stoneText,
@@ -76,6 +92,9 @@ export const __noRawColorsFixture = {
   _mixedClasses,
   _templatedQuasi,
   _templatedExpr,
+  _dropShadow,
+  _scrollbar,
+  _textShadow,
   _semanticSuccess,
   _semanticWarning,
   _semanticDestructive,
@@ -84,4 +103,7 @@ export const __noRawColorsFixture = {
   _blackOpacity,
   _whitespaceLike,
   _layout,
+  _blueAsset,
+  _dynamicImport,
+  _dynamicTemplateImport,
 };
