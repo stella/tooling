@@ -1,7 +1,7 @@
 # git-cliff configuration: https://git-cliff.org/docs/configuration
 #
 # Generates GitHub release notes from Conventional Commits since the
-# previous tag. Used by `release.yml` to write `NOTES.md` and pass it
+# previous tag. Used by `publish.yml` to write `NOTES.md` and pass it
 # to `gh release create --notes-file`. The repo enforces Conventional
 # Commits in PR titles (`feat`, `fix`, `chore`, `docs`); anything that
 # slips through unconventional is filtered out below.
@@ -16,7 +16,7 @@ body = """
 {% for group, commits in commits | group_by(attribute="group") %}
 ### {{ group | split(pat=":") | last }}
 {% for commit in commits %}
-- {% if commit.scope %}**{{ commit.scope }}**: {% endif %}{{ commit.message | split(pat="\\n") | first | trim }}\
+- {% if commit.scope %}**{{ commit.scope }}**: {% endif %}{{ commit.message | split(pat="\n") | first | trim }}\
 {% endfor %}
 {% endfor %}\n
 """
@@ -51,7 +51,8 @@ commit_parsers = [
   { message = "^refactor",        group = "03:♻️ Refactor" },
   { message = "^docs",            group = "04:📚 Documentation" },
   { message = "^test",            group = "05:🧪 Tests" },
-  { message = "^chore\\(deps\\)", group = "06:📦 Dependencies" },
+  { message = "^chore\\(deps[^)]*\\)", group = "06:📦 Dependencies" },
+  { message = "^chore\\(release\\)", skip = true },
   { message = "^chore",           group = "07:⚙️ Miscellaneous" },
   { message = "^style",           skip  = true },
   { message = "^ci",              skip  = true },
