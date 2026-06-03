@@ -1,3 +1,7 @@
+<p align="center">
+  <img src=".github/assets/banner.png" alt="Stella tooling" width="100%" />
+</p>
+
 # stella tooling
 
 Shared TypeScript and oxlint configuration for stella public packages.
