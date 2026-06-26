@@ -1,0 +1,11 @@
+warning: stella should be written lowercase
+  --> $DIR/main.rs:2:20
+   |
+LL |     let _product = "Stella tooling";
+   |                    ^^^^^^^^^^^^^^^^
+   |
+   = help: replace `Stella` with `stella`
+   = note: `#[warn(stella_lowercase)]` on by default
+
+warning: 1 warning emitted
+
