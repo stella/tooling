@@ -1,0 +1,12 @@
+# Copy this to a Rust repository as `dylint.toml`.
+# Replace `<tooling-rev>` with the exact stella/tooling commit to keep lint
+# behavior reproducible.
+
+[workspace.metadata.dylint]
+libraries = [
+  {
+    git = "https://github.com/stella/tooling",
+    rev = "<tooling-rev>",
+    pattern = "rust-lints/*",
+  },
+]

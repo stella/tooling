@@ -12,6 +12,7 @@ This repo intentionally contains only portable tooling policy:
 - `@stll/oxlint-config`: general upstream oxlint rules and the shared
   `stella-lowercase` and `no-raw-colors` JS plugins.
 - `rust/`: source-of-truth Rust formatting, lint, and Cargo profile templates.
+- `rust-lints/`: Dylint libraries for stella-specific Rust rules.
 
 Repo-specific stella rules stay in the consuming repo: custom oxlint plugins,
 security rules, i18n rules, generated native artifacts, benchmark exceptions,
@@ -94,9 +95,18 @@ Use the Rust templates by copying them into a Rust repository:
 ```bash
 cp rust/rustfmt.toml /path/to/repo/rustfmt.toml
 cp rust/clippy.toml /path/to/repo/clippy.toml
+cp rust/dylint.toml /path/to/repo/dylint.toml
 ```
 
 Then copy either `rust/cargo-root.toml` or `rust/cargo-workspace.toml` into the
 repository's root `Cargo.toml`. Cargo does not support extending these settings
 from another package, so the templates are kept here as the canonical source and
 synced into consumers.
+
+Pin the `rev` in `dylint.toml` to the exact tooling commit being adopted. Then
+run Clippy first and Dylint second:
+
+```bash
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo dylint --workspace --all -- --all-targets --all-features -- -D warnings
+```
