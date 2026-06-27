@@ -42,7 +42,7 @@ impl<'tcx> LateLintPass<'tcx> for StellaLowercase {
         let LitKind::Str(value, _) = lit.node else {
             return;
         };
-        if !value.as_str().contains("Stella") {
+        if !has_stella_word(value.as_str()) {
             return;
         }
 
@@ -55,6 +55,18 @@ impl<'tcx> LateLintPass<'tcx> for StellaLowercase {
             "replace `Stella` with `stella`",
         );
     }
+}
+
+fn has_stella_word(value: &str) -> bool {
+    value.match_indices("Stella").any(|(index, _)| {
+        let before = value[..index].chars().next_back();
+        let after = value[index + "Stella".len()..].chars().next();
+        before.is_none_or(is_word_boundary) && after.is_none_or(is_word_boundary)
+    })
+}
+
+fn is_word_boundary(value: char) -> bool {
+    !value.is_alphanumeric() && value != '_'
 }
 
 #[test]

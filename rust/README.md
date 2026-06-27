@@ -22,7 +22,7 @@ into Rust repositories when adding or refreshing Rust support.
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-cargo dylint --workspace --all
+cargo dylint --workspace --all -- --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features --locked
 cargo audit
 cargo deny check

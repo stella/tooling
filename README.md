@@ -108,5 +108,5 @@ run Clippy first and Dylint second:
 
 ```bash
 cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo dylint --workspace --all
+cargo dylint --workspace --all -- --all-targets --all-features -- -D warnings
 ```
