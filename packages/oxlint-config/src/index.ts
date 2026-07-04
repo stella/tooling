@@ -23,7 +23,9 @@ export const libraryIgnorePatterns = ["node_modules/", "dist/", "coverage/"];
 // than appending to it. This must stay in sync with every plugin-prefixed
 // rule below: `import/*` and `promise/*` rules are configured further down,
 // but oxlint disables both plugins unless they are listed here, which left
-// `import/no-cycle` and every `promise/*` rule silently unenforced.
+// `import/no-cycle` and every `promise/*` rule silently unenforced. `react`
+// is enabled for `react/react-compiler`; see the comment on that rule for
+// why every other `react/*` rule is explicitly turned back off below.
 export const libraryPlugins = [
   "eslint",
   "typescript",
@@ -31,6 +33,7 @@ export const libraryPlugins = [
   "oxc",
   "import",
   "promise",
+  "react",
 ] satisfies Plugins;
 
 export const libraryRules = {
@@ -43,8 +46,17 @@ export const libraryRules = {
   "no-loop-func": "error",
   "no-nested-ternary": "error",
   "no-void": ["error", { allowAsStatement: true }],
+  // Callback expressions should stay lexically scoped; avoids accidental `this` rebinding.
+  "prefer-arrow-callback": "error",
   "stella-lowercase/stella-lowercase": "error",
   "no-raw-colors/no-raw-colors": "error",
+
+  // Spreading into an accumulator on every loop iteration is O(n^2); push/concat instead.
+  "oxc/no-accumulating-spread": "error",
+  // Spreading inside `.map()` allocates a new array per callback invocation; push instead.
+  "oxc/no-map-spread": "error",
+  // Flags `if`/`switch` branches with identical bodies: likely dead logic or a missed merge.
+  "oxc/branches-sharing-code": "error",
 
   "typescript/no-explicit-any": "error",
   "typescript/no-dynamic-delete": "error",
@@ -90,15 +102,54 @@ export const libraryRules = {
   "unicorn/prefer-ternary": "off",
   "unicorn/no-array-reduce": "error",
   "unicorn/no-nested-ternary": "off",
+  // `Array.from({ length }).fill(obj)` shares one reference across every slot.
+  "unicorn/no-array-fill-with-reference-type": "error",
 
   "import/no-cycle": "error",
   "import/consistent-type-specifier-style": "off",
+  // Keep a blank line after the import block so it stays visually separate from module body.
+  "import/newline-after-import": "error",
 
   "promise/always-return": "error",
   "promise/no-return-in-finally": "error",
   "promise/prefer-await-to-then": "off",
   "promise/prefer-await-to-callbacks": "off",
   "promise/avoid-new": "off",
+
+  // Enabling the `react` plugin (above) turns on its whole correctness-category
+  // rule set at "warn" by default, not just react-compiler. Only react-compiler
+  // is a deliberate addition here, so the rest are turned off to keep this
+  // package's blast radius scoped to the one rule being added; lift any of
+  // these independently if a future change wants them.
+  "react/exhaustive-deps": "off",
+  "react/forward-ref-uses-ref": "off",
+  "react/jsx-key": "off",
+  "react/jsx-no-duplicate-props": "off",
+  "react/jsx-no-undef": "off",
+  "react/jsx-props-no-spread-multi": "off",
+  "react/no-children-prop": "off",
+  "react/no-danger-with-children": "off",
+  "react/no-did-mount-set-state": "off",
+  "react/no-did-update-set-state": "off",
+  "react/no-direct-mutation-state": "off",
+  "react/no-find-dom-node": "off",
+  "react/no-is-mounted": "off",
+  "react/no-render-return-value": "off",
+  "react/no-string-refs": "off",
+  "react/no-this-in-sfc": "off",
+  "react/no-unsafe": "off",
+  "react/no-will-update-set-state": "off",
+  "react/void-dom-elements-no-children": "off",
+  // Requires oxlint >= 1.70. Nursery rule upstream: flags violations of the
+  // Rules of React that block compiler memoization; diagnostics may shift
+  // between oxlint minors, so re-audit findings after bumping the oxlint
+  // devDependency. oxlint has no bulk-suppression/baseline mechanism as of
+  // 1.72.0 (oxc-project/oxc#10549 tracks the upstream feature request and is
+  // still open); consumers adopting this against an existing findings
+  // backlog should carve out temporary `overrides` entries per legacy path
+  // (or per rule, at `"off"`) and fix forward, rather than expecting a
+  // generated suppression file.
+  "react/react-compiler": "error",
 
   "sort-keys": "off",
   "no-plusplus": "off",
