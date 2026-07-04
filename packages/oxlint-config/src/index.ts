@@ -3,12 +3,14 @@ import { defineConfig, type OxlintConfig, type OxlintOverride } from "oxlint";
 type Rules = NonNullable<OxlintConfig["rules"]>;
 type JsPlugins = NonNullable<OxlintConfig["jsPlugins"]>;
 type Options = NonNullable<OxlintConfig["options"]>;
+type Plugins = NonNullable<OxlintConfig["plugins"]>;
 
 export type LibraryOptions = {
   jsPlugins?: JsPlugins;
   ignorePatterns?: string[];
   options?: Options;
   overrides?: OxlintOverride[];
+  plugins?: Plugins;
   rules?: Rules;
 };
 
@@ -16,6 +18,20 @@ export const stellaLowercasePluginSpecifier = "@stll/oxlint-config/plugin";
 export const noRawColorsPluginSpecifier = "@stll/oxlint-config/no-raw-colors";
 
 export const libraryIgnorePatterns = ["node_modules/", "dist/", "coverage/"];
+
+// Setting oxlint's `plugins` config replaces its built-in default list rather
+// than appending to it. This must stay in sync with every plugin-prefixed
+// rule below: `import/*` and `promise/*` rules are configured further down,
+// but oxlint disables both plugins unless they are listed here, which left
+// `import/no-cycle` and every `promise/*` rule silently unenforced.
+export const libraryPlugins = [
+  "eslint",
+  "typescript",
+  "unicorn",
+  "oxc",
+  "import",
+  "promise",
+] satisfies Plugins;
 
 export const libraryRules = {
   "no-console": "off",
@@ -122,6 +138,9 @@ export const library = (options: LibraryOptions = {}): OxlintConfig =>
       typeAware: true,
       ...options.options,
     },
+    plugins: Array.from(
+      new Set([...libraryPlugins, ...(options.plugins ?? [])]),
+    ),
     jsPlugins: [
       stellaLowercasePluginSpecifier,
       noRawColorsPluginSpecifier,
