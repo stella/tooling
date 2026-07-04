@@ -6,6 +6,7 @@
 
 // Passes — module specifiers are not class lists.
 import _blueAsset from "bg-blue-500.svg";
+
 export { default as _redAsset } from "text-red-500.svg";
 
 // Gray-scale neutrals must fire.

@@ -53,6 +53,16 @@ export default library({
 });
 ```
 
+`react/react-compiler` is part of the default rule set and requires
+**oxlint >= 1.70**. It is a nursery rule upstream, so its diagnostics may
+change between oxlint minor versions; re-audit findings after bumping the
+oxlint devDependency. oxlint has no bulk-suppression/baseline mechanism as of
+1.72.0 ([oxc-project/oxc#10549](https://github.com/oxc-project/oxc/issues/10549)
+tracks the upstream feature request and is still open). A repo adopting this
+rule against an existing findings backlog should carve out temporary
+`overrides` entries per legacy path (or per rule, at `"off"`) and fix forward,
+rather than expecting a generated suppression file.
+
 Use the helper directly as the root config when possible. That keeps root-level
 options, shared JS plugins, shared ignores, and local exceptions in one merged
 object.
