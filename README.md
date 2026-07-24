@@ -133,3 +133,16 @@ run Clippy first and Dylint second:
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo dylint --workspace --all -- --all-targets --all-features -- -D warnings
 ```
+
+## Releasing packages
+
+Add a Changeset for every pull request that changes a published package. Choose
+the affected package and semantic bump with `bun run changeset`; use an empty
+Changeset when a release is intentionally unnecessary.
+
+After the change lands on `main`, the shared release workflow maintains one
+Version Packages pull request. Merging that pull request updates package
+versions and changelogs, then `.github/workflows/publish.yml` builds the
+tarballs and delegates the hardened npm and GitHub release transaction to the
+versioned `stella/.github` contract. Package tags use the immutable
+`<name>@<version>` form.
