@@ -4,8 +4,10 @@ on:
   push:
     branches: [main]
     paths:
-      - packages/typescript-config/package.json
-      - packages/oxlint-config/package.json
+      # Changesets owns these files, so ordinary manifest maintenance cannot
+      # accidentally start a release transaction.
+      - packages/typescript-config/CHANGELOG.md
+      - packages/oxlint-config/CHANGELOG.md
   workflow_dispatch:
     inputs:
       publish_to_npm:

@@ -68,4 +68,19 @@ describe("bun.lock workspace self-version synchronization", () => {
     expect(command).toContain("check-lockfile-workspace-versions.ts --write");
     expect(command).toEndWith("bun install --frozen-lockfile");
   });
+
+  test("automatic publishing only uses Changesets release signals", async () => {
+    const publishWorkflow = await Bun.file(
+      new URL("../.github/workflows/publish.yml", import.meta.url),
+    ).text();
+    const pushTrigger = publishWorkflow.slice(
+      0,
+      publishWorkflow.indexOf("  workflow_dispatch:"),
+    );
+
+    for (const packageName of ["typescript-config", "oxlint-config"]) {
+      expect(pushTrigger).toContain(`packages/${packageName}/CHANGELOG.md`);
+      expect(pushTrigger).not.toContain(`packages/${packageName}/package.json`);
+    }
+  });
 });
