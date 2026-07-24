@@ -4,6 +4,8 @@
   "oxlint-tsgolint": "7.0.2001",
   "typescript6Compatibility": {
     "version": "6.0.3",
+    "packageAlias": "typescript-compat",
+    "apiConsumers": ["TypeScript compiler API"],
     "peerBlockers": ["@astrojs/check", "@typescript-eslint/utils"]
   }
 }

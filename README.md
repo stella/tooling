@@ -33,10 +33,11 @@ oxlint-tsgolint 0.x line.
 
 TypeScript 6 is compatibility-only. A repository may keep it under the
 `typescript` package name only for a command that loads one of the peer
-blockers listed in `toolchain.json`. Its normal compiler must remain the
-TypeScript 7 native compiler, installed under a separate alias such as
-`@typescript/native`. Remove the compatibility install when the last listed
-blocker accepts TypeScript 7.
+blockers listed in `toolchain.json`. Code that imports the compiler API must
+use the manifest's `typescript-compat` package alias instead. The normal
+compiler remains TypeScript 7; install it directly or under an alias such as
+`@typescript/native`. Remove each compatibility install when its listed
+blocker or API consumer accepts TypeScript 7.
 
 Use the library TypeScript preset:
 
