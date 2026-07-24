@@ -30,6 +30,8 @@ describe("shared toolchain policy", () => {
       "oxlint-tsgolint": "7.0.2001",
       typescript: "7.0.2",
       typescript6Compatibility: {
+        apiConsumers: ["TypeScript compiler API"],
+        packageAlias: "typescript-compat",
         peerBlockers: ["@astrojs/check", "@typescript-eslint/utils"],
         version: "6.0.3",
       },
