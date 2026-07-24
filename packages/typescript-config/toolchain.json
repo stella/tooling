@@ -1,0 +1,9 @@
+{
+  "typescript": "7.0.2",
+  "oxlint": "1.75.0",
+  "oxlint-tsgolint": "7.0.2001",
+  "typescript6Compatibility": {
+    "version": "6.0.3",
+    "peerBlockers": ["@astrojs/check", "@typescript-eslint/utils"]
+  }
+}

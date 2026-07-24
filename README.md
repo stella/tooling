@@ -26,6 +26,18 @@ Install the shared TypeScript and oxlint packages:
 bun add -d @stll/typescript-config @stll/oxlint-config oxlint oxlint-tsgolint typescript
 ```
 
+The shared defaults require TypeScript 7.0.2 or newer, oxlint 1.75.0 or
+newer, and oxlint-tsgolint 7.0.2001 or newer. Pin the current versions from
+`@stll/typescript-config/toolchain.json`; do not use the deprecated
+oxlint-tsgolint 0.x line.
+
+TypeScript 6 is compatibility-only. A repository may keep it under the
+`typescript` package name only for a command that loads one of the peer
+blockers listed in `toolchain.json`. Its normal compiler must remain the
+TypeScript 7 native compiler, installed under a separate alias such as
+`@typescript/native`. Remove the compatibility install when the last listed
+blocker accepts TypeScript 7.
+
 Use the library TypeScript preset:
 
 ```json
