@@ -9,7 +9,8 @@
   "scripts": {
     "build": "bun --filter @stll/oxlint-config build",
     "changeset": "changeset",
-    "changeset:version": "changeset version && rm -f bun.lock && bun install",
+    "changeset:version": "changeset version && bun scripts/check-lockfile-workspace-versions.ts --write && bun install --frozen-lockfile",
+    "check:lockfile-versions": "bun scripts/check-lockfile-workspace-versions.ts",
     "typecheck": "bun --filter @stll/oxlint-config typecheck",
     "test": "bun test",
     "test:rust-lints": "cd rust-lints/stella_lints && cargo test",
