@@ -16,7 +16,11 @@
     "./base.json": "./base.json",
     "./library.json": "./library.json",
     "./node.json": "./node.json",
-    "./bun.json": "./bun.json"
+    "./bun.json": "./bun.json",
+    "./toolchain.json": "./toolchain.json"
+  },
+  "peerDependencies": {
+    "typescript": ">=7.0.2 <8"
   },
   "publishConfig": {
     "access": "public"

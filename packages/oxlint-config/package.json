@@ -61,12 +61,12 @@
   "devDependencies": {
     "@stll/typescript-config": "workspace:*",
     "oxfmt": "0.48.0",
-    "oxlint": "1.71.0",
-    "typescript": "6.0.3"
+    "oxlint": "1.75.0",
+    "typescript": "7.0.2"
   },
   "peerDependencies": {
-    "oxlint": ">=1.70.0",
-    "oxlint-tsgolint": ">=0.23.0"
+    "oxlint": ">=1.75.0 <2",
+    "oxlint-tsgolint": ">=7.0.2001 <8"
   },
   "engines": {
     "node": "^20.19.0 || >=22.12.0"
