@@ -101,4 +101,22 @@ describe("bun.lock workspace self-version synchronization", () => {
       releaseJob.indexOf("uses: stella/.github/"),
     );
   });
+
+  test("manual recovery pins both the source and prior artifact run", async () => {
+    const publishWorkflow = await Bun.file(
+      new URL("../.github/workflows/publish.yml", import.meta.url),
+    ).text();
+
+    expect(publishWorkflow).toContain("artifact_run_id:");
+    expect(publishWorkflow).toContain("source_ref:");
+    expect(publishWorkflow).toContain(
+      "ref: ${{ inputs.source_ref || github.sha }}",
+    );
+    expect(publishWorkflow).toContain(
+      "artifact-run-id: ${{ inputs.artifact_run_id || '' }}",
+    );
+    expect(publishWorkflow).toContain(
+      "source-ref: ${{ inputs.source_ref || '' }}",
+    );
+  });
 });
