@@ -34,7 +34,7 @@
     },
     "packages/oxlint-plugin": {
       "name": "@stll/oxlint-plugin",
-      "version": "0.0.0",
+      "version": "0.1.0",
       "devDependencies": {
         "@oxlint/plugins": "1.75.0",
         "@stll/typescript-config": "workspace:*",
