@@ -78,9 +78,27 @@ describe("bun.lock workspace self-version synchronization", () => {
       publishWorkflow.indexOf("  workflow_dispatch:"),
     );
 
-    for (const packageName of ["typescript-config", "oxlint-config"]) {
+    for (const packageName of [
+      "typescript-config",
+      "oxlint-config",
+      "oxlint-plugin",
+    ]) {
       expect(pushTrigger).toContain(`packages/${packageName}/CHANGELOG.md`);
       expect(pushTrigger).not.toContain(`packages/${packageName}/package.json`);
     }
+  });
+
+  test("release caller can verify and download package artifacts", async () => {
+    const publishWorkflow = await Bun.file(
+      new URL("../.github/workflows/publish.yml", import.meta.url),
+    ).text();
+    const releaseJob = publishWorkflow.slice(
+      publishWorkflow.indexOf("  release:"),
+    );
+
+    expect(releaseJob).toContain("actions: read");
+    expect(releaseJob.indexOf("actions: read")).toBeLessThan(
+      releaseJob.indexOf("uses: stella/.github/"),
+    );
   });
 });

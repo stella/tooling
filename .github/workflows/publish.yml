@@ -85,6 +85,7 @@ jobs:
       github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || inputs.publish_to_npm)
     permissions:
+      actions: read
       contents: write
       id-token: write
     # Keep this caller filename stable: npm trusted publishing authorizes it.
