@@ -1,0 +1,95 @@
+{
+  "name": "@stll/oxlint-plugin",
+  "version": "0.0.0",
+  "description": "Portable static-safety rules for Oxlint consumers.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stella/tooling.git",
+    "directory": "packages/oxlint-plugin"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "dist/index.mjs",
+  "types": "dist/index.d.mts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      },
+      "default": "./dist/index.mjs"
+    },
+    "./no-any-casts": {
+      "import": {
+        "types": "./dist/no-any-casts.d.mts",
+        "default": "./dist/no-any-casts.mjs"
+      },
+      "require": {
+        "types": "./dist/no-any-casts.d.cts",
+        "default": "./dist/no-any-casts.cjs"
+      },
+      "default": "./dist/no-any-casts.mjs"
+    },
+    "./no-dangerous-type-assertions": {
+      "import": {
+        "types": "./dist/no-dangerous-type-assertions.d.mts",
+        "default": "./dist/no-dangerous-type-assertions.mjs"
+      },
+      "require": {
+        "types": "./dist/no-dangerous-type-assertions.d.cts",
+        "default": "./dist/no-dangerous-type-assertions.cjs"
+      },
+      "default": "./dist/no-dangerous-type-assertions.mjs"
+    },
+    "./no-partial-record-satisfies": {
+      "import": {
+        "types": "./dist/no-partial-record-satisfies.d.mts",
+        "default": "./dist/no-partial-record-satisfies.mjs"
+      },
+      "require": {
+        "types": "./dist/no-partial-record-satisfies.d.cts",
+        "default": "./dist/no-partial-record-satisfies.cjs"
+      },
+      "default": "./dist/no-partial-record-satisfies.mjs"
+    },
+    "./no-unsafe-inner-html": {
+      "import": {
+        "types": "./dist/no-unsafe-inner-html.d.mts",
+        "default": "./dist/no-unsafe-inner-html.mjs"
+      },
+      "require": {
+        "types": "./dist/no-unsafe-inner-html.d.cts",
+        "default": "./dist/no-unsafe-inner-html.cjs"
+      },
+      "default": "./dist/no-unsafe-inner-html.mjs"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "format": "oxfmt ."
+  },
+  "devDependencies": {
+    "@oxlint/plugins": "1.75.0",
+    "@stll/typescript-config": "workspace:*",
+    "oxfmt": "0.48.0",
+    "typescript": "7.0.2"
+  },
+  "peerDependencies": {
+    "@oxlint/plugins": ">=1.75.0 <2",
+    "oxlint": ">=1.75.0 <2"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "extends": "@stll/typescript-config/library.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "noImplicitAny": false,
+    "noPropertyAccessFromIndexSignature": false
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}
