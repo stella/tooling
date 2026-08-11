@@ -9,6 +9,21 @@ export default library({
   jsPlugins: [...portableSafetyPluginSpecifiers],
   overrides: [
     {
+      // Oxlint presents plugin AST nodes as intentionally untyped values.
+      // Type-aware any-flow and condition rules cannot add safety inside the
+      // visitor implementation; the passive fixtures prove rule behavior.
+      files: ["packages/oxlint-plugin/src/**/*.ts"],
+      rules: {
+        "typescript/no-unsafe-assignment": "off",
+        "typescript/no-unsafe-member-access": "off",
+        "typescript/no-unsafe-call": "off",
+        "typescript/no-unsafe-return": "off",
+        "typescript/no-unsafe-argument": "off",
+        "typescript/strict-boolean-expressions": "off",
+        "typescript/no-unnecessary-condition": "off",
+      },
+    },
+    {
       files: ["packages/oxlint-plugin/fixtures/**/*.{ts,tsx}"],
       rules: portableSafetyRules,
     },
