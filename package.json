@@ -7,18 +7,18 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "bun --filter @stll/oxlint-config build",
+    "build": "bun --filter @stll/oxlint-config build && bun --filter @stll/oxlint-plugin build",
     "changeset": "changeset",
     "changeset:version": "changeset version && bun scripts/check-lockfile-workspace-versions.ts --write && bun install --frozen-lockfile",
     "check:lockfile-versions": "bun scripts/check-lockfile-workspace-versions.ts",
-    "typecheck": "bun --filter @stll/oxlint-config typecheck",
+    "typecheck": "bun --filter @stll/oxlint-config typecheck && bun --filter @stll/oxlint-plugin typecheck",
     "test": "bun test",
     "test:rust-lints": "cd rust-lints/stella_lints && cargo test",
     "lint": "bun run build && bun --bun oxlint -c oxlint.config.ts --report-unused-disable-directives-severity=error --deny-warnings --type-aware .",
     "lint:fix": "bun --bun oxlint -c oxlint.config.ts --type-aware --fix .",
     "format": "oxfmt . \"!.ai/**\" \"!.agents/**\" \"!.claude/**\" \"!AGENTS.md\" \"!CLAUDE.md\" \"!GEMINI.md\"",
-    "publint": "publint --pack npm packages/typescript-config && publint --pack npm packages/oxlint-config",
-    "pack:dry-run": "bun run build && (cd packages/typescript-config && npm pack --dry-run) && (cd packages/oxlint-config && npm pack --dry-run)",
+    "publint": "publint --pack npm packages/typescript-config && publint --pack npm packages/oxlint-config && publint --pack npm packages/oxlint-plugin",
+    "pack:dry-run": "bun run build && (cd packages/typescript-config && npm pack --dry-run) && (cd packages/oxlint-config && npm pack --dry-run) && (cd packages/oxlint-plugin && npm pack --dry-run)",
     "prepack": "bun run build && bun run typecheck",
     "sync-ai": "bash scripts/sync-ai-skills.sh",
     "sync-ai:check": "bash scripts/sync-ai-skills.sh --check"
@@ -27,6 +27,7 @@
     "@changesets/changelog-github": "0.7.0",
     "@changesets/cli": "2.31.0",
     "@stll/oxlint-config": "workspace:*",
+    "@stll/oxlint-plugin": "workspace:*",
     "bun-types": "1.3.14",
     "oxfmt": "0.48.0",
     "oxlint": "1.75.0",
@@ -34,6 +35,9 @@
     "publint": "0.3.21",
     "tsdown": "0.22.9",
     "typescript": "7.0.2"
+  },
+  "overrides": {
+    "js-yaml": "3.15.1"
   },
   "packageManager": "bun@1.3.14"
 }

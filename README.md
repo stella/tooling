@@ -11,19 +11,21 @@ This repo intentionally contains only portable tooling policy:
 - `@stll/typescript-config`: strict TypeScript config presets.
 - `@stll/oxlint-config`: general upstream oxlint rules and the shared
   `stella-lowercase` and `no-raw-colors` JS plugins.
+- `@stll/oxlint-plugin`: portable static-safety rules for unsafe type
+  assertions, incomplete union-keyed records, and raw DOM HTML sinks.
 - `rust/`: source-of-truth Rust formatting, lint, and Cargo profile templates.
 - `rust-lints/`: Dylint libraries for stella-specific Rust rules.
 
-Repo-specific stella rules stay in the consuming repo: custom oxlint plugins,
-security rules, i18n rules, generated native artifacts, benchmark exceptions,
-and package-specific ignores.
+Repo-specific stella rules stay in the consuming repo: domain authorization,
+i18n, generated native artifacts, benchmark exceptions, and package-specific
+ignores.
 
 ## Usage
 
 Install the shared TypeScript and oxlint packages:
 
 ```bash
-bun add -d @stll/typescript-config @stll/oxlint-config oxlint oxlint-tsgolint typescript
+bun add -d @stll/typescript-config @stll/oxlint-config @stll/oxlint-plugin @oxlint/plugins oxlint oxlint-tsgolint typescript
 ```
 
 The shared defaults require TypeScript 7.0.2 or newer, oxlint 1.75.0 or
@@ -65,6 +67,25 @@ export default library({
   ],
 });
 ```
+
+Add the portable safety rules to an existing Oxlint config:
+
+```ts
+import { defineConfig } from "oxlint";
+import {
+  portableSafetyPluginSpecifiers,
+  portableSafetyRules,
+} from "@stll/oxlint-plugin";
+
+export default defineConfig({
+  jsPlugins: [...portableSafetyPluginSpecifiers],
+  rules: { ...portableSafetyRules },
+});
+```
+
+When using `no-unsafe-inner-html`, disable the blanket `react/no-danger` rule;
+the portable rule permits static and provably sanitized HTML while rejecting
+untrusted values.
 
 `react/react-compiler` is part of the default rule set and requires
 **oxlint >= 1.70**. It is a nursery rule upstream, so its diagnostics may
