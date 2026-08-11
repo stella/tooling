@@ -33,13 +33,20 @@ newer, and oxlint-tsgolint 7.0.2001 or newer. Pin the current versions from
 `@stll/typescript-config/toolchain.json`; do not use the deprecated
 oxlint-tsgolint 0.x line.
 
-TypeScript 6 is compatibility-only. A repository may keep it under the
-`typescript` package name only for a command that loads one of the peer
-blockers listed in `toolchain.json`. Code that imports the compiler API must
-use the manifest's `typescript-compat` package alias instead. The normal
-compiler remains TypeScript 7; install it directly or under an alias such as
-`@typescript/native`. Remove each compatibility install when its listed
-blocker or API consumer accepts TypeScript 7.
+`toolchain.json` defines two supported TypeScript install layouts:
+
+- `direct` installs TypeScript 7 as `typescript` and runs the normal `tsc`
+  binary. Prefer this when every framework and compiler-API consumer supports
+  TypeScript 7.
+- `split-compatibility` keeps TypeScript 6 as `typescript` for incompatible
+  compiler-API consumers, then installs TypeScript 7 as `@typescript/native`
+  and invokes that binary for typechecking.
+
+TypeScript 6 is compatibility-only. Use the split layout only for a command
+that loads one of the peer blockers listed in `toolchain.json`, or for code
+that imports the TypeScript compiler API. Remove the compatibility install when
+the blocker accepts TypeScript 7. The shared config's peer range accepts both
+layouts; the compiler and typecheck command in each layout remain TypeScript 7.
 
 Use the library TypeScript preset:
 

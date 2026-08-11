@@ -2,6 +2,22 @@
   "typescript": "7.0.2",
   "oxlint": "1.75.0",
   "oxlint-tsgolint": "7.0.2001",
+  "typescriptInstallLayouts": [
+    {
+      "type": "direct",
+      "compilerPackage": "typescript",
+      "compilerSpecifier": "7.0.2",
+      "typecheckCommand": "tsc --noEmit"
+    },
+    {
+      "type": "split-compatibility",
+      "compilerPackage": "@typescript/native",
+      "compilerSpecifier": "npm:typescript@7.0.2",
+      "compatibilityPackage": "typescript",
+      "compatibilitySpecifier": "6.0.3",
+      "typecheckCommand": "node ./node_modules/@typescript/native/bin/tsc --noEmit"
+    }
+  ],
   "typescript6Compatibility": {
     "version": "6.0.3",
     "packageAlias": "typescript-compat",
