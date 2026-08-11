@@ -8,6 +8,7 @@
         "@changesets/changelog-github": "0.7.0",
         "@changesets/cli": "2.31.0",
         "@stll/oxlint-config": "workspace:*",
+        "@stll/oxlint-plugin": "workspace:*",
         "bun-types": "1.3.14",
         "oxfmt": "0.48.0",
         "oxlint": "1.75.0",
