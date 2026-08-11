@@ -29,6 +29,23 @@ describe("shared toolchain policy", () => {
       oxlint: "1.75.0",
       "oxlint-tsgolint": "7.0.2001",
       typescript: "7.0.2",
+      typescriptInstallLayouts: [
+        {
+          compilerPackage: "typescript",
+          compilerSpecifier: "7.0.2",
+          type: "direct",
+          typecheckCommand: "tsc --noEmit",
+        },
+        {
+          compatibilityPackage: "typescript",
+          compatibilitySpecifier: "6.0.3",
+          compilerPackage: "@typescript/native",
+          compilerSpecifier: "npm:typescript@7.0.2",
+          type: "split-compatibility",
+          typecheckCommand:
+            "node ./node_modules/@typescript/native/bin/tsc --noEmit",
+        },
+      ],
       typescript6Compatibility: {
         apiConsumers: ["TypeScript compiler API"],
         packageAlias: "typescript-compat",
@@ -38,13 +55,8 @@ describe("shared toolchain policy", () => {
     });
   });
 
-  test("rejects pre-TS7 compiler and tsgolint consumers", async () => {
-    const oxlintPackage = await readJson(
-      "packages/oxlint-config/package.json",
-    );
-    const typescriptPackage = await readJson(
-      "packages/typescript-config/package.json",
-    );
+  test("rejects pre-TS7 tsgolint consumers", async () => {
+    const oxlintPackage = await readJson("packages/oxlint-config/package.json");
 
     expect(oxlintPackage).toEqual(
       expect.objectContaining({
@@ -54,11 +66,17 @@ describe("shared toolchain policy", () => {
         },
       }),
     );
+  });
+
+  test("supports both TypeScript install layouts", async () => {
+    const typescriptPackage = await readJson(
+      "packages/typescript-config/package.json",
+    );
 
     expect(typescriptPackage).toEqual(
       expect.objectContaining({
         peerDependencies: {
-          typescript: ">=7.0.2 <8",
+          typescript: ">=6.0.3 <8",
         },
       }),
     );

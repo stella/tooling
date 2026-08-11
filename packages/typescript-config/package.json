@@ -19,10 +19,10 @@
     "./bun.json": "./bun.json",
     "./toolchain.json": "./toolchain.json"
   },
-  "peerDependencies": {
-    "typescript": ">=7.0.2 <8"
-  },
   "publishConfig": {
     "access": "public"
+  },
+  "peerDependencies": {
+    "typescript": ">=6.0.3 <8"
   }
 }
