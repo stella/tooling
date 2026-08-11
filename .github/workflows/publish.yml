@@ -16,6 +16,16 @@ on:
         required: true
         default: false
         type: boolean
+      artifact_run_id:
+        description: Exact prior publish run whose artifacts should be resumed
+        required: false
+        default: ""
+        type: string
+      source_ref:
+        description: Exact source SHA matching the recovery artifacts
+        required: false
+        default: ""
+        type: string
 
 concurrency:
   group: publish-${{ github.ref }}
@@ -41,6 +51,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           persist-credentials: false
+          ref: ${{ inputs.source_ref || github.sha }}
 
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
@@ -91,8 +102,10 @@ jobs:
     # Keep this caller filename stable: npm trusted publishing authorizes it.
     uses: stella/.github/.github/workflows/npm-independent-release.yml@b8c0884053fb8d4fb6ba157692189e0f1aae1785 # v1.6.0
     with:
+      artifact-run-id: ${{ inputs.artifact_run_id || '' }}
       artifact-pattern: npm-tarball-*
       package-files: |
         packages/typescript-config/package.json
         packages/oxlint-config/package.json
         packages/oxlint-plugin/package.json
+      source-ref: ${{ inputs.source_ref || '' }}
