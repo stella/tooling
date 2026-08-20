@@ -1,4 +1,6 @@
 [install]
 # 5-day quarantine: reject fresh package versions to reduce supply-chain risk.
 minimumReleaseAge = 432_000
-
+minimumReleaseAgeExcludes = [
+  "bun-types", # quarantine-expires: 2026-08-25T14:11:33.785Z
+]
