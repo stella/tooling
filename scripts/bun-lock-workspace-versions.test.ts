@@ -97,6 +97,9 @@ describe("bun.lock workspace self-version synchronization", () => {
     );
 
     expect(releaseJob).toContain("actions: read");
+    expect(releaseJob).toContain(
+      "github.ref == 'refs/heads/main'\n      && (github.event_name == 'push' || inputs.publish_to_npm)",
+    );
     expect(releaseJob.indexOf("actions: read")).toBeLessThan(
       releaseJob.indexOf("uses: stella/.github/"),
     );
