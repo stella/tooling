@@ -105,14 +105,14 @@ describe("bun.lock workspace self-version synchronization", () => {
     );
   });
 
-  test("manual recovery pins both the source and prior artifact run", async () => {
+  test("manual recovery binds prior artifacts without replacing the build checkout", async () => {
     const publishWorkflow = await Bun.file(
       new URL("../.github/workflows/publish.yml", import.meta.url),
     ).text();
 
     expect(publishWorkflow).toContain("artifact_run_id:");
     expect(publishWorkflow).toContain("source_ref:");
-    expect(publishWorkflow).toContain(
+    expect(publishWorkflow).not.toContain(
       "ref: ${{ inputs.source_ref || github.sha }}",
     );
     expect(publishWorkflow).toContain(
