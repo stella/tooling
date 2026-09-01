@@ -1,5 +1,13 @@
 # @stll/oxlint-plugin
 
+## 0.2.0
+
+### Minor Changes
+
+- [#36](https://github.com/stella/tooling/pull/36) [`65497ef`](https://github.com/stella/tooling/commit/65497efd68b09002b78cebe167cfaaf0fe2bdbf6) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Publish route-query guard plugins for TanStack Router + React Query consumers.
+  The guards reject raw route query-client calls and suspense queries that start
+  only after route component mount, preventing avoidable request waterfalls.
+
 ## 0.1.0
 
 ### Minor Changes
