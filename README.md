@@ -12,13 +12,15 @@ This repo intentionally contains only portable tooling policy:
 - `@stll/oxlint-config`: general upstream oxlint rules and the shared
   `stella-lowercase` and `no-raw-colors` JS plugins.
 - `@stll/oxlint-plugin`: portable static-safety rules for unsafe type
-  assertions, incomplete union-keyed records, and raw DOM HTML sinks.
+  assertions, incomplete union-keyed records, raw DOM HTML sinks, and
+  route-query waterfalls.
 - `rust/`: source-of-truth Rust formatting, lint, and Cargo profile templates.
 - `rust-lints/`: Dylint libraries for stella-specific Rust rules.
 
 Repo-specific stella rules stay in the consuming repo: domain authorization,
 i18n, generated native artifacts, benchmark exceptions, and package-specific
-ignores.
+ignores. Route-query conventions are shared here because they are the common
+TanStack Router + React Query contract.
 
 ## Usage
 
@@ -89,6 +91,27 @@ export default defineConfig({
   rules: { ...portableSafetyRules },
 });
 ```
+
+For TanStack Router + React Query applications, add the route-query guards to
+prevent cache misses and render-fetch waterfalls during navigation:
+
+```ts
+import { defineConfig } from "oxlint";
+import {
+  routeQueryPluginSpecifiers,
+  routeQueryRules,
+} from "@stll/oxlint-plugin";
+
+export default defineConfig({
+  jsPlugins: routeQueryPluginSpecifiers,
+  rules: routeQueryRules,
+});
+```
+
+`require-loader-prefetch` requires every statically attributable
+`useSuspenseQuery` in a route to be referenced by that route's `loader`.
+`no-raw-route-query-client` requires route freshness helpers instead of raw
+TanStack Query client calls and keeps pending components synchronous.
 
 When using `no-unsafe-inner-html`, disable the blanket `react/no-danger` rule;
 the portable rule permits static and provably sanitized HTML while rejecting

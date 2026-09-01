@@ -1,7 +1,7 @@
 {
   "name": "@stll/oxlint-plugin",
   "version": "0.1.0",
-  "description": "Portable static-safety rules for Oxlint consumers.",
+  "description": "Portable static-safety and route-query rules for Oxlint consumers.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -69,6 +69,28 @@
         "default": "./dist/no-unsafe-inner-html.cjs"
       },
       "default": "./dist/no-unsafe-inner-html.mjs"
+    },
+    "./no-raw-route-query-client": {
+      "import": {
+        "types": "./dist/no-raw-route-query-client.d.mts",
+        "default": "./dist/no-raw-route-query-client.mjs"
+      },
+      "require": {
+        "types": "./dist/no-raw-route-query-client.d.cts",
+        "default": "./dist/no-raw-route-query-client.cjs"
+      },
+      "default": "./dist/no-raw-route-query-client.mjs"
+    },
+    "./require-loader-prefetch": {
+      "import": {
+        "types": "./dist/require-loader-prefetch.d.mts",
+        "default": "./dist/require-loader-prefetch.mjs"
+      },
+      "require": {
+        "types": "./dist/require-loader-prefetch.d.cts",
+        "default": "./dist/require-loader-prefetch.cjs"
+      },
+      "default": "./dist/require-loader-prefetch.mjs"
     }
   },
   "publishConfig": {
@@ -82,6 +104,7 @@
   "devDependencies": {
     "@oxlint/plugins": "1.75.0",
     "@stll/typescript-config": "workspace:*",
+    "@types/node": "25.9.1",
     "oxfmt": "0.48.0",
     "typescript": "7.0.2"
   },
