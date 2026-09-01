@@ -7,6 +7,8 @@ export default defineConfig({
     "src/no-dangerous-type-assertions.ts",
     "src/no-partial-record-satisfies.ts",
     "src/no-unsafe-inner-html.ts",
+    "src/no-raw-route-query-client.ts",
+    "src/require-loader-prefetch.ts",
   ],
   format: ["esm", "cjs"],
   dts: true,

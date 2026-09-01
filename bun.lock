@@ -38,6 +38,7 @@
       "devDependencies": {
         "@oxlint/plugins": "1.75.0",
         "@stll/typescript-config": "workspace:*",
+        "@types/node": "25.9.1",
         "oxfmt": "0.48.0",
         "typescript": "7.0.2",
       },

@@ -2,11 +2,13 @@ import { library } from "./packages/oxlint-config/src/index";
 import {
   portableSafetyPluginSpecifiers,
   portableSafetyRules,
+  routeQueryPluginSpecifiers,
+  routeQueryRules,
 } from "./packages/oxlint-plugin/src/index";
 
 export default library({
   ignorePatterns: ["packages/oxlint-config/dist/"],
-  jsPlugins: [...portableSafetyPluginSpecifiers],
+  jsPlugins: [...portableSafetyPluginSpecifiers, ...routeQueryPluginSpecifiers],
   overrides: [
     {
       // Oxlint presents plugin AST nodes as intentionally untyped values.
@@ -25,7 +27,7 @@ export default library({
     },
     {
       files: ["packages/oxlint-plugin/fixtures/**/*.{ts,tsx}"],
-      rules: portableSafetyRules,
+      rules: { ...portableSafetyRules, ...routeQueryRules },
     },
   ],
 });
