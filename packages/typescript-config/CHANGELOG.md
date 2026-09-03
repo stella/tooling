@@ -1,5 +1,13 @@
 # @stll/typescript-config
 
+## 0.2.2
+
+### Patch Changes
+
+- [#39](https://github.com/stella/tooling/pull/39) [`24ef000`](https://github.com/stella/tooling/commit/24ef000a5597d72325ff5c7abf8f9c044382b588) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Require Oxlint 1.80 or newer and replace the removed monolithic React Compiler rule with actionable category rules. Consumers that disabled `react/react-compiler` must replace it with precise category overrides.
+
+  Publish Oxlint 1.81 as the current shared toolchain policy.
+
 ## 0.2.1
 
 ### Patch Changes
