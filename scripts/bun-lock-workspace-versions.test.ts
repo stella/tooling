@@ -127,6 +127,21 @@ describe("bun.lock workspace self-version synchronization", () => {
     expect(packageFiles).toEqual(await publishablePackageFiles());
   });
 
+  test("every discovered package runs its declared build before packing", async () => {
+    const publishWorkflow = await Bun.file(
+      new URL("../.github/workflows/publish.yml", import.meta.url),
+    ).text();
+    const packJob = publishWorkflow.slice(
+      publishWorkflow.indexOf("  pack:"),
+      publishWorkflow.indexOf("  release:"),
+    );
+
+    expect(packJob).toContain(
+      'bun --cwd "packages/${PACKAGE}" --if-present build',
+    );
+    expect(packJob).not.toContain('if [[ "$PACKAGE" ==');
+  });
+
   test("release caller can verify and download package artifacts", async () => {
     const publishWorkflow = await Bun.file(
       new URL("../.github/workflows/publish.yml", import.meta.url),

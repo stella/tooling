@@ -109,9 +109,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "$PACKAGE" == "oxlint-config" || "$PACKAGE" == "oxlint-plugin" ]]; then
-            bun --filter "@stll/$PACKAGE" build
-          fi
+          bun --cwd "packages/${PACKAGE}" --if-present build
           mkdir -p release-artifacts
           (
             cd "packages/${PACKAGE}"
