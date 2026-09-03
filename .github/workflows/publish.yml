@@ -40,7 +40,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       package-directories: ${{ steps.release-packages.outputs.package-directories }}
-      package-files: ${{ steps.release-packages.outputs.package-files }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
@@ -144,5 +143,8 @@ jobs:
     with:
       artifact-run-id: ${{ inputs.artifact_run_id || '' }}
       artifact-pattern: npm-tarball-*
-      package-files: ${{ needs.release-metadata.outputs.package-files }}
+      package-files: |
+        packages/oxlint-config/package.json
+        packages/oxlint-plugin/package.json
+        packages/typescript-config/package.json
       source-ref: ${{ inputs.source_ref || '' }}
