@@ -35,6 +35,25 @@ permissions:
   contents: read
 
 jobs:
+  release-metadata:
+    name: Discover publishable packages
+    runs-on: ubuntu-latest
+    outputs:
+      package-directories: ${{ steps.release-packages.outputs.package-directories }}
+      package-files: ${{ steps.release-packages.outputs.package-files }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version-file: package.json
+
+      - name: Discover publishable packages
+        id: release-packages
+        run: bun scripts/release-package-metadata.ts >> "$GITHUB_OUTPUT"
+
   verify:
     name: Verify release source
     runs-on: ubuntu-latest
@@ -62,11 +81,11 @@ jobs:
 
   pack:
     name: Build and pack ${{ matrix.package }}
-    needs: verify
+    needs: [release-metadata, verify]
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        package: [typescript-config, oxlint-config, oxlint-plugin]
+        package: ${{ fromJSON(needs.release-metadata.outputs.package-directories) }}
     permissions:
       contents: read
     steps:
@@ -112,7 +131,7 @@ jobs:
 
   release:
     name: Publish packages
-    needs: pack
+    needs: [release-metadata, pack]
     if: >-
       github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || inputs.publish_to_npm)
@@ -125,8 +144,5 @@ jobs:
     with:
       artifact-run-id: ${{ inputs.artifact_run_id || '' }}
       artifact-pattern: npm-tarball-*
-      package-files: |
-        packages/typescript-config/package.json
-        packages/oxlint-config/package.json
-        packages/oxlint-plugin/package.json
+      package-files: ${{ needs.release-metadata.outputs.package-files }}
       source-ref: ${{ inputs.source_ref || '' }}

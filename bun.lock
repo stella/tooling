@@ -20,7 +20,7 @@
     },
     "packages/oxlint-config": {
       "name": "@stll/oxlint-config",
-      "version": "0.4.0",
+      "version": "0.6.0",
       "devDependencies": {
         "@stll/typescript-config": "workspace:*",
         "oxfmt": "0.48.0",
