@@ -18,7 +18,7 @@ describe("shared toolchain policy", () => {
     expect(rootPackage).toEqual(
       expect.objectContaining({
         devDependencies: expect.objectContaining({
-          oxlint: "1.75.0",
+          oxlint: "1.81.0",
           "oxlint-tsgolint": "7.0.2001",
           typescript: "7.0.2",
         }),
@@ -26,7 +26,7 @@ describe("shared toolchain policy", () => {
     );
 
     expect(toolchain).toEqual({
-      oxlint: "1.75.0",
+      oxlint: "1.81.0",
       "oxlint-tsgolint": "7.0.2001",
       typescript: "7.0.2",
       typescriptInstallLayouts: [
@@ -61,7 +61,7 @@ describe("shared toolchain policy", () => {
     expect(oxlintPackage).toEqual(
       expect.objectContaining({
         peerDependencies: {
-          oxlint: ">=1.75.0 <2",
+          oxlint: ">=1.80.0 <2",
           "oxlint-tsgolint": ">=7.0.2001 <8",
         },
       }),

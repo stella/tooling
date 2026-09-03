@@ -24,8 +24,8 @@ export const libraryIgnorePatterns = ["node_modules/", "dist/", "coverage/"];
 // rule below: `import/*` and `promise/*` rules are configured further down,
 // but oxlint disables both plugins unless they are listed here, which left
 // `import/no-cycle` and every `promise/*` rule silently unenforced. `react`
-// is enabled for `react/react-compiler`; see the comment on that rule for
-// why every other `react/*` rule is explicitly turned back off below.
+// is enabled for the React Compiler category rules; see the comment on that
+// ruleset for why every other `react/*` rule is explicitly turned back off.
 export const libraryPlugins = [
   "eslint",
   "typescript",
@@ -35,6 +35,34 @@ export const libraryPlugins = [
   "promise",
   "react",
 ] satisfies Plugins;
+
+// Oxlint 1.80 replaced react/react-compiler with category-specific rules.
+// Keep the actionable compiler diagnostics strict while excluding internal
+// invariant and unfinished-feature reports that do not identify source bugs.
+export const reactCompilerRules = {
+  "react/capitalized-calls": "error",
+  "react/error-boundaries": "error",
+  "react/exhaustive-effect-dependencies": "error",
+  "react/globals": "error",
+  "react/hooks": "error",
+  "react/immutability": "error",
+  "react/incompatible-library": "error",
+  "react/invariant": "off",
+  "react/memo-dependencies": "error",
+  "react/no-deriving-state-in-effects": "error",
+  "react/preserve-manual-memoization": "error",
+  "react/purity": "error",
+  "react/refs": "error",
+  "react/rule-suppression": "error",
+  "react/set-state-in-effect": "error",
+  "react/set-state-in-render": "error",
+  "react/static-components": "error",
+  "react/syntax": "error",
+  "react/todo": "off",
+  "react/unsupported-syntax": "error",
+  "react/use-memo": "error",
+  "react/void-use-memo": "error",
+} satisfies Rules;
 
 export const libraryRules = {
   "no-console": "off",
@@ -140,16 +168,7 @@ export const libraryRules = {
   "react/no-unsafe": "off",
   "react/no-will-update-set-state": "off",
   "react/void-dom-elements-no-children": "off",
-  // Requires oxlint >= 1.70. Nursery rule upstream: flags violations of the
-  // Rules of React that block compiler memoization; diagnostics may shift
-  // between oxlint minors, so re-audit findings after bumping the oxlint
-  // devDependency. oxlint has no bulk-suppression/baseline mechanism as of
-  // 1.72.0 (oxc-project/oxc#10549 tracks the upstream feature request and is
-  // still open); consumers adopting this against an existing findings
-  // backlog should carve out temporary `overrides` entries per legacy path
-  // (or per rule, at `"off"`) and fix forward, rather than expecting a
-  // generated suppression file.
-  "react/react-compiler": "error",
+  ...reactCompilerRules,
 
   "sort-keys": "off",
   "no-plusplus": "off",

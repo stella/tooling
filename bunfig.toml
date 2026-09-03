@@ -1,4 +1,30 @@
 [install]
 # 5-day quarantine: reject fresh package versions to reduce supply-chain risk.
 minimumReleaseAge = 432_000
-minimumReleaseAgeExcludes = []
+minimumReleaseAgeExcludes = [
+  # Upgrading to Oxlint 1.81.0 requires the category-specific React Compiler
+  # rules. Keep every optional native binding in the same temporary exception
+  # so Bun cannot silently omit the executable. Remove these exceptions after
+  # 2026-09-06T15:22:06.857Z.
+  "@oxlint/binding-android-arm-eabi",
+  "@oxlint/binding-android-arm64",
+  "@oxlint/binding-darwin-arm64",
+  "@oxlint/binding-darwin-x64",
+  "@oxlint/binding-freebsd-x64",
+  "@oxlint/binding-linux-arm-gnueabihf",
+  "@oxlint/binding-linux-arm-musleabihf",
+  "@oxlint/binding-linux-arm64-gnu",
+  "@oxlint/binding-linux-arm64-musl",
+  "@oxlint/binding-linux-ppc64-gnu",
+  "@oxlint/binding-linux-riscv64-gnu",
+  "@oxlint/binding-linux-riscv64-musl",
+  "@oxlint/binding-linux-s390x-gnu",
+  "@oxlint/binding-linux-x64-gnu",
+  "@oxlint/binding-linux-x64-musl",
+  "@oxlint/binding-openharmony-arm64",
+  "@oxlint/binding-win32-arm64-msvc",
+  "@oxlint/binding-win32-ia32-msvc",
+  "@oxlint/binding-win32-x64-msvc",
+  "@oxlint/plugins",
+  "oxlint",
+]
