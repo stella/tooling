@@ -1,6 +1,6 @@
 {
   "name": "@stll/oxlint-config",
-  "version": "0.4.0",
+  "version": "0.6.0",
   "description": "Shared general oxlint configuration for stella packages.",
   "license": "Apache-2.0",
   "repository": {
@@ -61,11 +61,11 @@
   "devDependencies": {
     "@stll/typescript-config": "workspace:*",
     "oxfmt": "0.48.0",
-    "oxlint": "1.75.0",
+    "oxlint": "1.81.0",
     "typescript": "7.0.2"
   },
   "peerDependencies": {
-    "oxlint": ">=1.75.0 <2",
+    "oxlint": ">=1.80.0 <2",
     "oxlint-tsgolint": ">=7.0.2001 <8"
   },
   "engines": {

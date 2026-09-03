@@ -1,7 +1,31 @@
 import { describe, expect, test } from "bun:test";
+import { readdir } from "node:fs/promises";
 
 import packageJson from "../package.json";
 import { syncWorkspaceVersions } from "./lib/bun-lock-workspace-versions";
+
+const publishablePackageFiles = async (): Promise<string[]> => {
+  const packageDirectory = new URL("../packages/", import.meta.url);
+  const entries = await readdir(packageDirectory, { withFileTypes: true });
+  const packageFiles: string[] = [];
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+
+    const manifest: unknown = await Bun.file(
+      new URL(`./${entry.name}/package.json`, packageDirectory),
+    )
+      .json()
+      .catch(() => null);
+    if (typeof manifest !== "object" || manifest === null) continue;
+    if ("private" in manifest && manifest.private === true) continue;
+    if (!("publishConfig" in manifest)) continue;
+
+    packageFiles.push(`packages/${entry.name}/package.json`);
+  }
+
+  return packageFiles.sort();
+};
 
 const fixture = `{
   "lockfileVersion": 1,
@@ -78,14 +102,29 @@ describe("bun.lock workspace self-version synchronization", () => {
       publishWorkflow.indexOf("  workflow_dispatch:"),
     );
 
-    for (const packageName of [
-      "typescript-config",
-      "oxlint-config",
-      "oxlint-plugin",
-    ]) {
-      expect(pushTrigger).toContain(`packages/${packageName}/CHANGELOG.md`);
-      expect(pushTrigger).not.toContain(`packages/${packageName}/package.json`);
-    }
+    expect(pushTrigger).toContain("packages/*/CHANGELOG.md");
+    expect(pushTrigger).not.toContain("package.json");
+  });
+
+  test("central publisher receives every publishable package", async () => {
+    const publishWorkflow = await Bun.file(
+      new URL("../.github/workflows/publish.yml", import.meta.url),
+    ).text();
+    const releaseJob = publishWorkflow.slice(
+      publishWorkflow.indexOf("  release:"),
+    );
+    const packageBlock = releaseJob.match(
+      /package-files: \|\n(?<packageFiles>(?: {8}packages\/[^\n]+\n)+)/u,
+    );
+
+    expect(packageBlock?.groups?.packageFiles).toBeDefined();
+    const packageFiles = packageBlock?.groups?.packageFiles
+      .trim()
+      .split("\n")
+      .map((line) => line.trim())
+      .sort();
+
+    expect(packageFiles).toEqual(await publishablePackageFiles());
   });
 
   test("release caller can verify and download package artifacts", async () => {

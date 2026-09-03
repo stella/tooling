@@ -1,6 +1,6 @@
 {
   "typescript": "7.0.2",
-  "oxlint": "1.75.0",
+  "oxlint": "1.81.0",
   "oxlint-tsgolint": "7.0.2001",
   "typescriptInstallLayouts": [
     {

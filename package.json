@@ -30,7 +30,7 @@
     "@stll/oxlint-plugin": "workspace:*",
     "bun-types": "1.4.0",
     "oxfmt": "0.48.0",
-    "oxlint": "1.75.0",
+    "oxlint": "1.81.0",
     "oxlint-tsgolint": "7.0.2001",
     "publint": "0.3.21",
     "tsdown": "0.22.9",
