@@ -1,6 +1,8 @@
 ---
-"@stll/oxlint-config": patch
+"@stll/oxlint-config": minor
 "@stll/typescript-config": patch
 ---
 
-Replace the removed monolithic React Compiler rule with actionable category rules and publish the Oxlint 1.81 toolchain policy.
+Require Oxlint 1.80 or newer and replace the removed monolithic React Compiler rule with actionable category rules. Consumers that disabled `react/react-compiler` must replace it with precise category overrides.
+
+Publish Oxlint 1.81 as the current shared toolchain policy.

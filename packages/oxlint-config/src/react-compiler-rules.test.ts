@@ -9,6 +9,7 @@ describe("React Compiler rules", () => {
     expect("react/react-compiler" in libraryRules).toBe(false);
     expect(reactCompilerRules["react/invariant"]).toBe("off");
     expect(reactCompilerRules["react/todo"]).toBe("off");
+    expect(libraryRules).toEqual(expect.objectContaining(reactCompilerRules));
 
     const severities = Object.values(reactCompilerRules);
     expect(severities.filter((severity) => severity === "error")).toHaveLength(

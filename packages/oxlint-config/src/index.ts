@@ -145,9 +145,9 @@ export const libraryRules = {
   "promise/avoid-new": "off",
 
   // Enabling the `react` plugin (above) turns on its whole correctness-category
-  // rule set at "warn" by default, not just react-compiler. Only react-compiler
-  // is a deliberate addition here, so the rest are turned off to keep this
-  // package's blast radius scoped to the one rule being added; lift any of
+  // rule set at "warn" by default, not just the React Compiler categories.
+  // Only the compiler categories are deliberate additions here, so the rest
+  // are turned off to keep this package's blast radius scoped; lift any of
   // these independently if a future change wants them.
   "react/exhaustive-deps": "off",
   "react/forward-ref-uses-ref": "off",
