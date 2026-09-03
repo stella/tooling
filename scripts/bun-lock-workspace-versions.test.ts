@@ -102,11 +102,8 @@ describe("bun.lock workspace self-version synchronization", () => {
       publishWorkflow.indexOf("  workflow_dispatch:"),
     );
 
-    for (const packageFile of await publishablePackageFiles()) {
-      const packageDirectory = packageFile.replace("/package.json", "");
-      expect(pushTrigger).toContain(`${packageDirectory}/CHANGELOG.md`);
-      expect(pushTrigger).not.toContain(packageFile);
-    }
+    expect(pushTrigger).toContain("packages/*/CHANGELOG.md");
+    expect(pushTrigger).not.toContain("package.json");
   });
 
   test("central publisher receives every publishable package", async () => {
