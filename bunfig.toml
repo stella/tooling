@@ -2,6 +2,8 @@
 # 5-day quarantine: reject fresh package versions to reduce supply-chain risk.
 minimumReleaseAge = 432_000
 minimumReleaseAgeExcludes = [
+  # Keep Bun's compiler contract aligned with the pinned runtime.
+  "bun-types", # quarantine-expires: 2026-09-09T08:36:48.390Z
   # Upgrading to Oxlint 1.81.0 requires the category-specific React Compiler
   # rules. Keep every optional native binding in the same temporary exception
   # so Bun cannot silently omit the executable. Remove these exceptions after
