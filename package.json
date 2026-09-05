@@ -20,8 +20,8 @@
     "publint": "publint --pack npm packages/typescript-config && publint --pack npm packages/oxlint-config && publint --pack npm packages/oxlint-plugin",
     "pack:dry-run": "bun run build && (cd packages/typescript-config && npm pack --dry-run) && (cd packages/oxlint-config && npm pack --dry-run) && (cd packages/oxlint-plugin && npm pack --dry-run)",
     "prepack": "bun run build && bun run typecheck",
-    "sync-ai": "bash scripts/sync-ai-skills.sh",
-    "sync-ai:check": "bash scripts/sync-ai-skills.sh --check"
+    "sync-ai": "bash .ai/shared/scripts/sync-ai-skills.sh .",
+    "sync-ai:check": "bash .ai/shared/scripts/sync-ai-skills.sh --check ."
   },
   "devDependencies": {
     "@changesets/changelog-github": "1.0.0",
