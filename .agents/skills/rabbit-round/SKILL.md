@@ -18,9 +18,13 @@ identified.
 Fetch paginated review threads through GitHub GraphQL so unresolved state and
 thread replies are preserved. Fetch top-level issue comments separately. Record
 every participant and reply author in a thread, which comments apply to the
-current head, and which are stale. Treat a thread as bot-authored only when every
-participant is a confirmed allowed bot; a mixed or uncertain thread follows the
-human-thread rules.
+current head, and which are stale. Classify participants from a fresh fetch.
+Record a receipt for every workflow reply with its returned reply-node ID and
+exact content, and retain those receipts across resume or handoff. On later
+fetches, exclude only replies matched to an exact receipt; never infer an
+exclusion from the requester account or an attribution footer. All remaining
+participants must be confirmed allowed bots; a human, mixed, or uncertain thread
+follows the human-thread rules.
 
 Do not rely only on the REST review-comments list: it does not represent thread
 resolution or the complete conversation reliably.
@@ -37,7 +41,10 @@ comment:
 - **Push back**: incorrect, stale, speculative, or contrary to documented
   constraints.
 - **Defer**: accepted, but landing in a named follow-up PR because the enclosing
-  workflow's review budget is spent. Only with the follow-up PR's URL.
+  workflow's review budget is spent. Only with the follow-up PR's URL, and every
+  defer in one run names the same PR. Never for a verified release-blocking
+  defect (security, authorization, data loss, corruption): those are fixed on the
+  current head.
 
 Read the cited code and applicable instructions before deciding. Treat security,
 authorization, data loss, and compatibility claims as hypotheses to verify, not
@@ -69,11 +76,14 @@ finding. Keep responses short and factual:
 Follow repository attribution rules for GitHub comments. Do not claim a check
 passed unless it ran successfully on the reported head.
 
-After replying, resolve only review threads whose every participant is a
-confirmed allowed bot and that are implemented, already addressed, answered
-with a supported pushback, or deferred to a named follow-up PR. Leave human, mixed-participant, and uncertain threads
-open. Top-level comments have no thread-resolution state; do not minimize bot
-summaries by default.
+After replying, refetch each candidate thread before resolving it. Exclude only
+exact workflow reply receipts, then require every remaining participant to be a
+confirmed allowed bot. Triage any new bot finding before resolving; any human,
+unknown, mixed-participant, or uncertain arrival leaves the thread open. Resolve
+only when the finding is implemented, already addressed, answered with supported
+pushback, or deferred to a named follow-up PR. Top-level comments have no
+thread-resolution state: a reply naming the follow-up PR is the whole disposition
+there. Do not minimize bot summaries by default.
 
 ## 5. Recheck the Current Head
 
@@ -81,7 +91,10 @@ Refresh the PR after the push and report one status:
 
 - `clean`: all current-head automated reviewers are terminal, required checks
   are green, and no actionable automated finding remains in a review thread or
-  top-level comment
+  top-level comment. A top-level finding answered with a defer reply carrying the
+  follow-up PR's URL is no longer actionable on later rounds, unless it names a
+  verified release-blocking defect: no defer makes one of those non-actionable,
+  and the status stays `needs_changes` until it is fixed on the current head
 - `pending_bots`: this round pushed the current head, or a current-head
   automated review or required check is still running
 - `needs_changes`: actionable automated feedback remains
