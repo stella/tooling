@@ -16,7 +16,7 @@
     "test:rust-lints": "cd rust-lints/stella_lints && cargo test",
     "lint": "bun run build && bun --bun oxlint -c oxlint.config.ts --report-unused-disable-directives-severity=error --deny-warnings --type-aware .",
     "lint:fix": "bun --bun oxlint -c oxlint.config.ts --type-aware --fix .",
-    "format": "oxfmt . \"!.ai/**\" \"!.agents/**\" \"!.claude/**\" \"!AGENTS.md\" \"!CLAUDE.md\" \"!GEMINI.md\"",
+    "format": "oxfmt . \"!.ai/**\" \"!.agents/**\" \"!.claude/**\" \"!AGENTS.md\" \"!GEMINI.md\"",
     "publint": "publint --pack npm packages/typescript-config && publint --pack npm packages/oxlint-config && publint --pack npm packages/oxlint-plugin",
     "pack:dry-run": "bun run build && (cd packages/typescript-config && npm pack --dry-run) && (cd packages/oxlint-config && npm pack --dry-run) && (cd packages/oxlint-plugin && npm pack --dry-run)",
     "prepack": "bun run build && bun run typecheck",
