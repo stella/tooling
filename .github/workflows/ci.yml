@@ -66,6 +66,11 @@ jobs:
       - name: Lockfile workspace-version check
         run: bun run check:lockfile-versions
 
+      # Fails a Version Packages PR before merge if a bump lands at or below a
+      # version already on npm; the publish job repeats this gate.
+      - name: Registry version check
+        run: bun run check:registry-versions
+
       - name: Typecheck
         run: bun run typecheck
 
