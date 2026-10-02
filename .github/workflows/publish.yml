@@ -59,8 +59,6 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
-          # Recovery resumes artifacts from an older run: verify that source.
-          ref: ${{ inputs.source_ref || github.sha }}
           persist-credentials: false
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
