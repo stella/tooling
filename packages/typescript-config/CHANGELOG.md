@@ -1,5 +1,11 @@
 # @stll/typescript-config
 
+## 0.7.0
+
+### Minor Changes
+
+- [#50](https://github.com/stella/tooling/pull/50) [`7289bc7`](https://github.com/stella/tooling/commit/7289bc770be307928ac93596b327a8cf18a86229) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Move the version line above the previously published 0.6.0 so `latest` resolves to the current source. This release contains the 0.2.1 and 0.2.2 changes.
+
 ## 0.2.2
 
 ### Patch Changes
