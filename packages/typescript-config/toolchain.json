@@ -22,6 +22,10 @@
     "version": "6.0.3",
     "packageAlias": "typescript-compat",
     "apiConsumers": ["TypeScript compiler API"],
-    "peerBlockers": ["@astrojs/check", "@typescript-eslint/utils"]
+    "peerBlockers": [
+      "@astrojs/check",
+      "@typescript-eslint/utils",
+      "dependency-cruiser"
+    ]
   }
 }
