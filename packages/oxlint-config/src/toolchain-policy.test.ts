@@ -49,7 +49,11 @@ describe("shared toolchain policy", () => {
       typescript6Compatibility: {
         apiConsumers: ["TypeScript compiler API"],
         packageAlias: "typescript-compat",
-        peerBlockers: ["@astrojs/check", "@typescript-eslint/utils"],
+        peerBlockers: [
+          "@astrojs/check",
+          "@typescript-eslint/utils",
+          "dependency-cruiser",
+        ],
         version: "6.0.3",
       },
     });
