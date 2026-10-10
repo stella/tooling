@@ -232,12 +232,9 @@ const selectorFiles = (snapshot: GitSnapshot) => {
         throw new Error(
           "Setup version-file leaves the tracked toolchain scope",
         );
-      const tool =
-        input === "node-version-file"
-          ? "node"
-          : input === "bun-version-file"
-            ? "bun"
-            : "shared";
+      let tool: ToolchainChangedTool = "shared";
+      if (input === "node-version-file") tool = "node";
+      else if (input === "bun-version-file") tool = "bun";
       const selected = files.get(file) ?? new Set<ToolchainChangedTool>();
       selected.add(tool);
       files.set(file, selected);
@@ -322,7 +319,8 @@ const stableJson = (value: unknown): string => {
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([key, item]) => [key, stableJson(item)]),
     );
-  return JSON.stringify(value) ?? "undefined";
+  if (value === undefined) return "undefined";
+  return JSON.stringify(value);
 };
 const inventory = () =>
   ({
@@ -798,18 +796,20 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
               directoryDepth(path.posix.dirname(a)),
           )
           .at(0);
-        const manager = owner?.[1]["packageManager"];
+        const ownerManager = owner?.[1]["packageManager"];
         const sameOwner = candidates.filter(
           ([candidate]) => path.posix.dirname(candidate) === lockDirectory,
         );
         const selectedLocks = sameOwner.filter(([candidate]) => {
-          if (typeof manager !== "string") return true;
-          const name = path.posix.basename(candidate);
-          if (manager.startsWith("bun@")) return name === "bun.lock";
-          if (manager.startsWith("pnpm@")) return name === "pnpm-lock.yaml";
-          if (manager.startsWith("npm@"))
+          if (typeof ownerManager !== "string") return true;
+          const lockName = path.posix.basename(candidate);
+          if (ownerManager.startsWith("bun@")) return lockName === "bun.lock";
+          if (ownerManager.startsWith("pnpm@"))
+            return lockName === "pnpm-lock.yaml";
+          if (ownerManager.startsWith("npm@"))
             return (
-              name === "package-lock.json" || name === "npm-shrinkwrap.json"
+              lockName === "package-lock.json" ||
+              lockName === "npm-shrinkwrap.json"
             );
           return false;
         });
@@ -862,11 +862,13 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
         // Local/non-registry dependencies must never be reinterpreted as aliases.
         const namedTool = changedPackageTool(dependency);
         const nonRegistry = nonRegistryResolution(version);
-        const registryName = nonRegistry
-          ? dependency
-          : version.startsWith("npm:")
-            ? packageTarget({ name: dependency, specifier: version })
-            : /^((?:@[^/@\s]+\/)?[^/@\s]+)@/.exec(version)?.[1];
+        let registryName = /^((?:@[^/@\s]+\/)?[^/@\s]+)@/.exec(version)?.[1];
+        if (nonRegistry) registryName = dependency;
+        else if (version.startsWith("npm:"))
+          registryName = packageTarget({
+            name: dependency,
+            specifier: version,
+          });
         const tool =
           (registryName === undefined
             ? undefined

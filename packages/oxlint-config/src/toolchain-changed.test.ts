@@ -421,7 +421,7 @@ test("CI event-base wiring invokes parity for a committed compiler bump", async 
   expect(
     workflow.getIn(["jobs", "checks", "steps", 0, "with", "fetch-depth"]),
   ).toBe(0);
-  const steps = workflow.getIn(["jobs", "checks", "steps"]);
+  const steps: unknown = workflow.getIn(["jobs", "checks", "steps"]);
   if (
     !steps ||
     typeof steps !== "object" ||
