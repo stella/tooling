@@ -87,6 +87,10 @@ export const parseToolchainPolicy = (input: unknown) => {
   const bun = string(input, "bun");
   const typescript = string(input, "typescript");
   const node = string(input, "node");
+  const consumerNode = string(input, "consumerNode");
+  const consumerNpm = string(input, "consumerNpm");
+  const consumerPnpm = string(input, "consumerPnpm");
+  const consumerTypescript = string(input, "consumerTypescript");
   const python = string(input, "python");
   const postgres = string(input, "postgres");
   const valkey = string(input, "valkey");
@@ -96,6 +100,9 @@ export const parseToolchainPolicy = (input: unknown) => {
     ...packages,
     bun,
     typescript,
+    consumerNpm,
+    consumerPnpm,
+    consumerTypescript,
   }))
     if (valid(value) !== value)
       throw new Error(`toolchain.json ${name} must be an exact release`);
@@ -109,12 +116,27 @@ export const parseToolchainPolicy = (input: unknown) => {
   );
   if (!nodePolicyValid(node))
     throw new Error("Node must be a canonical major N.x series");
+  if (
+    valid(consumerNode) !== consumerNode ||
+    !consumerNode.startsWith("22.") ||
+    consumerNode.includes("-") ||
+    consumerNode.includes("+")
+  )
+    throw new Error("consumerNode must be an exact stable Node 22 release");
   if (!/^\d+\.\d+(?:\.\d+)?$/.test(python))
     throw new Error("Python must be an exact minor or patch release");
   if (!/^\d+\.\d+\.\d+$/.test(rust))
     throw new Error("Rust must be an exact stable release");
   if (!/^nightly-\d{4}-\d{2}-\d{2}$/.test(rustCompilerDevelopment))
     throw new Error("Rust compiler development must be a dated nightly");
+  if (
+    !consumerTypescript.startsWith("6.") ||
+    consumerTypescript.includes("-") ||
+    consumerTypescript.includes("+")
+  )
+    throw new Error(
+      "consumerTypescript must be an exact stable TypeScript 6 release",
+    );
   const compatibility = input["typescript6Compatibility"];
   if (!record(compatibility))
     throw new Error("missing TypeScript compatibility policy");
@@ -226,6 +248,10 @@ export const parseToolchainPolicy = (input: unknown) => {
     postgres,
     valkey,
     valkeyArtifacts,
+    consumerNode,
+    consumerNpm,
+    consumerPnpm,
+    consumerTypescript,
     python,
     rust,
     rustCompilerDevelopment,

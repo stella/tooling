@@ -14,6 +14,7 @@ import path from "node:path";
 import toolchain from "../toolchain.json";
 import { cloudSetupPath, generateCloudSetup } from "./cloud-setup";
 import type { parseCloudSetup } from "./cloud-setup-schema";
+import { consumerCheckWorkflow } from "./toolchain-consumer-checks";
 import {
   checkToolchain,
   parseToolchainConfiguration,
@@ -44,6 +45,62 @@ const fixture = (
     rmSync(root, { recursive: true, force: true });
   }
 };
+
+test("consumer check declarations remain mandatory despite runtime and action opt-outs", () => {
+  const workflow = ".github/workflows/consumer.yml";
+  const declaration = {
+    workflow,
+    job: "consumer",
+    packages: ["packages/library"],
+  };
+  const approved = policy.actions[consumerCheckWorkflow];
+  const uses = `${consumerCheckWorkflow}@${approved?.sha ?? "1234567890abcdef1234567890abcdef12345678"}`;
+  const invocation = `jobs:\n  consumer:\n    uses: ${uses} # ${approved?.version ?? "v1"}\n    with:\n      consumer-node: '${policy.consumerNode}'\n      packages: '["packages/library"]'\n`;
+  const configuration = {
+    consumerChecks: [declaration],
+    optOuts: [
+      { rule: "dependabot-policy", reason: "Consumer fixture" },
+      {
+        rule: "runtime-workflow",
+        reason: "Verify mandatory consumer declaration",
+      },
+      { rule: "action-pins", reason: "Verify mandatory consumer declaration" },
+    ],
+  };
+  const files = {
+    [workflow]: invocation,
+    "packages/library/package.json": JSON.stringify({
+      name: "@example/library",
+      engines: { node: ">=20.10.0" },
+    }),
+    "stll-toolchain.json": JSON.stringify(configuration),
+  };
+  expect(fixture(files)).toEqual([]);
+  for (const mutation of [
+    { ...files, [workflow]: invocation.replace(policy.consumerNode, "26.0.0") },
+    {
+      ...files,
+      [workflow]: invocation.replace(uses, `${consumerCheckWorkflow}@main`),
+    },
+    {
+      ...files,
+      "stll-toolchain.json": JSON.stringify({
+        ...configuration,
+        consumerChecks: [],
+      }),
+    },
+    {
+      ...files,
+      "stll-toolchain.json": JSON.stringify({
+        ...configuration,
+        consumerChecks: [{ ...declaration, job: "missing" }],
+      }),
+    },
+  ])
+    expect(fixture(mutation).some(({ rule }) => rule === "configuration")).toBe(
+      true,
+    );
+});
 
 test("empty repositories do not acquire unrelated tool requirements", () => {
   expect(fixture({ "readme.txt": "hello" })).toEqual([]);

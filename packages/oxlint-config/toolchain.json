@@ -120,5 +120,9 @@
       }
     }
   },
-  "rustCompilerDevelopment": "nightly-2026-04-16"
+  "rustCompilerDevelopment": "nightly-2026-04-16",
+  "consumerNode": "22.23.3",
+  "consumerNpm": "12.2.0",
+  "consumerPnpm": "12.9.1",
+  "consumerTypescript": "6.0.3"
 }
