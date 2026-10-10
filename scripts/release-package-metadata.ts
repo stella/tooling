@@ -3,6 +3,8 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 
+import { releaseGeneratedPaths } from "./lib/release-generated-paths";
+
 const ROOT = join(import.meta.dirname, "..");
 const PACKAGES_DIRECTORY = join(ROOT, "packages");
 const OUTPUT_DELIMITER = "stella_release_packages";
@@ -57,20 +59,10 @@ const packageFiles = packageDirectories.map(
 const releasePaths = packageDirectories.map(
   (directory) => `packages/${directory}/**`,
 );
-const generatedPaths = [
-  "bun.lock",
-  ...packageDirectories.flatMap((directory) => [
-    `packages/${directory}/CHANGELOG.md`,
-    `packages/${directory}/package.json`,
-  ]),
-];
+const generatedPaths = releaseGeneratedPaths(packageDirectories);
 
 const multilineOutput = (name: string, values: string[]): string =>
-  [
-    `${name}<<${OUTPUT_DELIMITER}`,
-    ...values,
-    OUTPUT_DELIMITER,
-  ].join("\n");
+  [`${name}<<${OUTPUT_DELIMITER}`, ...values, OUTPUT_DELIMITER].join("\n");
 
 console.log(`package-directories=${JSON.stringify(packageDirectories)}`);
 console.log(multilineOutput("package-files", packageFiles));

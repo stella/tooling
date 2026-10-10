@@ -1,6 +1,7 @@
 /// <reference types="bun-types" />
 
 import { describe, expect, test } from "bun:test";
+import { stringify } from "yaml";
 
 import { checkPackageFiles, packageRules } from "./toolchain-packages";
 
@@ -40,6 +41,243 @@ const check = (files: Record<string, string>) =>
 const manifest = (value: unknown) => check({ "package.json": json(value) });
 
 describe("shared package pins", () => {
+  test("pnpm descendant catalogs require explicit package membership", () => {
+    const files = {
+      "pnpm-workspace.yaml": stringify({
+        packages: ["**"],
+        catalog: { oxlint: "1.87.0", "@stll/oxlint-plugin": "workspace:*" },
+      }),
+      "package.json": json({}),
+      "packages/plugin/package.json": json({
+        name: "@stll/oxlint-plugin",
+        version: "0.7.0",
+      }),
+      "apps/deep/app/package.json": json({
+        devDependencies: {
+          oxlint: "catalog:",
+          "@stll/oxlint-plugin": "catalog:",
+        },
+      }),
+    };
+    expect(check(files)).toEqual([]);
+    expect(
+      check({
+        ...files,
+        "pnpm-workspace.yaml": stringify({
+          catalog: { oxlint: "1.87.0", "@stll/oxlint-plugin": "workspace:*" },
+        }),
+      }).some(({ path }) => path === "apps/deep/app/package.json"),
+    ).toBe(true);
+    expect(
+      check({
+        ...files,
+        "packages/plugin/package.json": json({
+          name: "@stll/oxlint-plugin",
+          version: "0.6.0",
+        }),
+      }),
+    ).not.toEqual([]);
+  });
+  test("omitted or empty pnpm package patterns include only the root package", () => {
+    for (const packages of [undefined, []]) {
+      const workspace = stringify({
+        packages,
+        catalog: { oxlint: "1.87.0" },
+      });
+      expect(
+        check({
+          "pnpm-workspace.yaml": workspace,
+          "package.json": json({ devDependencies: { oxlint: "catalog:" } }),
+        }),
+      ).toEqual([]);
+      expect(
+        check({
+          "pnpm-workspace.yaml": workspace,
+          "apps/app/package.json": json({
+            devDependencies: { oxlint: "catalog:" },
+          }),
+        }),
+      ).toMatchObject([
+        { path: "apps/app/package.json", rule: "package-pins" },
+      ]);
+    }
+  });
+  test("pnpm ownership prevents member JSON catalogs from shadowing workspace pins", () => {
+    for (const reference of ["catalog:", "catalog:tools"]) {
+      const member = json({
+        catalog: { oxlint: "1.87.0" },
+        catalogs: { tools: { oxlint: "1.87.0" } },
+        devDependencies: { oxlint: reference },
+      });
+      const files = {
+        "pnpm-workspace.yaml": stringify({
+          packages: ["packages/*"],
+          catalog: { oxlint: "1.87.0" },
+          catalogs: { tools: { oxlint: "1.87.0" } },
+        }),
+        "packages/app/package.json": member,
+      };
+      expect(check(files)).toEqual([]);
+      for (const workspace of [
+        {
+          packages: ["packages/*"],
+          catalog: { oxlint: "1.86.0" },
+          catalogs: { tools: { oxlint: "1.86.0" } },
+        },
+        { packages: ["packages/*"] },
+        {
+          packages: ["packages/*", "!packages/app"],
+          catalog: { oxlint: "1.87.0" },
+          catalogs: { tools: { oxlint: "1.87.0" } },
+        },
+      ]) {
+        expect(
+          check({ ...files, "pnpm-workspace.yaml": stringify(workspace) }).some(
+            ({ path, rule }) =>
+              path === "packages/app/package.json" && rule === "package-pins",
+          ),
+        ).toBe(true);
+      }
+    }
+  });
+  test("pnpm default and named catalogs resolve owned tool pins", () => {
+    for (const reference of ["catalog:", "catalog:default", "catalog:tools"]) {
+      const pins = {
+        ...policy.packages,
+        "bun-types": policy.bun,
+        typescript: "7.0.2",
+      };
+      const workspace = {
+        packages: ["packages/*"],
+        catalog: pins,
+        catalogs: { tools: pins },
+      };
+      const files = {
+        "pnpm-workspace.yaml": stringify(workspace),
+        "package.json": json({}),
+        "packages/app/package.json": json({
+          devDependencies: Object.fromEntries(
+            Object.keys(pins).map((name) => [name, reference]),
+          ),
+        }),
+      };
+      expect(check(files)).toEqual([]);
+      for (const name of Object.keys(pins)) {
+        const divergent = { ...pins, [name]: "wrong" };
+        expect(
+          check({
+            ...files,
+            "pnpm-workspace.yaml": stringify({
+              ...workspace,
+              catalog: divergent,
+              catalogs: { tools: divergent },
+            }),
+          }),
+        ).not.toEqual([]);
+      }
+    }
+  });
+  test("unused pnpm catalog pins report their YAML source lines", () => {
+    const text =
+      "packages:\n  - packages/*\ncatalog:\n  oxlint: ^1.87.0\ncatalogs:\n  tools:\n    oxlint: ^1.87.0\n";
+    expect(check({ "pnpm-workspace.yaml": text })).toMatchObject([
+      { path: "pnpm-workspace.yaml", line: 4, rule: "package-pins" },
+      { path: "pnpm-workspace.yaml", line: 7, rule: "package-pins" },
+    ]);
+  });
+  test("pnpm catalog references fail missing, cyclic and excluded workspace resolution", () => {
+    const consumer = json({ devDependencies: { oxlint: "catalog:" } });
+    for (const catalog of [
+      {},
+      { oxlint: "catalog:missing" },
+      { oxlint: "catalog:" },
+      { oxlint: "catalog:tools" },
+    ]) {
+      expect(
+        check({
+          "pnpm-workspace.yaml": stringify({
+            packages: ["packages/*"],
+            catalog,
+            catalogs: { tools: { oxlint: "catalog:" } },
+          }),
+          "packages/app/package.json": consumer,
+        }),
+      ).not.toEqual([]);
+    }
+    expect(
+      check({
+        "pnpm-workspace.yaml": stringify({
+          packages: ["packages/*", "!packages/excluded"],
+          catalog: { oxlint: "1.87.0" },
+        }),
+        "packages/excluded/package.json": consumer,
+      }),
+    ).toMatchObject([
+      { path: "packages/excluded/package.json", rule: "package-pins" },
+    ]);
+    const files = {
+      "pnpm-workspace.yaml": stringify({
+        packages: ["nested/**"],
+        catalog: { oxlint: "1.87.0" },
+      }),
+      "nested/pnpm-workspace.yaml": stringify({
+        packages: ["app"],
+        catalog: { oxlint: "1.87.0" },
+      }),
+      "nested/app/package.json": consumer,
+    };
+    expect(check(files)).toEqual([]);
+    expect(
+      check({
+        ...files,
+        "nested/pnpm-workspace.yaml": stringify({ packages: ["app"] }),
+      }),
+    ).toMatchObject([
+      { path: "nested/app/package.json", rule: "package-pins" },
+    ]);
+  });
+  test("pnpm workspace pins respect the workspace file instead of JSON workspaces", () => {
+    const files = {
+      "pnpm-workspace.yaml": stringify({
+        packages: ["./packages/*"],
+        catalog: { "@stll/oxlint-plugin": "workspace:*" },
+      }),
+      "package.json": json({ workspaces: ["other/*"] }),
+      "packages/plugin/package.json": json({
+        name: "@stll/oxlint-plugin",
+        version: "0.7.0",
+      }),
+      "packages/app/package.json": json({
+        devDependencies: { "@stll/oxlint-plugin": "catalog:" },
+      }),
+    };
+    expect(check(files)).toEqual([]);
+    expect(
+      check({
+        ...files,
+        "pnpm-workspace.yaml": stringify({
+          packages: ["packages/*", "!packages/plugin"],
+          catalog: { "@stll/oxlint-plugin": "workspace:*" },
+        }),
+      }),
+    ).not.toEqual([]);
+  });
+  test("invalid pnpm catalog documents fail instead of skipping pins", () => {
+    for (const text of [
+      "catalog: [",
+      "[]",
+      "null",
+      "catalog: {}\ncatalog: {}\n",
+      "catalog: []\n",
+      "catalogs: []\n",
+      "catalogs:\n  tools: []\n",
+      "packages: other\n",
+      "packages: [42]\n",
+    ])
+      expect(check({ "pnpm-workspace.yaml": text })).toMatchObject([
+        { rule: "package-pins", path: "pnpm-workspace.yaml" },
+      ]);
+  });
   test("packageManager must name the exact shared Bun version", () => {
     expect(manifest({ packageManager: `bun@${policy.bun}` })).toEqual([]);
     for (const value of [

@@ -183,6 +183,87 @@ describe("Dependabot policy", () => {
     ).toBe(true);
   });
 
+  test("pnpm workspace YAML owns package membership and keeps exclusions and standalone roots", () => {
+    const files = {
+      "package.json": JSON.stringify({
+        packageManager: "pnpm@10.0.0",
+        workspaces: ["ignored/*"],
+      }),
+      "pnpm-workspace.yaml":
+        'packages:\n  - ./packages//*\n  - "!./packages/excluded"',
+      "packages/member/package.json": "{}",
+      "packages/excluded/package.json": "{}",
+      "independent/package.json": "{}",
+      "ignored/member/package.json": "{}",
+    };
+    const good = config([
+      update("npm"),
+      update("npm", "/packages/excluded"),
+      update("npm", "/independent"),
+      update("npm", "/ignored/member"),
+    ]);
+    expect(check(good, files)).toEqual([]);
+    const generated = generateDependabotConfig({ files, policy });
+    expect(check(generated, files)).toEqual([]);
+    expect(generated).not.toContain("/packages/member");
+    for (const directory of [
+      "/packages/excluded",
+      "/independent",
+      "/ignored/member",
+    ])
+      expect(generated).toContain(directory);
+    const changed = {
+      ...files,
+      "pnpm-workspace.yaml": files["pnpm-workspace.yaml"].replace(
+        "./packages//*",
+        "other/*",
+      ),
+    };
+    expect(changed["pnpm-workspace.yaml"]).not.toBe(
+      files["pnpm-workspace.yaml"],
+    );
+    expect(
+      check(good, changed).some(({ message }) =>
+        message.includes("add a npm update entry covering /packages/member"),
+      ),
+    ).toBe(true);
+    expect(
+      check(generateDependabotConfig({ files: changed, policy }), changed),
+    ).toEqual([]);
+  });
+
+  test("pnpm uses only the documented YAML filename and preserves root-only workspaces", () => {
+    const files = {
+      "package.json": JSON.stringify({
+        packageManager: "pnpm@12.10.1",
+        workspaces: ["packages/*"],
+      }),
+      "packages/member/package.json": "{}",
+    };
+    for (const { file, text } of [
+      { file: "pnpm-workspace.yml", text: 'packages: ["packages/*"]' },
+      { file: "pnpm-workspace.yaml", text: "catalog: {}" },
+      { file: "pnpm-workspace.yaml", text: "packages: []\ncatalog: {}" },
+    ]) {
+      const entries = { ...files, [file]: text };
+      expect(
+        check(config(), entries).some(({ message }) =>
+          message.includes("/packages/member"),
+        ),
+      ).toBe(true);
+      const generated = generateDependabotConfig({ files: entries, policy });
+      expect(check(generated, entries)).toEqual([]);
+      expect(generated).toContain("/packages/member");
+    }
+    for (const text of ["[", "packages: wrong", "packages: [true]"])
+      expect(() =>
+        generateDependabotConfig({
+          files: { ...files, "pnpm-workspace.yaml": text },
+          policy,
+        }),
+      ).toThrow();
+  });
+
   test("uv workspace members inherit the root update entry while excluded and independent projects stay separate", () => {
     const files = {
       "pyproject.toml":

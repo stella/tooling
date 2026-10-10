@@ -731,3 +731,138 @@ test("every shared Docker definition suffix enforces base image pins", () => {
     ).toBe(true);
   }
 });
+
+test("workflow containers and services share Docker runtime pin validation", () => {
+  for (const image of ["node", "python", "oven/bun"]) {
+    const version =
+      image === "node"
+        ? policy.node
+        : image === "python"
+          ? policy.python
+          : policy.bun;
+    const rule = image === "oven/bun" ? "bun-pins" : "runtime-docker";
+    for (const declaration of [
+      `container: ${image}:VERSION`,
+      `container: {image: ${image}:VERSION}`,
+      `services: {runtime: {image: ${image}:VERSION}}`,
+      `services: {runtime: ${image}:VERSION}`,
+      `container: &image {image: ${image}:VERSION}\n    services: {runtime: *image}`,
+      `services: {runtime: {<<: &image {image: ${image}:VERSION}}}`,
+    ]) {
+      const source = `jobs:\n  test:\n    ${declaration}\n    steps: []`;
+      expect(
+        check(
+          ".github/workflows/ci.yml",
+          source.replaceAll("VERSION", version),
+        ),
+      ).toEqual([]);
+      expect(
+        check(
+          ".github/workflows/ci.yml",
+          source.replaceAll("VERSION", "latest"),
+        ).some((entry) => entry.rule === rule),
+      ).toBe(true);
+    }
+  }
+  expect(
+    check(
+      ".github/workflows/ci.yml",
+      "jobs:\n  test:\n    container: '${{ matrix.image }}'\n    services: {redis: {image: redis:7}}\n    steps: []",
+    ).some(({ rule }) => rule === "runtime-docker"),
+  ).toBe(true);
+  expect(
+    check(
+      ".github/workflows/ci.yml",
+      "jobs:\n  test:\n    container: ubuntu:24.04\n    services: {redis: {image: redis:7}}\n    steps: []",
+    ),
+  ).toEqual([]);
+});
+
+test("Docker action metadata requires opt-out and validates runtime images", () => {
+  for (const image of ["node", "python", "oven/bun"]) {
+    const version =
+      image === "node"
+        ? policy.node
+        : image === "python"
+          ? policy.python
+          : policy.bun;
+    const rule = image === "oven/bun" ? "bun-pins" : "runtime-docker";
+    for (const file of ["action.yml", "nested/action.yaml"]) {
+      const source = (tag: string) =>
+        `runs: &runs\n  using: docker\n  image: docker://${image}:${tag}`;
+      expect(check(file, source(version)).map(({ rule }) => rule)).toEqual([
+        "action-pins",
+      ]);
+      expect(check(file, source("latest")).map(({ rule }) => rule)).toEqual([
+        "action-pins",
+        rule,
+      ]);
+      const alias = `defaults: &docker {using: docker, image: 'docker://${image}:latest'}\nruns: {<<: *docker}`;
+      expect(check(file, alias).map(({ rule }) => rule)).toEqual([
+        "action-pins",
+        rule,
+      ]);
+    }
+    expect(
+      check(
+        ".github/workflows/ci.yml",
+        workflow(`      - uses: docker://${image}:latest`),
+      ).map(({ rule }) => rule),
+    ).toEqual(["action-pins", rule]);
+  }
+  for (const file of ["Dockerfile", "./Dockerfile", "docker/Dockerfile"])
+    expect(
+      check("action.yml", `runs: {using: docker, image: '${file}'}`),
+    ).toEqual([]);
+  expect(
+    check("action.yml", "runs: {using: docker, image: 'docker://redis:7'}").map(
+      ({ rule }) => rule,
+    ),
+  ).toEqual(["action-pins"]);
+  expect(
+    check(
+      "action.yml",
+      "runs: {using: node24, main: index.js}\nexample: {image: 'docker://node:latest'}",
+    ),
+  ).toEqual([]);
+});
+
+test("Docker action local paths stay inside the repository and use the documented filename", () => {
+  for (const file of ["action.yml", "nested/action.yml"]) {
+    for (const image of [
+      "/Dockerfile",
+      "C:/Dockerfile",
+      "..\\Dockerfile",
+      "../../Dockerfile",
+      "docker://example/Dockerfile",
+      "Containerfile.production",
+      "Dockerfile.production",
+    ])
+      expect(
+        check(file, `runs: {using: docker, image: '${image}'}`).some(
+          ({ rule }) => rule === "action-pins",
+        ),
+      ).toBe(true);
+    expect(
+      check(file, "runs: {using: docker, image: 'node/Dockerfile'}"),
+    ).toEqual([]);
+  }
+  expect(
+    check("nested/action.yml", "runs: {using: docker, image: '../Dockerfile'}"),
+  ).toEqual([]);
+  expect(
+    check("action.yml", "runs: {using: docker, image: '../Dockerfile'}").some(
+      ({ rule }) => rule === "action-pins",
+    ),
+  ).toBe(true);
+});
+
+test("aliases for whole service tables cannot hide runtime images", () => {
+  for (const image of ["node", "python", "oven/bun"]) {
+    const rule = image === "oven/bun" ? "bun-pins" : "runtime-docker";
+    const source = `defaults: &services\n  runtime: &runtime {image: '${image}:latest'}\njobs:\n  test:\n    services: *services\n    steps: []`;
+    expect(
+      check(".github/workflows/ci.yml", source).map((entry) => entry.rule),
+    ).toEqual([rule]);
+  }
+});

@@ -60,7 +60,7 @@ export const toolchainInputKind = (file: string) => {
     isMiseConfigPath(file) ||
     isPythonDependencyManifest(file) ||
     isDockerDefinitionPath(file) ||
-    /(?:^|\/)(?:package\.json|stll-toolchain\.json|\.bun-version|\.node-version|\.nvmrc|\.python-version|rust-toolchain(?:\.toml)?|\.tool-versions|\.?mise\.toml|uv\.toml|\.uv\.toml|\.github\/dependabot\.ya?ml|Cargo\.toml)$/.test(
+    /(?:^|\/)(?:package\.json|pnpm-workspace\.yaml|stll-toolchain\.json|\.bun-version|\.node-version|\.nvmrc|\.python-version|rust-toolchain(?:\.toml)?|\.tool-versions|\.?mise\.toml|uv\.toml|\.uv\.toml|\.github\/dependabot\.ya?ml|Cargo\.toml)$/.test(
       file,
     )
   )

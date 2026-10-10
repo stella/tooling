@@ -21,6 +21,7 @@ import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 
 import { syncWorkspaceVersions } from "./lib/bun-lock-workspace-versions";
+import { workspaceVersionOutputs } from "./lib/release-generated-paths";
 import { syncWorkspaceToolchainPins } from "./lib/toolchain-workspace-versions";
 
 const ROOT = join(import.meta.dirname, "..");
@@ -35,7 +36,9 @@ const workspaceDirs = entries
   .map((entry) => `packages/${entry.name}`)
   .sort();
 
-const lockText = await Bun.file(join(ROOT, "bun.lock")).text();
+const lockText = await Bun.file(
+  join(ROOT, workspaceVersionOutputs.lockfile),
+).text();
 
 const args = process.argv.slice(2);
 const invalidArgs = args.filter((arg) => arg !== "--write");
@@ -64,7 +67,7 @@ for (const workspaceDir of workspaceDirs) {
   packageNames.set(workspaceDir, name);
 }
 
-const toolchainPath = join(ROOT, "packages/oxlint-config/toolchain.json");
+const toolchainPath = join(ROOT, workspaceVersionOutputs.toolchain);
 const toolchainResult = syncWorkspaceToolchainPins({
   policyText: await Bun.file(toolchainPath).text(),
   workspaceVersions: new Map(
@@ -99,7 +102,7 @@ if (
 }
 
 if (write && unrepairable.length === 0 && result.text !== lockText) {
-  await Bun.write(join(ROOT, "bun.lock"), result.text);
+  await Bun.write(join(ROOT, workspaceVersionOutputs.lockfile), result.text);
   console.log(
     `bun.lock workspace-version sync: updated ${result.mismatches.length} workspace(s).`,
   );

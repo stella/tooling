@@ -89,12 +89,47 @@ const workspaceRoots = (
   );
   const workspaces = new Map<string, string[]>();
   for (const file of manifests) {
+    if (ecosystem === "npm") {
+      const directory = path.posix.dirname(file);
+      const workspaceFile = path.posix.join(directory, "pnpm-workspace.yaml");
+      const text = files[workspaceFile];
+      if (text !== undefined) {
+        const document = parseDocument(text);
+        if (document.errors.length > 0)
+          throw new Error(`${workspaceFile}:1: invalid pnpm workspace YAML`);
+        const parsed: unknown = document.toJS({ maxAliasCount: 100 });
+        if (!record(parsed))
+          throw new Error(
+            `${workspaceFile}:1: pnpm workspace must contain an object`,
+          );
+        const patterns = parsed["packages"] ?? [];
+        if (!strings(patterns))
+          throw new Error(
+            `${workspaceFile}:1: pnpm packages must be a string array`,
+          );
+        workspaces.set(
+          directory,
+          patterns.map((pattern) =>
+            pattern.startsWith("!")
+              ? `!${path.posix.normalize(pattern.slice(1))}`
+              : path.posix.normalize(pattern),
+          ),
+        );
+        continue;
+      }
+    }
     try {
       const parsed: unknown =
         ecosystem === "npm"
           ? JSON.parse(files[file] ?? "")
           : parseToml(files[file] ?? "");
       if (!record(parsed)) continue;
+      if (
+        ecosystem === "npm" &&
+        typeof parsed["packageManager"] === "string" &&
+        parsed["packageManager"].startsWith("pnpm@")
+      )
+        continue;
       const value = workspaceTable(parsed, ecosystem);
       const patterns = record(value)
         ? value[ecosystem === "npm" ? "packages" : "members"]

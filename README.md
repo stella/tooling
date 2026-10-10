@@ -89,6 +89,9 @@ package ecosystem and update root (Bun roots use `bun`, npm/pnpm/Yarn use
 `npm`, and uv projects use `uv`), uses the policy schedule/groups and a
 five-day cooldown, and ignores tooling-owned npm and action pins. Workspace
 members share their update root; independent manifests need their own entry.
+`pnpm-workspace.yaml` owns pnpm catalogs and membership. Omitted `packages`
+includes only the root, matching the current pnpm contract; declare member
+patterns explicitly to keep membership stable across pnpm versions.
 The generator derives the reference from the same policy and ecosystem
 registry as the guard: run `bun scripts/write-dependabot-policy.ts` after
 policy changes. Consumers can copy its applicable entries and directory paths;

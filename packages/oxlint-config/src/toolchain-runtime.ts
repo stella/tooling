@@ -365,6 +365,40 @@ export const checkRuntimeFile = ({
         });
     });
   }
+  type RuntimeImageOptions = {
+    image: unknown;
+    line: number;
+    label: string;
+  };
+  const checkRuntimeImage = ({ image, line, label }: RuntimeImageOptions) => {
+    if (typeof image !== "string" || image.includes("${{")) {
+      add({
+        rule: "runtime-docker",
+        line,
+        message: `cannot determine ${label} runtime; use a static image or a reasoned runtime-docker opt-out`,
+      });
+      return;
+    }
+    const runtime = /^(node|python|oven\/bun)(?::([^@]+))?(?:@.*)?$/i.exec(
+      canonicalDockerRuntime(image),
+    );
+    if (runtime === null) return;
+    const tool = runtime[1]?.toLowerCase();
+    const version = runtime[2]?.split("-").at(0);
+    const expected =
+      tool === "node"
+        ? policy.node
+        : tool === "python"
+          ? policy.python
+          : policy.bun;
+    pin({
+      rule: tool === "oven/bun" ? "bun-pins" : "runtime-docker",
+      value: version,
+      expected,
+      label: `${label} ${tool}`,
+      line,
+    });
+  };
   if (isDockerDefinitionPath(file)) {
     const variables = new Map<string, string>();
     const escape = /^\s*#\s*escape\s*=\s*([\\`])\s*$/m.exec(text)?.[1] ?? "\\";
@@ -428,25 +462,7 @@ export const checkRuntimeFile = ({
       const previousStage = stages.has(image.toLowerCase());
       if (stage !== undefined) stages.add(stage);
       if (previousStage) return;
-      const runtime = /^(node|python|oven\/bun)(?::([^@]+))?(?:@.*)?$/i.exec(
-        canonicalDockerRuntime(image),
-      );
-      if (runtime === null) return;
-      const tool = runtime[1]?.toLowerCase();
-      const version = runtime[2]?.split("-").at(0);
-      const expected =
-        tool === "node"
-          ? policy.node
-          : tool === "python"
-            ? policy.python
-            : policy.bun;
-      pin({
-        rule: tool === "oven/bun" ? "bun-pins" : "runtime-docker",
-        value: version,
-        expected,
-        label: `FROM ${tool}`,
-        line,
-      });
+      checkRuntimeImage({ image, line, label: "FROM" });
     };
     lines.forEach((line, index) => {
       const heredoc = heredocs.at(0);
@@ -655,6 +671,11 @@ export const checkRuntimeFile = ({
         line,
         message: "Docker image actions require a reasoned action-pins opt-out",
       });
+      checkRuntimeImage({
+        image: value.slice("docker://".length),
+        line,
+        label: "Docker action image",
+      });
       return;
     }
     const remote = /^([^./][^\s@]*\/[^\s@]+)@([^\s]+)$/.exec(value);
@@ -723,6 +744,16 @@ export const checkRuntimeFile = ({
       line: reference === undefined ? line : nodeLine(reference),
     });
   };
+  const checkContainer = (node: unknown) => {
+    node = resolveNode(node);
+    if (node === undefined) return;
+    const image = isMap(node) ? getNode(node, "image") : node;
+    checkRuntimeImage({
+      image: isScalar(image) ? image.value : undefined,
+      line: nodeLine(image ?? node),
+      label: "container image",
+    });
+  };
   const checkSteps = (node: unknown) => {
     node = resolveNode(node);
     if (isSeq(node)) for (const step of node.items) checkAction(step);
@@ -736,6 +767,11 @@ export const checkRuntimeFile = ({
         for (const key of keysOf(jobs)) {
           const job = getNode(jobs, key);
           checkAction(job);
+          checkContainer(getNode(job, "container"));
+          const services = getNode(job, "services");
+          if (isMap(services))
+            for (const service of keysOf(services))
+              checkContainer(getNode(services, service));
           checkSteps(getNode(job, "steps"));
         }
     } else {
@@ -743,6 +779,41 @@ export const checkRuntimeFile = ({
       const using = getNode(runs, "using");
       if (isScalar(using) && using.value === "composite")
         checkSteps(getNode(runs, "steps"));
+      if (isScalar(using) && using.value === "docker") {
+        const image = getNode(runs, "image");
+        const value = isScalar(image) ? image.value : undefined;
+        if (typeof value === "string" && value.startsWith("docker://")) {
+          add({
+            rule: "action-pins",
+            line: nodeLine(image),
+            message:
+              "Docker image actions require a reasoned action-pins opt-out",
+          });
+          checkRuntimeImage({
+            image: value.slice("docker://".length),
+            line: nodeLine(image),
+            label: "Docker action image",
+          });
+        } else if (
+          typeof value !== "string" ||
+          value.includes("${{") ||
+          value.includes("\\") ||
+          value.includes(":") ||
+          path.posix.isAbsolute(value) ||
+          path.posix
+            .normalize(path.posix.join(path.posix.dirname(file), value))
+            .split("/")
+            .at(0) === ".." ||
+          path.posix.basename(value) !== "Dockerfile"
+        ) {
+          add({
+            rule: "action-pins",
+            line: nodeLine(image),
+            message:
+              "Docker actions must reference a local Dockerfile or declare a reasoned action-pins opt-out for an external image",
+          });
+        }
+      }
     }
   } catch {
     add({

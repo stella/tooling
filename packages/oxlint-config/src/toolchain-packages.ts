@@ -1,6 +1,7 @@
 import path from "node:path";
 import picomatch from "picomatch";
 import { satisfies } from "semver";
+import { isNode, LineCounter, parseDocument } from "yaml";
 
 export const packageRules = [
   "bun-pins",
@@ -66,11 +67,13 @@ export const checkPackageFiles = ({
     Object.entries({ ...policy.packages, "bun-types": policy.bun }),
   );
   const manifests = new Map<string, Record<string, unknown>>();
+  const yamlLocations = new Map<string, number[]>();
   const reportedLines = new Map<string, number>();
   const add = ({ file, rule, key, value, message }: AddDiagnosticOptions) => {
     const serialized = JSON.stringify(value);
     const locationKey = `${file}:${key}:${serialized ?? ""}`;
     const previous = reportedLines.get(locationKey) ?? -1;
+    const yamlLine = yamlLocations.get(locationKey)?.shift();
     const index =
       files[file]
         ?.split(/\r?\n/)
@@ -84,22 +87,70 @@ export const checkPackageFiles = ({
     diagnostics.push({
       rule,
       path: file,
-      line: Math.max(1, index + 1),
+      line: yamlLine ?? Math.max(1, index + 1),
       message,
     });
   };
   for (const [file, text] of Object.entries(files)) {
-    if (path.posix.basename(file) !== "package.json") continue;
+    const pnpm = path.posix.basename(file) === "pnpm-workspace.yaml";
+    if (!pnpm && path.posix.basename(file) !== "package.json") continue;
     try {
-      const json: unknown = JSON.parse(text);
+      const lineCounter = new LineCounter();
+      const document = pnpm ? parseDocument(text, { lineCounter }) : undefined;
+      if (document !== undefined && document.errors.length > 0)
+        throw new Error("invalid YAML");
+      const json: unknown =
+        document === undefined ? JSON.parse(text) : document.toJS();
       if (!record(json)) throw new Error("manifest must be an object");
+      if (pnpm) {
+        if (json["catalog"] !== undefined && !record(json["catalog"]))
+          throw new Error("catalog must be a mapping");
+        if (
+          json["catalogs"] !== undefined &&
+          (!record(json["catalogs"]) ||
+            Object.values(json["catalogs"]).some((catalog) => !record(catalog)))
+        )
+          throw new Error("named catalogs must be mappings");
+        if (
+          json["packages"] !== undefined &&
+          (!Array.isArray(json["packages"]) ||
+            !json["packages"].every(
+              (pattern: unknown) => typeof pattern === "string",
+            ))
+        )
+          throw new Error("workspace packages must be patterns");
+      }
       manifests.set(file, json);
+      if (document === undefined) continue;
+      const catalogEntries = [
+        { catalog: json["catalog"], prefix: ["catalog"] },
+        ...(record(json["catalogs"])
+          ? Object.entries(json["catalogs"]).map(([name, catalog]) => ({
+              catalog,
+              prefix: ["catalogs", name],
+            }))
+          : []),
+      ];
+      for (const { catalog, prefix } of catalogEntries) {
+        if (!record(catalog)) continue;
+        for (const [name, value] of Object.entries(catalog)) {
+          const node = document.getIn([...prefix, name], true);
+          if (!isNode(node) || node.range === undefined || node.range === null)
+            continue;
+          const key = `${file}:${name}:${JSON.stringify(value)}`;
+          const lines = yamlLocations.get(key) ?? [];
+          lines.push(lineCounter.linePos(node.range[0]).line);
+          yamlLocations.set(key, lines);
+        }
+      }
     } catch {
       add({
         file,
         rule: "package-pins",
         key: "",
-        message: "invalid package.json object",
+        message: pnpm
+          ? "invalid pnpm-workspace.yaml object"
+          : "invalid package.json object",
       });
     }
   }
@@ -107,7 +158,37 @@ export const checkPackageFiles = ({
     json,
     ...(record(json["workspaces"]) ? [json["workspaces"]] : []),
   ];
+  const pnpmWorkspaceFor = (file: string) => {
+    let directory = path.posix.dirname(file);
+    while (true) {
+      const workspace = manifests.get(
+        path.posix.join(directory, "pnpm-workspace.yaml"),
+      );
+      if (workspace !== undefined) return { directory, workspace };
+      if (directory === ".") return undefined;
+      directory = path.posix.dirname(directory);
+    }
+  };
   const catalogFor = (file: string, name: string): unknown => {
+    const owner = pnpmWorkspaceFor(file);
+    if (owner !== undefined) {
+      const { directory, workspace } = owner;
+      if (
+        path.posix.basename(file) === "package.json" &&
+        !pnpmContains({ directory, file, patterns: workspace["packages"] })
+      )
+        return undefined;
+      if (name === "" || name === "default")
+        return (
+          workspace["catalog"] ??
+          (record(workspace["catalogs"])
+            ? workspace["catalogs"]["default"]
+            : undefined)
+        );
+      return record(workspace["catalogs"])
+        ? workspace["catalogs"][name]
+        : undefined;
+    }
     let directory = path.posix.dirname(file);
     while (true) {
       const manifest = manifests.get(
@@ -130,6 +211,33 @@ export const checkPackageFiles = ({
       directory = path.posix.dirname(directory);
     }
   };
+  const pnpmContains = ({
+    directory,
+    file,
+    patterns,
+  }: {
+    directory: string;
+    file: string;
+    patterns: unknown;
+  }) => {
+    const relative = path.posix.relative(directory, path.posix.dirname(file));
+    if (relative === "") return true;
+    if (!Array.isArray(patterns)) return false;
+    const normalize = (pattern: string) => path.posix.normalize(pattern);
+    const selected = patterns.filter(
+      (value: unknown): value is string => typeof value === "string",
+    );
+    return (
+      picomatch(
+        selected.filter((pattern) => !pattern.startsWith("!")).map(normalize),
+      )(relative) &&
+      !picomatch(
+        selected
+          .filter((pattern) => pattern.startsWith("!"))
+          .map((pattern) => normalize(pattern.slice(1))),
+      )(relative)
+    );
+  };
   const resolve = (file: string, name: string, value: unknown): unknown => {
     const visited = new Set<string>();
     while (typeof value === "string" && value.startsWith("catalog:")) {
@@ -149,6 +257,26 @@ export const checkPackageFiles = ({
     name: string;
     pin: string;
   }) => {
+    const owner = pnpmWorkspaceFor(file);
+    if (owner !== undefined) {
+      const { directory, workspace } = owner;
+      if (!pnpmContains({ directory, file, patterns: workspace["packages"] }))
+        return false;
+      const candidates = [...manifests.entries()].filter(
+        ([candidate, json]) =>
+          path.posix.basename(candidate) === "package.json" &&
+          json["name"] === name &&
+          pnpmContains({
+            directory,
+            file: candidate,
+            patterns: workspace["packages"],
+          }),
+      );
+      return (
+        candidates.length === 1 &&
+        candidates.every(([, json]) => json["version"] === pin)
+      );
+    }
     let directory = path.posix.dirname(file);
     while (true) {
       const root = manifests.get(path.posix.join(directory, "package.json"));

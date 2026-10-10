@@ -112,3 +112,11 @@ test("all Docker definition suffixes remain in the shared reader and runtime cla
     }
   }
 });
+
+test("pnpm workspace inputs use the producer's YAML filename", () => {
+  expect(toolchainInputKind("pnpm-workspace.yaml")).toBe("config");
+  expect(toolchainInputKind("nested/pnpm-workspace.yaml")).toBe("config");
+  expect(toolchainInputKind("pnpm-workspace.yml")).toBeUndefined();
+  for (const prefix of ["vendor", "node_modules", "nested/vendor"])
+    expect(toolchainInputKind(`${prefix}/pnpm-workspace.yaml`)).toBeUndefined();
+});
