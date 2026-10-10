@@ -110,6 +110,41 @@ export const verifyConsumerNodeArchive = ({
 };
 
 type ConsumerTools = { node: string; npm: string; pnpm: string; bin: string };
+type WriteConsumerToolWrappersOptions = {
+  node: string;
+  npm: string;
+  pnpm: string;
+  directory: string;
+};
+export const writeConsumerToolWrappers = async ({
+  node,
+  npm,
+  pnpm,
+  directory,
+}: WriteConsumerToolWrappersOptions) => {
+  // Explicit wrappers keep fixture scripts and nested package-manager invocations on the consumer runtime.
+  const wrappers = directory;
+  await mkdir(wrappers);
+  const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+  for (const [name, cli] of [
+    ["npm", npm],
+    ["pnpm", pnpm],
+  ]) {
+    if (!name || !cli) throw new Error("missing package manager binding");
+    await writeFile(
+      path.join(wrappers, name),
+      `#!/bin/sh\nexec ${quote(node)} ${quote(cli)} "$@"\n`,
+      { mode: 0o755 },
+    );
+  }
+  return {
+    node,
+    npm,
+    pnpm,
+    bin: `${wrappers}${path.delimiter}${path.dirname(node)}`,
+  };
+};
+
 const provisionConsumerTools = async (
   scratch: string,
   policy: ReturnType<typeof parseToolchainPolicy>,
@@ -190,22 +225,12 @@ const provisionConsumerTools = async (
     )
       throw new Error("consumer package manager version mismatch");
   }
-  // Explicit wrappers keep fixture scripts and nested package-manager invocations on the consumer runtime.
-  const wrappers = path.join(scratch, "consumer-bin");
-  await mkdir(wrappers);
-  const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
-  for (const [name, cli] of [
-    ["npm", npm],
-    ["pnpm", pnpm],
-  ]) {
-    if (!name || !cli) throw new Error("missing package manager binding");
-    await writeFile(
-      path.join(wrappers, name),
-      `#!/bin/sh\nexec ${quote(node)} ${quote(cli)} "$@"\n`,
-      { mode: 0o755 },
-    );
-  }
-  return { node, npm, pnpm, bin: `${bin}${path.delimiter}${wrappers}` };
+  return writeConsumerToolWrappers({
+    node,
+    npm,
+    pnpm,
+    directory: path.join(scratch, "consumer-bin"),
+  });
 };
 
 const trackedManifests = async (root: string) => {

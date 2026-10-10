@@ -1,8 +1,12 @@
-import { existsSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { resolveNuxtPublishTarget } from "./publish-build-target-nuxt";
+import { resolveVitePublishTarget } from "./publish-build-target-vite";
 import {
   resolveManifestContract,
   type PublishTarget,
@@ -109,7 +113,7 @@ export const resolvePublishBuildTarget = async (
   const compilerSegments = compilerCommandSegments(build).filter((words) =>
     words.some(
       (word) =>
-        /(?:^|\/)(?:tsdown|tsup|tsc|tsgo|vite|esbuild|rolldown|babel|swc)(?:\.[cm]?js)?$/.test(
+        /(?:^|\/)(?:tsdown|tsup|tsc|tsgo|vite|nuxt-module-build|esbuild|rolldown|babel|swc)(?:\.[cm]?js)?$/.test(
           decodeShellWord(word),
         ) ||
         /(?:typescript|@typescript\/native)\/bin\/tsc$/.test(
@@ -118,13 +122,19 @@ export const resolvePublishBuildTarget = async (
     ),
   );
   const compiler = compilerSegments.at(0);
-  if (
-    compilerSegments.length !== 1 ||
-    compiler?.length !== 1 ||
-    compiler.at(0) !== "tsdown"
-  )
+  if (compilerSegments.length !== 1 || compiler === undefined)
     throw new Error(
-      "Supported publish target resolver requires tsdown without CLI overrides",
+      "Publish target resolver requires exactly one supported compiler stage",
+    );
+  const words = compiler.map(decodeShellWord);
+  if (words.length === 2 && words.at(1) === "build") {
+    if (words.at(0) === "vite") return resolveVitePublishTarget(directory);
+    if (words.at(0) === "nuxt-module-build")
+      return resolveNuxtPublishTarget(directory);
+  }
+  if (words.length !== 1 || words.at(0) !== "tsdown")
+    throw new Error(
+      "Supported publish target resolver requires tsdown, vite build, or nuxt-module-build build without CLI overrides",
     );
   const configFiles = ["ts", "mts", "cts", "js", "mjs", "cjs", "json"]
     .map((extension) => path.join(directory, `tsdown.config.${extension}`))
@@ -143,45 +153,103 @@ export const resolvePublishBuildTarget = async (
     throw new Error(
       `Publish target resolver supports tsdown ${supportedTsdownVersion}; review the adapter before changing build tools`,
     );
-  const tool: unknown = await import(
-    pathToFileURL(require.resolve("tsdown")).href
-  );
-  if (!record(tool) || typeof tool["resolveUserConfig"] !== "function")
-    throw new Error(
-      "Installed tsdown does not expose its configuration resolver",
+  const loaderRequire = createRequire(import.meta.url);
+  // Register tsx in the isolated Node process before any config imports. The
+  // global registration avoids namespaced CJS imports rewriting builtin URLs.
+  // The caller's Node executable owns config parsing and resolution, even when
+  // the guard itself runs under Bun. Only final target data crosses the boundary.
+  const scratch = mkdtempSync(path.join(tmpdir(), "stll-publish-target-"));
+  try {
+    const resultFile = path.join(scratch, "targets.json");
+    const result = spawnSync(
+      process.versions.bun ? "node" : process.execPath,
+      [
+        "--import",
+        pathToFileURL(loaderRequire.resolve("tsx")).href,
+        "--input-type=module",
+        "--eval",
+        tsdownConfigProcess,
+        JSON.stringify({
+          directory,
+          configFile,
+          toolUrl: pathToFileURL(require.resolve("tsdown")).href,
+          resultFile,
+        }),
+      ],
+      {
+        cwd: directory,
+        encoding: "utf8",
+        timeout: 30_000,
+        maxBuffer: 1024 * 1024,
+      },
     );
-  const loaded: unknown = configFile.endsWith(".json")
-    ? { default: JSON.parse(readFileSync(configFile, "utf8")) }
-    : await import(pathToFileURL(configFile).href);
-  if (!record(loaded)) throw new Error("Invalid tsdown module");
-  const exported = loaded["default"];
-  if (typeof exported === "function")
-    throw new Error(
-      "Dynamic root tsdown configurations require a supported target resolver",
-    );
-  const userConfigs: unknown[] = Array.isArray(exported)
-    ? exported
-    : [exported];
-  const resolved: unknown[] = [];
-  for (const config of userConfigs) {
-    if (!record(config))
-      throw new Error("tsdown configurations must be objects");
-    if (
-      config["cwd"] !== undefined ||
-      config["workspace"] !== undefined ||
-      config["fromVite"] !== undefined
-    )
+    if (result.error) throw result.error;
+    if (result.status !== 0)
       throw new Error(
-        "Relocated or inherited build configurations require a supported target resolver",
+        `Node tsdown configuration resolver failed: ${result.stderr.trim()}`,
       );
-    const output: unknown = await tool["resolveUserConfig"](
-      { ...config, cwd: directory },
-      { cwd: directory },
-      new Set<string>(),
-    );
-    if (!Array.isArray(output))
-      throw new Error("Invalid tsdown resolved configuration");
-    resolved.push(...output);
+    const resolved: unknown = JSON.parse(readFileSync(resultFile, "utf8"));
+    return resolvedTsdownTarget(resolved);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
   }
-  return resolvedTsdownTarget(resolved);
 };
+
+// This is JavaScript executed by Node at the published engine floor. Keep config
+// functions inside the child so JSON cannot silently discard target overrides.
+const tsdownConfigProcess = `
+import { readFileSync, writeFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
+const { directory, configFile, toolUrl, resultFile } = JSON.parse(process.argv[1]);
+const record = value => typeof value === 'object' && value !== null && !Array.isArray(value);
+const tool = await import(toolUrl);
+if (typeof tool.resolveUserConfig !== 'function')
+  throw new Error('Installed tsdown does not expose its configuration resolver');
+if (tool.globalLogger) tool.globalLogger.level = 'silent';
+const loaded = configFile.endsWith('.json')
+  ? { default: JSON.parse(readFileSync(configFile, 'utf8')) }
+  : await import(pathToFileURL(configFile).href);
+if (!record(loaded)) throw new Error('Invalid tsdown module');
+const exported = loaded.default;
+if (typeof exported === 'function')
+  throw new Error('Dynamic root tsdown configurations require a supported target resolver');
+const configs = Array.isArray(exported) ? exported : [exported];
+const resolved = [];
+const rejectOptionsHooks = plugins => {
+  if (plugins === undefined || plugins === null || plugins === false) return;
+  if (Array.isArray(plugins)) {
+    for (const plugin of plugins) rejectOptionsHooks(plugin);
+    return;
+  }
+  if (!record(plugins) || typeof plugins.then === 'function' || plugins.options !== undefined)
+    throw new Error('Dynamic plugin options hooks require a supported target resolver');
+};
+for (const config of configs) {
+  if (!record(config)) throw new Error('tsdown configurations must be objects');
+  if (config.cwd !== undefined || config.workspace !== undefined || config.fromVite !== undefined)
+    throw new Error('Relocated or inherited build configurations require a supported target resolver');
+  const output = await tool.resolveUserConfig(
+    { ...config, cwd: directory, logLevel: 'silent' }, { cwd: directory }, new Set(),
+  );
+  if (!Array.isArray(output)) throw new Error('Invalid tsdown resolved configuration');
+  for (const entry of output) {
+    if (!record(entry)) throw new Error('Invalid resolved tsdown configuration');
+    if (entry.hooks !== undefined)
+      throw new Error('Build hooks require a supported target resolver');
+    rejectOptionsHooks(entry.plugins);
+    const input = entry.inputOptions;
+    if (input !== undefined && !record(input))
+      throw new Error('Dynamic tsdown inputOptions require a supported target resolver');
+    const transform = record(input) ? input.transform : undefined;
+    if (transform !== undefined && !record(transform))
+      throw new Error('tsdown transform overrides must be an object');
+    if (record(input)) rejectOptionsHooks(input.plugins);
+    const target = record(transform) && transform.target != null ? transform.target : entry.target;
+    if (target !== undefined && typeof target !== 'string' &&
+        !(Array.isArray(target) && target.every(item => typeof item === 'string')))
+      throw new Error('Build tool returned an unsupported resolved JavaScript target');
+    resolved.push({ target, dts: { emitDtsOnly: record(entry.dts) && entry.dts.emitDtsOnly === true } });
+  }
+}
+writeFileSync(resultFile, JSON.stringify(resolved));
+`;

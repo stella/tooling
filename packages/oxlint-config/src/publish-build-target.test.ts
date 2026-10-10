@@ -170,9 +170,74 @@ test("the installed build resolver supplies engine defaults and real config muta
         JSON.stringify({ ...manifest, scripts: { build } }),
       );
       await expect(resolvePublishBuildTarget(directory)).rejects.toThrow(
-        "tsdown",
+        "resolver",
       );
     }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("the CLI loader parser transpiles TypeScript configs and their relative imports", async () => {
+  const directory = mkdtempSync(
+    path.join(tmpdir(), "publish-target-typescript-"),
+  );
+  const require = createRequire(import.meta.url);
+  try {
+    mkdirSync(path.join(directory, "node_modules"));
+    symlinkSync(
+      path.dirname(require.resolve("tsdown/package.json")),
+      path.join(directory, "node_modules/tsdown"),
+    );
+    writeFileSync(
+      path.join(directory, "entry.js"),
+      "export const value = 1;\n",
+    );
+    writeFileSync(
+      path.join(directory, "package.json"),
+      JSON.stringify({
+        name: "example-typescript-config",
+        type: "module",
+        scripts: { build: "tsdown" },
+      }),
+    );
+    writeFileSync(
+      path.join(directory, "target.ts"),
+      "export const target: string = 'es2022';\n",
+    );
+    const configFile = path.join(directory, "tsdown.config.ts");
+    const config = [
+      "import { defineConfig } from 'tsdown';",
+      "import { target } from './target.ts';",
+      "const entry: string[] = ['entry.js'];",
+      "export default defineConfig({ entry, target, dts: false });",
+    ].join("\n");
+    writeFileSync(configFile, config);
+    expect(await resolvePublishBuildTarget(directory)).toEqual({
+      type: "javascript",
+      targets: ["es2022"],
+    });
+    for (const unsupported of [
+      "{ entry: ['entry.js'], dts: false, inputOptions: () => ({ transform: { target: 'node26' } }) }",
+      "{ entry: ['entry.js'], dts: false, hooks: { 'build:prepare': ({ options }) => { options.target = ['node26']; } } }",
+      "{ entry: ['entry.js'], dts: false, plugins: [{ name: 'change-target', options: options => ({ ...options, transform: { target: 'node26' } }) }] }",
+    ]) {
+      writeFileSync(configFile, `export default ${unsupported};\n`);
+      await expect(resolvePublishBuildTarget(directory)).rejects.toThrow(
+        "supported target resolver",
+      );
+    }
+    writeFileSync(
+      configFile,
+      [
+        "export default { entry: ['entry.js'], dts: false, target: 'es2020',",
+        "plugins: [{ name: 'config-target', tsdownConfig(config) { config.target = 'es2022'; } }] };",
+      ].join("\n"),
+    );
+    expect(await resolvePublishBuildTarget(directory)).toEqual({
+      type: "javascript",
+      targets: ["es2022"],
+    });
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

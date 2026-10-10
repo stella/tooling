@@ -4,11 +4,13 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import policy from "../toolchain.json";
 import {
   consumerCommandEnvironment,
   assertConsumerFixtureFiles,
   consumerFixtureCommands,
   verifyConsumerNodeArchive,
+  writeConsumerToolWrappers,
 } from "./consumer-compat";
 import { parseConsumerCompatArguments } from "./consumer-compat-arguments";
 import {
@@ -262,6 +264,62 @@ describe("consumer compatibility declarations", () => {
 });
 
 describe("isolated consumer runtime", () => {
+  test("nested manager invocations execute pinned wrappers before bundled and inherited producers", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "consumer-wrappers-"));
+    try {
+      const nodeBin = path.join(directory, "node-bin");
+      const managerBin = path.join(directory, "pinned-managers");
+      const fixture = path.join(directory, "fixture");
+      await Promise.all([mkdir(nodeBin), mkdir(managerBin), mkdir(fixture)]);
+      const node = path.join(nodeBin, "node");
+      await writeFile(node, '#!/bin/sh\nexec /bin/sh "$@"\n', { mode: 0o755 });
+      for (const manager of ["npm", "pnpm"] as const) {
+        const version =
+          manager === "npm" ? policy.consumerNpm : policy.consumerPnpm;
+        await writeFile(
+          path.join(managerBin, manager),
+          `#!/bin/sh\n[ "$1" = --version ] || exit 1\nprintf '%s\\n' '${version}'\n`,
+          { mode: 0o755 },
+        );
+        await writeFile(
+          path.join(nodeBin, manager),
+          "#!/bin/sh\necho bundled-manager\n",
+          { mode: 0o755 },
+        );
+      }
+      const tools = await writeConsumerToolWrappers({
+        node,
+        npm: path.join(managerBin, "npm"),
+        pnpm: path.join(managerBin, "pnpm"),
+        directory: path.join(directory, "consumer-bin"),
+      });
+      const script = path.join(fixture, "nested.sh");
+      await writeFile(
+        script,
+        "#!/bin/sh\nset -eu\nnpm --version\npnpm --version\n",
+      );
+      const env = consumerCommandEnvironment({
+        tools,
+        directory: fixture,
+        home: directory,
+      });
+      const result = Bun.spawnSync(["/bin/sh", script], { cwd: fixture, env });
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout.toString()).toBe(
+        `${policy.consumerNpm}\n${policy.consumerPnpm}\n`,
+      );
+      const oldOrder = `${nodeBin}${path.delimiter}${tools.bin}`;
+      const regression = Bun.spawnSync(["/bin/sh", script], {
+        cwd: fixture,
+        env: { ...env, PATH: oldOrder },
+      });
+      expect(regression.stdout.toString()).toBe(
+        "bundled-manager\nbundled-manager\n",
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
   test("both managers install, typecheck, build and smoke using the consumer Node executable", () => {
     const tools = {
       node: "/consumer/node",
@@ -349,7 +407,7 @@ describe("isolated consumer runtime", () => {
 
   test("consumer runtime precedes local tools and inherited dev runtime; module lookup cannot inherit repository paths", () => {
     const env = consumerCommandEnvironment({
-      tools: { bin: "/isolated/node/bin:/isolated/managers/bin" },
+      tools: { bin: "/isolated/managers/bin:/isolated/node/bin" },
       directory: "/isolated/fixture",
       home: "/isolated/home",
       environment: {
@@ -365,8 +423,8 @@ describe("isolated consumer runtime", () => {
       },
     });
     expect(env["PATH"]?.split(":").slice(0, 3)).toEqual([
-      "/isolated/node/bin",
       "/isolated/managers/bin",
+      "/isolated/node/bin",
       "/isolated/fixture/node_modules/.bin",
     ]);
     expect(env["NODE_PATH"]).toBeUndefined();

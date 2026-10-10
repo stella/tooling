@@ -48,16 +48,27 @@
         },
         "default": "./dist/no-raw-colors.mjs"
       },
-      "./toolchain.json": "./toolchain.json"
+      "./toolchain.json": "./toolchain.json",
+      "./build-target": {
+        "import": {
+          "types": "./dist/publish-build-target-nuxt-helper.d.mts",
+          "default": "./dist/publish-build-target-nuxt-helper.mjs"
+        },
+        "require": {
+          "types": "./dist/publish-build-target-nuxt-helper.d.cts",
+          "default": "./dist/publish-build-target-nuxt-helper.cjs"
+        },
+        "default": "./dist/publish-build-target-nuxt-helper.mjs"
+      }
     },
     "main": "dist/index.mjs",
     "types": "dist/index.d.mts",
     "bin": {
       "stll-cloud-setup": "./dist/cloud-setup-cli.mjs",
-      "stll-toolchain-check": "./dist/toolchain-check-cli.mjs",
-      "stll-typecheck-parity": "./dist/typecheck-parity-cli.mjs",
+      "stll-consumer-compat": "./dist/consumer-compat-cli.mjs",
       "stll-publish-contract": "./dist/publish-contract-cli.mjs",
-      "stll-consumer-compat": "./dist/consumer-compat-cli.mjs"
+      "stll-toolchain-check": "./dist/toolchain-check-cli.mjs",
+      "stll-typecheck-parity": "./dist/typecheck-parity-cli.mjs"
     }
   }
 }

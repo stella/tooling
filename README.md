@@ -418,12 +418,25 @@ peers must support the consumer versions; ranges may include newer versions.
 Bun runtime/compiler requirements are rejected. JSON and declaration-only packages
 record `{"type":"types-only"}` explicitly.
 
-The initial build adapter resolves tsdown 0.22.9 configurations using the installed
-build tool, including engine-derived defaults, format overrides, and object-form
-low-level target overrides. No syntax lowering records `esnext`. Dynamic input
-options, relocated/inherited configurations, additional direct compiler stages,
-and unsupported build tools fail with a diagnostic. Add a reviewed resolver when
-adopting another build tool; a guessed target is never a contract.
+Build adapters use the installed configuration loaders and bind their behavior to
+tsdown 0.22.9, Vite 8.1.5, or @nuxt/module-builder 1.0.3 (unbuild 3.6.1 and
+mkdist 2.4.1). They record final transform targets, including separate Nuxt module
+and runtime entries. No syntax lowering records `esnext`. Unsupported overrides,
+additional compiler stages, and unrecognized late build hooks fail with a diagnostic.
+Add a reviewed resolver when adopting another build tool.
+
+Nuxt modules can set both emitted targets without replacing the builder's entries:
+
+```ts
+import { nuxtModuleTarget } from "@stll/oxlint-config/build-target";
+
+export default { hooks: { "build:before": nuxtModuleTarget("es2022") } };
+```
+
+The Nuxt adapter accepts this owned hook from the same package version as the CLI;
+it captures the normalized configuration before cleanup or output writes. The built
+publish-contract CLI is also checked against a TypeScript configuration and relative
+TypeScript import on the package's minimum supported Node release.
 
 Packed-artifact checks run nightly, while the static contract check runs per PR.
 The reusable consumer job declares its exact scope in `stll-toolchain.json`:
