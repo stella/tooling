@@ -90,6 +90,7 @@ const trackedInput = (file: string) => {
       "pnpm-lock.yaml",
       "package-lock.json",
       "npm-shrinkwrap.json",
+      "yarn.lock",
       "pnpm-workspace.yaml",
       ".node-version",
       ".nvmrc",
@@ -270,12 +271,39 @@ const selectorFiles = (snapshot: GitSnapshot) => {
 
 const compilerInstallationNames = (snapshot: GitSnapshot) => {
   const names = new Set<string>();
+  const collectCatalogs = (value: unknown) => {
+    if (!changedRecord(value)) return;
+    const visit = (entry: unknown) => {
+      if (!changedRecord(entry)) return;
+      for (const [name, specifier] of Object.entries(entry)) {
+        if (
+          typeof specifier === "string" &&
+          changedPackageTool(packageTarget({ name, specifier })) ===
+            "typescript"
+        )
+          names.add(name);
+        else visit(specifier);
+      }
+    };
+    visit(value["catalog"]);
+    visit(value["catalogs"]);
+  };
   for (const file of snapshot.entries.keys()) {
     const basename = path.posix.basename(file);
     if (basename === "package.json") {
       const manifest = parseChangedJson(snapshotText({ snapshot, file }));
       if (!changedRecord(manifest))
         throw new Error(`Invalid tracked manifest: ${file}`);
+      if (
+        typeof manifest["name"] === "string" &&
+        changedPackageTool(manifest["name"]) === "typescript"
+      )
+        throw new Error(
+          `Tracked compiler source has no immutable artifact identity: ${file}`,
+        );
+      collectCatalogs(manifest);
+      collectCatalogs(manifest["workspaces"]);
+
       for (const field of installedFields) {
         const dependencies = manifest[field];
         if (!changedRecord(dependencies)) continue;
@@ -287,12 +315,18 @@ const compilerInstallationNames = (snapshot: GitSnapshot) => {
           )
             names.add(name);
       }
+    } else if (basename === "pnpm-workspace.yaml") {
+      const document = parseDocument(snapshotText({ snapshot, file }));
+      if (document.errors.length > 0)
+        throw new Error(`Invalid catalog YAML: ${file}`);
+      collectCatalogs(document.toJS({ maxAliasCount: 100 }));
     } else if (
       [
         "bun.lock",
         "pnpm-lock.yaml",
         "package-lock.json",
         "npm-shrinkwrap.json",
+        "yarn.lock",
       ].includes(basename)
     ) {
       const lock = parseChangedLock({
@@ -312,6 +346,69 @@ const compilerInstallationNames = (snapshot: GitSnapshot) => {
     }
   }
   return names;
+};
+
+type EffectiveCatalogSpecifierOptions = {
+  snapshot: GitSnapshot;
+  file: string;
+  dependency: string;
+  specifier: string;
+};
+const effectiveCatalogSpecifier = ({
+  snapshot,
+  file,
+  dependency,
+  specifier,
+}: EffectiveCatalogSpecifierOptions) => {
+  if (!specifier.startsWith("catalog:")) return specifier;
+  const catalog = specifier.slice("catalog:".length);
+  const owners = [...snapshot.entries.keys()]
+    .filter(
+      (candidate) =>
+        ["package.json", "pnpm-workspace.yaml"].includes(
+          path.posix.basename(candidate),
+        ) &&
+        isAncestor(path.posix.dirname(candidate), path.posix.dirname(file)),
+    )
+    .sort(
+      (a, b) =>
+        directoryDepth(path.posix.dirname(b)) -
+          directoryDepth(path.posix.dirname(a)) ||
+        Number(b.endsWith("pnpm-workspace.yaml")) -
+          Number(a.endsWith("pnpm-workspace.yaml")),
+    );
+  for (const owner of owners) {
+    const text = snapshotText({ snapshot, file: owner });
+    let value: unknown;
+    if (owner.endsWith(".yaml")) {
+      const document = parseDocument(text);
+      if (document.errors.length > 0)
+        throw new Error(`Invalid catalog YAML: ${owner}`);
+      value = document.toJS({ maxAliasCount: 100 });
+    } else value = parseChangedJson(text);
+    if (!changedRecord(value)) continue;
+    const sources = [value];
+    if (changedRecord(value["workspaces"])) sources.push(value["workspaces"]);
+    for (const source of sources) {
+      let declarations: unknown;
+      if (catalog === "") declarations = source["catalog"];
+      else if (changedRecord(source["catalogs"]))
+        declarations = source["catalogs"][catalog];
+      if (declarations === undefined) continue;
+      if (
+        !changedRecord(declarations) ||
+        typeof declarations[dependency] !== "string"
+      )
+        throw new Error(
+          `Missing effective catalog dependency: ${file}:${dependency}`,
+        );
+      const effective = declarations[dependency];
+      if (effective.startsWith("catalog:"))
+        throw new Error(`Recursive compiler catalog: ${file}:${dependency}`);
+      return effective;
+    }
+  }
+  throw new Error(`Missing effective catalog: ${file}:${dependency}`);
 };
 const compilerPatches = (snapshot: GitSnapshot) => {
   const compilerNames = compilerInstallationNames(snapshot);
@@ -567,16 +664,23 @@ const boundResolution = ({
       path.posix.dirname(lockFile),
       path.posix.dirname(file),
     ) || ".";
+  const importerVersion = lock.importers[directory]?.[dependency];
+  const importerName =
+    path.posix.basename(lockFile) === "pnpm-lock.yaml" &&
+    importerVersion !== undefined
+      ? importerRegistryName({ dependency, version: importerVersion })
+      : undefined;
   const candidates = lock.resolutions.filter(
-    (item) => item.name === name || item.dependency === dependency,
+    (item) =>
+      item.name === (importerName ?? name) || item.dependency === dependency,
   );
   if (path.posix.basename(lockFile) === "pnpm-lock.yaml") {
     const value = lock.importers[directory]?.[dependency];
     if (value === undefined)
       throw new Error(`Missing resolved importer: ${file}:${dependency}`);
     const descriptor = value.replace(/^npm:/, "");
-    const version = descriptor.startsWith(`${name}@`)
-      ? descriptor.slice(name.length + 1)
+    const version = descriptor.startsWith(`${importerName ?? name}@`)
+      ? descriptor.slice((importerName ?? name).length + 1)
       : descriptor;
     const resolvedVersion = version.split("(").at(0);
     const matched = candidates.filter(
@@ -587,6 +691,29 @@ const boundResolution = ({
     );
     if (versions.size === 1) return matched;
     throw new Error(`Ambiguous resolved importer: ${file}:${dependency}`);
+  }
+  if (path.posix.basename(lockFile) === "yarn.lock") {
+    const declarations = installedFields.flatMap((field) => {
+      const source = manifest[field];
+      return changedRecord(source) && typeof source[dependency] === "string"
+        ? [source[dependency]]
+        : [];
+    });
+    const matched = candidates.filter((item) =>
+      item.location
+        .split(/,\s*/)
+        .some((selector) =>
+          declarations.some(
+            (specifier) =>
+              selector === `${dependency}@${specifier}` ||
+              selector === `${dependency}@npm:${specifier}`,
+          ),
+        ),
+    );
+    if (matched.length > 0) return matched;
+    throw new Error(
+      `Missing resolved Yarn compiler declaration: ${file}:${dependency}`,
+    );
   }
   const locations: string[] = [];
   if (path.posix.basename(lockFile) === "bun.lock") {
@@ -720,6 +847,14 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
       const manifest = parseChangedJson(text);
       if (!changedRecord(manifest))
         throw new Error(`Invalid tracked manifest: ${file}`);
+      if (
+        typeof manifest["name"] === "string" &&
+        changedPackageTool(manifest["name"]) === "typescript"
+      )
+        throw new Error(
+          `Tracked compiler source has no immutable artifact identity: ${file}`,
+        );
+
       manifests.set(file, manifest);
       catalogs(file, manifest);
       if (changedRecord(manifest["workspaces"]))
@@ -750,6 +885,7 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
         "pnpm-lock.yaml",
         "package-lock.json",
         "npm-shrinkwrap.json",
+        "yarn.lock",
       ].includes(name)
     )
       locks.set(file, parseChangedLock({ file, text }));
@@ -857,6 +993,7 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
         "pnpm-lock.yaml",
         "package-lock.json",
         "npm-shrinkwrap.json",
+        "yarn.lock",
       ].some((name) => locks.has(path.posix.join(directory, name)))
     )
       return true;
@@ -942,7 +1079,8 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
           );
         const tool =
           changedPackageTool(packageTarget({ name: dependency, specifier })) ??
-          changedPackageTool(dependency);
+          changedPackageTool(dependency) ??
+          (compilerNames.has(dependency) ? "typescript" : undefined);
         if (tool !== undefined)
           tools[tool].add(`${file}:${field}:${dependency}:${specifier}`);
       }
@@ -964,9 +1102,44 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
       for (const [dependency, specifier] of Object.entries(dependencies)) {
         if (typeof specifier !== "string")
           throw new Error(`Invalid dependency specifier: ${file}`);
-        const name = packageTarget({ name: dependency, specifier });
-        const tool = changedPackageTool(name) ?? changedPackageTool(dependency);
+        const declaredTarget = packageTarget({ name: dependency, specifier });
+        if (
+          changedPackageTool(declaredTarget) === undefined &&
+          changedPackageTool(dependency) === undefined &&
+          !compilerNames.has(dependency)
+        )
+          continue;
+        const effectiveSpecifier = effectiveCatalogSpecifier({
+          snapshot,
+          file,
+          dependency,
+          specifier,
+        });
+        const name = packageTarget({
+          name: dependency,
+          specifier: effectiveSpecifier,
+        });
+        const tool =
+          changedPackageTool(name) ??
+          changedPackageTool(dependency) ??
+          (compilerNames.has(dependency) ? "typescript" : undefined);
         if (tool === undefined) continue;
+        const sourceSpecifier = effectiveSpecifier.startsWith("npm:")
+          ? effectiveSpecifier.slice(4 + name.length + 1)
+          : effectiveSpecifier;
+        if (
+          tool === "typescript" &&
+          (/^(?:link:|portal:|workspace:)/i.test(sourceSpecifier) ||
+            (/^(?:file:|\.{1,2}\/|\/)/i.test(sourceSpecifier) &&
+              !/\.(?:tgz|tar\.gz)(?:[?#].*)?$/i.test(sourceSpecifier)))
+        )
+          throw new Error(
+            `Compiler source has no immutable identity: ${file}:${dependency}`,
+          );
+        if (tool === "typescript")
+          tools.typescript.add(
+            `${file}:${field}:${dependency}:specifier:${specifier}`,
+          );
         const candidates = [...locks]
           .filter(([lockFile]) => {
             const relative = path.posix.relative(
@@ -1009,6 +1182,7 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
           if (ownerManager.startsWith("bun@")) return lockName === "bun.lock";
           if (ownerManager.startsWith("pnpm@"))
             return lockName === "pnpm-lock.yaml";
+          if (ownerManager.startsWith("yarn@")) return lockName === "yarn.lock";
           if (ownerManager.startsWith("npm@"))
             return (
               lockName === "package-lock.json" ||
@@ -1030,9 +1204,39 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
           dependency,
           name,
         });
-        const range = specifier.startsWith("npm:")
-          ? specifier.slice(specifier.lastIndexOf("@") + 1)
-          : specifier;
+        if (
+          tool === "typescript" &&
+          resolved.some((item) => item.name !== name)
+        )
+          throw new Error(
+            `Compiler lock name does not match effective declaration: ${file}:${dependency}`,
+          );
+        if (
+          tool === "typescript" &&
+          nonRegistryResolution(sourceSpecifier) &&
+          resolved.some((item) => item.sourceProof.type !== "immutable")
+        )
+          throw new Error(
+            `Compiler source has no immutable identity: ${file}:${dependency}`,
+          );
+        if (
+          tool === "typescript" &&
+          /^(?:git(?:\+[^:]+)?:|github:|gitlab:|bitbucket:|ssh:|git@)/i.test(
+            sourceSpecifier,
+          ) &&
+          resolved.some(
+            (item) =>
+              !/(?:git(?:\+[^:]+)?:|github:|gitlab:|bitbucket:|ssh:|git@|\.git(?:#|["\\]))/i.test(
+                item.identity,
+              ),
+          )
+        )
+          throw new Error(
+            `Compiler Git source has no matching immutable identity: ${file}:${dependency}`,
+          );
+        const range = effectiveSpecifier.startsWith("npm:")
+          ? effectiveSpecifier.slice(effectiveSpecifier.lastIndexOf("@") + 1)
+          : effectiveSpecifier;
         if (
           validRange(range) &&
           !resolved.some(
@@ -1045,7 +1249,7 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
           );
         for (const item of resolved)
           tools[tool].add(
-            `${file}:${dependency}=>${item.location}:${item.name}@${item.version}`,
+            `${file}:${dependency}=>${item.location}:${item.name}@${item.version}:${item.identity}`,
           );
       }
     }
@@ -1053,7 +1257,7 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
   for (const [lockFile, lock] of locks) {
     for (const item of lock.resolutions) {
       tools[item.tool].add(
-        `${lockFile}:${item.location}:${item.dependency}=>${item.name}@${item.version}`,
+        `${lockFile}:${item.location}:${item.dependency}=>${item.name}@${item.version}:${item.identity}`,
       );
       if (item.tool === "typescript")
         typescript.add(`${item.name}@${item.version}`);

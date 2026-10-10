@@ -1,6 +1,8 @@
 import { valid } from "semver";
 import { parseDocument } from "yaml";
 
+import { isCompilerPackage } from "./compiler-packages";
+
 export const toolchainChangedTools = [
   "bun",
   "node",
@@ -20,20 +22,7 @@ export const changedRecord = (
 export const changedPackageTool = (
   name: string,
 ): ToolchainChangedTool | undefined => {
-  if (
-    [
-      "typescript",
-      "@typescript/native",
-      "@typescript/native-preview",
-      "typescript-compat",
-      "bun-types",
-      "@types/bun",
-      "tsgo",
-      "@typescript/tsgo",
-    ].includes(name) ||
-    name.startsWith("@typescript/native-")
-  )
-    return "typescript";
+  if (isCompilerPackage(name)) return "typescript";
   if (name === "oxlint" || name === "oxfmt" || name === "oxlint-tsgolint")
     return name;
   if (
@@ -150,12 +139,18 @@ export const parseChangedJson = (text: string): unknown => {
   return JSON.parse(result);
 };
 
+export type ChangedLockSourceProof =
+  | { type: "registry" }
+  | { type: "immutable"; identity: string }
+  | { type: "unidentified" };
 export type ChangedLockResolution = {
   tool: ToolchainChangedTool;
   name: string;
   version: string;
   dependency: string;
   location: string;
+  identity: string;
+  sourceProof: ChangedLockSourceProof;
 };
 export type ChangedLock = {
   resolutions: ChangedLockResolution[];
@@ -181,7 +176,131 @@ const exactVersion = (value: string) => {
   if (version && valid(version) === version) return version;
   throw new Error(`Unresolved toolchain lock version: ${value}`);
 };
+const stableIdentity = (value: unknown): string => {
+  if (Array.isArray(value)) return JSON.stringify(value.map(stableIdentity));
+  if (changedRecord(value))
+    return JSON.stringify(
+      Object.entries(value)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, entry]) => [key, stableIdentity(entry)]),
+    );
+  if (value === undefined) return "undefined";
+  return JSON.stringify(value);
+};
+const validIntegrity = (value: string) =>
+  value.split(/\s+/).some((item) => {
+    const match = /^(sha1|sha256|sha384|sha512)-([A-Za-z0-9+/]+={0,2})$/.exec(
+      item,
+    );
+    const algorithm = match?.[1];
+    const encoded = match?.[2];
+    if (!algorithm || !encoded) return false;
+    const bytes = Buffer.from(encoded, "base64");
+    if (bytes.toString("base64") !== encoded) return false;
+    switch (algorithm) {
+      case "sha1":
+        return bytes.length === 20;
+      case "sha256":
+        return bytes.length === 32;
+      case "sha384":
+        return bytes.length === 48;
+      case "sha512":
+        return bytes.length === 64;
+      default:
+        return false;
+    }
+  });
+const lockSourceProof = (raw: unknown): ChangedLockSourceProof => {
+  const sources: string[] = [];
+  const evidence: string[] = [];
+  const commits: string[] = [];
+  const source = (value: unknown) => {
+    if (typeof value !== "string") return;
+    sources.push(value);
+    const commit = /#(?:commit=)?([a-f0-9]{40}|[a-f0-9]{64})(?:[&#]|$)/i.exec(
+      value,
+    )?.[1];
+    if (commit) commits.push(`commit:${commit.toLowerCase()}`);
+  };
+  const digest = (key: string, value: unknown) => {
+    if (typeof value !== "string") return;
+    if (
+      (key === "integrity" && validIntegrity(value)) ||
+      (key === "checksum" && /^(?:[a-f0-9]+\/)?[a-f0-9]{128}$/i.test(value)) ||
+      (key === "shasum" && /^[a-f0-9]{40}$/i.test(value))
+    )
+      evidence.push(`${key}:${value}`);
+    if (key === "commit" && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(value))
+      commits.push(`commit:${value.toLowerCase()}`);
+  };
+  const metadata = (value: unknown) => {
+    if (!changedRecord(value)) return;
+    for (const key of ["resolved", "resolution", "tarball", "repo", "version"])
+      source(value[key]);
+    for (const key of ["integrity", "checksum", "shasum", "commit"])
+      digest(key, value[key]);
+    if (changedRecord(value["resolution"])) {
+      const resolution = value["resolution"];
+      for (const key of ["tarball", "repo", "directory"])
+        source(resolution[key]);
+      for (const key of ["integrity", "commit"]) digest(key, resolution[key]);
+      if (
+        resolution["type"] === "directory" ||
+        typeof resolution["directory"] === "string"
+      )
+        sources.push("file:");
+      if (resolution["type"] === "git") sources.push("git:");
+    }
+    if (value["link"] === true) sources.push("link:");
+  };
+  if (Array.isArray(raw)) {
+    source(raw[0]);
+    source(raw[1]);
+    digest("integrity", raw[3]);
+  } else if (changedRecord(raw)) {
+    if (changedRecord(raw["metadata"])) {
+      metadata(raw["metadata"]);
+      source(raw["descriptor"]);
+    } else metadata(raw);
+  }
+  // Directory protocols are not archive bytes; unrelated hashes cannot prove them.
+  const directory = sources.some((value) => {
+    if (/(?:^|@)(?:link:|portal:|workspace:)/i.test(value)) return true;
+    const local = /(?:^|@)file:(.*)$/i.exec(value)?.[1];
+    if (local !== undefined)
+      return !/\.(?:tgz|tar\.gz)(?:[?#].*)?$/i.test(local);
+    return (
+      /^(?:\.{1,2}\/|\/)/.test(value) &&
+      !/\.(?:tgz|tar\.gz)(?:[?#].*)?$/i.test(value)
+    );
+  });
+  if (directory) return { type: "unidentified" };
+  const gitSource = sources.some((value) =>
+    /(?:^|@)(?:git(?:\+[^:]+)?:|github:|gitlab:|bitbucket:|ssh:)|(?:github\.com|gitlab\.com)[:/]|(?:^|@)git@|^[\w.-]+@(?!(?:npm|patch|file|link|portal|workspace|https?|git(?:\+[^:]+)?|github|gitlab|bitbucket|ssh):)[^/:]+:|\.git(?:#|$)/i.test(
+      value,
+    ),
+  );
+  if (gitSource) {
+    const proof = commits;
+    return proof.length > 0
+      ? { type: "immutable", identity: stableIdentity(proof.sort()) }
+      : { type: "unidentified" };
+  }
+  const externalArchive = sources.some(
+    (value) =>
+      /(?:^|@)file:/i.test(value) ||
+      (/(?:^|@)https?:/i.test(value) &&
+        !/(?:^|@)https:\/\/(?:registry\.npmjs\.org|registry\.yarnpkg\.com)\//i.test(
+          value,
+        )),
+  );
+  if (externalArchive && evidence.length === 0) return { type: "unidentified" };
+  if (evidence.length > 0)
+    return { type: "immutable", identity: stableIdentity(evidence.sort()) };
+  return { type: "registry" };
+};
 type AddResolutionOptions = {
+  raw: unknown;
   resolutions: ChangedLockResolution[];
   name: string;
   version: string;
@@ -189,6 +308,7 @@ type AddResolutionOptions = {
   location: string;
 };
 const addResolution = ({
+  raw,
   resolutions,
   name,
   version,
@@ -197,16 +317,30 @@ const addResolution = ({
 }: AddResolutionOptions) => {
   const tool = changedPackageTool(name) ?? changedPackageTool(dependency);
   if (tool === undefined) return;
+  const sourceProof = lockSourceProof(raw);
+  if (tool === "typescript" && sourceProof.type === "unidentified")
+    throw new Error(`Compiler source has no immutable identity: ${name}`);
+  const identity = stableIdentity(raw);
   if (version.startsWith("workspace:") || version.startsWith("link:")) {
     if (tool !== "shared")
       throw new Error(`Unresolved compiler workspace lock version: ${name}`);
-    resolutions.push({ tool, name, version, dependency, location });
+    resolutions.push({
+      tool,
+      name,
+      version,
+      dependency,
+      location,
+      identity,
+      sourceProof,
+    });
     return;
   }
   resolutions.push({
     tool,
     name,
     version: exactVersion(version),
+    identity,
+    sourceProof,
     dependency,
     location,
   });
@@ -264,7 +398,13 @@ export const parseChangedLock = ({
       const descriptor =
         typeof first === "string" ? packageDescriptor(first) : undefined;
       if (descriptor !== undefined)
-        addResolution({ resolutions, ...descriptor, dependency, location });
+        addResolution({
+          resolutions,
+          ...descriptor,
+          dependency,
+          location,
+          raw: value,
+        });
       else if (changedPackageTool(dependency) !== undefined)
         throw new Error(`Invalid Bun toolchain lock entry: ${location}`);
     }
@@ -298,13 +438,101 @@ export const parseChangedLock = ({
         changedRecord(metadata) && typeof metadata["version"] === "string"
           ? metadata["version"]
           : descriptor.version;
+      const baseDescriptor = location.split("(").at(0);
+      const snapshots = changedRecord(parsed["snapshots"])
+        ? Object.fromEntries(
+            Object.entries(parsed["snapshots"]).filter(
+              ([key]) => key.split("(").at(0) === baseDescriptor,
+            ),
+          )
+        : {};
       addResolution({
         resolutions,
         name: descriptor.name,
+        raw: { descriptor: location, metadata, snapshots },
         version,
         dependency: descriptor.name,
         location,
       });
+    }
+  } else if (file.endsWith("yarn.lock")) {
+    const classic = /^# yarn lockfile v1\s*$/m.test(text);
+    let yaml = text;
+    if (classic) {
+      yaml = text
+        .split(/\r?\n/)
+        .map((line) => {
+          if (line === "" || /^\s*#/.test(line)) return line;
+          if (!/^\s/.test(line) && line.endsWith(":"))
+            return `${JSON.stringify(line.slice(0, -1))}:`;
+          const field = /^(\s+)([A-Za-z][\w-]*|"(?:[^"\\]|\\.)*") (.+)$/.exec(
+            line,
+          );
+          if (field) return `${field[1]}${field[2]}: ${field[3]}`;
+          return line;
+        })
+        .join("\n");
+    }
+    const document = parseDocument(yaml);
+    if (document.errors.length > 0) throw new Error("Invalid Yarn lockfile");
+    const parsed: unknown = document.toJS({ maxAliasCount: 100 });
+    if (
+      !changedRecord(parsed) ||
+      (!classic && !changedRecord(parsed["__metadata"]))
+    )
+      throw new Error("Unsupported Yarn lockfile shape");
+    for (const [location, metadata] of Object.entries(parsed)) {
+      if (location === "__metadata") continue;
+      const selectors = location.replace(/"/g, "").split(/,\s*/);
+      const descriptors = selectors
+        .map(packageDescriptor)
+        .filter((item) => item !== undefined);
+      for (const descriptor of descriptors) {
+        const alias = descriptor.version.startsWith("npm:")
+          ? packageDescriptor(descriptor.version.slice(4))
+          : undefined;
+        const dependency = descriptor.name;
+        const resolution =
+          changedRecord(metadata) && typeof metadata["resolution"] === "string"
+            ? packageDescriptor(metadata["resolution"])
+            : undefined;
+        const resolutionAlias = resolution?.version.startsWith("npm:")
+          ? packageDescriptor(resolution.version.slice(4))
+          : undefined;
+        let name = resolutionAlias?.name ?? resolution?.name ?? dependency;
+        if (alias && !isCompilerPackage(name)) name = alias.name;
+        const patchDescriptor = descriptor.version.startsWith("patch:")
+          ? packageDescriptor(descriptor.version.slice("patch:".length))
+          : undefined;
+        if (
+          (isCompilerPackage(name) ||
+            isCompilerPackage(dependency) ||
+            (patchDescriptor !== undefined &&
+              isCompilerPackage(patchDescriptor.name))) &&
+          (descriptor.version.startsWith("patch:") ||
+            resolution?.version.startsWith("patch:"))
+        )
+          throw new Error(
+            `Yarn compiler patch identity requires tracked patch bytes: ${location}`,
+          );
+        if (
+          changedPackageTool(name) === undefined &&
+          changedPackageTool(dependency) === undefined
+        )
+          continue;
+        if (!changedRecord(metadata) || typeof metadata["version"] !== "string")
+          throw new Error(`Missing Yarn toolchain version: ${location}`);
+        if (!classic && typeof metadata["resolution"] !== "string")
+          throw new Error(`Missing Yarn compiler resolution: ${location}`);
+        addResolution({
+          resolutions,
+          name,
+          version: metadata["version"],
+          dependency,
+          location,
+          raw: { selectors, metadata },
+        });
+      }
     }
   } else {
     const parsed = parseChangedJson(text);
@@ -318,6 +546,11 @@ export const parseChangedLock = ({
         if (!changedRecord(metadata))
           throw new Error("Invalid npm lockfile package");
         if (!location.includes("node_modules/")) {
+          const ownName = metadata["name"];
+          if (typeof ownName === "string" && isCompilerPackage(ownName))
+            throw new Error(
+              `Compiler directory lock entry has no tracked byte identity: ${location || "."}`,
+            );
           importers[location || "."] = importerDependencies(metadata);
           continue;
         }
@@ -328,6 +561,7 @@ export const parseChangedLock = ({
           addResolution({
             resolutions,
             name,
+            raw: metadata,
             version: `link:${String(metadata["resolved"])}`,
             dependency,
             location,
@@ -338,6 +572,7 @@ export const parseChangedLock = ({
           addResolution({
             resolutions,
             name,
+            raw: metadata,
             version: metadata["version"],
             dependency,
             location,
@@ -369,6 +604,7 @@ export const parseChangedLock = ({
             addResolution({
               resolutions,
               name: alias?.name ?? dependency,
+              raw: metadata,
               version: alias?.version ?? version,
               dependency,
               location,

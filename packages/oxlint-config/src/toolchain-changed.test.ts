@@ -68,6 +68,137 @@ const fixture = () => {
   };
   return { repo, write, commit };
 };
+
+for (const location of ["catalog", "catalogs", "workspaces", "pnpm"])
+  test(`compiler catalog alias in ${location} retains patch bytes and canonical resolution`, async () => {
+    const { repo, write, commit } = fixture();
+    const aliases = { compiler: "npm:typescript@7.0.2" };
+    const root = {
+      packageManager: "bun@1.4.3",
+      devDependencies: { compiler: "catalog:" },
+    };
+    if (location === "catalog")
+      write("package.json", { ...root, catalog: aliases });
+    if (location === "catalogs")
+      write("package.json", {
+        ...root,
+        devDependencies: { compiler: "catalog:tools" },
+        catalogs: { tools: aliases },
+      });
+    if (location === "workspaces")
+      write("package.json", {
+        ...root,
+        workspaces: { packages: [], catalog: aliases },
+      });
+    if (location === "pnpm") {
+      write("package.json", root);
+      write(
+        "pnpm-workspace.yaml",
+        "packages: []\ncatalog:\n  compiler: npm:typescript@7.0.2\n",
+      );
+    }
+    const lock = {
+      lockfileVersion: 1,
+      workspaces: { "": { devDependencies: root.devDependencies } },
+      packages: { compiler: ["typescript@7.0.2"] },
+    };
+    write("bun.lock", lock);
+    write("custom/compiler+7.0.2.patch", "before\n");
+    const since = commit();
+    write("custom/compiler+7.0.2.patch", "after\n");
+    commit();
+    expect(await detectToolchainChanges({ repo, since })).toMatchObject({
+      status: "compared",
+      tools: ["typescript"],
+    });
+    write("bun.lock", { ...lock, packages: { compiler: ["compiler@7.0.2"] } });
+    commit();
+    expect(await detectToolchainChanges({ repo, since: "HEAD" })).toMatchObject(
+      { status: "unreadable", changed: true },
+    );
+  });
+
+test("compiler catalog archives require their own immutable source evidence", async () => {
+  const { repo, write, commit } = fixture();
+  write("package.json", {
+    packageManager: "bun@1.4.3",
+    devDependencies: { typescript: "catalog:", ordinary: "catalog:absent" },
+    catalog: { typescript: "file:./compiler.tgz" },
+  });
+  write("bun.lock", {
+    lockfileVersion: 1,
+    workspaces: { "": { devDependencies: { typescript: "catalog:" } } },
+    packages: {
+      typescript: [
+        "typescript@7.0.2",
+        "file:./compiler.tgz",
+        {},
+        `sha512-${"A".repeat(86)}==`,
+      ],
+    },
+  });
+  commit();
+  expect(await detectToolchainChanges({ repo, since: "HEAD" })).toMatchObject({
+    status: "compared",
+    changed: false,
+  });
+});
+
+test("the nearest catalog owner controls compiler source validation", async () => {
+  const { repo, write, commit } = fixture();
+  write("package.json", {
+    packageManager: "bun@1.4.3",
+    workspaces: ["packages/*"],
+    catalog: { typescript: "7.0.2" },
+  });
+  write("packages/child/package.json", {
+    name: "child",
+    devDependencies: { typescript: "catalog:" },
+    catalog: { typescript: "file:../compiler" },
+  });
+  write("bun.lock", {
+    lockfileVersion: 1,
+    workspaces: {
+      "": {},
+      "packages/child": { devDependencies: { typescript: "catalog:" } },
+    },
+    packages: {
+      typescript: ["typescript@7.0.2", "", {}, `sha512-${"A".repeat(86)}==`],
+    },
+  });
+  commit();
+  expect(await detectToolchainChanges({ repo, since: "HEAD" })).toMatchObject({
+    status: "unreadable",
+    changed: true,
+  });
+});
+
+for (const source of [
+  "file:../compiler",
+  "link:../compiler",
+  "portal:../compiler",
+  "workspace:*",
+  "github:example/compiler#main",
+])
+  test(`effective compiler catalog ${source} cannot borrow registry integrity`, async () => {
+    const { repo, write, commit } = fixture();
+    write("package.json", {
+      packageManager: "bun@1.4.3",
+      devDependencies: { typescript: "catalog:" },
+      catalog: { typescript: source },
+    });
+    write("bun.lock", {
+      lockfileVersion: 1,
+      workspaces: { "": { devDependencies: { typescript: "catalog:" } } },
+      packages: {
+        typescript: ["typescript@7.0.2", "", {}, `sha512-${"A".repeat(86)}==`],
+      },
+    });
+    commit();
+    expect(await detectToolchainChanges({ repo, since: "HEAD" })).toMatchObject(
+      { status: "unreadable", changed: true },
+    );
+  });
 test("exact Bun image variants normalize while floating selectors always run parity", async () => {
   for (const variant of ["alpine", "slim", "debian", "distroless"]) {
     const { repo, write, commit } = fixture();
@@ -226,7 +357,7 @@ test("immutable HEAD snapshots ignore working files and unrelated lock dependenc
   });
 });
 
-test("Bun, npm and pnpm declaration-only range edits preserve resolved compiler equality", async () => {
+test("Bun, npm and pnpm compiler specifier edits retain resolved versions but run parity", async () => {
   for (const format of ["bun", "npm", "pnpm"] as const) {
     const { repo, write, commit } = fixture();
     const writeSnapshot = (range: string) => {
@@ -257,8 +388,8 @@ test("Bun, npm and pnpm declaration-only range edits preserve resolved compiler 
     commit();
     expect(await detectToolchainChanges({ repo, since })).toEqual({
       status: "compared",
-      changed: false,
-      tools: [],
+      changed: true,
+      tools: ["typescript"],
       current: { bun: [], typescript: ["typescript@7.0.2"] },
     });
   }

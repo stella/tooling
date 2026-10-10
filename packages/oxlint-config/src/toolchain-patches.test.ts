@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { stringify } from "yaml";
 
+import { compilerPackages } from "./compiler-packages";
 import { detectToolchainChanges } from "./toolchain-changed";
 import { runSelectedTypecheckParity } from "./typecheck-parity-selection";
 
@@ -101,14 +102,7 @@ const changedParity = async ({
   expect(runs).toBe(1);
 };
 
-for (const compiler of [
-  "typescript",
-  "bun-types",
-  "@types/bun",
-  "@typescript/native",
-  "@typescript/native-preview",
-  "tsgo",
-])
+for (const compiler of Object.values(compilerPackages))
   test(`${compiler} same-version declared patch content changes run parity`, async () => {
     await withPatches({
       before: {
@@ -404,3 +398,50 @@ for (const owner of ["declaration", "patch-package"])
       exercise: changedParity,
     });
   });
+
+test("local compiler aliases cannot hide mutable compiler directory bytes", async () => {
+  await withPatches({
+    before: {
+      "package.json": {
+        private: true,
+        packageManager: "npm@12.2.0",
+        devDependencies: { compiler: "file:./local-compiler" },
+      },
+      "local-compiler/package.json": {
+        name: "typescript",
+        version: "7.0.2",
+        bin: { tsc: "bin/tsc" },
+      },
+      "local-compiler/bin/tsc": "compiler before\n",
+      "package-lock.json": {
+        lockfileVersion: 3,
+        packages: {
+          "": { devDependencies: { compiler: "file:./local-compiler" } },
+          "node_modules/compiler": { link: true, resolved: "local-compiler" },
+          "local-compiler": { name: "typescript", version: "7.0.2" },
+        },
+      },
+    },
+    after: { "local-compiler/bin/tsc": "compiler after\n" },
+    exercise: async ({ repo, since }) => {
+      const result = await detectToolchainChanges({ repo, since });
+      expect(result).toMatchObject({
+        status: "unreadable",
+        changed: true,
+        error:
+          "Tracked compiler source has no immutable artifact identity: local-compiler/package.json",
+      });
+      let runs = 0;
+      await runSelectedTypecheckParity({
+        repo,
+        since,
+        run: async () => {
+          runs++;
+          return true;
+        },
+        output: () => {},
+      });
+      expect(runs).toBe(1);
+    },
+  });
+});
