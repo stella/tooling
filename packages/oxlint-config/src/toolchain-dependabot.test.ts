@@ -183,6 +183,78 @@ describe("Dependabot policy", () => {
     ).toBe(true);
   });
 
+  test("uv workspace members inherit the root update entry while excluded and independent projects stay separate", () => {
+    const files = {
+      "pyproject.toml":
+        '[project]\nname = "workspace"\n[tool.uv.workspace]\nmembers = ["packages/*"]\nexclude = ["packages/excluded"]',
+      "uv.lock": "",
+      "packages/member/pyproject.toml": '[project]\nname = "member"',
+      "packages/excluded/pyproject.toml": '[project]\nname = "excluded"',
+      "independent/pyproject.toml": '[project]\nname = "independent"',
+    };
+    const good = config([
+      update("uv"),
+      update("pip", "/packages/excluded"),
+      update("pip", "/independent"),
+    ]);
+    expect(check(good, files)).toEqual([]);
+    const generated = generateDependabotConfig({ files, policy });
+    expect(check(generated, files)).toEqual([]);
+    expect(generated).not.toContain("/packages/member");
+    expect(generated).toContain("/packages/excluded");
+    expect(generated).toContain("/independent");
+    expect(
+      check(
+        config([
+          update("pip", "/packages/excluded"),
+          update("pip", "/independent"),
+        ]),
+        files,
+      ).some(({ message }) =>
+        message.includes("add a uv update entry covering /"),
+      ),
+    ).toBe(true);
+    const changed = {
+      ...files,
+      "pyproject.toml": files["pyproject.toml"].replace(
+        'members = ["packages/*"]',
+        'members = ["different/*"]',
+      ),
+    };
+    expect(changed["pyproject.toml"]).not.toBe(files["pyproject.toml"]);
+    expect(
+      check(good, changed).some(({ message }) =>
+        message.includes("add a pip update entry covering /packages/member"),
+      ),
+    ).toBe(true);
+    expect(
+      check(generateDependabotConfig({ files: changed, policy }), changed),
+    ).toEqual([]);
+  });
+
+  test("requirements-prefixed text manifests use the same reader and ecosystem predicate", () => {
+    for (const name of [
+      "requirements.txt",
+      "requirements_dev.txt",
+      "requirements-ci.txt",
+      "requirements.prod.txt",
+      "requirements-extra.txt",
+    ]) {
+      const files = { [`python/${name}`]: "requests==2.32.0" };
+      expect(check(config([update("pip", "/python")]), files)).toEqual([]);
+      expect(check(generateDependabotConfig({ files, policy }), files)).toEqual(
+        [],
+      );
+      expect(
+        check(config([]), files).some(({ message }) =>
+          message.includes("add a pip update entry covering /python"),
+        ),
+      ).toBe(true);
+    }
+    const files = { "legal-act.txt": "text", "docs/contract.txt": "text" };
+    expect(checkDependabot({ files, policy })).toEqual([]);
+  });
+
   test("does not require configuration in repositories without an ecosystem", () => {
     expect(
       checkDependabot({ files: { "README.md": "hello" }, policy }),

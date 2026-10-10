@@ -4,7 +4,10 @@ import { parse as parseToml } from "smol-toml";
 import { isNode, LineCounter, parseDocument, stringify } from "yaml";
 
 import { ownedDockerImageAliases } from "./toolchain-images";
-import { githubAutomationFileKind } from "./toolchain-inputs";
+import {
+  githubAutomationFileKind,
+  isPythonDependencyManifest,
+} from "./toolchain-inputs";
 
 export const dependabotRules = ["dependabot-policy"] as const;
 
@@ -47,15 +50,40 @@ const directoryOf = (file: string) => {
   return directory === "." ? "/" : `/${directory}`;
 };
 
+const workspaceManifests = {
+  npm: "package.json",
+  cargo: "Cargo.toml",
+  uv: "pyproject.toml",
+} as const;
+
+const workspaceTable = (
+  parsed: Record<string, unknown>,
+  ecosystem: keyof typeof workspaceManifests,
+) => {
+  switch (ecosystem) {
+    case "npm":
+      return parsed["workspaces"];
+    case "cargo":
+      return parsed["workspace"];
+    case "uv": {
+      const tool = parsed["tool"];
+      const uv = record(tool) ? tool["uv"] : undefined;
+      return record(uv) ? uv["workspace"] : undefined;
+    }
+    default: {
+      const unexpected: never = ecosystem;
+      throw new Error(`unknown workspace ecosystem: ${unexpected}`);
+    }
+  }
+};
+
 /** Workspace members share their update root; independent manifests keep their own. */
 const workspaceRoots = (
   files: Record<string, string>,
-  ecosystem: "npm" | "cargo",
+  ecosystem: keyof typeof workspaceManifests,
 ) => {
   const manifests = Object.keys(files).filter(
-    (file) =>
-      path.posix.basename(file) ===
-      (ecosystem === "npm" ? "package.json" : "Cargo.toml"),
+    (file) => path.posix.basename(file) === workspaceManifests[ecosystem],
   );
   const workspaces = new Map<string, string[]>();
   for (const file of manifests) {
@@ -65,13 +93,13 @@ const workspaceRoots = (
           ? JSON.parse(files[file] ?? "")
           : parseToml(files[file] ?? "");
       if (!record(parsed)) continue;
-      const value = parsed[ecosystem === "npm" ? "workspaces" : "workspace"];
+      const value = workspaceTable(parsed, ecosystem);
       const patterns = record(value)
         ? value[ecosystem === "npm" ? "packages" : "members"]
         : value;
       if (strings(patterns)) {
         const excluded =
-          ecosystem === "cargo" && record(value) && strings(value["exclude"])
+          ecosystem !== "npm" && record(value) && strings(value["exclude"])
             ? value["exclude"].map((pattern) => `!${pattern}`)
             : [];
         workspaces.set(path.posix.dirname(file), [...patterns, ...excluded]);
@@ -160,16 +188,22 @@ const ecosystemRoots = (files: Record<string, string>) => {
     requireRoot(javascriptEcosystem(directory, files), directory);
   for (const directory of workspaceRoots(files, "cargo"))
     requireRoot("cargo", directory);
+  for (const directory of workspaceRoots(files, "uv")) {
+    const root = directory === "/" ? "." : directory.slice(1);
+    requireRoot(
+      pythonEcosystem(path.posix.join(root, "pyproject.toml"), files),
+      directory,
+    );
+  }
   for (const file of Object.keys(files)) {
     if (githubAutomationFileKind(file) !== undefined)
       requireRoot("github-actions", "/");
     const name = path.posix.basename(file);
     if (isDockerfile(file)) requireRoot("docker", directoryOf(file));
     if (
-      name === "pyproject.toml" ||
       name === "uv.lock" ||
       name === "uv.toml" ||
-      /^requirements(?:[.-][^/]*)?\.txt$/.test(name)
+      (name !== "pyproject.toml" && isPythonDependencyManifest(file))
     )
       requireRoot(pythonEcosystem(file, files), directoryOf(file));
   }

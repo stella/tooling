@@ -21,6 +21,11 @@ export const githubAutomationFileKind = (file: string) => {
   return undefined;
 };
 
+/** Project manifests and requirements-prefixed text files declare Python dependencies. */
+export const isPythonDependencyManifest = (file: string) =>
+  !excludedInputPath(file) &&
+  /(?:^|\/)(?:pyproject\.toml|requirements[^/]*\.txt)$/.test(file);
+
 /** Lockfiles establish ecosystem presence without reading their dependency graphs. */
 export const toolchainInputKind = (file: string) => {
   if (excludedInputPath(file)) return undefined;
@@ -28,7 +33,8 @@ export const toolchainInputKind = (file: string) => {
   if (
     githubAutomationFileKind(file) !== undefined ||
     isMiseConfigPath(file) ||
-    /(?:^|\/)(?:package\.json|stll-toolchain\.json|\.bun-version|\.node-version|\.nvmrc|\.python-version|rust-toolchain(?:\.toml)?|\.tool-versions|\.?mise\.toml|pyproject\.toml|uv\.toml|\.uv\.toml|\.github\/dependabot\.ya?ml|Dockerfile[^/]*|Containerfile|Cargo\.toml|requirements[^/]*\.txt)$/.test(
+    isPythonDependencyManifest(file) ||
+    /(?:^|\/)(?:package\.json|stll-toolchain\.json|\.bun-version|\.node-version|\.nvmrc|\.python-version|rust-toolchain(?:\.toml)?|\.tool-versions|\.?mise\.toml|uv\.toml|\.uv\.toml|\.github\/dependabot\.ya?ml|Dockerfile[^/]*|Containerfile|Cargo\.toml)$/.test(
       file,
     )
   )
