@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import assert from "node:assert/strict";
 import {
+  existsSync,
   mkdtempSync,
   mkdirSync,
   rmSync,
@@ -17,6 +18,7 @@ import {
   resolvedTsdownTarget,
   resolvePublishBuildTarget,
   supportedPublishBuildCommand,
+  publishBuildLifecycleScripts,
 } from "./publish-build-target";
 import {
   checkPublishContract,
@@ -125,9 +127,9 @@ test("nullish transform target overrides preserve tsdown defaults", () => {
 
 test("declaration and JSON assets explicitly have no JavaScript target", () => {
   expect(
-    assetOnlyTarget({ exports: { "./base.json": "./base.json" } }),
+    assetOnlyTarget({ exports: { "./base.json": "./base.json" } }, "npm"),
   ).toEqual({ type: "types-only" });
-  expect(assetOnlyTarget({ types: "./dist/index.d.ts" })).toEqual({
+  expect(assetOnlyTarget({ types: "./dist/index.d.ts" }, "npm")).toEqual({
     type: "types-only",
   });
   for (const manifest of [
@@ -136,30 +138,109 @@ test("declaration and JSON assets explicitly have no JavaScript target", () => {
     { exports: { ".": "./base.json" }, scripts: { build: "generate" } },
     {},
   ])
-    expect(assetOnlyTarget(manifest)).toBeUndefined();
+    expect(assetOnlyTarget(manifest, "npm")).toBeUndefined();
 });
 
 test("asset classification follows actual publish overrides in both directions", () => {
+  expect(() =>
+    assetOnlyTarget(
+      {
+        exports: { ".": "./base.json" },
+        publishConfig: { exports: { ".": "./dist/index.js" } },
+      },
+      "npm",
+    ),
+  ).toThrow("npm pack does not apply differing publishConfig.exports");
+  expect(() =>
+    assetOnlyTarget(
+      {
+        exports: { ".": "./source/index.js" },
+        publishConfig: { exports: { ".": "./base.json" } },
+      },
+      "npm",
+    ),
+  ).toThrow("npm pack does not apply differing publishConfig.exports");
   expect(
-    assetOnlyTarget({
-      exports: { ".": "./base.json" },
-      publishConfig: { exports: { ".": "./dist/index.js" } },
-    }),
+    assetOnlyTarget(
+      {
+        exports: { ".": "./base.json" },
+        publishConfig: { exports: { ".": "./dist/index.js" } },
+      },
+      "pnpm",
+    ),
   ).toBeUndefined();
   expect(
-    assetOnlyTarget({
-      exports: { ".": "./source/index.js" },
-      publishConfig: { exports: { ".": "./base.json" } },
-    }),
+    assetOnlyTarget(
+      {
+        exports: { ".": "./source/index.js" },
+        publishConfig: { exports: { ".": "./base.json" } },
+      },
+      "pnpm",
+    ),
   ).toEqual({ type: "types-only" });
   expect(
-    assetOnlyTarget({
-      exports: { ".": { types: "./index.d.ts", default: "./base.json" } },
-      publishConfig: {
-        exports: { ".": { types: "./index.d.ts", default: "./index.js" } },
+    assetOnlyTarget(
+      {
+        exports: { ".": { types: "./index.d.ts", default: "./base.json" } },
+        publishConfig: {
+          exports: { ".": { types: "./index.d.ts", default: "./index.js" } },
+        },
       },
-    }),
+      "pnpm",
+    ),
   ).toBeUndefined();
+});
+
+test("publish lifecycle hooks fail before asset returns or configuration imports", async () => {
+  const directory = mkdtempSync(path.join(tmpdir(), "publish-lifecycle-"));
+  const marker = path.join(directory, "config-imported");
+  try {
+    writeFileSync(
+      path.join(directory, "tsdown.config.mjs"),
+      `import {writeFileSync} from 'node:fs';writeFileSync(${JSON.stringify(marker)}, 'yes');export default {entry:['entry.js'],dts:false,target:'node20.19'};\n`,
+    );
+    for (const packer of ["npm", "pnpm"] as const)
+      for (const lifecycle of publishBuildLifecycleScripts) {
+        for (const value of ["", null, undefined])
+          expect(() =>
+            assetOnlyTarget(
+              {
+                exports: { ".": "./base.json" },
+                scripts: { [lifecycle]: value },
+              },
+              packer,
+            ),
+          ).toThrow(`lifecycle script ${lifecycle}`);
+        for (const manifest of [
+          {
+            name: "published-assets",
+            exports: { ".": "./base.json" },
+            scripts: { [lifecycle]: "emit-later" },
+          },
+          {
+            name: "published-javascript",
+            type: "module",
+            main: "./dist/index.js",
+            scripts: { build: "tsdown", [lifecycle]: "emit-later" },
+          },
+        ]) {
+          expect(() => assetOnlyTarget(manifest, packer)).toThrow(
+            `lifecycle script ${lifecycle}`,
+          );
+          writeFileSync(
+            path.join(directory, "package.json"),
+            JSON.stringify(manifest),
+          );
+          await assert.rejects(
+            resolvePublishBuildTarget(directory, packer),
+            new RegExp(`lifecycle script ${lifecycle}`, "u"),
+          );
+        }
+      }
+    expect(existsSync(marker)).toBe(false);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("the installed build resolver supplies engine defaults and real config mutations", async () => {
@@ -219,7 +300,7 @@ test("the installed build resolver supplies engine defaults and real config muta
         path.join(member, "tsdown.config.mjs"),
         `export default ${config};\n`,
       );
-      expect(await resolvePublishBuildTarget(member)).toEqual({
+      expect(await resolvePublishBuildTarget(member, "npm")).toEqual({
         type: "javascript",
         targets: [...expected],
       });
@@ -234,7 +315,7 @@ test("the installed build resolver supplies engine defaults and real config muta
         `export default ${config};\n`,
       );
       await assert.rejects(
-        () => resolvePublishBuildTarget(directory),
+        () => resolvePublishBuildTarget(directory, "npm"),
         /JavaScript target/,
       );
     }
@@ -242,7 +323,7 @@ test("the installed build resolver supplies engine defaults and real config muta
       path.join(directory, "tsdown.config.mjs"),
       "export default { entry: ['entry.js'], dts: false, target: 'es2022,node26' };\n",
     );
-    const normalized = await resolvePublishBuildTarget(directory);
+    const normalized = await resolvePublishBuildTarget(directory, "npm");
     expect(normalized).toEqual({
       type: "javascript",
       targets: ["es2022", "node26"],
@@ -250,8 +331,13 @@ test("the installed build resolver supplies engine defaults and real config muta
     expect(
       checkPublishContract({
         manifest,
+        packer: "npm",
         target: normalized,
-        contract: resolveManifestContract({ manifest, target: normalized }),
+        contract: resolveManifestContract({
+          manifest,
+          target: normalized,
+          packer: "npm",
+        }),
         policy: { node: "22.12.0", typescript: "6.0.3" },
       }),
     ).toMatchObject([{ field: "target" }]);
@@ -275,7 +361,7 @@ test("the installed build resolver supplies engine defaults and real config muta
         JSON.stringify({ ...manifest, scripts: { build } }),
       );
       await assert.rejects(
-        () => resolvePublishBuildTarget(directory),
+        () => resolvePublishBuildTarget(directory, "npm"),
         /resolver/,
       );
     }
@@ -319,7 +405,7 @@ test("the CLI loader parser transpiles TypeScript configs and their relative imp
       "export default defineConfig({ entry, target, dts: false });",
     ].join("\n");
     writeFileSync(configFile, config);
-    expect(await resolvePublishBuildTarget(directory)).toEqual({
+    expect(await resolvePublishBuildTarget(directory, "npm")).toEqual({
       type: "javascript",
       targets: ["es2022"],
     });
@@ -334,7 +420,7 @@ test("the CLI loader parser transpiles TypeScript configs and their relative imp
     ]) {
       writeFileSync(configFile, `export default ${unsupported};\n`);
       await assert.rejects(
-        () => resolvePublishBuildTarget(directory),
+        () => resolvePublishBuildTarget(directory, "npm"),
         /supported target resolver/,
       );
     }
@@ -345,7 +431,7 @@ test("the CLI loader parser transpiles TypeScript configs and their relative imp
         "plugins: [{ name: 'config-target', tsdownConfig(config) { config.target = 'es2022'; } }] };",
       ].join("\n"),
     );
-    expect(await resolvePublishBuildTarget(directory)).toEqual({
+    expect(await resolvePublishBuildTarget(directory, "npm")).toEqual({
       type: "javascript",
       targets: ["es2022"],
     });

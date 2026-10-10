@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { lte, parse, satisfies } from "semver";
 
 import { consumerNodeSupportMatches } from "./consumer-node-support";
@@ -180,15 +181,21 @@ export const parsePublishContract = (value: unknown): PublishContract => {
   };
 };
 
+export type PublishPacker = "npm" | "pnpm";
+
 type ResolveManifestContractOptions = {
+  packer: PublishPacker;
   manifest: unknown;
   target: PublishTarget;
 };
 
 export const resolveManifestContract = ({
+  packer,
   manifest,
   target,
 }: ResolveManifestContractOptions): PublishContract => {
+  if (packer !== "npm" && packer !== "pnpm")
+    throw new Error("publish packer must be npm or pnpm");
   const source = object(manifest, "package manifest");
   const config =
     "publishConfig" in source
@@ -199,12 +206,24 @@ export const resolveManifestContract = ({
     [...publishConfigOverrideKeys, "access", "registry"],
     "publishConfig",
   );
+  if (packer === "npm")
+    for (const key of publishConfigOverrideKeys)
+      if (
+        Object.hasOwn(config, key) &&
+        !(key === "exports" || key === "typesVersions"
+          ? JSON.stringify(config[key]) === JSON.stringify(source[key])
+          : isDeepStrictEqual(config[key], source[key]))
+      )
+        throw new Error(
+          `npm pack does not apply differing publishConfig.${key}; move the published entry to package.json or use pnpm`,
+        );
   for (const field of ["browser", "esnext", "es2015", "unpkg", "umd:main"])
     if (Object.hasOwn(source, field) || Object.hasOwn(config, field))
       throw new Error(`published entry field ${field} is unsupported`);
   const published: Record<string, unknown> = {};
   for (const key of entryPointKeys) {
-    if (key !== "type" && key in config) published[key] = config[key];
+    if (packer === "pnpm" && key !== "type" && key in config)
+      published[key] = config[key];
     else if (key in source) published[key] = source[key];
   }
   if (typeof published["bin"] === "string") {
@@ -255,13 +274,14 @@ type CheckPublishContractOptions = ResolveManifestContractOptions & {
 };
 
 export const checkPublishContract = ({
+  packer,
   manifest,
   target,
   contract,
   policy,
 }: CheckPublishContractOptions) => {
   consumerPolicy(policy);
-  const current = resolveManifestContract({ manifest, target });
+  const current = resolveManifestContract({ packer, manifest, target });
   const committed = parsePublishContract(contract);
   const diagnostics: PublishContractDiagnostic[] = [];
   const add = (field: string, message: string) =>

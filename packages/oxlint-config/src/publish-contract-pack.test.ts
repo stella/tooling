@@ -112,9 +112,116 @@ test("pnpm pack preserves the modeled published contract projection", () => {
       ),
     );
     const target = { type: "javascript", targets: ["es2022"] } as const;
-    expect(resolveManifestContract({ manifest: packed, target })).toEqual(
-      resolveManifestContract({ manifest, target }),
+    expect(
+      resolveManifestContract({ packer: "pnpm", manifest: packed, target }),
+    ).toEqual(resolveManifestContract({ packer: "pnpm", manifest, target }));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("npm pack retains source entry points and does not apply publishConfig entry overrides", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "publish-contract-npm-pack-"));
+  try {
+    for (const directory of ["source", "dist", "packed"]) {
+      mkdirSync(path.join(root, directory));
+      if (directory === "packed") continue;
+      for (const file of [
+        "index.js",
+        "index.cjs",
+        "index.d.ts",
+        "legacy.d.ts",
+        "cli.js",
+      ])
+        writeFileSync(path.join(root, directory, file), "export {};\n");
+    }
+    const manifest = {
+      name: "npm-publication-contract-fixture",
+      version: "1.0.0",
+      type: "module",
+      files: ["source", "dist"],
+      engines: { node: ">=22" },
+      peerDependencies: { typescript: ">=6 <8" },
+      exports: {
+        ".": { types: "./source/index.d.ts", import: "./source/index.js" },
+      },
+      main: "./source/index.cjs",
+      module: "./source/index.js",
+      types: "./source/index.d.ts",
+      typings: "./source/legacy.d.ts",
+      bin: { fixture: "source/cli.js" },
+      typesVersions: { "*": { "*": ["source/*"] } },
+    };
+    const publishConfig = {
+      exports: {
+        ".": { types: "./dist/index.d.ts", import: "./dist/index.js" },
+      },
+      main: "./dist/index.cjs",
+      module: "./dist/index.js",
+      types: "./dist/index.d.ts",
+      typings: "./dist/legacy.d.ts",
+      bin: { fixture: "dist/cli.js" },
+      typesVersions: { "*": { "*": ["dist/*"] } },
+    };
+    expect(Object.keys(publishConfig).sort()).toEqual(
+      [...publishConfigOverrideKeys].sort(),
     );
+    writeFileSync(
+      path.join(root, "package.json"),
+      JSON.stringify({ ...manifest, publishConfig }),
+    );
+    execFileSync(
+      "npm",
+      [
+        "pack",
+        "--ignore-scripts",
+        "--pack-destination",
+        path.join(root, "packed"),
+      ],
+      {
+        cwd: root,
+        stdio: "pipe",
+        timeout: 30_000,
+        env: {
+          ...process.env,
+          npm_config_cache: path.join(root, "cache"),
+          npm_config_update_notifier: "false",
+        },
+      },
+    );
+    const archives = readdirSync(path.join(root, "packed"));
+    expect(archives).toHaveLength(1);
+    const archive = archives.at(0);
+    if (archive === undefined)
+      throw new Error("npm pack did not produce an archive");
+    const packed: unknown = JSON.parse(
+      execFileSync(
+        "tar",
+        ["-xOf", path.join(root, "packed", archive), "package/package.json"],
+        { encoding: "utf8" },
+      ),
+    );
+    if (!object(packed)) throw new Error("npm pack manifest must be an object");
+    const target = { type: "javascript", targets: ["es2022"] } as const;
+    const sourceContract = resolveManifestContract({
+      packer: "npm",
+      manifest,
+      target,
+    });
+    expect(packed["publishConfig"]).toEqual(publishConfig);
+    expect(
+      resolveManifestContract({
+        packer: "npm",
+        manifest: { ...packed, publishConfig: {} },
+        target,
+      }),
+    ).toEqual(sourceContract);
+    expect(
+      resolveManifestContract({ packer: "pnpm", manifest: packed, target }),
+    ).not.toEqual(sourceContract);
+    expect(() =>
+      resolveManifestContract({ packer: "npm", manifest: packed, target }),
+    ).toThrow("npm pack does not apply differing publishConfig.exports");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

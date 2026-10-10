@@ -426,7 +426,8 @@ mkdist 2.4.1). They record final transform targets, including separate Nuxt modu
 and runtime entries. No syntax lowering records `esnext`.
 Only exact single build invocations (`tsdown`, `vite build`, or
 `nuxt-module-build build`) are supported. Shell composition, environment prefixes,
-launchers, directory changes, workspace filters, and CLI overrides fail.
+launchers, directory changes, workspace filters, CLI overrides, and pre/post build
+lifecycle scripts fail.
 Vite accepts its version-bound default plugin pipeline and the default
 `@vitejs/plugin-vue` 6.0.8 factory; custom Vue compiler, template, script, and feature
 options are unsupported. Nuxt accepts the version-bound builder and owned target
@@ -446,10 +447,13 @@ it captures the normalized configuration before cleanup or output writes. The bu
 publish-contract CLI is also checked against a TypeScript configuration and relative
 TypeScript import on the package's minimum supported Node release.
 
-The static guard models `publishConfig` overrides for `exports`, `main`, `module`,
-`types`, `typings`, `bin`, and `typesVersions`; `access` and `registry` are allowed
-publication metadata. Other overrides, including `engines`, are rejected. A real
-pnpm-pack test compares every modeled contract field with the tarball manifest.
+The static guard follows the packer declared in the tracked release workflow.
+With pnpm, it models `publishConfig` overrides for `exports`, `main`, `module`,
+`types`, `typings`, `bin`, and `typesVersions`. npm does not apply these overrides,
+so differing values fail; move the published entry into the source manifest.
+`access` and `registry` are allowed publication metadata. Other overrides,
+including `engines`, are rejected. Real npm and pnpm pack tests compare the
+modeled contract with each tarball manifest.
 
 Packed-artifact checks run nightly, while the static contract check runs per PR.
 The reusable consumer job declares its exact scope in `stll-toolchain.json`:

@@ -630,10 +630,11 @@ export const consumerFixtureCommands = ({
       : [
           tools.node,
           tools.pnpm,
+          "pm",
           "install",
           "--ignore-scripts",
           "--no-frozen-lockfile",
-          "--config.store-dir",
+          "--store-dir",
           path.join(home, "pnpm-store"),
         ];
   return [

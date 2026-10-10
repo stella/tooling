@@ -335,13 +335,22 @@ peers must support the consumer versions; ranges may include newer versions.
 Bun runtime/compiler requirements are rejected. JSON and declaration-only packages
 record `{"type":"types-only"}` explicitly.
 
+The static guard follows the packer declared in the tracked release workflow.
+With pnpm, it models `publishConfig` overrides for `exports`, `main`, `module`,
+`types`, `typings`, `bin`, and `typesVersions`. npm does not apply these overrides,
+so differing values fail; move the published entry into the source manifest.
+`access` and `registry` are allowed publication metadata. Other overrides,
+including `engines`, are rejected. Real npm and pnpm pack tests compare the
+modeled contract with each tarball manifest.
+
 Build adapters use the installed configuration loaders and bind their behavior to
 tsdown 0.22.9, Vite 8.1.5, or @nuxt/module-builder 1.0.3 (unbuild 3.6.1 and
 mkdist 2.4.1). They record final transform targets, including separate Nuxt module
 and runtime entries. No syntax lowering records `esnext`.
 Only exact single build invocations (`tsdown`, `vite build`, or
 `nuxt-module-build build`) are supported. Shell composition, environment prefixes,
-launchers, directory changes, workspace filters, and CLI overrides fail.
+launchers, directory changes, workspace filters, CLI overrides, and pre/post build
+lifecycle scripts fail.
 Vite accepts its version-bound default plugin pipeline and the default
 `@vitejs/plugin-vue` 6.0.8 factory; custom Vue compiler, template, script, and feature
 options are unsupported. Nuxt accepts the version-bound builder and owned target

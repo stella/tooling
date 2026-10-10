@@ -53,10 +53,22 @@ try {
     path.join(fixture, "node_modules"),
     "dir",
   );
+  mkdirSync(path.join(fixture, ".github/workflows"), { recursive: true });
+  writeFileSync(
+    path.join(fixture, ".github/workflows/publish.yml"),
+    readFileSync(path.join(root, ".github/workflows/publish.yml"), "utf8"),
+  );
   execFileSync("git", ["init", "-q"], { cwd: fixture });
   execFileSync(
     "git",
-    ["add", "package.json", "tsdown.config.ts", "build-target.ts", "index.ts"],
+    [
+      "add",
+      "package.json",
+      "tsdown.config.ts",
+      "build-target.ts",
+      "index.ts",
+      ".github",
+    ],
     { cwd: fixture },
   );
   for (const args of [["--write"], []]) {

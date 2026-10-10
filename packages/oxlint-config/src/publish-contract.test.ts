@@ -5,6 +5,7 @@ import { describe, expect, test } from "bun:test";
 import {
   checkPublishContract,
   parsePublishContract,
+  publishConfigOverrideKeys,
   resolveManifestContract,
 } from "./publish-contract";
 
@@ -30,9 +31,15 @@ const manifest = {
   },
   bin: { library: "./dist/cli.js" },
 };
-const baseline = resolveManifestContract({ manifest, target });
+const baseline = resolveManifestContract({ packer: "pnpm", manifest, target });
 const check = (actual: unknown, contract: unknown = baseline) =>
-  checkPublishContract({ manifest: actual, target, contract, policy });
+  checkPublishContract({
+    packer: "pnpm",
+    manifest: actual,
+    target,
+    contract,
+    policy,
+  });
 
 const contractFields = [
   "engines",
@@ -93,12 +100,14 @@ describe("published contract schema", () => {
 
   test("types-only and JavaScript without lowering remain distinct", () => {
     const declarations = resolveManifestContract({
+      packer: "pnpm",
       manifest: { types: "./index.d.ts" },
       target: { type: "types-only" },
     });
     expect(declarations.target).toEqual({ type: "types-only" });
     expect(
       checkPublishContract({
+        packer: "pnpm",
         manifest: { types: "./index.d.ts" },
         target: { type: "types-only" },
         contract: declarations,
@@ -107,6 +116,7 @@ describe("published contract schema", () => {
     ).toEqual([]);
     expect(
       resolveManifestContract({
+        packer: "pnpm",
         manifest: {},
         target: { type: "javascript", targets: ["esnext"] },
       }).target,
@@ -119,6 +129,7 @@ describe("published contract schema", () => {
   test("normalizes target sets but preserves ordered resolution branches", () => {
     expect(
       resolveManifestContract({
+        packer: "pnpm",
         manifest,
         target: { type: "javascript", targets: ["node22", "es2022", "node22"] },
       }),
@@ -146,11 +157,13 @@ describe("published contract schema", () => {
       typesVersions: { ">=6": { "*": ["v6/*"] }, "*": { "*": ["fallback/*"] } },
     };
     const committed = resolveManifestContract({
+      packer: "pnpm",
       manifest: typed,
       target: { type: "types-only" },
     });
     expect(
       checkPublishContract({
+        packer: "pnpm",
         manifest: {
           typesVersions: {
             "*": { "*": ["fallback/*"] },
@@ -168,6 +181,7 @@ describe("published contract schema", () => {
 describe("actual published manifest projection", () => {
   test("applies supported overrides and retains both declaration fields", () => {
     const actual = resolveManifestContract({
+      packer: "pnpm",
       manifest: {
         ...manifest,
         typings: "./source/legacy.d.ts",
@@ -199,6 +213,7 @@ describe("actual published manifest projection", () => {
     });
     expect(
       resolveManifestContract({
+        packer: "pnpm",
         manifest: {
           name: "@example/cli",
           bin: "./cli.js",
@@ -207,10 +222,15 @@ describe("actual published manifest projection", () => {
       }).entryPoints.bin,
     ).toEqual({ cli: "./cli.js" });
     expect(() =>
-      resolveManifestContract({ manifest: { bin: "./cli.js" }, target }),
+      resolveManifestContract({
+        packer: "pnpm",
+        manifest: { bin: "./cli.js" },
+        target,
+      }),
     ).toThrow("package name");
     expect(() =>
       resolveManifestContract({
+        packer: "pnpm",
         manifest: {
           name: "@example/cli",
           bin: "./cli.js",
@@ -240,6 +260,7 @@ describe("actual published manifest projection", () => {
     ])
       expect(() =>
         resolveManifestContract({
+          packer: "pnpm",
           manifest: { ...manifest, publishConfig: { [key]: {} } },
           target,
         }),
@@ -248,6 +269,7 @@ describe("actual published manifest projection", () => {
       for (const location of ["root", "publishConfig"])
         expect(() =>
           resolveManifestContract({
+            packer: "pnpm",
             manifest:
               location === "root"
                 ? { ...manifest, [key]: "./alternate.js" }
@@ -258,6 +280,7 @@ describe("actual published manifest projection", () => {
     for (const malformed of [null, [], "public", 1])
       expect(() =>
         resolveManifestContract({
+          packer: "pnpm",
           manifest: { ...manifest, publishConfig: malformed },
           target,
         }),
@@ -265,15 +288,24 @@ describe("actual published manifest projection", () => {
     for (const malformed of [null, false, { node: null }])
       expect(() =>
         resolveManifestContract({
+          packer: "pnpm",
           manifest: { ...manifest, publishConfig: { engines: malformed } },
           target,
         }),
       ).toThrow();
     expect(() =>
-      resolveManifestContract({ manifest: { engines: null }, target }),
+      resolveManifestContract({
+        packer: "pnpm",
+        manifest: { engines: null },
+        target,
+      }),
     ).toThrow();
     expect(() =>
-      resolveManifestContract({ manifest: { peerDependencies: null }, target }),
+      resolveManifestContract({
+        packer: "pnpm",
+        manifest: { peerDependencies: null },
+        target,
+      }),
     ).toThrow();
   });
 
@@ -309,7 +341,11 @@ describe("actual published manifest projection", () => {
             diagnostic.field.startsWith(`${field}.`),
         ),
       ).toBe(true);
-      const updated = resolveManifestContract({ manifest: actual, target });
+      const updated = resolveManifestContract({
+        packer: "pnpm",
+        manifest: actual,
+        target,
+      });
       expect(check(actual, updated)).toEqual([]);
     }
     expect(
@@ -347,6 +383,7 @@ describe("actual published manifest projection", () => {
       ).not.toEqual([]);
     expect(
       checkPublishContract({
+        packer: "pnpm",
         manifest,
         target: { type: "javascript", targets: ["es2020"] },
         contract: baseline,
@@ -358,6 +395,7 @@ describe("actual published manifest projection", () => {
       publishConfig: { main: "./published.cjs" },
     };
     const publishedContract = resolveManifestContract({
+      packer: "pnpm",
       manifest: published,
       target,
     });
@@ -377,12 +415,14 @@ describe("actual published manifest projection", () => {
       '{"__proto__":"*","typescript":">=6.0.3 <8"}',
     );
     const actual = resolveManifestContract({
+      packer: "pnpm",
       manifest: { peerDependencies: peers },
       target,
     });
     expect(Object.hasOwn(actual.peerDependencies, "__proto__")).toBe(true);
     expect(
       checkPublishContract({
+        packer: "pnpm",
         manifest: { peerDependencies: { typescript: ">=6.0.3 <8" } },
         target,
         contract: actual,
@@ -408,7 +448,11 @@ describe("consumer compatibility policy", () => {
             ? {}
             : { peerDependencies: { typescript } }),
         };
-        const committed = resolveManifestContract({ manifest: actual, target });
+        const committed = resolveManifestContract({
+          packer: "pnpm",
+          manifest: actual,
+          target,
+        });
         expect(check(actual, committed)).toEqual([]);
       }
   });
@@ -417,7 +461,10 @@ describe("consumer compatibility policy", () => {
     for (const node of ["26.x", ">=26", ">22.12.0", "<22", "latest"]) {
       const actual = { engines: { node } };
       expect(
-        check(actual, resolveManifestContract({ manifest: actual, target })),
+        check(
+          actual,
+          resolveManifestContract({ packer: "pnpm", manifest: actual, target }),
+        ),
       ).toMatchObject([{ field: "engines.node" }]);
     }
     for (const typescript of ["^7", ">=7", "<6", ">6.0.3", "latest"])
@@ -425,6 +472,7 @@ describe("consumer compatibility policy", () => {
         check(
           { peerDependencies: { typescript } },
           resolveManifestContract({
+            packer: "pnpm",
             manifest: { peerDependencies: { typescript } },
             target,
           }),
@@ -435,6 +483,7 @@ describe("consumer compatibility policy", () => {
         check(
           { peerDependencies: { [peer]: "*" } },
           resolveManifestContract({
+            packer: "pnpm",
             manifest: { peerDependencies: { [peer]: "*" } },
             target,
           }),
@@ -442,7 +491,10 @@ describe("consumer compatibility policy", () => {
       ).toMatchObject([{ field: `peerDependencies.${peer}` }]);
     const bun = { engines: { bun: "*" } };
     expect(
-      check(bun, resolveManifestContract({ manifest: bun, target })),
+      check(
+        bun,
+        resolveManifestContract({ packer: "pnpm", manifest: bun, target }),
+      ),
     ).toMatchObject([{ field: "engines.bun" }]);
     for (const runtime of [
       "node26",
@@ -456,9 +508,11 @@ describe("consumer compatibility policy", () => {
     ])
       expect(
         checkPublishContract({
+          packer: "pnpm",
           manifest: {},
           target: { type: "javascript", targets: [runtime] },
           contract: resolveManifestContract({
+            packer: "pnpm",
             manifest: {},
             target: { type: "javascript", targets: [runtime] },
           }),
@@ -468,9 +522,11 @@ describe("consumer compatibility policy", () => {
     for (const runtime of ["node20", "node22", "node22.12", "es2022"])
       expect(
         checkPublishContract({
+          packer: "pnpm",
           manifest: {},
           target: { type: "javascript", targets: [runtime] },
           contract: resolveManifestContract({
+            packer: "pnpm",
             manifest: {},
             target: { type: "javascript", targets: [runtime] },
           }),
@@ -483,6 +539,7 @@ describe("consumer compatibility policy", () => {
     for (const node of ["22.x", "^22.12.0", "26.0.0", "22.12.0-rc.1"])
       expect(() =>
         checkPublishContract({
+          packer: "pnpm",
           manifest,
           target,
           contract: baseline,
@@ -492,6 +549,7 @@ describe("consumer compatibility policy", () => {
     for (const typescript of ["6.x", "^6.0.3", "7.0.2", "6.0.3-rc.1"])
       expect(() =>
         checkPublishContract({
+          packer: "pnpm",
           manifest,
           target,
           contract: baseline,
@@ -499,4 +557,107 @@ describe("consumer compatibility policy", () => {
         }),
       ).toThrow("consumer policy");
   });
+});
+
+test("npm contracts reject every differing supported override and accept structural equality", () => {
+  const publishConfig = Object.fromEntries(
+    publishConfigOverrideKeys.map((key) => [key, manifest[key]]),
+  );
+  const equal = {
+    ...manifest,
+    publishConfig: {
+      ...publishConfig,
+      bin: { library: "./dist/cli.js" },
+      exports: manifest.exports,
+    },
+  };
+  expect(
+    resolveManifestContract({ packer: "npm", manifest: equal, target }),
+  ).toEqual(baseline);
+  expect(
+    checkPublishContract({
+      packer: "npm",
+      manifest: equal,
+      target,
+      contract: baseline,
+      policy,
+    }),
+  ).toEqual([]);
+  const bins = {
+    ...manifest,
+    bin: { first: "./first.js", second: "./second.js" },
+  };
+  expect(
+    resolveManifestContract({
+      packer: "npm",
+      manifest: {
+        ...bins,
+        publishConfig: { bin: { second: "./second.js", first: "./first.js" } },
+      },
+      target,
+    }),
+  ).toEqual(resolveManifestContract({ packer: "npm", manifest: bins, target }));
+  expect(() =>
+    resolveManifestContract({
+      packer: "npm",
+      manifest: {
+        ...manifest,
+        publishConfig: {
+          exports: {
+            ...manifest.exports,
+            ".": {
+              require: "./dist/index.cjs",
+              import: "./dist/index.js",
+              types: "./dist/index.d.ts",
+            },
+          },
+        },
+      },
+      target,
+    }),
+  ).toThrow("publishConfig.exports");
+  expect(() =>
+    resolveManifestContract({
+      packer: "npm",
+      manifest: {
+        ...manifest,
+        typesVersions: {
+          ">=6": { "*": ["v6/*"] },
+          "*": { "*": ["fallback/*"] },
+        },
+        publishConfig: {
+          typesVersions: {
+            "*": { "*": ["fallback/*"] },
+            ">=6": { "*": ["v6/*"] },
+          },
+        },
+      },
+      target,
+    }),
+  ).toThrow("publishConfig.typesVersions");
+  for (const key of publishConfigOverrideKeys) {
+    const changed = { ...manifest, publishConfig: { [key]: "./different.js" } };
+    for (const operation of [
+      () =>
+        resolveManifestContract({ packer: "npm", manifest: changed, target }),
+      () =>
+        checkPublishContract({
+          packer: "npm",
+          manifest: changed,
+          target,
+          contract: baseline,
+          policy,
+        }),
+    ])
+      expect(operation).toThrow(
+        `npm pack does not apply differing publishConfig.${key}`,
+      );
+  }
+  expect(() =>
+    resolveManifestContract({
+      packer: "npm",
+      manifest: { publishConfig: { main: "./index.js" } },
+      target,
+    }),
+  ).toThrow("publishConfig.main");
 });

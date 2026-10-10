@@ -1179,11 +1179,27 @@ describe("isolated consumer runtime", () => {
       });
       expect(commands).toHaveLength(5);
       expect(commands.every((argv) => argv[0] === tools.node)).toBe(true);
-      expect(commands[0]?.slice(0, 3)).toEqual([
-        tools.node,
-        tools[manager],
-        "install",
-      ]);
+      expect(commands[0]).toEqual(
+        manager === "pnpm"
+          ? [
+              tools.node,
+              tools.pnpm,
+              "pm",
+              "install",
+              "--ignore-scripts",
+              "--no-frozen-lockfile",
+              "--store-dir",
+              "/home/pnpm-store",
+            ]
+          : [
+              tools.node,
+              tools.npm,
+              "install",
+              "--ignore-scripts",
+              "--no-audit",
+              "--no-fund",
+            ],
+      );
       expect(commands[0]).toContain("--ignore-scripts");
       expect(commands[1]).toEqual(
         manager === "pnpm"

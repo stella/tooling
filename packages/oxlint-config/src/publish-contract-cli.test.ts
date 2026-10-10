@@ -7,6 +7,18 @@ import path from "node:path";
 
 const cli = path.join(import.meta.dir, "publish-contract-cli.ts");
 
+const writeReleaseWorkflow = async (root: string) => {
+  const directory = path.join(root, ".github/workflows");
+  await mkdir(directory, { recursive: true });
+  await writeFile(
+    path.join(directory, "publish.yml"),
+    await readFile(
+      new URL("../../../.github/workflows/publish.yml", import.meta.url),
+      "utf8",
+    ),
+  );
+};
+
 test("CLI checks recursively declared packages and rejects unnamed public members", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "publish-contract-cli-"));
   const writeManifest = async (directory: string, manifest: unknown) => {
@@ -35,6 +47,7 @@ test("CLI checks recursively declared packages and rejects unnamed public member
     });
     await writeManifest("fixtures", { workspaces: ["nested/*"] });
     await writeManifest("fixtures/nested/library", { name: "nested-library" });
+    await writeReleaseWorkflow(root);
     execFileSync("git", ["init", "--quiet"], { cwd: root });
     execFileSync("git", ["add", "."], { cwd: root });
     const written = run("--write");
@@ -83,13 +96,21 @@ test("CLI read and write reject unsupported published manifests without replacin
     Bun.spawnSync([process.execPath, cli, ...args], { cwd: root });
   try {
     await writeFile(manifestFile, JSON.stringify(manifest));
+    await writeReleaseWorkflow(root);
     execFileSync("git", ["init", "--quiet"], { cwd: root });
-    execFileSync("git", ["add", "package.json"], { cwd: root });
+    execFileSync("git", ["add", "package.json", ".github"], { cwd: root });
     const written = run("--write");
     expect(written.stderr.toString()).toBe("");
     expect(written.exitCode).toBe(0);
     const committed = await readFile(contractFile, "utf8");
     for (const mutation of [
+      {
+        manifest: {
+          ...manifest,
+          publishConfig: { exports: "./published.json" },
+        },
+        message: "npm pack does not apply differing publishConfig.exports",
+      },
       {
         manifest: { ...manifest, version: "latest" },
         message: "semver-valid version",

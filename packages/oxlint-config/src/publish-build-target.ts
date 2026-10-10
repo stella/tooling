@@ -9,6 +9,7 @@ import { resolveNuxtPublishTarget } from "./publish-build-target-nuxt";
 import { resolveVitePublishTarget } from "./publish-build-target-vite";
 import {
   resolveManifestContract,
+  type PublishPacker,
   type PublishTarget,
 } from "./publish-contract";
 
@@ -156,15 +157,34 @@ const exportPaths = (value: unknown): string[] => {
   throw new Error("Invalid package export declaration");
 };
 
+const publishBuildScript = "build";
+export const publishBuildLifecycleScripts = [
+  `pre${publishBuildScript}`,
+  `post${publishBuildScript}`,
+] as const;
+const assertPublishBuildLifecycle = (manifest: Record<string, unknown>) => {
+  const scripts = manifest["scripts"];
+  if (!record(scripts)) return;
+  for (const script of publishBuildLifecycleScripts) {
+    if (Object.hasOwn(scripts, script))
+      throw new Error(
+        `Publish target resolver does not support lifecycle script ${script}`,
+      );
+  }
+};
+
 /** JSON and declaration-only packages have no emitted JavaScript target. */
 export const assetOnlyTarget = (
   manifest: unknown,
+  packer: PublishPacker,
 ): PublishTarget | undefined => {
   if (!record(manifest)) throw new Error("Package manifest must be an object");
+  assertPublishBuildLifecycle(manifest);
   if (record(manifest["scripts"]) && manifest["scripts"]["build"] !== undefined)
     return undefined;
   const published = resolveManifestContract({
     manifest,
+    packer,
     target: { type: "types-only" },
   });
   const paths = (
@@ -196,11 +216,12 @@ export const supportedPublishBuildCommand = (build: string) => {
 
 export const resolvePublishBuildTarget = async (
   directory: string,
+  packer: PublishPacker,
 ): Promise<PublishTarget> => {
   const manifest: unknown = JSON.parse(
     readFileSync(path.join(directory, "package.json"), "utf8"),
   );
-  const assets = assetOnlyTarget(manifest);
+  const assets = assetOnlyTarget(manifest, packer);
   if (assets !== undefined) return assets;
   if (
     !record(manifest) ||

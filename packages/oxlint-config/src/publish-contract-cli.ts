@@ -7,11 +7,13 @@ import {
   assertConsumerPublishableManifest,
   discoverConsumerManifests,
 } from "./consumer-compat-config";
+import { resolveConsumerReleasePack } from "./consumer-release-pack";
 import { resolvePublishBuildTarget } from "./publish-build-target";
 import {
   checkPublishContract,
   resolveManifestContract,
 } from "./publish-contract";
+import { githubAutomationFileKind } from "./toolchain-inputs";
 import { parseToolchainPolicy } from "./toolchain-schema";
 
 const root = process.cwd();
@@ -42,9 +44,10 @@ const main = async () => {
         file
           .split("/")
           .some((part) => part === "node_modules" || part === ".git") ||
-        !["package.json", "pnpm-workspace.yaml"].includes(
+        (!["package.json", "pnpm-workspace.yaml"].includes(
           path.posix.basename(file),
-        )
+        ) &&
+          githubAutomationFileKind(file) !== "workflow")
       )
         continue;
       files[file] = readFileSync(path.join(root, file), "utf8");
@@ -72,12 +75,14 @@ const main = async () => {
       checked++;
       const directory = path.dirname(path.join(root, file));
       const contractFile = path.join(directory, "publish-contract.json");
-      const target = await resolvePublishBuildTarget(directory);
-      const current = resolveManifestContract({ manifest, target });
+      const packer = resolveConsumerReleasePack(files).manager;
+      const target = await resolvePublishBuildTarget(directory, packer);
+      const current = resolveManifestContract({ manifest, target, packer });
       const committed: unknown = write
         ? current
         : JSON.parse(readFileSync(contractFile, "utf8"));
       const diagnostics = checkPublishContract({
+        packer,
         manifest,
         target,
         contract: committed,
