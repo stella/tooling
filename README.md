@@ -22,15 +22,121 @@ i18n, generated native artifacts, benchmark exceptions, and package-specific
 ignores. Route-query conventions are shared here because they are the common
 TanStack Router + React Query contract.
 
-## Bun version
+## Shared toolchain
 
-`@stll/oxlint-config/toolchain.json` owns the shared Bun version. Install
-`@stll/oxlint-config` as a dev dependency and align `packageManager` and
-`bun-types` with its `bun` field. Configure `oven-sh/setup-bun` with
-`bun-version-file: package.json`, then run `bunx --no-install stll-toolchain-check`
-from the repository root in CI. The check covers tracked manifests, workflows,
-Dockerfiles, and version-manager files. A non-Bun manifest requires an explicit
-`--allow-non-bun-package-manager path/to/package.json` exception.
+`@stll/oxlint-config/toolchain.json` is the versioned source for shared tool
+versions. Install `@stll/oxlint-config` as a dev dependency, inherit its pins,
+and run `bunx --no-install stll-toolchain-check` from the repository root in CI.
+The CLI inspects tracked configuration files, prints `path:line: [rule] message`,
+and exits with status 1 on a mismatch. Tools absent from a repository do not
+introduce requirements.
+
+Schema version 1 contains these fields:
+
+| Fields                                                                                     | Contract                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schemaVersion`                                                                            | Supported policy schema version (`1`).                                                                                                                                                                                                                                                                                                                                                                                  |
+| `bun`                                                                                      | Exact `packageManager`, `bun-types`, image and manager pin.                                                                                                                                                                                                                                                                                                                                                             |
+| `oxlint`, `oxlint-tsgolint`, `@oxlint/plugins`, `@stll/oxlint-plugin`, `oxfmt`, `lefthook` | Exact dependency and catalog pins. Declared local workspace packages must resolve to the same version.                                                                                                                                                                                                                                                                                                                  |
+| `typescript`, `typescriptInstallLayouts`, `typescript6Compatibility`                       | Exact compiler pins and complete direct or split install layouts; the optional compatibility alias is exact too.                                                                                                                                                                                                                                                                                                        |
+| `node`, `python`, `rust`, `rustCompilerDevelopment`                                        | Runtime selectors and version-manager pins. Node selects the policy major (`26.x`); static minor and patch selectors within that major are allowed. A Python minor pin preserves existing patch selectors within that release series; a patch policy requires the exact patch. Rust selects the stable release unless a toolchain file declares the `rustc-dev` component; compiler development uses its dated nightly. |
+| `actions`                                                                                  | Approved action names mapped to full `sha` and `version` comment.                                                                                                                                                                                                                                                                                                                                                       |
+| `dependabot`                                                                               | Shared schedule, cooldown and groups. Package and action ignores derive from the owned pins.                                                                                                                                                                                                                                                                                                                            |
+
+Configure `oven-sh/setup-bun` with `bun-version-file: package.json` and a
+matching `packageManager`. Configure setup-node/setup-python with
+`node-version-file`/`python-version-file` referencing tracked `.node-version`
+or `.nvmrc` / `.python-version` files; direct version inputs are forbidden.
+Node and Python image tags and mise/asdf entries inherit the same pins.
+The Node policy is `26.x`: selectors must select major 26. Bare major,
+major wildcard, minor and stable patch selectors within that major are allowed;
+open ranges, other majors, prereleases and floating aliases fail.
+Release and publish workflows use exact patch version-file selectors for
+reproducible builds; this repository pins `.node-version` to `26.10.0`.
+The series policy accepts that patch without weakening release validation.
+GitHub JavaScript action host runtimes (`runs.using`) are platform-managed
+and do not select the project toolchain Node version.
+
+The Rust stable pin is `1.96.0`; `rustCompilerDevelopment` is
+`nightly-2026-04-16`. Only a `rustc-dev` component declaration selects that
+nightly. A nightly without that component fails.
+
+`engines.node` and `requires-python` are support ranges: they must include the
+shared runtime. The Node support range must include every stable release in
+the policy major, so `>=26`, `^26` and `^24 || ^26` pass; `^24`, `<26`,
+`>=27` and ranges that omit part of major 26 fail. A minor Python pin requires support for every patch in that
+series. Python comparisons, compatible releases, wildcard exclusions,
+and comma intersections are supported for final releases; unsupported syntax
+produces a diagnostic.
+
+Direct compiler invocations in `scripts.typecheck` must use the selected
+layout command. Classification decodes shell tokens to find compiler calls;
+acceptance requires the declared command text after leading environment
+prefixes are removed, including its option spelling and quoting. Delegated wrappers and workspace runners are checked by the
+consumer typecheck parity contract rather than inferred from manifests.
+
+Listed shared actions require their approved SHA and matching `# vX` comment.
+CI also checks the shared release policy's runtime selector action set against
+`toolchain.json`, deriving its immutable checkout ref from the existing
+release-policy workflow reference.
+Other remote actions and reusable workflows require a full SHA. Local actions
+are repository-owned. The checker resolves YAML aliases and TOML tool tables.
+A runtime version file may come from a preceding checkout in the same job:
+use the exact `${{ job.workflow_repository }}` / `${{ job.workflow_sha }}` pair,
+or a same-repository checkout with no `ref`. For no-ref checkouts, omit
+`repository`, name this repository literally, or use `${{ github.repository }}`.
+The checkout must omit both `if` and `continue-on-error`, and its normalized
+path must be unique among every checkout in that job, including later steps.
+Unknown checkout destinations prevent mapped selectors from proving provenance.
+Sparse checkouts must explicitly list the selected repository-relative file,
+without the checkout prefix, in `sparse-checkout`. This applies in either cone
+mode and to delegated sources. Dynamic, empty, glob, negation, or unsupported
+sparse configurations fail; a cone-mode input alone is insufficient. Directory
+entries cannot substitute for the selected file.
+Other nonempty, nonconstant GitHub expression refs on same-repository checkouts
+(including `${{ job.workflow_repository }}`) delegate a safe static version-file selector
+to that checkout. The CLI reports delegation on stdout without validating the
+current source's version file. Literal refs and unpaired `${{ github.sha }}` /
+`${{ job.workflow_sha }}` remain rejected.
+For snapshot-bound sources, the guard maps a prefixed selector to the
+corresponding tracked source file.
+Literal commit SHAs, branches, tags, unpaired snapshot contexts,
+foreign repositories, and traversal paths cannot supply mapped runtime files.
+
+The named rules are `bun-pins`, `package-pins`, `typescript-layout`,
+`node-engine`, `node-version`, `python-version`, `rust-version`,
+`runtime-manager`, `runtime-docker`, `runtime-workflow`, `action-pins`, and
+`dependabot-policy`. An exception requires a tracked root
+`stll-toolchain.json` listing the rule and its reason:
+
+```json
+{
+  "optOuts": [{ "rule": "bun-pins", "reason": "This repository uses npm." }]
+}
+```
+
+`node-engine` is mandatory: an opt-out cannot bypass the shared Node support range.
+
+Unknown rules, empty reasons, duplicate rules, and malformed configurations
+fail. Opt-outs apply repository-wide to the named rule, so keep them narrow.
+
+`.github/dependabot.yml` is the shared reference. It declares each detected
+package ecosystem and update root (Bun roots use `bun`, npm/pnpm/Yarn use
+`npm`, and uv projects use `uv`), uses the policy schedule/groups and a
+five-day cooldown, and ignores tooling-owned npm and action pins. Workspace
+members share their update root; independent manifests need their own entry.
+`pnpm-workspace.yaml` owns pnpm catalogs and membership. Omitted `packages`
+includes only the root, matching the current pnpm contract; declare member
+patterns explicitly to keep membership stable across pnpm versions.
+The generator derives the reference from the same policy and ecosystem
+registry as the guard: run `bun scripts/write-dependabot-policy.ts` after
+policy changes. Consumers can copy its applicable entries and directory paths;
+the CLI rejects missing coverage and policy drift. Owned package pins follow
+release metadata. The `changeset:version` command first includes the policy
+package in the release plan whenever an owned workspace pin changes, then
+synchronizes pins through `bun scripts/check-lockfile-workspace-versions.ts
+--write`, which also refreshes cached workspace versions without regenerating
+the dependency graph.
 
 ## Usage
 
@@ -40,8 +146,8 @@ Install the shared TypeScript and oxlint packages:
 bun add -d @stll/typescript-config @stll/oxlint-config @stll/oxlint-plugin @oxlint/plugins oxlint oxlint-tsgolint typescript
 ```
 
-The shared defaults require TypeScript 7.0.2 or newer, oxlint 1.80.0 or
-newer, and oxlint-tsgolint 7.0.2001 or newer. Pin the current versions from
+The shared defaults require TypeScript 7.0.2 or newer, oxlint 1.87.0 or
+newer, and oxlint-tsgolint 7.0.2003 or newer. Pin the current versions from
 `@stll/oxlint-config/toolchain.json`; do not use the deprecated
 oxlint-tsgolint 0.x line.
 

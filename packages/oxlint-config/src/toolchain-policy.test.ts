@@ -4,6 +4,9 @@ import { describe, expect, test } from "bun:test";
 import path from "node:path";
 
 import toolchainPolicy from "../toolchain.json";
+import { checkToolchain } from "./toolchain-guard";
+import { nodeSelectorMatches } from "./toolchain-node";
+import { parseToolchainPolicy } from "./toolchain-schema";
 
 const repositoryRoot = path.resolve(import.meta.dir, "../../..");
 
@@ -24,54 +27,21 @@ describe("shared toolchain policy", () => {
       }),
     );
   });
-  test("pins the current TS7 and Oxc toolchain", async () => {
-    const rootPackage = await readJson("package.json");
-    const toolchain = await readJson("packages/oxlint-config/toolchain.json");
+  test("release runtime pins an exact patch inside the shared Node series", async () => {
+    const selector = (
+      await Bun.file(path.join(repositoryRoot, ".node-version")).text()
+    ).trim();
+    expect(selector).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(nodeSelectorMatches(selector, toolchainPolicy.node)).toBe(true);
+  });
 
-    expect(rootPackage).toEqual(
-      expect.objectContaining({
-        devDependencies: expect.objectContaining({
-          oxlint: "1.87.0",
-          "oxlint-tsgolint": "7.0.2003",
-          typescript: "7.0.2",
-        }),
+  test("repository conforms to every shared toolchain rule", () => {
+    expect(
+      checkToolchain({
+        root: repositoryRoot,
+        policy: parseToolchainPolicy(toolchainPolicy),
       }),
-    );
-
-    expect(toolchain).toEqual({
-      bun: "1.4.3",
-      oxlint: "1.87.0",
-      "@oxlint/plugins": "1.87.0",
-      oxfmt: "0.72.0",
-      "oxlint-tsgolint": "7.0.2003",
-      typescript: "7.0.2",
-      typescriptInstallLayouts: [
-        {
-          compilerPackage: "typescript",
-          compilerSpecifier: "7.0.2",
-          type: "direct",
-          typecheckCommand: "bun check",
-        },
-        {
-          compatibilityPackage: "typescript",
-          compatibilitySpecifier: "6.0.3",
-          compilerPackage: "@typescript/native",
-          compilerSpecifier: "npm:typescript@7.0.2",
-          type: "split-compatibility",
-          typecheckCommand: "bun check",
-        },
-      ],
-      typescript6Compatibility: {
-        apiConsumers: ["TypeScript compiler API"],
-        packageAlias: "typescript-compat",
-        peerBlockers: [
-          "@astrojs/check",
-          "@typescript-eslint/utils",
-          "dependency-cruiser",
-        ],
-        version: "6.0.3",
-      },
-    });
+    ).toEqual([]);
   });
 
   test("rejects pre-TS7 tsgolint consumers", async () => {
