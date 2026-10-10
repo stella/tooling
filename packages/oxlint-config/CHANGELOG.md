@@ -1,5 +1,13 @@
 # @stll/oxlint-config
 
+## 0.12.1
+
+### Patch Changes
+
+- [#76](https://github.com/stella/tooling/pull/76) [`11a7ef7`](https://github.com/stella/tooling/commit/11a7ef7f8a5345694ec592b23223e1bad7cb781c) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Scope generated environment files to cloud declarations with services.
+
+- [#79](https://github.com/stella/tooling/pull/79) [`9efedf9`](https://github.com/stella/tooling/commit/9efedf93b3d1163febc7e6b47bf4c6e7fe8c3637) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Allow SHA256 image digests alongside exact runtime patch tags, matching tracked Node versions when present. Classify image families before checking unresolved tag variables.
+
 ## 0.12.0
 
 ### Minor Changes
