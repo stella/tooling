@@ -1,5 +1,7 @@
 import { lte, parse, satisfies } from "semver";
 
+import { consumerNodeSupportMatches } from "./consumer-node-support";
+
 export type PublishTarget =
   | { type: "javascript"; targets: readonly string[] }
   | { type: "types-only" };
@@ -108,6 +110,10 @@ const entryPointKeys = [
   "typesVersions",
 ] as const;
 
+export const publishConfigOverrideKeys = entryPointKeys.filter(
+  (key) => key !== "type",
+);
+
 const entryPoints = (value: unknown): EntryPoints => {
   const source = object(value, "entryPoints");
   closedKeys(source, entryPointKeys, "entryPoints");
@@ -182,14 +188,11 @@ export const resolveManifestContract = ({
     "publishConfig" in source
       ? object(source["publishConfig"], "publishConfig")
       : {};
-  if ("directory" in config)
-    throw new Error(
-      "publishConfig.directory requires a resolved published manifest",
-    );
-  if ("peerDependencies" in config)
-    throw new Error(
-      "publishConfig.peerDependencies is not a supported manifest override",
-    );
+  closedKeys(
+    config,
+    [...publishConfigOverrideKeys, "access", "registry"],
+    "publishConfig",
+  );
   for (const field of ["browser", "esnext", "es2015", "unpkg", "umd:main"])
     if (Object.hasOwn(source, field) || Object.hasOwn(config, field))
       throw new Error(`published entry field ${field} is unsupported`);
@@ -199,10 +202,7 @@ export const resolveManifestContract = ({
     else if (key in source) published[key] = source[key];
   }
   if (typeof published["bin"] === "string") {
-    const name = text(
-      Object.hasOwn(config, "name") ? config["name"] : source["name"],
-      "package name for bin",
-    );
+    const name = text(source["name"], "package name for bin");
     const command = name.split("/").at(-1);
     if (command === undefined || command === "")
       throw new Error("package name must determine its bin command");
@@ -210,7 +210,6 @@ export const resolveManifestContract = ({
   }
   let engines: unknown = {};
   if (Object.hasOwn(source, "engines")) engines = source["engines"];
-  if (Object.hasOwn(config, "engines")) engines = config["engines"];
   return parsePublishContract({
     engines,
     peerDependencies: Object.hasOwn(source, "peerDependencies")
@@ -297,7 +296,16 @@ export const checkPublishContract = ({
     if (range !== undefined && !satisfies(version, range))
       add(field, `${field} must support consumer version ${version}`);
   };
-  support("engines.node", current.engines["node"], policy.node);
+  if (
+    !consumerNodeSupportMatches({
+      range: current.engines["node"],
+      node: policy.node,
+    })
+  )
+    add(
+      "engines.node",
+      `engines.node must support consumer version ${policy.node}`,
+    );
   support(
     "engines.typescript",
     current.engines["typescript"],

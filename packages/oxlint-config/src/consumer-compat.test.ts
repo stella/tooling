@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -11,6 +12,7 @@ import {
   consumerFixtureCommands,
   verifyConsumerNodeArchive,
   writeConsumerToolWrappers,
+  runConsumerCompat,
 } from "./consumer-compat";
 import { parseConsumerCompatArguments } from "./consumer-compat-arguments";
 import {
@@ -22,9 +24,96 @@ import {
   oldestPublishedConsumerVersion,
   parseConsumerFixtures,
   type ConsumerFixture,
+  assertConsumerFixtureKind,
 } from "./consumer-compat-config";
 
 describe("consumer compatibility declarations", () => {
+  test("a React package cannot select a node fixture before provisioning or installing", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "consumer-kind-"));
+    const fetchSpy = spyOn(globalThis, "fetch").mockRejectedValue(
+      new Error("Fixture validation must happen before network provisioning"),
+    );
+    try {
+      await mkdir(path.join(root, "fixtures/node"), { recursive: true });
+      await writeFile(
+        path.join(root, "package.json"),
+        JSON.stringify({
+          name: "react-library",
+          version: "1.0.0",
+          peerDependencies: { react: ">=18" },
+        }),
+      );
+      await writeFile(
+        path.join(root, "fixtures/consumer-compat.json"),
+        JSON.stringify({
+          packages: [
+            {
+              package: ".",
+              fixture: "node",
+              kind: "node",
+              build: ["npm", "run", "build"],
+              smoke: ["node", "smoke.mjs"],
+            },
+          ],
+        }),
+      );
+      await writeFile(
+        path.join(root, "fixtures/node/package.json"),
+        JSON.stringify({
+          private: true,
+          scripts: { build: "tsc" },
+        }),
+      );
+      execFileSync("git", ["init", "-q"], { cwd: root });
+      execFileSync("git", ["add", "."], { cwd: root });
+      await expect(
+        runConsumerCompat({
+          root,
+          packages: ["."],
+          consumerNode: policy.consumerNode,
+          fixturePath: "fixtures",
+          policy,
+        }),
+      ).rejects.toThrow("requires fixture kind react");
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+  test("fixture kind follows published React peers rather than caller choice", () => {
+    const fixture = {
+      package: ".",
+      fixture: "library",
+      kind: "node",
+      build: ["npm", "run", "build"],
+      smoke: ["node", "smoke.mjs"],
+    } satisfies ConsumerFixture;
+    const pkg = { directory: ".", name: "library", manifest: {} };
+    expect(() => assertConsumerFixtureKind({ fixture, pkg })).not.toThrow();
+    const react = { ...pkg, manifest: { peerDependencies: { react: ">=18" } } };
+    expect(() => assertConsumerFixtureKind({ fixture, pkg: react })).toThrow(
+      "fixture kind react",
+    );
+    const reactFixture = {
+      ...fixture,
+      kind: "react",
+    } satisfies ConsumerFixture;
+    expect(() =>
+      assertConsumerFixtureKind({ fixture: reactFixture, pkg: react }),
+    ).not.toThrow();
+    expect(() =>
+      assertConsumerFixtureKind({ fixture: reactFixture, pkg }),
+    ).toThrow("fixture kind node");
+    for (const peer of [null, 18, "latest", ""]) {
+      expect(() =>
+        assertConsumerFixtureKind({
+          fixture: reactFixture,
+          pkg: { ...pkg, manifest: { peerDependencies: { react: peer } } },
+        }),
+      ).toThrow("invalid published React peer");
+    }
+  });
   test("pack staging preserves relative workspace references and public root identity", () => {
     const root = {
       directory: ".",

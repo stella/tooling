@@ -21,6 +21,7 @@ import {
   consumerStagingPaths,
   consumerPackRootManifest,
   assertConsumerFixtureManifest,
+  assertConsumerFixtureKind,
   bindConsumerManifest,
   consumerDependencyConfigFiles,
   consumerRecord,
@@ -521,6 +522,20 @@ const runFixture = async ({
   policy,
   manager,
 }: FixtureOptions) => {
+  const selectedArtifact = artifacts.get(pkg.name);
+  if (!selectedArtifact)
+    throw new Error(`missing consumer artifact: ${pkg.name}`);
+  const published: unknown = JSON.parse(
+    await execute("tar", ["-xOf", selectedArtifact, "package/package.json"], {
+      cwd: scratch,
+    }),
+  );
+  if (!consumerRecord(published))
+    throw new Error(`invalid packed package manifest: ${pkg.name}`);
+  assertConsumerFixtureKind({
+    fixture,
+    pkg: { directory: pkg.directory, name: pkg.name, manifest: published },
+  });
   const source = await containedDirectory(fixtureRoot, fixture.fixture);
   const directory = path.join(
     scratch,
@@ -539,7 +554,7 @@ const runFixture = async ({
   });
   const reactBindings: Record<string, string> = {};
   if (fixture.kind === "react") {
-    const peers = pkg.manifest["peerDependencies"];
+    const peers = published["peerDependencies"];
     if (!consumerRecord(peers) || typeof peers["react"] !== "string")
       throw new Error(`React fixture requires a React peer: ${pkg.name}`);
     const react = oldestPublishedConsumerVersion(
@@ -681,6 +696,7 @@ export const runConsumerCompat = async ({
     );
     if (!fixture)
       throw new Error(`missing declared consumer fixture: ${directory}`);
+    assertConsumerFixtureKind({ fixture, pkg });
     await assertConsumerFixtureFiles(
       await containedDirectory(fixtureRoot, fixture.fixture),
     );

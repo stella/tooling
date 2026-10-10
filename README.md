@@ -415,6 +415,8 @@ consumer support and cannot accept development-only requirements.
 The consumer policy pins Node 22.23.3, npm 12.2.0, pnpm 12.9.1, and TypeScript
 6.0.3 independently of the development toolchain. Published engines and TypeScript
 peers must support the consumer versions; ranges may include newer versions.
+An absent `engines.node` is unrestricted, matching package-manager semantics; a
+declared range must contain the consumer Node version. Both guards share this rule.
 Bun runtime/compiler requirements are rejected. JSON and declaration-only packages
 record `{"type":"types-only"}` explicitly.
 
@@ -438,16 +440,23 @@ it captures the normalized configuration before cleanup or output writes. The bu
 publish-contract CLI is also checked against a TypeScript configuration and relative
 TypeScript import on the package's minimum supported Node release.
 
+The static guard models `publishConfig` overrides for `exports`, `main`, `module`,
+`types`, `typings`, `bin`, and `typesVersions`; `access` and `registry` are allowed
+publication metadata. Other overrides, including `engines`, are rejected. A real
+pnpm-pack test compares every modeled contract field with the tarball manifest.
+
 Packed-artifact checks run nightly, while the static contract check runs per PR.
 The reusable consumer job declares its exact scope in `stll-toolchain.json`:
 
 ```json
 {
-  "consumerChecks": [{
-    "workflow": ".github/workflows/consumer-compat.yml",
-    "job": "consumer",
-    "packages": ["packages/library"]
-  }]
+  "consumerChecks": [
+    {
+      "workflow": ".github/workflows/consumer-compat.yml",
+      "job": "consumer",
+      "packages": ["packages/library"]
+    }
+  ]
 }
 ```
 
@@ -471,18 +480,21 @@ The fixture directory contains `consumer-compat.json`:
 
 ```json
 {
-  "packages": [{
-    "package": "packages/library",
-    "fixture": "library",
-    "kind": "node",
-    "build": ["npm", "run", "build"],
-    "smoke": ["npm", "run", "smoke"]
-  }]
+  "packages": [
+    {
+      "package": "packages/library",
+      "fixture": "library",
+      "kind": "node",
+      "build": ["npm", "run", "build"],
+      "smoke": ["npm", "run", "smoke"]
+    }
+  ]
 }
 ```
 
 Each fixture is a standalone project with its own source, package manifest, and
-TypeScript configuration. Use `react` for a React peer and a render smoke; use
-`node` for an import and representative call. Dependency bindings, runtime tools,
+TypeScript configuration. The package peers determine its fixture kind: a React
+peer requires `react` and a render smoke; other packages require `node` and an
+import with a representative call. A mismatching declaration fails. Dependency bindings, runtime tools,
 and caches belong to the runner. A nightly failure must open or update one issue
 in the consuming repository and use its existing failure notification.

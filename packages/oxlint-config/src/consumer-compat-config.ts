@@ -84,6 +84,33 @@ export type ConsumerPackage = {
   manifest: Record<string, unknown>;
 };
 
+type ConsumerFixtureKindOptions = {
+  fixture: ConsumerFixture;
+  pkg: ConsumerPackage;
+};
+
+export const assertConsumerFixtureKind = ({
+  fixture,
+  pkg,
+}: ConsumerFixtureKindOptions) => {
+  const peers = pkg.manifest["peerDependencies"];
+  if (peers !== undefined && !consumerRecord(peers))
+    throw new Error(`invalid published peerDependencies: ${pkg.name}`);
+  const react = consumerRecord(peers) ? peers["react"] : undefined;
+  if (
+    react !== undefined &&
+    (typeof react !== "string" ||
+      react.trim() === "" ||
+      validRange(react) === null)
+  )
+    throw new Error(`invalid published React peer: ${pkg.name}`);
+  const kind = react === undefined ? "node" : "react";
+  if (fixture.kind !== kind)
+    throw new Error(
+      `${pkg.name} requires fixture kind ${kind} from its published peers`,
+    );
+};
+
 export const consumerStagingPaths = (
   packages: Map<string, ConsumerPackage>,
 ) => {

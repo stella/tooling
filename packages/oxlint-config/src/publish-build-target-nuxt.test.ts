@@ -194,14 +194,24 @@ test.skipIf(
         typeof module !== "object" ||
         module === null ||
         !("nuxtModuleTarget" in module) ||
-        typeof module.nuxtModuleTarget !== "function" ||
-        !("isNuxtModuleTargetHook" in module) ||
-        typeof module.isNuxtModuleTargetHook !== "function"
+        !("isNuxtModuleTargetHook" in module)
       )
         throw new Error(
           "Built Nuxt helper must export its callback and recognizer",
         );
-      return module;
+      const {
+        nuxtModuleTarget: makeTarget,
+        isNuxtModuleTargetHook: recognizeTarget,
+      } = module;
+      if (
+        typeof makeTarget !== "function" ||
+        typeof recognizeTarget !== "function"
+      )
+        throw new Error("Built Nuxt helper exports must be functions");
+      return {
+        nuxtModuleTarget: makeTarget,
+        isNuxtModuleTargetHook: recognizeTarget,
+      };
     };
     const esmHelper = helper(esm);
     const cjsHelper = helper(cjs);

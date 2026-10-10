@@ -1,8 +1,8 @@
 import path from "node:path";
-import { satisfies, validRange } from "semver";
 import { parseDocument } from "yaml";
 
 import { discoverConsumerPackages } from "./consumer-compat-config";
+import { consumerNodeSupportMatches } from "./consumer-node-support";
 import { githubAutomationFileKind } from "./toolchain-inputs";
 
 export const consumerCheckWorkflow =
@@ -194,10 +194,11 @@ export const checkConsumerChecks = ({
             );
           const engines = manifest["engines"];
           if (
-            !record(engines) ||
-            typeof engines["node"] !== "string" ||
-            validRange(engines["node"]) === null ||
-            !satisfies(policy.consumerNode, engines["node"])
+            (engines !== undefined && !record(engines)) ||
+            !consumerNodeSupportMatches({
+              range: record(engines) ? engines["node"] : undefined,
+              node: policy.consumerNode,
+            })
           )
             throw new Error(
               `${manifestPath} engines.node must support consumer Node ${policy.consumerNode}`,

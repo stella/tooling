@@ -152,9 +152,21 @@ test("only a declared immutable reusable invocation validates published consumer
 
 test("every declared package must be a tracked published manifest supporting consumer Node", () => {
   for (const value of [
+    { name: "@example/library" },
+    { name: "@example/library", engines: {} },
+    { name: "@example/library", engines: { npm: ">=10" } },
+  ])
+    expect(
+      check({
+        ...files,
+        "packages/library/package.json": JSON.stringify(value),
+      }),
+    ).toEqual([]);
+  for (const value of [
     { name: "@example/library", private: true, engines: { node: ">=20" } },
     { engines: { node: ">=20" } },
-    { name: "@example/library" },
+    { name: "@example/library", engines: null },
+    { name: "@example/library", engines: { node: null } },
     { name: "@example/library", engines: { node: ">=24" } },
     { name: "@example/library", engines: { node: "latest" } },
   ])

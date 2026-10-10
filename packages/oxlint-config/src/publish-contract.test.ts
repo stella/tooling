@@ -173,7 +173,6 @@ describe("actual published manifest projection", () => {
         publishConfig: {
           access: "public",
           registry: "https://registry.npmjs.org",
-          engines: { node: ">=22" },
           exports: { ".": "./published.js" },
           main: "./published.cjs",
           module: "./published.js",
@@ -185,7 +184,7 @@ describe("actual published manifest projection", () => {
       },
       target,
     });
-    expect(actual.engines).toEqual({ node: ">=22" });
+    expect(actual.engines).toEqual(manifest.engines);
     expect(actual.peerDependencies).toEqual(manifest.peerDependencies);
     expect(actual.entryPoints).toEqual({
       type: "module",
@@ -202,11 +201,10 @@ describe("actual published manifest projection", () => {
         manifest: {
           name: "@example/cli",
           bin: "./cli.js",
-          publishConfig: { name: "@example/published-cli" },
         },
         target,
       }).entryPoints.bin,
-    ).toEqual({ "published-cli": "./cli.js" });
+    ).toEqual({ cli: "./cli.js" });
     expect(() =>
       resolveManifestContract({ manifest: { bin: "./cli.js" }, target }),
     ).toThrow("package name");
@@ -219,11 +217,26 @@ describe("actual published manifest projection", () => {
         },
         target,
       }),
-    ).toThrow("package name");
+    ).toThrow("publishConfig.name");
   });
 
   test("fails on unsupported surfaces and malformed overrides instead of guessing", () => {
-    for (const key of ["directory", "peerDependencies"])
+    for (const key of [
+      "directory",
+      "peerDependencies",
+      "engines",
+      "name",
+      "type",
+      "imports",
+      "files",
+      "os",
+      "cpu",
+      "libc",
+      "tag",
+      "provenance",
+      "executableFiles",
+      "unknown",
+    ])
       expect(() =>
         resolveManifestContract({
           manifest: { ...manifest, publishConfig: { [key]: {} } },
@@ -400,15 +413,12 @@ describe("consumer compatibility policy", () => {
   });
 
   test("a contract update cannot permit incompatible engines, peers or runtime targets", () => {
-    for (const node of ["26.x", ">=26", ">22.12.0", "<22", "latest"])
-      for (const override of [false, true]) {
-        const actual = override
-          ? { engines: { node: ">=20" }, publishConfig: { engines: { node } } }
-          : { engines: { node } };
-        expect(
-          check(actual, resolveManifestContract({ manifest: actual, target })),
-        ).toMatchObject([{ field: "engines.node" }]);
-      }
+    for (const node of ["26.x", ">=26", ">22.12.0", "<22", "latest"]) {
+      const actual = { engines: { node } };
+      expect(
+        check(actual, resolveManifestContract({ manifest: actual, target })),
+      ).toMatchObject([{ field: "engines.node" }]);
+    }
     for (const typescript of ["^7", ">=7", "<6", ">6.0.3", "latest"])
       expect(
         check(
