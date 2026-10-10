@@ -939,6 +939,14 @@ test.skipIf(process.env["CI"] !== "true")(
         {},
         { outDir: "./dist" },
         { declaration: true, declarationDir: "./types" },
+        { incremental: true, tsBuildInfoFile: "./cache.tsbuildinfo" },
+        { composite: true, tsBuildInfoFile: "./cache.tsbuildinfo" },
+        {
+          declaration: true,
+          declarationDir: "./types",
+          incremental: true,
+          tsBuildInfoFile: "./cache.tsbuildinfo",
+        },
         { composite: true },
       ]) {
         for (const outside of [false, true]) {
