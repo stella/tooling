@@ -304,6 +304,7 @@ describe("TypeScript install layouts", () => {
     for (const typecheck of [
       "tsc --noEmit",
       "tsgo --noEmit",
+      "bun check",
       "bunx tsc --noEmit",
       "npx tsc --noEmit",
       "bun run tsc --noEmit",
@@ -343,6 +344,37 @@ describe("TypeScript install layouts", () => {
         scripts: { typecheck: "bun scripts/typecheck.ts" },
       }),
     ).toEqual([]);
+  });
+  test("a Bun check layout validates its direct compiler command", () => {
+    const selectedPolicy = {
+      ...policy,
+      typescriptInstallLayouts: policy.typescriptInstallLayouts.map(
+        (layout) => ({ ...layout, typecheckCommand: "bun check" }),
+      ),
+    };
+    for (const command of ["bun check", "bun check --project tsconfig.json"])
+      expect(
+        checkPackageFiles({
+          files: {
+            "package.json": json({
+              devDependencies: { typescript: "7.0.2" },
+              scripts: { typecheck: command },
+            }),
+          },
+          policy: selectedPolicy,
+        }),
+      ).toEqual([]);
+    expect(
+      checkPackageFiles({
+        files: {
+          "package.json": json({
+            devDependencies: { typescript: "7.0.2" },
+            scripts: { typecheck: "tsc --noEmit" },
+          }),
+        },
+        policy: selectedPolicy,
+      }).some(({ rule }) => rule === "typescript-layout"),
+    ).toBe(true);
   });
   test("all declared layouts pass and every required pin mutation fails", () => {
     for (const layout of policy.typescriptInstallLayouts) {

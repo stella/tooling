@@ -58,6 +58,10 @@ series. Python comparisons, compatible releases, wildcard exclusions,
 and comma intersections are supported for final releases; unsupported syntax
 produces a diagnostic.
 
+Direct compiler invocations in `scripts.typecheck` must use the selected
+layout command. Delegated wrappers and workspace runners are checked by the
+consumer typecheck parity contract rather than inferred from manifests.
+
 Listed shared actions require their approved SHA and matching `# vX` comment.
 Other remote actions and reusable workflows require a full SHA. Local actions
 are repository-owned. The checker resolves YAML aliases and TOML tool tables.
