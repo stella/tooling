@@ -166,7 +166,7 @@ export const snapshotDeclarationBundle = (
     if (typeof bytes !== "string" && !(bytes instanceof Uint8Array))
       throw new Error("Declaration bundle output must contain text or bytes");
     Object.defineProperty(result, file, {
-      value: `${type}:${hash(bytes)}`,
+      value: `${String(type)}:${hash(bytes)}`,
       enumerable: true,
     });
   }
