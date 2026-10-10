@@ -72,7 +72,10 @@ the selected file. A scoped Bun-source declaration can acknowledge a dynamic
 sparse expression, but cannot waive a literal omission or invalid pattern,
 including literal patterns mixed with expression lines or literal fragments
 adjoining an expression. Every applicable checkout sparse configuration is
-validated before a declaration can acknowledge an unresolved selector.
+validated before a declaration can acknowledge an unresolved selector. Mixed literal/expression sparse
+configurations retain their literal paths: those paths must explicitly include a
+static selected manifest. A declaration acknowledges only expression additions;
+known manifest pins continue to be validated.
 Other nonempty, nonconstant GitHub expression refs on same-repository checkouts
 (including `${{ job.workflow_repository }}`) delegate a safe static version-file selector
 to that checkout. The CLI reports delegation on stdout without validating the

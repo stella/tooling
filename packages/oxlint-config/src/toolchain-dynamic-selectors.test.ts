@@ -453,3 +453,36 @@ test("all overlapping checkout sparse configurations precede declaration authori
       ]),
     ).toEqual({ diagnostics: [], matched: [bunDecision] });
 });
+
+test("mixed sparse states retain literal manifest requirements", () => {
+  for (const entries of [
+    ["src", "${{ inputs.sparse }}"],
+    ["${{ inputs.sparse }}", "src"],
+    ["src${{ inputs.suffix }}", "src"],
+  ]) {
+    const source = (paths: string[], ref: string) =>
+      `on: push\njobs:\n  example:\n    steps:\n      - uses: ${action("actions/checkout")}\n        with:\n          path: snapshot\n          ref: '${ref}'\n          sparse-checkout-cone-mode: false\n          sparse-checkout: |\n${paths.map((entry) => `            ${entry}\n`).join("")}      - id: setup\n        uses: ${action("oven-sh/setup-bun")}\n        with: {bun-version-file: snapshot/package.json}\n`;
+    for (const ref of ["${{ inputs.ref }}", "${{ github.sha }}"]) {
+      const omitted = check(source(entries, ref), [bunDecision]);
+      expect(omitted.matched).toEqual([]);
+      expect(omitted.diagnostics).toMatchObject([{ rule: "bun-pins" }]);
+      const present = source([...entries, "package.json"], ref);
+      expect(check(present, [bunDecision])).toEqual({
+        diagnostics: [],
+        matched: [bunDecision],
+      });
+      expect(check(present).diagnostics).toMatchObject([{ rule: "bun-pins" }]);
+      if (ref !== "${{ github.sha }}") continue;
+      expect(
+        checkRuntimeFile({
+          file,
+          text: present,
+          policy,
+          trackedFiles: new Set(["package.json"]),
+          readFile: () => JSON.stringify({ packageManager: "bun@0.1.0" }),
+          dynamicSelectors: parseDynamicSelectors([bunDecision]),
+        }),
+      ).toMatchObject([{ rule: "bun-pins" }]);
+    }
+  }
+});

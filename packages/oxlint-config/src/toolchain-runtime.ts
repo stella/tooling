@@ -835,7 +835,8 @@ export const checkRuntimeFile = ({
     | { mode: "all" }
     | { mode: "files"; paths: ReadonlySet<string> }
     | { mode: "invalid" }
-    | { mode: "dynamic" };
+    | { mode: "dynamic" }
+    | { mode: "mixed"; paths: ReadonlySet<string> };
   type CheckoutBinding = {
     path: string;
     sparse: SparseCheckout;
@@ -900,7 +901,8 @@ export const checkRuntimeFile = ({
       )
         return false;
       if (entry.sparse.mode === "invalid") return true;
-      if (entry.sparse.mode !== "files") return false;
+      if (entry.sparse.mode !== "files" && entry.sparse.mode !== "mixed")
+        return false;
       if (selector === undefined) return true;
       const selectedFile =
         entry.path === "."
@@ -991,19 +993,23 @@ export const checkRuntimeFile = ({
       });
       return;
     }
-    if (binding !== undefined && binding.sparse.mode === "dynamic") {
+    if (
+      binding !== undefined &&
+      (binding.sparse.mode === "dynamic" || binding.sparse.mode === "mixed")
+    ) {
       if (
-        tool === "bun" &&
-        !unreviewableCheckoutSource &&
-        authorizeDynamic("bun-source", line)
-      )
+        tool !== "bun" ||
+        unreviewableCheckoutSource ||
+        !authorizeDynamic("bun-source", line)
+      ) {
+        add({
+          rule,
+          line,
+          message: `checkout sparse-checkout must explicitly list ${target} without dynamic, glob, or negation patterns`,
+        });
         return;
-      add({
-        rule,
-        line,
-        message: `checkout sparse-checkout must explicitly list ${target} without dynamic, glob, or negation patterns`,
-      });
-      return;
+      }
+      if (binding.sparse.mode === "dynamic") return;
     }
     if (binding?.source === "delegated") {
       onDelegated?.({
@@ -1229,8 +1235,12 @@ export const checkRuntimeFile = ({
       .filter((entry) => entry !== "");
     if (paths.length === 0 || paths.some((entry) => !sparseEntryIsValid(entry)))
       return { mode: "invalid" };
-    if (paths.some(dynamic)) return { mode: "dynamic" };
-    return { mode: "files", paths: new Set(paths) };
+    const literalPaths = new Set(paths.filter((entry) => !dynamic(entry)));
+    if (paths.some(dynamic)) {
+      if (literalPaths.size === 0) return { mode: "dynamic" };
+      return { mode: "mixed", paths: literalPaths };
+    }
+    return { mode: "files", paths: literalPaths };
   };
   let currentEngineFloor: ResolvedEngineFloor | undefined;
   const checkAction = (node: unknown) => {
