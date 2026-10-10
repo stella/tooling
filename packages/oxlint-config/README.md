@@ -374,3 +374,8 @@ definitions are conservatively fingerprinted alongside Dockerfiles. Catalog and 
 an unclassifiable reference runs full parity. This may run parity for unrelated
 edits to these declaration files. Active installed compiler comparisons still
 use the owning lockfile resolutions.
+
+Compiler patch declarations, lockfile patch hashes, and their tracked patch files
+are included even when the compiler version is unchanged. Compiler patch-package
+files are included too. Missing referenced compiler patches fail closed; unrelated
+package patches do not trigger compiler parity.

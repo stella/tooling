@@ -7,6 +7,7 @@ import { parseAllDocuments, parseDocument } from "yaml";
 
 import {
   changedPackageTool,
+  changedCompilerPatches,
   changedRecord,
   parseChangedJson,
   parseChangedLock,
@@ -60,6 +61,21 @@ const containerDefinition = (file: string) =>
   isDockerDefinitionPath(file) ||
   isComposeDefinitionPath(file) ||
   isKubernetesDefinitionPath(file);
+const compilerPatchPackageFile = (
+  file: string,
+  compilerNames: ReadonlySet<string>,
+) => {
+  if (!file.endsWith(".patch")) return false;
+  // patch-package encodes nested installations with ++; the final package is patched.
+  const target = path.posix.basename(file).split("++").at(-1);
+  if (target === undefined) return false;
+  const encoded = /^(@[^+]+\+[^+]+|[^+]+)\+/.exec(target)?.[1];
+  return (
+    encoded !== undefined &&
+    (changedPackageTool(encoded.replace("+", "/")) === "typescript" ||
+      compilerNames.has(encoded.replace("+", "/")))
+  );
+};
 const trackedInput = (file: string) => {
   if (
     file.split("/").some((part) => part === "node_modules" || part === "vendor")
@@ -82,6 +98,7 @@ const trackedInput = (file: string) => {
       "toolchain.json",
       ".npmrc",
     ].includes(name) ||
+    file.endsWith(".patch") ||
     otherRuntimeFiles.has(name) ||
     isMiseConfigPath(file) ||
     githubAutomationFileKind(file) !== undefined ||
@@ -251,6 +268,138 @@ const selectorFiles = (snapshot: GitSnapshot) => {
   return files;
 };
 
+const compilerInstallationNames = (snapshot: GitSnapshot) => {
+  const names = new Set<string>();
+  for (const file of snapshot.entries.keys()) {
+    const basename = path.posix.basename(file);
+    if (basename === "package.json") {
+      const manifest = parseChangedJson(snapshotText({ snapshot, file }));
+      if (!changedRecord(manifest))
+        throw new Error(`Invalid tracked manifest: ${file}`);
+      for (const field of installedFields) {
+        const dependencies = manifest[field];
+        if (!changedRecord(dependencies)) continue;
+        for (const [name, specifier] of Object.entries(dependencies))
+          if (
+            typeof specifier === "string" &&
+            changedPackageTool(packageTarget({ name, specifier })) ===
+              "typescript"
+          )
+            names.add(name);
+      }
+    } else if (
+      [
+        "bun.lock",
+        "pnpm-lock.yaml",
+        "package-lock.json",
+        "npm-shrinkwrap.json",
+      ].includes(basename)
+    ) {
+      const lock = parseChangedLock({
+        file,
+        text: snapshotText({ snapshot, file }),
+      });
+      for (const resolution of lock.resolutions)
+        if (resolution.tool === "typescript") names.add(resolution.dependency);
+      for (const dependencies of Object.values(lock.importers))
+        for (const [name, version] of Object.entries(dependencies))
+          if (
+            changedPackageTool(
+              importerRegistryName({ dependency: name, version }) ?? name,
+            ) === "typescript"
+          )
+            names.add(name);
+    }
+  }
+  return names;
+};
+const compilerPatches = (snapshot: GitSnapshot) => {
+  const compilerNames = compilerInstallationNames(snapshot);
+  const result: {
+    file: string;
+    name: string;
+    metadata: unknown;
+    reference?: string;
+  }[] = [];
+  for (const file of snapshot.entries.keys()) {
+    const name = path.posix.basename(file);
+    if (
+      ![
+        "package.json",
+        "pnpm-workspace.yaml",
+        "pnpm-lock.yaml",
+        "bun.lock",
+      ].includes(name)
+    )
+      continue;
+    const text = snapshotText({ snapshot, file });
+    let value: unknown;
+    if (name.endsWith(".yaml")) {
+      const document = parseDocument(text);
+      if (document.errors.length > 0)
+        throw new Error(`Invalid compiler patch YAML: ${file}`);
+      value = document.toJS({ maxAliasCount: 100 });
+    } else value = parseChangedJson(text);
+    const sources = [value];
+    if (name === "package.json" && changedRecord(value))
+      sources.push(value["pnpm"]);
+    for (const source of sources)
+      for (const patch of changedCompilerPatches({
+        value: source,
+        compilerNames,
+        stringsArePaths:
+          name === "package.json" || name === "pnpm-workspace.yaml",
+      })) {
+        if (patch.reference === undefined) {
+          result.push({ file, name: patch.name, metadata: patch.metadata });
+          continue;
+        }
+        const reference = path.posix.normalize(
+          path.posix.join(path.posix.dirname(file), patch.reference),
+        );
+        if (
+          patch.reference.trim() === "" ||
+          path.posix.isAbsolute(patch.reference) ||
+          patch.reference.includes("\\") ||
+          patch.reference
+            .split("")
+            .some(
+              (character) =>
+                character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
+            ) ||
+          reference === ".." ||
+          reference.startsWith("../")
+        )
+          throw new Error(
+            `Compiler patch reference leaves the tracked snapshot: ${file}:${patch.name}`,
+          );
+        result.push({
+          file,
+          name: patch.name,
+          metadata: patch.metadata,
+          reference,
+        });
+      }
+    // pnpm snapshot identifiers carry patch hashes even when package versions agree.
+    if (
+      name === "pnpm-lock.yaml" &&
+      changedRecord(value) &&
+      changedRecord(value["snapshots"])
+    )
+      for (const descriptor of Object.keys(value["snapshots"])) {
+        const packageName = /^(@[^/]+\/[^@]+|[^@]+)@/.exec(descriptor)?.[1];
+        if (
+          packageName &&
+          (changedPackageTool(packageName) === "typescript" ||
+            compilerNames.has(packageName)) &&
+          descriptor.includes("patch_hash=")
+        )
+          result.push({ file, name: descriptor, metadata: descriptor });
+      }
+  }
+  return result;
+};
+
 const readSnapshots = async ({
   repo,
   trees,
@@ -278,6 +427,7 @@ const readSnapshots = async ({
       const tree = trees.at(index);
       if (!entries || !tree) throw new Error("Missing Git tree");
       const required = new Set<string>();
+      const requiredPatches = new Set<string>();
       for (const [file, entry] of entries) {
         if (entry.mode !== "120000") continue;
         const text = blobs.get(entry.oid);
@@ -295,14 +445,24 @@ const readSnapshots = async ({
       }
       // Resolve symlink closure before reading workflow YAML.
       const unresolvedLinks = [...required].some((file) => !entries.has(file));
-      if (!unresolvedLinks)
-        for (const file of selectorFiles({ entries, blobs }).keys())
-          required.add(file);
+      if (!unresolvedLinks) {
+        const snapshot = { entries, blobs };
+        for (const file of selectorFiles(snapshot).keys()) required.add(file);
+        for (const patch of compilerPatches(snapshot))
+          if (patch.reference !== undefined) {
+            required.add(patch.reference);
+            requiredPatches.add(patch.reference);
+          }
+      }
       for (const file of required) {
         if (entries.has(file)) continue;
         const entry = tree.get(file);
         if (!entry)
-          throw new Error(`Missing tracked toolchain selector file: ${file}`);
+          throw new Error(
+            requiredPatches.has(file)
+              ? `Missing tracked compiler patch: ${file}`
+              : `Missing tracked toolchain selector file: ${file}`,
+          );
         entries.set(file, entry);
         expanded = true;
       }
@@ -362,6 +522,19 @@ const packageTarget = ({
   if (target === undefined)
     throw new Error("Unclassifiable npm alias declaration");
   return target;
+};
+/** Importers contain resolved descriptors, not declarations; classify protocols first. */
+const importerRegistryName = ({
+  dependency,
+  version,
+}: {
+  dependency: string;
+  version: string;
+}) => {
+  if (nonRegistryResolution(version)) return dependency;
+  if (version.startsWith("npm:"))
+    return packageTarget({ name: dependency, specifier: version });
+  return /^((?:@[^/@\s]+\/)?[^/@\s]+)@/.exec(version)?.[1];
 };
 const directoryDepth = (directory: string) =>
   directory.split("/").filter((part) => part !== "." && part !== "").length;
@@ -498,6 +671,16 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
   const workspacePatterns = new Map<string, unknown>();
   const typescript = new Set<string>();
   const selectedFiles = selectorFiles(snapshot);
+  const compilerNames = compilerInstallationNames(snapshot);
+  for (const patch of compilerPatches(snapshot)) {
+    tools.typescript.add(
+      `compiler-patch:${patch.file}:${patch.name}:${stableJson(patch.metadata)}`,
+    );
+    if (patch.reference !== undefined)
+      tools.typescript.add(
+        `compiler-patch-source:${patch.reference}:${snapshotText({ snapshot, file: patch.reference })}`,
+      );
+  }
   const addBun = (value: string) => {
     const version = exactBun(value);
     bunVersions.add(version);
@@ -529,6 +712,8 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
   for (const file of snapshot.entries.keys()) {
     const text = snapshotText({ snapshot, file });
     const name = path.posix.basename(file);
+    if (compilerPatchPackageFile(file, compilerNames))
+      tools.typescript.add(`patch-package:${file}:${text}`);
     for (const tool of selectedFiles.get(file) ?? [])
       tools[tool].add(`selector-file:${file}:${text}`);
     if (name === "package.json") {
@@ -880,13 +1065,7 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
         // Local/non-registry dependencies must never be reinterpreted as aliases.
         const namedTool = changedPackageTool(dependency);
         const nonRegistry = nonRegistryResolution(version);
-        let registryName = /^((?:@[^/@\s]+\/)?[^/@\s]+)@/.exec(version)?.[1];
-        if (nonRegistry) registryName = dependency;
-        else if (version.startsWith("npm:"))
-          registryName = packageTarget({
-            name: dependency,
-            specifier: version,
-          });
+        const registryName = importerRegistryName({ dependency, version });
         const tool =
           (registryName === undefined
             ? undefined

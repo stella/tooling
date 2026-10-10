@@ -26,7 +26,12 @@ export const changedPackageTool = (
       "@typescript/native",
       "@typescript/native-preview",
       "typescript-compat",
-    ].includes(name)
+      "bun-types",
+      "@types/bun",
+      "tsgo",
+      "@typescript/tsgo",
+    ].includes(name) ||
+    name.startsWith("@typescript/native-")
   )
     return "typescript";
   if (name === "oxlint" || name === "oxfmt" || name === "oxlint-tsgolint")
@@ -38,6 +43,50 @@ export const changedPackageTool = (
   )
     return "shared";
   return undefined;
+};
+
+/** Compiler patch declarations retain hashes as well as referenced source paths. */
+export const changedCompilerPatches = ({
+  value,
+  stringsArePaths,
+  compilerNames,
+}: {
+  value: unknown;
+  stringsArePaths: boolean;
+  compilerNames: ReadonlySet<string>;
+}) => {
+  const patches: { name: string; metadata: unknown; reference?: string }[] = [];
+  if (!changedRecord(value)) return patches;
+  const declarations = value["patchedDependencies"];
+  if (declarations === undefined) return patches;
+  if (!changedRecord(declarations))
+    throw new Error("Unclassifiable patchedDependencies declaration");
+  for (const [descriptor, metadata] of Object.entries(declarations)) {
+    const name = /^(@[^/]+\/[^@]+|[^@]+)(?:@.*)?$/.exec(descriptor)?.[1];
+    if (
+      !name ||
+      (changedPackageTool(name) !== "typescript" && !compilerNames.has(name))
+    )
+      continue;
+    let reference: string | undefined;
+    if (typeof metadata === "string") {
+      if (metadata.trim() === "")
+        throw new Error(`Empty compiler patch metadata: ${descriptor}`);
+      if (stringsArePaths) reference = metadata;
+    } else if (changedRecord(metadata)) {
+      const declaredPath = metadata["path"];
+      if (declaredPath !== undefined) {
+        if (typeof declaredPath !== "string")
+          throw new Error(`Invalid compiler patch path: ${descriptor}`);
+        reference = declaredPath;
+      }
+    } else throw new Error(`Invalid compiler patch metadata: ${descriptor}`);
+    if (stringsArePaths && reference === undefined)
+      throw new Error(`Missing compiler patch path: ${descriptor}`);
+    if (reference === undefined) patches.push({ name: descriptor, metadata });
+    else patches.push({ name: descriptor, metadata, reference });
+  }
+  return patches;
 };
 
 /** JSONC permits comments and trailing commas, never alterations inside strings. */
