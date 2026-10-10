@@ -182,7 +182,14 @@ test("only a declared immutable reusable invocation validates published consumer
 });
 
 test("declared consumer workflows require valid scheduled execution", () => {
-  for (const cron of ["13 2 * * *", "0 0 1 JAN MON", "20/15 0-4 * * 1,3,5"])
+  for (const cron of [
+    "13 2 * * *",
+    "0 0 1 JAN MON",
+    "20/15 0-4 * * 1,3,5",
+    "0-59/5 0-23 1-31 JAN-DEC SUN-SAT",
+    "0 23 31 12 7",
+    "*/15 * * * 0,7",
+  ])
     expect(
       check({
         ...files,
@@ -212,6 +219,43 @@ test("declared consumer workflows require valid scheduled execution", () => {
         message: expect.stringContaining("on.schedule"),
       }),
     );
+});
+
+test("scheduled consumer cron fields enforce syntax and domain bounds", () => {
+  for (const cron of [
+    "invalid cron fields look five",
+    "99 99 * * *",
+    "0 0 0 * *",
+    "0 0 32 * *",
+    "0 0 * 0 *",
+    "0 0 * 13 *",
+    "0 0 * * 8",
+    "-1 * * * *",
+    "0 24 * * *",
+    "59-0 * * * *",
+    "0,,1 * * * *",
+    "*/0 * * * *",
+    "*/x * * * *",
+    "*/2/3 * * * *",
+    "0 0 * JAN-FEB-SUN *",
+    "0 0 * * UNKNOWN",
+    "0 0 ? * *",
+    "@daily",
+  ]) {
+    expect(
+      check({
+        ...files,
+        [workflow]: JSON.stringify({
+          on: { schedule: [{ cron }] },
+          jobs: { consumer: job },
+        }),
+      }),
+    ).toContainEqual(
+      expect.objectContaining({
+        message: expect.stringContaining("valid on.schedule"),
+      }),
+    );
+  }
 });
 
 test("every declared package must be a tracked published manifest supporting consumer Node", () => {

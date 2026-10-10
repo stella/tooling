@@ -380,7 +380,7 @@ The reusable consumer job declares its exact scope in `stll-toolchain.json`:
 
 The reusable consumer job must be stand-alone and unconditional (no `needs`, `if`, or `strategy`), so a job condition
 cannot skip its scheduled execution.
-The declared workflow requires a nonempty `on.schedule` with five-field POSIX cron;
+The declared workflow requires a nonempty `on.schedule` with validated five-field cron (field bounds, lists, ranges, and positive steps);
 `workflow_dispatch` may also be enabled. That job calls the shared
 `package-consumer-compat.yml` workflow at its approved immutable policy pin, with
 `packages` as the same JSON array and `consumer-node` equal to the consumer policy
@@ -395,7 +395,9 @@ minimum-supported-major contract.
 --fixture-path tests/consumer` tests final tarballs in isolated projects with both
 npm and pnpm. The repository builds once with its development toolchain first.
 Workspace protocols are resolved by the package manager before `npm pack` creates
-the final artifact; both consumers install those artifacts. The runner verifies
+the final artifact; both consumers install those artifacts. Catalog entries that resolve to a local workspace
+package are unsupported: use `workspace:` for that dependency. Registry catalog
+dependencies remain supported. The runner verifies
 the official Node archive checksum and exact runtime/package-manager versions,
 uses the oldest published React satisfying the package peer range, typechecks with
 the consumer TypeScript, and runs each fixture's build and usage smoke.

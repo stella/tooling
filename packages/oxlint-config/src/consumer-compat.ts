@@ -13,10 +13,14 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { isDeepStrictEqual } from "node:util";
 import { satisfies } from "semver";
-import { parseDocument, stringify } from "yaml";
+import { stringify } from "yaml";
 
+import {
+  bunCatalogState,
+  catalogState,
+  pnpmWorkspaceState,
+} from "./consumer-catalogs";
 import {
   consumerPackageClosure,
   consumerStagingPaths,
@@ -299,74 +303,6 @@ const copyWithoutDependencies = async (source: string, destination: string) => {
       return true;
     },
   });
-};
-
-const catalogMapping = (value: unknown, field: string) => {
-  if (!consumerRecord(value)) throw new Error(`${field} must be a mapping`);
-  const entries = new Map<string, string>();
-  for (const [name, specifier] of Object.entries(value)) {
-    if (name === "" || typeof specifier !== "string" || specifier.trim() === "")
-      throw new Error(`${field} must contain nonempty package specifiers`);
-    entries.set(name, specifier);
-  }
-  return Object.fromEntries(entries);
-};
-
-const catalogState = (source: Record<string, unknown>, file: string) => {
-  const result: {
-    catalog?: Record<string, string>;
-    catalogs?: Record<string, Record<string, string>>;
-  } = {};
-  if (Object.hasOwn(source, "catalog"))
-    result.catalog = catalogMapping(source["catalog"], `${file}: catalog`);
-  if (Object.hasOwn(source, "catalogs")) {
-    if (!consumerRecord(source["catalogs"]))
-      throw new Error(`${file}: catalogs must be a mapping`);
-    const named = new Map<string, Record<string, string>>();
-    for (const [name, entries] of Object.entries(source["catalogs"])) {
-      if (name === "")
-        throw new Error(`${file}: catalog names must be nonempty`);
-      named.set(name, catalogMapping(entries, `${file}: catalogs.${name}`));
-    }
-    result.catalogs = Object.fromEntries(named);
-  }
-  return result;
-};
-
-const bunCatalogState = (manifest: Record<string, unknown>) => {
-  const sources = [manifest];
-  if (consumerRecord(manifest["workspaces"]))
-    sources.push(manifest["workspaces"]);
-  const merged: Record<string, unknown> = {};
-  for (const source of sources) {
-    const state = catalogState(source, "package.json");
-    for (const [field, value] of Object.entries(state)) {
-      if (
-        Object.hasOwn(merged, field) &&
-        !isDeepStrictEqual(merged[field], value)
-      )
-        throw new Error(`conflicting Bun ${field} definitions in package.json`);
-      merged[field] = value;
-    }
-  }
-  return catalogState(merged, "package.json");
-};
-
-const pnpmWorkspaceState = (source: string, file: string) => {
-  const document = parseDocument(source, { uniqueKeys: true });
-  if (document.errors.length !== 0)
-    throw new Error(`invalid pnpm workspace: ${file}`);
-  const workspace: unknown = document.toJS({ maxAliasCount: 100 });
-  if (!consumerRecord(workspace))
-    throw new Error(`invalid pnpm workspace: ${file}`);
-  const packages = workspace["packages"];
-  if (
-    packages !== undefined &&
-    (!Array.isArray(packages) ||
-      !packages.every((entry: unknown) => typeof entry === "string"))
-  )
-    throw new Error(`invalid pnpm workspace packages: ${file}`);
-  return { packages: packages ?? [], ...catalogState(workspace, file) };
 };
 
 type StageConsumerWorkspaceOptions = {
@@ -894,7 +830,7 @@ export const runConsumerCompat = async ({
       pnpm: "pnpm",
       bin: "",
     });
-    const closure = consumerPackageClosure(pkg, packages);
+    const closure = consumerPackageClosure({ selected: pkg, packages, files });
     for (const [name, member] of closure) all.set(name, member);
     selections.push({ pkg, fixture, closure });
   }

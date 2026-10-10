@@ -3,6 +3,8 @@ import picomatch from "picomatch";
 import { compare, satisfies, validRange } from "semver";
 import { parseDocument } from "yaml";
 
+import { resolveConsumerCatalog } from "./consumer-catalogs";
+
 export const consumerFixtureKinds = ["node", "react"] as const;
 export type ConsumerFixture = {
   package: string;
@@ -355,25 +357,51 @@ export const discoverConsumerPackages = (files: Record<string, string>) => {
   return packages;
 };
 
-export const consumerPackageClosure = (
-  selected: ConsumerPackage,
-  packages: Map<string, ConsumerPackage>,
-) => {
+export const consumerPublishedDependencyFields = [
+  "dependencies",
+  "optionalDependencies",
+  "peerDependencies",
+] as const;
+
+type ConsumerPackageClosureOptions = {
+  selected: ConsumerPackage;
+  packages: Map<string, ConsumerPackage>;
+  files: Record<string, string>;
+};
+export const consumerPackageClosure = ({
+  selected,
+  packages,
+  files,
+}: ConsumerPackageClosureOptions) => {
   const closure = new Map<string, ConsumerPackage>();
   const visit = (pkg: ConsumerPackage) => {
     if (closure.has(pkg.name)) return;
     closure.set(pkg.name, pkg);
-    for (const field of [
-      "dependencies",
-      "optionalDependencies",
-      "peerDependencies",
-    ]) {
+    for (const field of consumerPublishedDependencyFields) {
       const dependencies = pkg.manifest[field];
       if (!consumerRecord(dependencies)) continue;
       for (const [name, specifier] of Object.entries(dependencies)) {
         const local = packages.get(name);
         if (typeof specifier !== "string")
           throw new Error(`invalid package dependency: ${pkg.name} -> ${name}`);
+        if (specifier.startsWith("catalog:") && local !== undefined) {
+          const resolved = resolveConsumerCatalog({
+            directory: pkg.directory,
+            name,
+            specifier,
+            files,
+          });
+          const version = local.manifest["version"];
+          if (
+            resolved.startsWith("workspace:") ||
+            (typeof version === "string" &&
+              validRange(resolved) !== null &&
+              satisfies(version, resolved))
+          )
+            throw new Error(
+              `catalog dependency ${name} resolves to workspace package ${local.name}; use workspace:`,
+            );
+        }
         if (/^workspace:(?:@[^/@]+\/)?[^/@]+@/.test(specifier))
           throw new Error(
             `workspace alias specifiers are not supported by consumer-compat: ${name} -> ${specifier}; use the package name as the dependency key`,

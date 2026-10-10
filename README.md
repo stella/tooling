@@ -468,7 +468,8 @@ The reusable consumer job declares its exact scope in `stll-toolchain.json`:
 }
 ```
 
-The declared workflow must include a nonempty schedule; manual dispatch is optional.
+The declared workflow requires valid five-field cron with bounded numeric values,
+month/day names, lists, ranges, and positive steps; manual dispatch is optional.
 The reusable consumer job must be stand-alone and unconditional (no `needs`, `if`, or `strategy`), so a job condition
 cannot skip its scheduled execution.
 That job calls `package-consumer-compat.yml` at the approved shared policy SHA with
@@ -484,13 +485,15 @@ minimum-supported-major contract.
 --fixture-path tests/consumer` tests final tarballs in isolated projects with both
 npm and pnpm. The repository builds once with its development toolchain first.
 Workspace protocols are resolved by the package manager before `npm pack` creates
-the final artifact; both consumers install those artifacts. Workspace alias
+the final artifact; both consumers install those artifacts. Catalog entries that resolve to a local workspace
+package are unsupported: use `workspace:` for that dependency. Registry catalog
+dependencies remain supported. Workspace alias
 specifiers are unsupported: use the package name as the dependency key. The runner verifies
 the official Node archive checksum and exact runtime/package-manager versions,
 uses the oldest published React satisfying the package peer range, typechecks with
 the consumer TypeScript, and runs each fixture's build and usage smoke. Both
 publication packers and fixture commands use the provisioned consumer Node with
-isolated package-manager settings. Installed binaries named `node`, `npm`, or
+isolated package-manager settings. Installed binaries named `node`, `npm`, `npx`, or
 `pnpm` are rejected before fixture build and smoke commands.
 
 The fixture directory contains `consumer-compat.json`:

@@ -32,6 +32,7 @@ import { parseConsumerCompatArguments } from "./consumer-compat-arguments";
 import {
   consumerRecord,
   consumerPackageClosure,
+  consumerPublishedDependencyFields,
   consumerStagingPaths,
   consumerPackRootManifest,
   bindConsumerManifest,
@@ -772,7 +773,13 @@ describe("consumer compatibility declarations", () => {
     const library = packages.get("@example/library");
     if (!library) throw new Error("missing library fixture");
     expect(
-      [...consumerPackageClosure(library, packages).keys()].sort(),
+      [
+        ...consumerPackageClosure({
+          selected: library,
+          packages,
+          files,
+        }).keys(),
+      ].sort(),
     ).toEqual(["@example/core", "@example/library"]);
     expect(
       [
@@ -790,6 +797,89 @@ describe("consumer compatibility declarations", () => {
     ]).toEqual(["@example/core"]);
   });
 
+  test("catalog dependencies selecting local packages require explicit workspace intent in every published section", () => {
+    for (const source of ["pnpm", "bun"] as const)
+      for (const owner of [".", "packages/owner"])
+        for (const catalog of ["", "tooling"])
+          for (const field of consumerPublishedDependencyFields) {
+            const directory =
+              owner === "."
+                ? "packages/library"
+                : "packages/owner/children/library";
+            const state =
+              catalog === ""
+                ? { catalog: { "@example/core": "^1", external: "^3" } }
+                : {
+                    catalogs: {
+                      tooling: { "@example/core": "^1", external: "^3" },
+                    },
+                  };
+            const rootState =
+              owner === "."
+                ? state
+                : {
+                    catalog: { "@example/core": "^2" },
+                    catalogs: { tooling: { "@example/core": "^2" } },
+                  };
+            const files: Record<string, string> = {
+              "package.json": JSON.stringify({
+                private: true,
+                workspaces:
+                  source === "bun"
+                    ? { packages: ["packages/**"], ...rootState }
+                    : ["packages/**"],
+              }),
+              "packages/core/package.json": JSON.stringify({
+                name: "@example/core",
+                version: "1.2.0",
+              }),
+              [`${directory}/package.json`]: JSON.stringify({
+                name: "library",
+                [field]: { "@example/core": `catalog:${catalog}` },
+              }),
+            };
+            if (source === "pnpm")
+              files["pnpm-workspace.yaml"] = stringify({
+                packages: ["packages/**"],
+                ...rootState,
+              });
+            if (owner !== ".") {
+              files[`${owner}/package.json`] = JSON.stringify({
+                private: true,
+                workspaces:
+                  source === "bun"
+                    ? { packages: ["children/*"], ...state }
+                    : ["children/*"],
+              });
+              if (source === "pnpm")
+                files[`${owner}/pnpm-workspace.yaml`] = stringify({
+                  packages: ["children/*"],
+                  ...state,
+                });
+            }
+            const closure = () => {
+              const packages = discoverConsumerPackages(files);
+              const selected = packages.get("library");
+              if (selected === undefined)
+                throw new Error("missing selected fixture");
+              return consumerPackageClosure({ selected, packages, files });
+            };
+            expect(closure).toThrow(
+              "catalog dependency @example/core resolves to workspace package @example/core; use workspace:",
+            );
+            files["packages/core/package.json"] = JSON.stringify({
+              name: "@example/core",
+              version: "2.0.0",
+            });
+            expect([...closure().keys()]).toEqual(["library"]);
+            files[`${directory}/package.json`] = JSON.stringify({
+              name: "library",
+              [field]: { external: `catalog:${catalog}` },
+            });
+            expect([...closure().keys()]).toEqual(["library"]);
+          }
+  });
+
   test("unresolved workspace dependencies fail instead of falling through to registry", () => {
     const pkg = {
       name: "library",
@@ -797,7 +887,11 @@ describe("consumer compatibility declarations", () => {
       manifest: { dependencies: { missing: "workspace:*" } },
     };
     expect(() =>
-      consumerPackageClosure(pkg, new Map([[pkg.name, pkg]])),
+      consumerPackageClosure({
+        selected: pkg,
+        packages: new Map([[pkg.name, pkg]]),
+        files: {},
+      }),
     ).toThrow("unresolved workspace dependency");
   });
 
@@ -813,7 +907,11 @@ describe("consumer compatibility declarations", () => {
       manifest: { dependencies: { alias: "workspace:@example/core@*" } },
     };
     expect(() =>
-      consumerPackageClosure(pkg, new Map([[core.name, core]])),
+      consumerPackageClosure({
+        selected: pkg,
+        packages: new Map([[core.name, core]]),
+        files: {},
+      }),
     ).toThrow(
       "workspace alias specifiers are not supported by consumer-compat: alias -> workspace:@example/core@*; use the package name as the dependency key",
     );

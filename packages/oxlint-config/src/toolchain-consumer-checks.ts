@@ -33,6 +33,94 @@ const packageDirectories = (value: unknown): value is string[] =>
   value.every(repositoryDirectory) &&
   new Set(value).size === value.length;
 
+type CronField = {
+  minimum: number;
+  maximum: number;
+  names?: Record<string, number>;
+};
+const cronFields = [
+  { minimum: 0, maximum: 59 },
+  { minimum: 0, maximum: 23 },
+  { minimum: 1, maximum: 31 },
+  {
+    minimum: 1,
+    maximum: 12,
+    names: Object.fromEntries(
+      [
+        "JAN",
+        "FEB",
+        "MAR",
+        "APR",
+        "MAY",
+        "JUN",
+        "JUL",
+        "AUG",
+        "SEP",
+        "OCT",
+        "NOV",
+        "DEC",
+      ].map((name, index) => [name, index + 1]),
+    ),
+  },
+  {
+    minimum: 0,
+    maximum: 7,
+    names: Object.fromEntries(
+      ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"].map((name, index) => [
+        name,
+        index,
+      ]),
+    ),
+  },
+] as const;
+const cronFieldMatches = (text: string, field: CronField) => {
+  const value = (token: string) => {
+    const number = /^\d+$/.test(token)
+      ? Number(token)
+      : field.names?.[token.toUpperCase()];
+    return number !== undefined &&
+      Number.isSafeInteger(number) &&
+      number >= field.minimum &&
+      number <= field.maximum
+      ? number
+      : undefined;
+  };
+  return text.split(",").every((part) => {
+    const split = part.split("/");
+    if (split.length > 2) return false;
+    const [base, step] = split;
+    if (
+      step !== undefined &&
+      (!/^\d+$/.test(step) ||
+        !Number.isSafeInteger(Number(step)) ||
+        Number(step) <= 0)
+    )
+      return false;
+    if (base === "*") return true;
+    if (base === undefined) return false;
+    const bounds = base.split("-");
+    if (bounds.length > 2) return false;
+    const lower = bounds.at(0);
+    if (lower === undefined) return false;
+    const start = value(lower);
+    if (start === undefined) return false;
+    if (bounds.length === 1) return true;
+    const upper = bounds.at(1);
+    const end = upper === undefined ? undefined : value(upper);
+    return end !== undefined && start <= end;
+  });
+};
+const validConsumerCron = (text: string) => {
+  const fields = text.trim().split(/\s+/);
+  return (
+    fields.length === cronFields.length &&
+    cronFields.every((field, index) => {
+      const text = fields.at(index);
+      return text !== undefined && cronFieldMatches(text, field);
+    })
+  );
+};
+
 const nightlySchedule = (value: unknown) => {
   if (!record(value)) return false;
   const schedule = value["schedule"];
@@ -43,7 +131,7 @@ const nightlySchedule = (value: unknown) => {
       (entry: unknown) =>
         record(entry) &&
         typeof entry["cron"] === "string" &&
-        entry["cron"].trim().split(/\s+/).length === 5,
+        validConsumerCron(entry["cron"]),
     )
   );
 };
