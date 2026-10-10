@@ -594,7 +594,7 @@ test("committed pnpm peer snapshot edits run parity with compiler release unchan
     after: peerSnapshotLock("1.0.1", "1.0.0"),
     exercise: async ({ repo, since }) => {
       const result = await detectToolchainChanges({ repo, since });
-      expect(result.status).toBe("compared");
+      expect(result).toEqual(expect.objectContaining({ status: "compared" }));
       expect(result.tools).toContain("typescript");
       let runs = 0;
       await runSelectedTypecheckParity({

@@ -626,7 +626,8 @@ const importerRegistryName = ({
   if (nonRegistryResolution(version)) return dependency;
   if (version.startsWith("npm:"))
     return packageTarget({ name: dependency, specifier: version });
-  return /^((?:@[^/@\s]+\/)?[^/@\s]+)@/.exec(version)?.[1];
+  const descriptor = version.split("(").at(0) ?? "";
+  return /^((?:@[^/@\s]+\/)?[^/@\s]+)@/.exec(descriptor)?.[1];
 };
 const directoryDepth = (directory: string) =>
   directory.split("/").filter((part) => part !== "." && part !== "").length;
