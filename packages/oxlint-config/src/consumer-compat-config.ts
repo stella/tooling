@@ -232,6 +232,7 @@ export const assertConsumerFixtureManifest = (
     "resolutions",
     "workspaces",
     "packageManager",
+    "allowScripts",
   ])
     if (manifest[field] !== undefined)
       throw new Error(

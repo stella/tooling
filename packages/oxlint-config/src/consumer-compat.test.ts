@@ -1191,7 +1191,11 @@ describe("isolated consumer runtime", () => {
         "install",
       ]);
       expect(commands[0]).toContain("--ignore-scripts");
-      expect(commands[1]).toEqual([tools.node, tools[manager], "rebuild"]);
+      expect(commands[1]).toEqual(
+        manager === "pnpm"
+          ? [tools.node, tools.pnpm, "pm", "rebuild", "--pending"]
+          : [tools.node, tools.npm, "rebuild"],
+      );
       expect(commands[2]).toEqual([
         tools.node,
         "/fixture/node_modules/typescript/bin/tsc",

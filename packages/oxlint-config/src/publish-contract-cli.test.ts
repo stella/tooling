@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -27,6 +27,7 @@ test("CLI checks recursively declared packages and rejects unnamed public member
     });
     await writeManifest("packages/group/nested/library", {
       name: "nested-library",
+      version: "1.0.0",
       exports: "./data.json",
     });
     await writeManifest("packages/group/nested/excluded", {
@@ -56,13 +57,64 @@ test("CLI checks recursively declared packages and rejects unnamed public member
     ).toBe(false);
     expect(run().exitCode).toBe(0);
     await writeManifest("packages/group/nested/library", {
+      version: "1.0.0",
       exports: "./data.json",
     });
     const unnamed = run();
     expect(unnamed.exitCode).toBe(1);
     expect(unnamed.stderr.toString()).toContain(
-      "packages/group/nested/library/package.json: published package needs a name",
+      "public consumer package requires a valid npm name: packages/group/nested/library",
     );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("CLI read and write reject unsupported published manifests without replacing their contract", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "publish-contract-manifest-"));
+  const manifestFile = path.join(root, "package.json");
+  const contractFile = path.join(root, "publish-contract.json");
+  const manifest = {
+    name: "library",
+    version: "1.0.0",
+    exports: "./data.json",
+  };
+  const run = (...args: string[]) =>
+    Bun.spawnSync([process.execPath, cli, ...args], { cwd: root });
+  try {
+    await writeFile(manifestFile, JSON.stringify(manifest));
+    execFileSync("git", ["init", "--quiet"], { cwd: root });
+    execFileSync("git", ["add", "package.json"], { cwd: root });
+    const written = run("--write");
+    expect(written.stderr.toString()).toBe("");
+    expect(written.exitCode).toBe(0);
+    const committed = await readFile(contractFile, "utf8");
+    for (const mutation of [
+      {
+        manifest: { ...manifest, version: "latest" },
+        message: "semver-valid version",
+      },
+      {
+        manifest: { ...manifest, name: "Invalid Name" },
+        message: "valid npm name",
+      },
+      {
+        manifest: { ...manifest, bundleDependencies: [] },
+        message: "does not support bundleDependencies",
+      },
+      {
+        manifest: { ...manifest, bundledDependencies: false },
+        message: "does not support bundledDependencies",
+      },
+    ]) {
+      await writeFile(manifestFile, JSON.stringify(mutation.manifest));
+      for (const args of [[], ["--write"]]) {
+        const result = run(...args);
+        expect(result.exitCode).toBe(1);
+        expect(result.stderr.toString()).toContain(mutation.message);
+        expect(await readFile(contractFile, "utf8")).toBe(committed);
+      }
+    }
   } finally {
     await rm(root, { recursive: true, force: true });
   }

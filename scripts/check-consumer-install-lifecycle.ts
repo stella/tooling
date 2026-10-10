@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile, access, rm } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  writeFile,
+  readFile,
+  access,
+  rm,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { stringify } from "yaml";
 
 import {
   installConsumerFixtureDependencies,
@@ -86,6 +94,69 @@ try {
         });
     process.stdout.write(
       `${manager}: dependency runtime collision rejected before lifecycle execution\n`,
+    );
+    const success = path.join(scratch, `${manager}-success`);
+    const native = path.join(success, "dependency");
+    const successHome = path.join(success, "home");
+    await mkdir(native, { recursive: true });
+    await mkdir(successHome);
+    await writeFile(path.join(successHome, "npmrc"), "");
+    await writeFile(
+      path.join(native, "package.json"),
+      JSON.stringify({
+        name: "consumer-native-like",
+        version: "1.0.0",
+        scripts: { install: "node install.cjs" },
+      }),
+    );
+    await writeFile(
+      path.join(native, "install.cjs"),
+      'require("node:fs").writeFileSync("native-ready", "yes");\n',
+    );
+    await writeFile(
+      path.join(success, "package.json"),
+      JSON.stringify({
+        name: "consumer-lifecycle-success",
+        version: "1.0.0",
+        private: true,
+        dependencies: { "consumer-native-like": "file:./dependency" },
+        scripts: { rebuild: "node shadow.cjs" },
+      }),
+    );
+    await writeFile(
+      path.join(success, "shadow.cjs"),
+      'require("node:fs").writeFileSync("shadow-rebuild-ran", "yes");\n',
+    );
+    if (manager === "pnpm")
+      await writeFile(
+        path.join(success, "pnpm-workspace.yaml"),
+        stringify({ packages: ["."] }),
+      );
+    await installConsumerFixtureDependencies({
+      manager,
+      tools,
+      directory: success,
+      home: successHome,
+      fixture: {
+        package: ".",
+        fixture: ".",
+        kind: "node",
+        build: ["node", "build.cjs"],
+        smoke: ["node", "smoke.cjs"],
+      },
+    });
+    assert.equal(
+      await readFile(
+        path.join(success, "node_modules/consumer-native-like/native-ready"),
+        "utf8",
+      ),
+      "yes",
+    );
+    await assert.rejects(access(path.join(success, "shadow-rebuild-ran")), {
+      code: "ENOENT",
+    });
+    process.stdout.write(
+      `${manager}: approved dependency install ran through the built-in rebuild\n`,
     );
   }
 } finally {

@@ -13,8 +13,9 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { stringify } from "yaml";
+import { parse, stringify } from "yaml";
 
+import { consumerBuildApprovals } from "./consumer-build-approvals";
 import {
   bunCatalogState,
   catalogState,
@@ -617,7 +618,9 @@ export const consumerFixtureCommands = ({
         ];
   return [
     install,
-    [tools.node, tools[manager], "rebuild"],
+    manager === "pnpm"
+      ? [tools.node, tools.pnpm, "pm", "rebuild", "--pending"]
+      : [tools.node, tools.npm, "rebuild"],
     [
       tools.node,
       path.join(directory, "node_modules/typescript/bin/tsc"),
@@ -633,7 +636,7 @@ export const installConsumerFixtureDependencies = async (
 ) => {
   const env = consumerCommandEnvironment(options);
   const commands = consumerFixtureCommands(options);
-  for (const argv of commands.slice(0, 2)) {
+  for (const [index, argv] of commands.slice(0, 2).entries()) {
     const executable = argv.at(0);
     if (!executable) throw new Error("missing consumer dependency command");
     process.stdout.write(
@@ -641,6 +644,46 @@ export const installConsumerFixtureDependencies = async (
     );
     // Installation cannot execute scripts; validate bins before any lifecycle execution.
     await assertConsumerInstalledToolBins(options.directory);
+    if (index !== 0) continue;
+    const manifestFile = path.join(options.directory, "package.json");
+    const manifest: unknown = JSON.parse(await readFile(manifestFile, "utf8"));
+    if (!consumerRecord(manifest))
+      throw new Error("invalid consumer fixture manifest");
+    const lockSource = await readFile(
+      path.join(
+        options.directory,
+        options.manager === "npm" ? "package-lock.json" : "pnpm-lock.yaml",
+      ),
+      "utf8",
+    );
+    const lock: unknown =
+      options.manager === "npm" ? JSON.parse(lockSource) : parse(lockSource);
+    const approvals = consumerBuildApprovals({
+      manifest,
+      lock,
+      manager: options.manager,
+    });
+    if (options.manager === "npm") {
+      // Explicit identities also prevent older manager defaults from rebuilding
+      // unapproved transitive packages or the root fixture lifecycle.
+      const rebuild = commands.at(1);
+      if (!rebuild) throw new Error("missing consumer rebuild command");
+      rebuild.push(...Object.keys(approvals));
+      if (Object.keys(approvals).length === 0) break;
+      await writeFile(
+        manifestFile,
+        `${JSON.stringify({ ...manifest, allowScripts: approvals }, null, 2)}\n`,
+      );
+    } else {
+      const workspaceFile = path.join(options.directory, "pnpm-workspace.yaml");
+      const workspace: unknown = parse(await readFile(workspaceFile, "utf8"));
+      if (!consumerRecord(workspace))
+        throw new Error("invalid generated consumer workspace");
+      await writeFile(
+        workspaceFile,
+        stringify({ ...workspace, allowBuilds: approvals }),
+      );
+    }
   }
 };
 

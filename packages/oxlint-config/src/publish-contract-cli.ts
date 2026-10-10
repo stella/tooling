@@ -3,7 +3,10 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-import { discoverConsumerManifests } from "./consumer-compat-config";
+import {
+  assertConsumerPublishableManifest,
+  discoverConsumerManifests,
+} from "./consumer-compat-config";
 import { resolvePublishBuildTarget } from "./publish-build-target";
 import {
   checkPublishContract,
@@ -65,8 +68,7 @@ const main = async () => {
         throw new Error(
           `Published workspace packages under vendor directories are not supported by publish-contract: ${file}; move the package to a supported workspace directory`,
         );
-      if (typeof manifest["name"] !== "string" || manifest["name"] === "")
-        throw new Error(`${file}: published package needs a name`);
+      assertConsumerPublishableManifest({ manifest, directory: relative });
       checked++;
       const directory = path.dirname(path.join(root, file));
       const contractFile = path.join(directory, "publish-contract.json");

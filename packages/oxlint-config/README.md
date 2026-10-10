@@ -398,7 +398,7 @@ minimum-supported-major contract.
 --fixture-path tests/consumer` tests final tarballs in isolated projects with both
 npm and pnpm. The repository builds once with its development toolchain first.
 Workspace protocols are resolved by the package manager before `npm pack` creates
-the final artifact; both consumers install those artifacts. Fixture installs disable scripts, reject reserved runtime/manager bins, then run an explicit rebuild under the pinned consumer runtime before typecheck, build and smoke. Catalog entries that resolve to a local workspace
+the final artifact; both consumers install those artifacts. Fixture installs disable scripts, reject reserved runtime/manager bins, then approve only directly declared dependencies at their resolved lock identities. npm rebuilds those identities; pnpm runs its built-in pending rebuild. Both use the pinned consumer runtime before typecheck, build and smoke. Undeclared transitive build scripts receive no approval. Catalog entries that resolve to a local workspace
 package are unsupported: use `workspace:` for that dependency. Registry catalog
 dependencies remain supported. pnpm workspace owners require an adjacent tracked
 `package.json`; manifestless owners are unsupported. Public package names must be
