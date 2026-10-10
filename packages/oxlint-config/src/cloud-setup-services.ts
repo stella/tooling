@@ -32,11 +32,39 @@ service_password() {
   fi
   [[ "$(cat "$file")" =~ ^[0-9a-f]{64}$ ]] || fail "Invalid service credential state"
 }
+service_process_matches() {
+  local pid="$1" executable="$2" owner actual expected
+  [[ "$pid" =~ ^[1-9][0-9]*$ && -d "/proc/$pid" ]] || return 1
+  owner="$(stat -c '%u' "/proc/$pid" 2>/dev/null)" || return 2
+  [[ "$owner" =~ ^[0-9]+$ ]] || return 2
+  [[ "$owner" == "$SERVICE_UID" ]] || return 1
+  actual="$(readlink -f "/proc/$pid/exe" 2>/dev/null)" || return 2
+  expected="$(readlink -f "$executable")" || return 2
+  [[ -n "$actual" && -n "$expected" && "$actual" != *' (deleted)' ]] || return 2
+  [[ "$actual" == "$expected" ]]
+}
 service_process() {
-  local pid="$1" executable="$2"
-  [[ "$pid" =~ ^[1-9][0-9]*$ && -d "/proc/$pid" ]] || fail "Managed service process is unavailable"
-  [[ "$(stat -c '%u' "/proc/$pid")" == "$SERVICE_UID" ]] || fail "Service process has a different owner"
-  [[ "$(readlink -f "/proc/$pid/exe")" == "$(readlink -f "$executable")" ]] || fail "Service process has a different executable"
+  service_process_matches "$1" "$2" || fail "Managed service process identity differs from the recorded state"
+}
+service_prune_pid() {
+  local file="$1" executable="$2" service="$3" pid identity
+  [[ -e "$file" ]] || return 0
+  pid="$(head -n 1 "$file")"
+  # PostgreSQL encodes a standalone backend with a negative PID.
+  if [[ "$service" == postgres ]]; then pid="$(printf '%s' "$pid" | sed 's/^-//')"; fi
+  if service_process_matches "$pid" "$executable"; then return 0; else identity=$?; fi
+  [[ "$identity" != 2 ]] || fail "Cannot verify recorded live service process; retaining its PID file"
+  # Let PostgreSQL check orphan shared memory before removing a dead-PID lock.
+  if [[ "$service" == postgres && "$pid" =~ ^[1-9][0-9]*$ && ! -d "/proc/$pid" ]]; then return 0; fi
+  if [[ "$service" == postgres ]]; then
+    [[ "$pid" =~ ^[1-9][0-9]*$ && "$SERVICE_UID" != 0 ]] || fail "Cannot safely recover PostgreSQL PID state"
+    # The root controller is not our nonroot postgres. Preserve the remaining
+    # lock rows so PostgreSQL's EPERM/ancestor path still checks orphan memory.
+    root sed -i "1s/.*/$$/" "$file"
+    return 0
+  fi
+  # Restored state can name an unrelated live process; never signal that PID.
+  root rm -- "$file"
 }
 `;
 
@@ -57,6 +85,7 @@ const postgresStart = String.raw`
     root rm "$STATE/postgres.init-password"
   fi
   [[ -f "$pg_data/PG_VERSION" && "$(cat "$pg_data/PG_VERSION")" == '@POSTGRES@' ]] || fail "PostgreSQL data has a different major version"
+  service_prune_pid "$pg_data/postmaster.pid" "$pg_bin/postgres" postgres
   if ! service_run env PGHOST=127.0.0.1 PGHOSTADDR=127.0.0.1 "$pg_bin/pg_ctl" -D "$pg_data" status >/dev/null 2>&1; then
     service_run env PGHOST=127.0.0.1 PGHOSTADDR=127.0.0.1 "$pg_bin/pg_ctl" -D "$pg_data" -l "$pg_data/cloud.log" -o "-h 127.0.0.1 -p 55432 -c unix_socket_directories=" -t 10 -w start >/dev/null || fail "PostgreSQL start failed; port 55432 must be available"
   fi
@@ -89,14 +118,7 @@ const valkeyStart = String.raw`
     root chown stll-cloud:stll-cloud "$vk_config"
   fi
   [[ "$(cat "$vk_config")" == "$vk_expected" ]] || fail "Valkey configuration differs from managed settings"
-  if [[ -e "$vk_data/valkey.pid" ]]; then
-    vk_pid="$(cat "$vk_data/valkey.pid")"
-    if [[ "$vk_pid" =~ ^[1-9][0-9]*$ && -d "/proc/$vk_pid" ]]; then
-      service_process "$vk_pid" "$(command -v valkey-server)"
-    else
-      root rm "$vk_data/valkey.pid"
-    fi
-  fi
+  service_prune_pid "$vk_data/valkey.pid" "$(command -v valkey-server)" valkey
   if [[ ! -e "$vk_data/valkey.pid" ]]; then
     service_run valkey-server "$vk_config" || fail "Valkey start failed; port 56379 must be available"
   fi

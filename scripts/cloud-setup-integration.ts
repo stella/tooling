@@ -23,7 +23,19 @@ type CommandOptions = {
   output?: "trimmed" | "raw";
 };
 
-// Capture engine output: connection credentials must never enter CI logs.
+const diagnosticText = (value: string) =>
+  value
+    .replace(
+      /(PGPASSWORD|VALKEYCLI_AUTH|DATABASE_URL|REDIS_URL)=[^\s]+/g,
+      "$1=[redacted]",
+    )
+    .replace(
+      /(?:postgres(?:ql)?|rediss?):\/\/[^\s"']+/gi,
+      "[local connection redacted]",
+    )
+    .replace(/\b[a-f0-9]{64}\b/gi, "[digest redacted]");
+
+// Capture engine output and redact local connection values in failure details.
 const command = async ({
   label,
   args,
@@ -38,13 +50,20 @@ const command = async ({
     stdout: "pipe",
     stderr: "pipe",
   });
-  const [stdout, , exitCode] = await Promise.all([
+  const [stdout, stderr, exitCode] = await Promise.all([
     new Response(child.stdout).text(),
     new Response(child.stderr).text(),
     child.exited,
   ]);
-  if ((exitCode === 0) !== (outcome === "success"))
-    throw new Error(`${label}: unexpected command status ${exitCode}`);
+  if ((exitCode === 0) !== (outcome === "success")) {
+    throw new Error(
+      [
+        `${label}: unexpected command status ${exitCode}`,
+        `Command: ${JSON.stringify(args.map(diagnosticText))}`,
+        `stderr:\n${diagnosticText(stderr)}`,
+      ].join("\n"),
+    );
+  }
   return output === "raw" ? stdout : stdout.trim();
 };
 
@@ -151,6 +170,228 @@ const main = async () => {
         ...args,
       ],
     });
+  };
+  type SpawnedIdentity =
+    | { status: "pending" }
+    | {
+        status: "verified";
+        pid: string;
+        uid: string;
+        executable: string;
+        started: string;
+      };
+  const stalePidRestart = async () => {
+    const savedPgPid = await root(
+      ["cat", `${state}/postgres/postmaster.pid`],
+      "Managed PostgreSQL identifier state",
+    );
+    assert(savedPgPid.includes("\n"), "PostgreSQL identifier rows are absent");
+    assert(
+      (await pgQuery("SHOW data_directory")) === `${state}/postgres`,
+      "Restart database ownership differs",
+    );
+    await root(
+      [
+        "runuser",
+        "-u",
+        "stll-cloud",
+        "--",
+        `${pgBin}/pg_ctl`,
+        "-D",
+        `${state}/postgres`,
+        "-m",
+        "fast",
+        "-t",
+        "10",
+        "-w",
+        "stop",
+      ],
+      "Stop authenticated managed PostgreSQL for restart",
+    );
+    await valkey(["SHUTDOWN", "NOSAVE"]);
+    // Report the actual service-user PID before replacing the shell with sleep.
+    const monitor = Bun.spawn(
+      [
+        ...rootPrefix,
+        "runuser",
+        "-u",
+        "stll-cloud",
+        "--",
+        "sh",
+        "-c",
+        'printf "%s\\n" "$$"; exec sleep 120',
+      ],
+      { stdout: "pipe", stderr: "ignore" },
+    );
+    let identity: SpawnedIdentity = { status: "pending" };
+    try {
+      const reader = monitor.stdout.getReader();
+      const decoder = new TextDecoder();
+      let handshake = "";
+      const deadline = Date.now() + 5000;
+      while (!handshake.includes("\n")) {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0)
+          throw new Error("Service-user child handshake timed out");
+        const received = await Promise.race([
+          reader.read(),
+          Bun.sleep(remaining).then(() => {
+            throw new Error("Service-user child handshake timed out");
+          }),
+        ]);
+        if (received.done)
+          throw new Error("Service-user child handshake failed");
+        handshake += decoder.decode(received.value, { stream: true });
+        assert(
+          handshake.length <= 20,
+          "Service-user child handshake is invalid",
+        );
+      }
+      reader.releaseLock();
+      const pid = handshake.trim();
+      assert(
+        /^[1-9][0-9]*$/.test(pid),
+        "Service-user child identifier is invalid",
+      );
+      const sleepIdentity = String.raw`
+set -euo pipefail
+for ((attempt=0; attempt<40; attempt++)); do
+  executable="$(readlink -f "/proc/$CHILD_PID/exe")" || exit 1
+  if [[ "$executable" == */sleep ]]; then printf '%s\n' "$executable"; exit 0; fi
+  sleep 0.05
+done
+exit 1
+`;
+      const executable = await root(
+        ["env", `CHILD_PID=${pid}`, "bash", "-c", sleepIdentity],
+        "Unrelated child executable",
+      );
+      const uid = await root(
+        ["stat", "-c", "%u", `/proc/${pid}`],
+        "Unrelated child owner",
+      );
+      const started = await root(
+        ["awk", "{ print $22 }", `/proc/${pid}/stat`],
+        "Unrelated child start identity",
+      );
+      assert(
+        uid ===
+          (await root(["id", "-u", "stll-cloud"], "Managed service owner")),
+        "Cached identifier child must have the same service owner",
+      );
+      assert(
+        executable.endsWith("/sleep"),
+        "Cached identifier child must have a different executable",
+      );
+      identity = { status: "verified", pid, uid, executable, started };
+      const stalePg = join(fixture, "stale-postgres-pid");
+      const staleValkey = join(fixture, "stale-valkey-pid");
+      await writeFile(
+        stalePg,
+        `${pid}${savedPgPid.slice(savedPgPid.indexOf("\n"))}\n`,
+      );
+      await writeFile(staleValkey, `${pid}\n`);
+      await root(
+        [
+          "install",
+          "-m",
+          "600",
+          "-o",
+          "stll-cloud",
+          "-g",
+          "stll-cloud",
+          stalePg,
+          `${state}/postgres/postmaster.pid`,
+        ],
+        "Cached PostgreSQL identifier fixture",
+      );
+      await root(
+        [
+          "install",
+          "-m",
+          "600",
+          "-o",
+          "stll-cloud",
+          "-g",
+          "stll-cloud",
+          staleValkey,
+          `${state}/valkey/valkey.pid`,
+        ],
+        "Cached Valkey identifier fixture",
+      );
+      await start();
+      assert(
+        (await pgQuery("SELECT 1")) === "1",
+        "PostgreSQL stale-identifier restart failed",
+      );
+      assert(
+        (await valkey(["PING"])) === "PONG",
+        "Valkey stale-identifier restart failed",
+      );
+      assert(monitor.exitCode === null, "Restart stopped an unrelated child");
+      assert(
+        (await root(
+          ["readlink", "-f", `/proc/${pid}/exe`],
+          "Preserved child executable",
+        )) === executable,
+        "Unrelated child executable changed",
+      );
+      assert(
+        (await root(
+          ["stat", "-c", "%u", `/proc/${pid}`],
+          "Preserved child owner",
+        )) === uid,
+        "Unrelated child owner changed",
+      );
+      assert(
+        (await root(
+          ["awk", "{ print $22 }", `/proc/${pid}/stat`],
+          "Preserved child start identity",
+        )) === started,
+        "Unrelated child start identity changed",
+      );
+    } finally {
+      try {
+        switch (identity.status) {
+          case "verified": {
+            const removeStale = String.raw`
+set -euo pipefail
+if [[ -d "/proc/$CHILD_PID" && "$(stat -c '%u' "/proc/$CHILD_PID")" == "$CHILD_UID" && "$(readlink -f "/proc/$CHILD_PID/exe")" == "$CHILD_EXE" && "$(awk '{ print $22 }' "/proc/$CHILD_PID/stat")" == "$CHILD_STARTED" ]]; then
+  kill -TERM -- "$CHILD_PID"
+fi
+for file in "$STATE/postgres/postmaster.pid" "$STATE/valkey/valkey.pid"; do
+  if [[ -f "$file" && ! -L "$file" && "$(head -n 1 "$file")" == "$CHILD_PID" ]]; then rm -- "$file"; fi
+done
+`;
+            await root(
+              [
+                "env",
+                `STATE=${state}`,
+                `CHILD_PID=${identity.pid}`,
+                `CHILD_UID=${identity.uid}`,
+                `CHILD_EXE=${identity.executable}`,
+                `CHILD_STARTED=${identity.started}`,
+                "bash",
+                "-c",
+                removeStale,
+              ],
+              "Remove only spawned child and injected identifiers",
+            );
+            break;
+          }
+          case "pending":
+            break;
+          default: {
+            const exhaustive: never = identity;
+            throw new Error(`Unexpected child state: ${exhaustive}`);
+          }
+        }
+      } finally {
+        // This retained monitor belongs to this fixture; never signal a cached PID.
+        if (monitor.exitCode === null) monitor.kill();
+        await monitor.exited;
+      }
+    }
   };
   const nonrootInstall = async () => {
     const username = `stll-cloud-ci-${process.pid}`;
@@ -484,6 +725,11 @@ if (fs.statSync(path.join(vite, "consumer-cache")).uid !== uid) process.exit(1);
     assert(
       (await readEnvironment()) === environment,
       "Repeated startup changed local environment",
+    );
+    await stalePidRestart();
+    assert(
+      (await readEnvironment()) === environment,
+      "Cached identifier restart changed local environment",
     );
     await root(["rm", envPath], "Prepare unowned environment fixture");
     await writeFile(envPath, "UNOWNED_TEST_FILE=1\n");

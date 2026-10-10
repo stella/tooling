@@ -290,6 +290,7 @@ CACHE_PARENT="$FIXTURE_ROOT/cache"
 BUN_CACHE="$CACHE_PARENT/bun/$OUTPUT_UID"
 ${assignments}
 ${runtimePath}
+EXPECTED_PATH="$PATH"
 install() {
   [[ "$#" == 8 && "$1" == -d && "$2" == -m && "$4" == -o && "$6" == -g ]] || fail 'Unexpected provisioning arguments'
   if [[ "$8" == "$BUN_CACHE" ]]; then
@@ -308,7 +309,7 @@ stat() {
 }
 runuser() {
   [[ "$#" == 10 && "$1" == -u && "$2" == "$OUTPUT_USER" && "$3" == -- && "$4" == env ]] || fail 'Dependencies do not run as the caller'
-  [[ "$5" == "HOME=$OUTPUT_HOME" && "$6" == "BUN_INSTALL_CACHE_DIR=$BUN_CACHE" && "$7" == "PATH=$NODE_DIR/bin:$BUN_DIR:/usr/local/bin:/usr/bin:/bin" ]] || fail 'Caller environment is missing'
+  [[ "$5" == "HOME=$OUTPUT_HOME" && "$6" == "BUN_INSTALL_CACHE_DIR=$BUN_CACHE" && "$7" == "PATH=$EXPECTED_PATH" ]] || fail 'Caller environment is missing'
   [[ "$8" == '/opt/stll-cloud/bun/${policy.bun}/bun' && "$9" == install ]] || fail 'Pinned install is missing'
   shift 9
   [[ "$1" == --frozen-lockfile ]] || fail 'Frozen install is missing'

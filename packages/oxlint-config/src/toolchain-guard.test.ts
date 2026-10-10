@@ -13,6 +13,7 @@ import path from "node:path";
 
 import toolchain from "../toolchain.json";
 import { cloudSetupPath, generateCloudSetup } from "./cloud-setup";
+import type { parseCloudSetup } from "./cloud-setup-schema";
 import {
   checkToolchain,
   parseToolchainConfiguration,
@@ -383,7 +384,7 @@ test("repository configuration accepts an explicit cloud declaration without cha
     services: ["postgres", "valkey"],
     envFile: ".env",
     install: "bun install --frozen-lockfile",
-  };
+  } satisfies NonNullable<ReturnType<typeof parseCloudSetup>>;
   const configured = parseToolchainConfiguration({
     optOuts: [{ rule: "bun-pins", reason: "Repository decision" }],
     cloud,

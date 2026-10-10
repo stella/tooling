@@ -19,19 +19,23 @@ test("engine integration refuses non-CI execution before preparing services", ()
   );
 });
 
-test("owned engine cleanup remains syntactically valid Bash", () => {
+test("every owned-state shell fragment remains syntactically valid Bash", () => {
   const source = readFileSync(
     path.join(import.meta.dirname, "cloud-setup-integration.ts"),
     "utf8",
   );
-  const cleanup = source
-    .match(/const cleanup = String\.raw`([\s\S]*?)`;/)
-    ?.at(1);
-  expect(cleanup).toBeDefined();
-  if (cleanup === undefined) throw new Error("Integration cleanup is absent");
-  const result = Bun.spawnSync(["bash", "-n"], { stdin: Buffer.from(cleanup) });
-  expect(result.exitCode).toBe(0);
-  expect(result.stderr.toString()).toBe("");
+  const programs = [
+    ...source.matchAll(/const \w+ = String\.raw`([\s\S]*?)`;/g),
+  ];
+  expect(programs.length).toBeGreaterThan(0);
+  for (const program of programs) {
+    const body = program.at(1);
+    if (body === undefined)
+      throw new Error("Owned-state shell fragment is absent");
+    const result = Bun.spawnSync(["bash", "-n"], { stdin: Buffer.from(body) });
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr.toString()).toBe("");
+  }
 });
 
 test("nonroot dependency and Vite ownership verifier parses without executing writes", () => {
