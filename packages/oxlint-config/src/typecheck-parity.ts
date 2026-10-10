@@ -688,7 +688,8 @@ export const fixtureCompilerOptions = (args: FixtureCompilerOptionsArgs) => {
       ([name]) => !EMIT_ONLY_OPTIONS.has(name),
     ),
   );
-  return { ...options, noEmit: true };
+  options["noEmit"] = true;
+  return options;
 };
 
 export const fixturePackageContext = (configPath: string) => {
@@ -732,7 +733,10 @@ export const groupCompilerConfigs = (configs: CompilerConfig[]) => {
   >();
   for (const config of configs) {
     const key = canonicalOptions({
-      compilerOptions: config.compilerOptions,
+      compilerOptions: fixtureCompilerOptions({
+        compilerOptions: config.compilerOptions,
+        configPath: config.path,
+      }),
       packageContext: config.packageContext ?? {},
     });
     const existing = groups.get(key);
@@ -862,6 +866,30 @@ const timedCommand = ({ command, args, repo }: TimedCommandOptions) => {
 const NO_WORK_MAX_RSS_KIB = 16 * 1024;
 const NO_WORK_MAX_WALL_SECONDS = 0.25;
 
+type SourceDiagnosticSetOptions = {
+  output: string;
+  repo: string;
+  scratch: string;
+  configPaths: readonly string[];
+};
+export const sourceDiagnosticSet = ({
+  output,
+  repo,
+  scratch,
+  configPaths,
+}: SourceDiagnosticSetOptions) => {
+  const configs = new Set(configPaths.map((path) => resolve(path)));
+  return diagnosticSet(output, repo).filter((diagnostic) => {
+    if (diagnostic.startsWith("<config>:")) return true;
+    const file = /^(.*):[0-9]+:[0-9]+$/.exec(diagnostic)?.at(1);
+    if (file === undefined) return false;
+    const path = resolve(repo, file);
+    return (
+      !configs.has(path) && path !== scratch && !path.startsWith(scratch + "/")
+    );
+  });
+};
+
 type CompareRepositoryArgs = {
   repo: string;
   compiler: string;
@@ -953,13 +981,11 @@ export const compareRepository = async ({
       repo,
     });
     const sourceDiagnostics = (output: string) =>
-      diagnosticSet(output, repo).filter((diagnostic) => {
-        if (diagnostic.startsWith("<config>:")) return true;
-        const match = /^(.*):[0-9]+:[0-9]+$/.exec(diagnostic);
-        const file = match?.at(1);
-        if (file === undefined || !/\.[cm]?[jt]sx?$/.test(file)) return false;
-        const path = resolve(repo, file);
-        return path !== scratch && !path.startsWith(scratch + "/");
+      sourceDiagnosticSet({
+        output,
+        repo,
+        scratch,
+        configPaths: graph.projects.map(({ path }) => path),
       });
     const baselineDiagnostics = sourceDiagnostics(baselineRaw.output);
     // TypeScript reports emitted-with-diagnostics as 2; Bun's checker reports diagnostics as 1.

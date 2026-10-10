@@ -25,6 +25,7 @@ import {
   diagnosticParity,
   fixtures,
   resolveCompiler,
+  sourceDiagnosticSet,
 } from "./typecheck-parity";
 
 const repo = resolve("/consumer-repo");
@@ -46,7 +47,7 @@ test("compiler config grouping ignores property order but preserves option diffe
       compilerOptions: { strict: true, paths: { second: ["b"], first: ["a"] } },
     },
     {
-      path: "/repo/same/tsconfig.json",
+      path: "/repo/strict/tsconfig.same.json",
       compilerOptions: { paths: { first: ["a"], second: ["b"] }, strict: true },
     },
     {
@@ -858,6 +859,60 @@ test("config grouping preserves distinct package module contexts", () => {
   expect(groupCompilerConfigs(configs).map(({ projects }) => projects)).toEqual(
     [["/repo/esm/tsconfig.json"], ["/repo/commonjs/tsconfig.json"]],
   );
+});
+
+test("config grouping preserves path-dependent ambient and alias resolution", () => {
+  for (const compilerOptions of [
+    { strict: true },
+    {
+      strict: true,
+      paths: { "@/*": ["./src/*"] },
+      typeRoots: ["/shared/types"],
+    },
+    { strict: true, rootDirs: ["./src"], typeRoots: ["/shared/types"] },
+  ]) {
+    const configs = ["first", "second"].map((name) => ({
+      path: `/repo/${name}/tsconfig.json`,
+      compilerOptions,
+    }));
+    expect(groupCompilerConfigs(configs).length).toBe(2);
+  }
+  const configs = ["first", "second"].map((name) => ({
+    path: `/repo/${name}/tsconfig.json`,
+    compilerOptions: { strict: true, typeRoots: ["/shared/types"] },
+  }));
+  expect(groupCompilerConfigs(configs).length).toBe(1);
+});
+
+test("repository source diagnostics preserve JSON and exclude generated outputs and configs", () => {
+  const diagnostics = sourceDiagnosticSet({
+    output: [
+      "src/data.json(2,1): error TS1005: Expected comma.",
+      "src/input.ts(1,1): error TS2322: Type mismatch.",
+      "/scratch/project/output/input.d.ts(1,1): error TS2322: Generated.",
+      "tsconfig.json(1,1): error TS5069: Invalid config.",
+    ].join("\n"),
+    repo,
+    scratch: "/scratch",
+    configPaths: [join(repo, "tsconfig.json")],
+  });
+  expect(diagnostics).toEqual(["src/data.json:2:1005", "src/input.ts:1:2322"]);
+  expect(
+    compareDiagnosticSets(
+      { status: 1, diagnostics },
+      { status: 1, diagnostics },
+    ).passed,
+  ).toBe(true);
+  for (const missing of diagnostics)
+    expect(
+      compareDiagnosticSets(
+        { status: 1, diagnostics },
+        {
+          status: 1,
+          diagnostics: diagnostics.filter((entry) => entry !== missing),
+        },
+      ).passed,
+    ).toBe(false);
 });
 
 test("fixture configuration errors fail even when both compiler diagnostics and exits match", () => {
