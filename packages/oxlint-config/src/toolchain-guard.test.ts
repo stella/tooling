@@ -70,6 +70,21 @@ test("tracked root and nested action metadata cannot bypass snapshot discovery",
   }
 });
 
+test("mise environment overrides remain part of the tracked configuration snapshot", () => {
+  for (const file of [
+    "mise.ci.toml",
+    ".mise.production.toml",
+    "tools/mise.ci.local.toml",
+    ".config/mise/config.ci.toml",
+    "mise/conf.d/node.toml",
+  ])
+    expect(
+      fixture({ [file]: "[tools]\nnode = 'latest'" }).some(
+        ({ rule, path }) => rule === "runtime-manager" && path === file,
+      ),
+    ).toBe(true);
+});
+
 test("configuration discovery shares lockfile presence without parsing lock contents", () => {
   for (const file of ["bun.lock", "uv.lock", "tools/bun.lock", "tools/uv.lock"])
     expect(toolchainInputKind(file)).toBe("presence");

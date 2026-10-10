@@ -17,6 +17,7 @@ const policy = {
       type: "direct",
       compilerPackage: "typescript",
       compilerSpecifier: "7.0.2",
+      typecheckCommand: "tsc --noEmit",
     },
     {
       type: "split-compatibility",
@@ -24,6 +25,8 @@ const policy = {
       compilerSpecifier: "npm:typescript@7.0.2",
       compatibilityPackage: "typescript",
       compatibilitySpecifier: "6.0.3",
+      typecheckCommand:
+        "node ./node_modules/@typescript/native/bin/tsc --noEmit",
     },
   ],
   typescript6Compatibility: {
@@ -286,6 +289,61 @@ describe("shared package pins", () => {
 });
 
 describe("TypeScript install layouts", () => {
+  test("split compiler scripts select the declared current compiler", () => {
+    const dependencies = {
+      "@typescript/native": "npm:typescript@7.0.2",
+      typescript: "6.0.3",
+    };
+    const expected = "node ./node_modules/@typescript/native/bin/tsc --noEmit";
+    for (const typecheck of [
+      expected,
+      `${expected} --pretty false`,
+      `bun run prepare && ${expected}`,
+    ])
+      expect(manifest({ dependencies, scripts: { typecheck } })).toEqual([]);
+    for (const typecheck of [
+      "tsc --noEmit",
+      "tsgo --noEmit",
+      "bunx tsc --noEmit",
+      "npx tsc --noEmit",
+      "bun run tsc --noEmit",
+      "node ./node_modules/typescript/bin/tsc --noEmit",
+      `${expected} && tsc --noEmit`,
+      `tsc --noEmit || ${expected}`,
+    ])
+      expect(
+        manifest({ dependencies, scripts: { typecheck } }).some(
+          ({ rule }) => rule === "typescript-layout",
+        ),
+      ).toBe(true);
+  });
+  test("direct compiler scripts keep the policy invocation", () => {
+    const dependencies = { typescript: "7.0.2" };
+    expect(
+      manifest({
+        dependencies,
+        scripts: { typecheck: "tsc --noEmit --pretty false" },
+      }),
+    ).toEqual([]);
+    expect(
+      manifest({
+        dependencies,
+        scripts: { typecheck: "tsc --emitDeclarationOnly" },
+      }),
+    ).not.toEqual([]);
+    expect(
+      manifest({
+        dependencies,
+        scripts: { typecheck: "bun --filter app typecheck" },
+      }),
+    ).toEqual([]);
+    expect(
+      manifest({
+        dependencies,
+        scripts: { typecheck: "bun scripts/typecheck.ts" },
+      }),
+    ).toEqual([]);
+  });
   test("all declared layouts pass and every required pin mutation fails", () => {
     for (const layout of policy.typescriptInstallLayouts) {
       const dependencies =

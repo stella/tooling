@@ -3,7 +3,7 @@ import { parse as parseToml } from "smol-toml";
 import { isAlias, isMap, isScalar, isSeq, parseDocument } from "yaml";
 
 import { canonicalDockerRuntime } from "./toolchain-images";
-import { githubAutomationFileKind } from "./toolchain-inputs";
+import { githubAutomationFileKind, isMiseConfigPath } from "./toolchain-inputs";
 
 export const runtimeRules = [
   "bun-pins",
@@ -61,7 +61,61 @@ const compareRelease = (left: readonly number[], right: readonly number[]) => {
   return 0;
 };
 
-/** Evaluate final-release Python constraints, including compatible and prefix matches. */
+/** A minor policy covers every nonnegative patch in that release series. */
+type PythonSeriesRequirementOptions = {
+  current: readonly number[];
+  operator: string;
+  target: readonly number[];
+  wildcard: boolean;
+};
+const pythonSeriesRequirementMatches = ({
+  current,
+  operator,
+  target,
+  wildcard,
+}: PythonSeriesRequirementOptions) => {
+  const prefixCovers = (prefix: readonly number[]) =>
+    prefix.length <= 2 &&
+    prefix.every((part, index) => current.at(index) === part);
+  const prefixOverlaps =
+    target.slice(0, 2).every((part, index) => current.at(index) === part) &&
+    target.slice(3).every((part) => part === 0);
+  if (wildcard) {
+    if (operator === "==") return prefixCovers(target);
+    if (operator === "!=") return !prefixOverlaps;
+    return false;
+  }
+  const minimumComparison = compareRelease(current, target);
+  const seriesComparison = compareRelease(
+    current.slice(0, 2),
+    target.slice(0, 2),
+  );
+  switch (operator) {
+    case "==":
+      return false;
+    case "!=":
+      return !(
+        seriesComparison === 0 && target.slice(3).every((part) => part === 0)
+      );
+    case ">=":
+      return minimumComparison >= 0;
+    case ">":
+      return minimumComparison > 0;
+    case "<=":
+    case "<":
+      return seriesComparison < 0;
+    case "~=":
+      return (
+        target.length >= 2 &&
+        minimumComparison >= 0 &&
+        prefixCovers(target.slice(0, -1))
+      );
+    default:
+      return false;
+  }
+};
+
+/** Evaluate final-release Python constraints against the complete selected version set. */
 const pythonRequirementMatches = (requirement: unknown, version: string) => {
   if (typeof requirement !== "string" || requirement.trim() === "")
     return false;
@@ -73,8 +127,15 @@ const pythonRequirementMatches = (requirement: unknown, version: string) => {
     if (match === null) return false;
     const operator = match[1];
     const release = match[2];
-    if (release === undefined) return false;
+    if (release === undefined || operator === undefined) return false;
     const target = release.split(".").map(Number);
+    if (current.length === 2)
+      return pythonSeriesRequirementMatches({
+        current,
+        operator,
+        target,
+        wildcard: match[3] !== undefined,
+      });
     const comparison = compareRelease(current, target);
     if (match[3] !== undefined) {
       if (operator !== "==" && operator !== "!=") return false;
@@ -265,7 +326,7 @@ export const checkRuntimeFile = ({
         });
     }
   }
-  if (name === "mise.toml" || name === ".mise.toml") {
+  if (isMiseConfigPath(file)) {
     const parsed = toml("runtime-manager");
     const tools = parsed?.["tools"];
     if (record(tools)) {

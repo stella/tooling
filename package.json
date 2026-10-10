@@ -9,7 +9,7 @@
   "scripts": {
     "build": "bun --filter @stll/oxlint-config build && bun --filter @stll/oxlint-plugin build",
     "changeset": "changeset",
-    "changeset:version": "changeset version && bun scripts/check-lockfile-workspace-versions.ts --write && bun install --frozen-lockfile",
+    "changeset:version": "bun scripts/ensure-toolchain-release.ts && changeset version && bun scripts/check-lockfile-workspace-versions.ts --write && bun install --frozen-lockfile",
     "check:lockfile-versions": "bun scripts/check-lockfile-workspace-versions.ts",
     "check:registry-versions": "bun scripts/check-registry-versions.ts",
     "typecheck": "bun check -p packages/oxlint-config && bun check -p packages/oxlint-plugin",

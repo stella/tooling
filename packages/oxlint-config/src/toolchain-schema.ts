@@ -58,6 +58,7 @@ export const parseToolchainPolicy = (input: unknown) => {
     if (!record(layout)) throw new Error("invalid TypeScript install layout");
     const compilerPackage = string(layout, "compilerPackage");
     const compilerSpecifier = string(layout, "compilerSpecifier");
+    const typecheckCommand = string(layout, "typecheckCommand");
     switch (layout["type"]) {
       case "direct":
         if (
@@ -67,7 +68,12 @@ export const parseToolchainPolicy = (input: unknown) => {
           throw new Error(
             "direct TypeScript layout differs from shared version",
           );
-        return { type: "direct", compilerPackage, compilerSpecifier } as const;
+        return {
+          type: "direct",
+          compilerPackage,
+          compilerSpecifier,
+          typecheckCommand,
+        } as const;
       case "split-compatibility": {
         const compatibilityPackage = string(layout, "compatibilityPackage");
         const compatibilitySpecifier = string(layout, "compatibilitySpecifier");
@@ -84,6 +90,7 @@ export const parseToolchainPolicy = (input: unknown) => {
           compilerSpecifier,
           compatibilityPackage,
           compatibilitySpecifier,
+          typecheckCommand,
         } as const;
       }
       default:

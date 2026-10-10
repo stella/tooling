@@ -2,7 +2,11 @@
 
 import { expect, test } from "bun:test";
 
-import { githubAutomationFileKind } from "./toolchain-inputs";
+import {
+  githubAutomationFileKind,
+  isMiseConfigPath,
+  toolchainInputKind,
+} from "./toolchain-inputs";
 import { checkRuntimeFile, runtimeRules } from "./toolchain-runtime";
 
 const sha = "a".repeat(40);
@@ -189,8 +193,11 @@ test("requires-python ranges include the shared Python release", () => {
     "~=3.13",
     "==3.13.*",
     ">=3.13,!=3.12.*",
-    "<=3.13.0",
-    "==3.13.0",
+    "<3.14.0",
+    "<=3.14",
+    "~=3.13.0",
+    "==3.*",
+    "!=3.12.7",
   ])
     expect(
       check(
@@ -212,6 +219,14 @@ test("requires-python ranges include the shared Python release", () => {
     "",
     ">=3.13,",
     ">3.13.0",
+    "<=3.13.0",
+    "==3.13.0",
+    "!=3.13.7",
+    "!=3.13.1000000",
+    "!=3.13.7.*",
+    ">=3.13.1,<3.14",
+    "<3.13.1000000",
+    "<=3.13.9999999999999999999999",
   ])
     expect(
       check(
@@ -221,6 +236,61 @@ test("requires-python ranges include the shared Python release", () => {
         "3.13",
       ).some(({ rule }) => rule === "python-version"),
     ).toBe(true);
+});
+
+test("patch Python policy still checks a single exact release against support constraints", () => {
+  for (const requirement of [
+    ">3.13.0",
+    "==3.13.7",
+    "<=3.13.7",
+    ">=3.13.6,!=3.13.8",
+    "~=3.13.1",
+    "!=3.13.0",
+  ])
+    expect(
+      check("pyproject.toml", `[project]\nrequires-python = '${requirement}'`),
+    ).toEqual([]);
+  expect(
+    check("pyproject.toml", "[project]\nrequires-python = '!=3.13.7'").some(
+      ({ rule }) => rule === "python-version",
+    ),
+  ).toBe(true);
+});
+
+test("mise environment and configuration layouts share discovery and version checks", () => {
+  const paths = [
+    "mise.ci.toml",
+    ".mise.ci.toml",
+    "tools/mise.production.toml",
+    "mise.production.local.toml",
+    "tools/.mise.local.toml",
+    "mise/config.ci.toml",
+    ".mise/config.local.toml",
+    ".config/mise.toml",
+    ".config/mise/config.production.toml",
+    "mise/conf.d/node-tools.toml",
+    ".mise/conf.d/node.toml",
+    ".config/mise/conf.d/tools.toml",
+  ];
+  for (const file of paths) {
+    expect(isMiseConfigPath(file)).toBe(true);
+    expect(toolchainInputKind(file)).toBe("config");
+    const content = `[tools]\nnode = '${policy.node}'\nbun = '${policy.bun}'`;
+    expect(check(file, content)).toEqual([]);
+    expect(
+      check(file, content.replace(policy.node, "latest")).some(
+        ({ rule }) => rule === "runtime-manager",
+      ),
+    ).toBe(true);
+  }
+  for (const file of [
+    "config.ci.toml",
+    "mise.ci.toml.backup",
+    "mise/conf.d/.hidden.toml",
+    "vendor/mise.ci.toml",
+    "node_modules/example/mise.toml",
+  ])
+    expect(isMiseConfigPath(file)).toBe(false);
 });
 
 test("minor Python policy preserves explicit patch selectors within its release series", () => {

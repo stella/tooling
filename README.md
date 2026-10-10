@@ -53,7 +53,8 @@ The Rust stable pin is `1.96.0`; `rustCompilerDevelopment` is
 nightly. A nightly without that component fails.
 
 `engines.node` and `requires-python` are support ranges: they must include the
-shared runtime. Python comparisons, compatible releases, wildcard exclusions,
+shared runtime. A minor Python pin requires support for every patch in that
+series. Python comparisons, compatible releases, wildcard exclusions,
 and comma intersections are supported for final releases; unsupported syntax
 produces a diagnostic.
 
@@ -85,7 +86,9 @@ The generator derives the reference from the same policy and ecosystem
 registry as the guard: run `bun scripts/write-dependabot-policy.ts` after
 policy changes. Consumers can copy its applicable entries and directory paths;
 the CLI rejects missing coverage and policy drift. Owned package pins follow
-release metadata through `bun scripts/check-lockfile-workspace-versions.ts
+release metadata. The `changeset:version` command first includes the policy
+package in the release plan whenever an owned workspace pin changes, then
+synchronizes pins through `bun scripts/check-lockfile-workspace-versions.ts
 --write`, which also refreshes cached workspace versions without regenerating
 the dependency graph.
 

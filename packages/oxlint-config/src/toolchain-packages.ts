@@ -10,13 +10,19 @@ export const packageRules = [
 ] as const;
 
 type Layout =
-  | { type: "direct"; compilerPackage: string; compilerSpecifier: string }
+  | {
+      type: "direct";
+      compilerPackage: string;
+      compilerSpecifier: string;
+      typecheckCommand: string;
+    }
   | {
       type: "split-compatibility";
       compilerPackage: string;
       compilerSpecifier: string;
       compatibilityPackage: string;
       compatibilitySpecifier: string;
+      typecheckCommand: string;
     };
 
 type PackagePolicy = {
@@ -258,7 +264,7 @@ export const checkPackageFiles = ({
       (layout) => dependencies[layout.compilerPackage] !== undefined,
     );
     if (usesCompiler) {
-      const matches = policy.typescriptInstallLayouts.some((layout) => {
+      const selectedLayout = policy.typescriptInstallLayouts.find((layout) => {
         if (dependencies[layout.compilerPackage] !== layout.compilerSpecifier)
           return false;
         if (layout.type === "split-compatibility")
@@ -272,7 +278,7 @@ export const checkPackageFiles = ({
             dependencies[other.compilerPackage] === undefined,
         );
       });
-      if (!matches)
+      if (selectedLayout === undefined)
         add({
           file,
           rule: "typescript-layout",
@@ -280,6 +286,33 @@ export const checkPackageFiles = ({
           message:
             "TypeScript compiler and compatibility packages must match one complete declared install layout",
         });
+      const command = record(json["scripts"])
+        ? json["scripts"]["typecheck"]
+        : undefined;
+      if (selectedLayout !== undefined && typeof command === "string") {
+        const directCompiler =
+          /^(?:(?:bunx|npx|bun run|bun x)\s+(?:--[\w-]+\s+)*)?(?:tsc|tsgo)(?:\s|$)|^node\s+\S*\/bin\/(?:tsc|tsgo)(?:\.js)?(?:\s|$)/;
+        const normalizedExpected = selectedLayout.typecheckCommand
+          .replace(/\s+/g, " ")
+          .trim();
+        for (const segment of command.split(/&&|\|\||[;|\n]/)) {
+          const normalized = segment.trim().replace(/\s+/g, " ");
+          if (!directCompiler.test(normalized)) continue;
+          if (
+            normalized === normalizedExpected ||
+            normalized.startsWith(`${normalizedExpected} `)
+          )
+            continue;
+          add({
+            file,
+            rule: "typescript-layout",
+            key: "typecheck",
+            value: command,
+            message: `typecheck compiler invocation must use ${selectedLayout.typecheckCommand}`,
+          });
+          break;
+        }
+      }
     }
     if (
       record(json["engines"]) &&
