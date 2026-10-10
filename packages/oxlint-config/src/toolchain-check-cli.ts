@@ -18,7 +18,14 @@ try {
       readFileSync(new URL("../toolchain.json", import.meta.url), "utf8"),
     ),
   );
-  const diagnostics = checkToolchain({ root: process.cwd(), policy });
+  const diagnostics = checkToolchain({
+    root: process.cwd(),
+    policy,
+    onDelegated: ({ path, line, tool, selector, ref }) =>
+      process.stdout.write(
+        `${path}:${line}: [runtime-delegated] setup-${tool} ${selector} delegates its version to checkout ref ${ref}\n`,
+      ),
+  });
   for (const diagnostic of diagnostics)
     process.stderr.write(
       `${diagnostic.path}:${diagnostic.line}: [${diagnostic.rule}] ${diagnostic.message}\n`,

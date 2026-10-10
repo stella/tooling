@@ -39,6 +39,15 @@ type RuntimeDiagnostic = {
   message: string;
 };
 
+export type RuntimeDelegation = {
+  path: string;
+  line: number;
+  tool: "node" | "python" | "bun";
+  selector: string;
+  checkoutPath: string;
+  ref: string;
+};
+
 type CheckRuntimeFileOptions = {
   file: string;
   text: string;
@@ -46,6 +55,7 @@ type CheckRuntimeFileOptions = {
   trackedFiles: ReadonlySet<string>;
   readFile: (file: string) => string | undefined;
   repository?: string | undefined;
+  onDelegated?: ((report: RuntimeDelegation) => void) | undefined;
 };
 
 const record = (value: unknown): value is Record<string, unknown> =>
@@ -184,6 +194,7 @@ export const checkRuntimeFile = ({
   trackedFiles,
   readFile,
   repository,
+  onDelegated,
 }: CheckRuntimeFileOptions): RuntimeDiagnostic[] => {
   const diagnostics: RuntimeDiagnostic[] = [];
   const name = path.posix.basename(file);
@@ -503,8 +514,12 @@ export const checkRuntimeFile = ({
       ? text.slice(0, offset).split("\n").length
       : 1;
   };
-  type CheckoutBinding = { path: string; source: "tracked" | "untrusted" };
+  type CheckoutBinding =
+    | { path: string; source: "tracked" | "untrusted" }
+    | { path: string; source: "delegated"; ref: string };
   let checkoutBindings: CheckoutBinding[] = [];
+  let checkoutDestinations = new Map<string, number>();
+  let unknownCheckoutDestination = false;
   const staticRepositoryPath = (value: unknown): value is string =>
     typeof value === "string" &&
     value !== "" &&
@@ -513,6 +528,8 @@ export const checkRuntimeFile = ({
     !value.includes(":") &&
     !path.posix.isAbsolute(value) &&
     !value.split("/").includes("..");
+  const normalizeCheckoutPath = (prefix: string) =>
+    path.posix.normalize(prefix).replace(/\/$/, "") || ".";
   type RuntimeReferenceOptions = {
     value: unknown;
     tool: "node" | "python" | "bun";
@@ -539,7 +556,16 @@ export const checkRuntimeFile = ({
               selector.startsWith(`${entry.path}/`),
           );
     const target =
-      selector === undefined || binding?.source === "untrusted"
+      selector === undefined ||
+      unknownCheckoutDestination ||
+      binding?.source === "untrusted" ||
+      [...checkoutDestinations].some(
+        ([prefix, count]) =>
+          count > 1 &&
+          (prefix === "." ||
+            selector === prefix ||
+            selector.startsWith(`${prefix}/`)),
+      )
         ? undefined
         : binding === undefined || binding.path === "."
           ? selector
@@ -547,12 +573,23 @@ export const checkRuntimeFile = ({
     if (
       target === undefined ||
       !allowed.includes(path.posix.basename(target)) ||
-      !trackedFiles.has(target)
+      (binding?.source !== "delegated" && !trackedFiles.has(target))
     ) {
       add({
         rule,
         line,
         message: `setup-${tool} must reference a tracked ${allowed.join(" or ")}`,
+      });
+      return;
+    }
+    if (binding?.source === "delegated" && selector !== undefined) {
+      onDelegated?.({
+        path: file,
+        line,
+        tool,
+        selector,
+        checkoutPath: binding.path,
+        ref: binding.ref,
       });
       return;
     }
@@ -659,6 +696,35 @@ export const checkRuntimeFile = ({
     const source = sourceMap({ node, key });
     return isMap(source) ? resolveNode(source.get(key, true)) : undefined;
   };
+  const dynamicRefBody = (value: unknown) => {
+    if (typeof value !== "string" || !value.startsWith("${{")) return undefined;
+    let quote: "'" | '"' | undefined;
+    for (let index = 3; index < value.length; index++) {
+      const character = value.at(index);
+      if (quote !== undefined) {
+        if (character === quote) {
+          if (quote === "'" && value.at(index + 1) === "'") index++;
+          else quote = undefined;
+        } else if (quote === '"' && character === "\\") index++;
+        continue;
+      }
+      if (character === "'" || character === '"') quote = character;
+      else if (value.startsWith("${{", index)) return undefined;
+      else if (character === "}" && value.at(index + 1) === "}")
+        return index === value.length - 2
+          ? value.slice(3, index).trim()
+          : undefined;
+    }
+    return undefined;
+  };
+  const checkoutPrefixOf = (node: unknown) => {
+    const destination = getNode(getNode(node, "with"), "path");
+    return destination === undefined
+      ? "."
+      : isScalar(destination)
+        ? destination.value
+        : undefined;
+  };
   const checkAction = (node: unknown) => {
     node = resolveNode(node);
     if (!isMap(node)) return;
@@ -749,15 +815,9 @@ export const checkRuntimeFile = ({
       });
     if (automationKind === "workflow" && action === "actions/checkout") {
       const options = getNode(node, "with");
-      const checkoutPath = getNode(options, "path");
       const checkoutRepository = getNode(options, "repository");
       const checkoutRef = getNode(options, "ref");
-      const prefix =
-        checkoutPath === undefined
-          ? "."
-          : isScalar(checkoutPath)
-            ? checkoutPath.value
-            : undefined;
+      const prefix = checkoutPrefixOf(node);
       const repo =
         checkoutRepository === undefined
           ? undefined
@@ -775,17 +835,44 @@ export const checkRuntimeFile = ({
         isScalar(checkoutRef) &&
         checkoutRef.value === "${{ job.workflow_sha }}";
       const currentSource = self && checkoutRef === undefined;
+      const refValue = isScalar(checkoutRef) ? checkoutRef.value : undefined;
+      const dynamicRef = dynamicRefBody(refValue);
+      const delegatedSource =
+        (self || repo === "${{ job.workflow_repository }}") &&
+        dynamicRef !== undefined &&
+        dynamicRef !== "" &&
+        !/^(?:'(?:[^']|'')*'|"(?:[^"\\]|\\.)*"|(?:true|false|null)|-?(?:0x[\da-f]+|(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?))$/i.test(
+          dynamicRef,
+        ) &&
+        !/^(?:github\s*(?:\.\s*sha|\[\s*['"]sha['"]\s*\])|job\s*(?:\.\s*workflow_sha|\[\s*['"]workflow_sha['"]\s*\]))$/i.test(
+          dynamicRef,
+        );
+
       if (!staticRepositoryPath(prefix)) {
         // Unknown checkout destinations may shadow any tracked selector.
         checkoutBindings.push({ path: ".", source: "untrusted" });
       } else {
-        checkoutBindings.push({
-          path: path.posix.normalize(prefix),
-          source:
-            (workflowSource || currentSource) && ref === approved?.sha
-              ? "tracked"
-              : "untrusted",
-        });
+        const destination = normalizeCheckoutPath(prefix);
+        const trustedWriter =
+          ref === approved?.sha &&
+          sourceMap({ node, key: "if" }) === undefined &&
+          sourceMap({ node, key: "continue-on-error" }) === undefined &&
+          checkoutDestinations.get(destination) === 1 &&
+          !unknownCheckoutDestination;
+        if (trustedWriter && delegatedSource && typeof refValue === "string")
+          checkoutBindings.push({
+            path: destination,
+            source: "delegated",
+            ref: refValue,
+          });
+        else
+          checkoutBindings.push({
+            path: destination,
+            source:
+              trustedWriter && (workflowSource || currentSource)
+                ? "tracked"
+                : "untrusted",
+          });
       }
     }
     const tool =
@@ -824,8 +911,31 @@ export const checkRuntimeFile = ({
   };
   const checkSteps = (node: unknown) => {
     checkoutBindings = [];
+    checkoutDestinations = new Map();
+    unknownCheckoutDestination = false;
     node = resolveNode(node);
-    if (isSeq(node)) for (const step of node.items) checkAction(step);
+    if (!isSeq(node)) return;
+    if (automationKind === "workflow")
+      for (const step of node.items) {
+        const uses = getNode(step, "uses");
+        if (
+          !isScalar(uses) ||
+          typeof uses.value !== "string" ||
+          !uses.value.toLowerCase().startsWith("actions/checkout@")
+        )
+          continue;
+        const prefix = checkoutPrefixOf(step);
+        if (!staticRepositoryPath(prefix)) {
+          unknownCheckoutDestination = true;
+          continue;
+        }
+        const destination = normalizeCheckoutPath(prefix);
+        checkoutDestinations.set(
+          destination,
+          (checkoutDestinations.get(destination) ?? 0) + 1,
+        );
+      }
+    for (const step of node.items) checkAction(step);
   };
   try {
     // Resolve aliases first with an expansion bound before visiting executable fields.
@@ -835,6 +945,8 @@ export const checkRuntimeFile = ({
       if (isMap(jobs))
         for (const key of keysOf(jobs)) {
           checkoutBindings = [];
+          checkoutDestinations = new Map();
+          unknownCheckoutDestination = false;
           const job = getNode(jobs, key);
           checkAction(job);
           checkContainer(getNode(job, "container"));

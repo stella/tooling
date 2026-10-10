@@ -984,8 +984,10 @@ test("prefixed runtime selectors map only preceding matching source snapshots", 
       ),
     ).toBe(true);
     expect(
-      checkSource(workflow(`${foreign}\n${pinned}\n${setup("source/")}`)),
-    ).toEqual([]);
+      checkSource(workflow(`${foreign}\n${pinned}\n${setup("source/")}`)).some(
+        (entry) => entry.rule === rule,
+      ),
+    ).toBe(true);
     expect(
       checkSource(
         workflow(`${checkout("repository: other/repository")}\n${setup("")}`),
@@ -1037,5 +1039,246 @@ test("current root checkout spelling preserves selectors and unknown paths fail 
         ),
       ).some(({ rule }) => rule === "runtime-workflow"),
     ).toBe(true);
+  }
+});
+
+test("mapped runtime provenance requires an unconditional unique checkout destination", () => {
+  for (const [tool, action, version, target, rule] of [
+    ["node", "actions/setup-node", "v5", ".node-version", "runtime-workflow"],
+    [
+      "python",
+      "actions/setup-python",
+      "v6",
+      ".python-version",
+      "runtime-workflow",
+    ],
+    ["bun", "oven-sh/setup-bun", "v2", "package.json", "bun-pins"],
+  ]) {
+    const trusted = `      - uses: actions/checkout@${sha} # v5\n        with: {repository: '\${{ job.workflow_repository }}', ref: '\${{ job.workflow_sha }}', path: source}`;
+    const setup = `      - uses: ${action}@${sha} # ${version}\n        with: {${tool}-version-file: source/${target}}`;
+    const fails = (steps: string, defaults = "") =>
+      check(".github/workflows/ci.yml", `${defaults}${workflow(steps)}`).some(
+        (entry) => entry.rule === rule,
+      );
+    expect(fails(`${trusted}\n${setup}`)).toBe(false);
+    for (const field of [
+      "if: true",
+      "if: false",
+      "if:",
+      "if: '${{ inputs.enabled }}'",
+      "continue-on-error: true",
+      "continue-on-error: false",
+      "continue-on-error:",
+    ]) {
+      const conditional = `${trusted}\n        ${field}`;
+      expect(fails(`${conditional}\n${setup}`)).toBe(true);
+      const foreign = `      - uses: actions/checkout@${sha} # v5\n        with: {repository: other/repository, path: source}`;
+      expect(fails(`${foreign}\n${conditional}\n${setup}`)).toBe(true);
+    }
+    for (const path of ["source", "./source", "source/", "source/./"]) {
+      for (const ref of [sha, "main"]) {
+        const other = `      - uses: actions/checkout@${ref}\n        if: false\n        with: {repository: other/repository, path: '${path}'}`;
+        for (const steps of [
+          `${other}\n${trusted}\n${setup}`,
+          `${trusted}\n${other}\n${setup}`,
+          `${trusted}\n${setup}\n${other}`,
+        ])
+          expect(fails(steps)).toBe(true);
+      }
+    }
+    const alias = `defaults: &other {uses: 'actions/checkout@${sha}', with: {repository: other/repository, path: source}}\n`;
+    expect(fails(`${trusted}\n${setup}\n      - <<: *other`, alias)).toBe(true);
+    const conditionalAlias = `defaults: &condition {if: false}\n`;
+    expect(
+      fails(`${trusted}\n        <<: *condition\n${setup}`, conditionalAlias),
+    ).toBe(true);
+    const unknown = `      - uses: actions/checkout@${sha} # v5\n        with: {path: '\${{ inputs.destination }}'}`;
+    expect(fails(`${unknown}\n${trusted}\n${setup}`)).toBe(true);
+    expect(fails(`${trusted}\n${setup}\n${unknown}`)).toBe(true);
+    // Later ambiguous checkouts cannot reuse an unrelated tracked shadow file.
+    expect(
+      check(
+        ".github/workflows/ci.yml",
+        workflow(`${setup}\n${trusted}\n${trusted}`),
+        { [`source/${target}`]: files[target] ?? "" },
+      ).some((entry) => entry.rule === rule),
+    ).toBe(true);
+    expect(
+      check(".github/workflows/ci.yml", workflow(`${trusted}\n${trusted}`)),
+    ).toEqual([]);
+    const distinct = `      - uses: actions/checkout@${sha} # v5\n        with: {repository: other/repository, path: unrelated}`;
+    expect(fails(`${trusted}\n${setup}\n${distinct}`)).toBe(false);
+    const rootSetup = setup.replace(`source/${target}`, target);
+    const rootCheckout = `      - uses: actions/checkout@${sha} # v5`;
+    const repeatedRoot = `${rootCheckout}\n      - uses: actions/checkout@${sha} # v5\n        with: {path: './'}\n${rootSetup}`;
+    expect(fails(repeatedRoot)).toBe(true);
+  }
+});
+
+test("dynamic self-repository refs delegate safe selectors without reading current pins", () => {
+  for (const [tool, action, version, target] of [
+    ["bun", "oven-sh/setup-bun", "v2", "package.json"],
+    ["node", "actions/setup-node", "v5", ".node-version"],
+    ["python", "actions/setup-python", "v6", ".python-version"],
+  ]) {
+    for (const repository of [
+      undefined,
+      "stella/example",
+      "${{ github.repository }}",
+      "${{ job.workflow_repository }}",
+    ])
+      for (const ref of [
+        "${{ needs.prepare.outputs.release-ref }}",
+        "${{ inputs.ref }}",
+      ]) {
+        const reports: unknown[] = [];
+        const source = workflow(
+          `      - uses: actions/checkout@${sha} # v5\n        with: {${repository === undefined ? "" : `repository: '${repository}', `}ref: '${ref}', path: source}\n      - uses: ${action}@${sha} # ${version}\n        with: {${tool}-version-file: source/${target}}`,
+        );
+        const diagnostics = checkRuntimeFile({
+          file: ".github/workflows/ci.yml",
+          text: source,
+          policy,
+          repository: "stella/example",
+          trackedFiles: new Set(),
+          readFile: () => {
+            throw new Error("Delegation must not read the current source");
+          },
+          onDelegated: (report) => reports.push(report),
+        });
+        expect(diagnostics).toEqual([]);
+        expect(reports).toEqual([
+          {
+            path: ".github/workflows/ci.yml",
+            line: 7,
+            tool,
+            selector: `source/${target}`,
+            checkoutPath: "source",
+            ref,
+          },
+        ]);
+      }
+    for (const [repository, ref] of [
+      ["stella/example", sha],
+      ["stella/example", "main"],
+      ["stella/example", "v1"],
+      ["stella/example", "${{ github.sha }}"],
+      ["stella/example", "${{ job.workflow_sha }}"],
+      ["other/repository", "${{ inputs.ref }}"],
+    ]) {
+      const reports: unknown[] = [];
+      const source = workflow(
+        `      - uses: actions/checkout@${sha} # v5\n        with: {repository: '${repository}', ref: '${ref}', path: source}\n      - uses: ${action}@${sha} # ${version}\n        with: {${tool}-version-file: source/${target}}`,
+      );
+      expect(
+        checkRuntimeFile({
+          file: ".github/workflows/ci.yml",
+          text: source,
+          policy,
+          repository: "stella/example",
+          trackedFiles: new Set(Object.keys(files)),
+          readFile: (file) => files[file],
+          onDelegated: (report) => reports.push(report),
+        }).length,
+      ).toBeGreaterThan(0);
+      expect(reports).toEqual([]);
+    }
+    for (const ref of [
+      "${{ '" + sha + "' }}",
+      "${{ 'main' }}",
+      "${{ 42 }}",
+      "${{ true }}",
+      "${{ null }}",
+      "${{ }}",
+      "${{ github.sha }}",
+      "${{ github['sha'] }}",
+      "${{ job['workflow_sha'] }}",
+      "${{ github . sha }}",
+      "${{ job [ 'workflow_sha' ] }}",
+      "${{ inputs.ref }}${{ inputs.other }}",
+      "${{ inputs.ref }}-suffix}}",
+    ]) {
+      const reports: unknown[] = [];
+      const text = workflow(
+        `      - uses: actions/checkout@${sha} # v5\n        with: {ref: "${ref}", path: source}\n      - uses: ${action}@${sha} # ${version}\n        with: {${tool}-version-file: source/${target}}`,
+      );
+      expect(
+        checkRuntimeFile({
+          file: ".github/workflows/ci.yml",
+          text,
+          policy,
+          trackedFiles: new Set(),
+          readFile: () => undefined,
+          onDelegated: (report) => reports.push(report),
+        }).length,
+      ).toBeGreaterThan(0);
+      expect(reports).toEqual([]);
+    }
+    for (const formattedRef of [
+      "${{ format('v{0}}}', inputs.version) }}",
+      "${{ inputs.ref || '${{' }}",
+    ]) {
+      const formattedReports: unknown[] = [];
+      expect(
+        checkRuntimeFile({
+          file: ".github/workflows/ci.yml",
+          text: workflow(
+            `      - uses: actions/checkout@${sha} # v5\n        with: {ref: "${formattedRef}", path: source}\n      - uses: ${action}@${sha} # ${version}\n        with: {${tool}-version-file: source/${target}}`,
+          ),
+          policy,
+          trackedFiles: new Set(),
+          readFile: () => {
+            throw new Error("Current pin read");
+          },
+          onDelegated: (report) => formattedReports.push(report),
+        }),
+      ).toEqual([]);
+      expect(formattedReports).toHaveLength(1);
+    }
+    const base = `      - uses: actions/checkout@${sha} # v5\n        with: {ref: '\${{ inputs.ref }}', path: source}`;
+    for (const selector of [
+      `source/../${target}`,
+      `source/other-file`,
+      `/source/${target}`,
+      `source\\${target}`,
+      "${{ inputs.versionFile }}",
+    ]) {
+      const reports: unknown[] = [];
+      const text = workflow(
+        `${base}\n      - uses: ${action}@${sha} # ${version}\n        with: {${tool}-version-file: '${selector}'}`,
+      );
+      expect(
+        checkRuntimeFile({
+          file: ".github/workflows/ci.yml",
+          text,
+          policy,
+          trackedFiles: new Set(),
+          readFile: () => undefined,
+          onDelegated: (report) => reports.push(report),
+        }).length,
+      ).toBeGreaterThan(0);
+      expect(reports).toEqual([]);
+    }
+    for (const steps of [
+      `${base}\n        if: false`,
+      `${base}\n        continue-on-error: false`,
+      `${base}\n${base}`,
+    ]) {
+      const reports: unknown[] = [];
+      const text = workflow(
+        `${steps}\n      - uses: ${action}@${sha} # ${version}\n        with: {${tool}-version-file: source/${target}}`,
+      );
+      expect(
+        checkRuntimeFile({
+          file: ".github/workflows/ci.yml",
+          text,
+          policy,
+          trackedFiles: new Set(),
+          readFile: () => "invalid current pin",
+          onDelegated: (report) => reports.push(report),
+        }).length,
+      ).toBeGreaterThan(0);
+      expect(reports).toEqual([]);
+    }
   }
 });

@@ -2,9 +2,11 @@
 
 import { describe, expect, test } from "bun:test";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+
+import toolchain from "../toolchain.json";
 
 const packageJson = (properties: Record<string, unknown>) =>
   JSON.stringify(properties, null, 2);
@@ -79,4 +81,44 @@ describe("consumer toolchain guard CLI", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+});
+
+test("CLI delegation reaches stdout and preserves success while ordinary pins still fail", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "stll-delegated-cli-"));
+  try {
+    execFileSync("git", ["init", "-q", root]);
+    mkdirSync(path.join(root, ".github/workflows"), { recursive: true });
+    writeFileSync(
+      path.join(root, "stll-toolchain.json"),
+      packageJson({
+        optOuts: [
+          { rule: "dependabot-policy", reason: "CLI selector fixture" },
+        ],
+      }),
+    );
+    writeFileSync(
+      path.join(root, ".github/workflows/ci.yml"),
+      `jobs:\n  test:\n    steps:\n      - uses: actions/checkout@${toolchain.actions["actions/checkout"].sha} # ${toolchain.actions["actions/checkout"].version}\n        with: {ref: '\${{ inputs.ref }}', path: source}\n      - uses: oven-sh/setup-bun@${toolchain.actions["oven-sh/setup-bun"].sha} # ${toolchain.actions["oven-sh/setup-bun"].version}\n        with: {bun-version-file: source/package.json}`,
+    );
+    execFileSync("git", ["add", "."], { cwd: root });
+    const run = () =>
+      spawnSync(
+        process.execPath,
+        [path.resolve(import.meta.dir, "toolchain-check-cli.ts")],
+        { cwd: root, encoding: "utf8" },
+      );
+    const delegated = run();
+    expect(delegated.status).toBe(0);
+    expect(delegated.stderr).toBe("");
+    expect(delegated.stdout).toBe(
+      ".github/workflows/ci.yml:7: [runtime-delegated] setup-bun source/package.json delegates its version to checkout ref ${{ inputs.ref }}\n",
+    );
+    writeFileSync(path.join(root, ".node-version"), "invalid");
+    execFileSync("git", ["add", ".node-version"], { cwd: root });
+    const invalid = run();
+    expect(invalid.status).toBe(1);
+    expect(invalid.stderr).toContain("[node-version]");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

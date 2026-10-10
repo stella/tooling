@@ -5,7 +5,11 @@ import path from "node:path";
 import { checkDependabot, dependabotRules } from "./toolchain-dependabot";
 import { toolchainInputKind } from "./toolchain-inputs";
 import { checkPackageFiles, packageRules } from "./toolchain-packages";
-import { checkRuntimeFile, runtimeRules } from "./toolchain-runtime";
+import {
+  checkRuntimeFile,
+  runtimeRules,
+  type RuntimeDelegation,
+} from "./toolchain-runtime";
 import { parseToolchainPolicy } from "./toolchain-schema";
 
 export const toolchainRules = [
@@ -103,11 +107,13 @@ export const readToolchainInputs = (root: string) => {
 type CheckSharedToolchainOptions = {
   root: string;
   policy: ReturnType<typeof parseToolchainPolicy>;
+  onDelegated?: ((report: RuntimeDelegation) => void) | undefined;
 };
 
 export const checkToolchain = ({
   root,
   policy,
+  onDelegated,
 }: CheckSharedToolchainOptions) => {
   const { files, trackedFiles, diagnostics } = readToolchainInputs(root);
   let repository: string | undefined;
@@ -152,6 +158,7 @@ export const checkToolchain = ({
         },
         trackedFiles,
         repository,
+        onDelegated,
         readFile: (target) => files[target],
       }),
     );

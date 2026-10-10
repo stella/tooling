@@ -60,11 +60,21 @@ A prefixed version-file selector can use a preceding checkout in its job:
 use the exact `${{ job.workflow_repository }}` / `${{ job.workflow_sha }}` pair,
 or a same-repository checkout with no `ref`. For no-ref checkouts, omit
 `repository`, name this repository literally, or use `${{ github.repository }}`.
-The guard maps the selector to its tracked source file. Literal commit SHAs,
-branches, tags, `${{ github.sha }}`, mixed workflow contexts, foreign repositories,
-and traversal paths fail.
-Direct `bun-version` inputs are forbidden. The manifest referenced by
-`bun-version-file` must declare the shared `packageManager` value.
+The checkout must omit both `if` and `continue-on-error`, and its normalized
+path must be unique among every checkout in that job, including later steps.
+Unknown checkout destinations prevent mapped selectors from proving provenance.
+Other nonempty, nonconstant GitHub expression refs on same-repository checkouts
+(including `${{ job.workflow_repository }}`) delegate a safe static version-file selector
+to that checkout. The CLI reports delegation on stdout without validating the
+current source's version file. Literal refs and unpaired `${{ github.sha }}` /
+`${{ job.workflow_sha }}` remain rejected.
+For snapshot-bound sources, the guard maps the selector to its tracked source
+file. Literal commit SHAs,
+branches, tags, unpaired snapshot contexts, foreign repositories, and traversal
+paths fail.
+Direct `bun-version` inputs are forbidden. For snapshot-bound sources, the
+manifest referenced by `bun-version-file` must declare the shared
+`packageManager` value. Delegated commits own their version validation.
 
 Run the installed checker from the repository root in CI:
 
