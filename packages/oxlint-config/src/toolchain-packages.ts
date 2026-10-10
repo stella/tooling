@@ -44,6 +44,51 @@ type Diagnostic = {
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+// Preserve quoted assignment values when separating direct shell commands.
+const compilerCommandSegments = (command: string) => {
+  const words = command.match(
+    /(?:[^\s"'\\;&|]|\\[^\n]|"(?:[^"\\]|\\.)*"|'[^']*')+|&&|\|\||[;&|\n]/g,
+  );
+  const segments: string[][] = [[]];
+  for (const word of words ?? []) {
+    if (/^(?:&&|\|\||[;&|\n])$/.test(word)) segments.push([]);
+    else segments.at(-1)?.push(word);
+  }
+  return segments.map((words) => {
+    let start = 0;
+    const skipAssignments = () => {
+      while (/^[A-Za-z_][A-Za-z\d_]*=/.test(words.at(start) ?? "")) start += 1;
+    };
+    skipAssignments();
+    while (/^(?:\/usr\/bin\/|\/bin\/)?env$/.test(words.at(start) ?? "")) {
+      start += 1;
+      while (start < words.length) {
+        const option = words.at(start);
+        if (option === "--") {
+          start += 1;
+          break;
+        }
+        if (option === "-u" || option === "--unset") {
+          start += 2;
+          continue;
+        }
+        if (
+          option === "-" ||
+          option === "-i" ||
+          option === "--ignore-environment" ||
+          /^--unset=.+|^-u.+/.test(option ?? "")
+        ) {
+          start += 1;
+          continue;
+        }
+        break;
+      }
+      skipAssignments();
+    }
+    return words.slice(start).join(" ");
+  });
+};
+
 type CheckPackageFilesOptions = {
   files: Record<string, string>;
   policy: PackagePolicy;
@@ -423,8 +468,7 @@ export const checkPackageFiles = ({
         const normalizedExpected = selectedLayout.typecheckCommand
           .replace(/\s+/g, " ")
           .trim();
-        for (const segment of command.split(/&&|\|\||[;|\n]/)) {
-          const normalized = segment.trim().replace(/\s+/g, " ");
+        for (const normalized of compilerCommandSegments(command)) {
           if (!directCompiler.test(normalized)) continue;
           if (
             normalized === normalizedExpected ||

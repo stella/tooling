@@ -583,6 +583,76 @@ describe("TypeScript install layouts", () => {
       }),
     ).toEqual([]);
   });
+  test("environment prefixes preserve direct compiler selection in every segment", () => {
+    const dependencies = {
+      "@typescript/native": "npm:typescript@7.0.2",
+      typescript: "6.0.3",
+    };
+    const expected = "node ./node_modules/@typescript/native/bin/tsc --noEmit";
+    const prefixes = [
+      "NODE_OPTIONS=--max-old-space-size=4096",
+      'NODE_OPTIONS="--max-old-space-size=4096 --trace-warnings" CI=1',
+      "LABEL='tsc; ignored && tsgo | ignored' CI=",
+      "LABEL=escaped\\ value",
+      "env",
+      "env NODE_OPTIONS=--max-old-space-size=4096",
+      "CI=1 env NODE_OPTIONS='--trace-warnings --trace-deprecation'",
+      "/usr/bin/env -i CI=1",
+      "env --ignore-environment --unset NODE_OPTIONS CI=1",
+      "env -u NODE_OPTIONS --unset=CI -uDEBUG -- CI=1",
+      "env CI=1 env NODE_OPTIONS=--trace-warnings",
+    ];
+    for (const prefix of prefixes) {
+      for (const command of [expected, `${expected} --pretty false`])
+        expect(
+          manifest({
+            dependencies,
+            scripts: { typecheck: `${prefix} ${command}` },
+          }),
+        ).toEqual([]);
+      for (const compiler of [
+        "tsc --noEmit",
+        "./node_modules/.bin/tsc --noEmit",
+        "node ./node_modules/typescript/bin/tsc --noEmit",
+        "bunx tsc --noEmit",
+      ]) {
+        for (const typecheck of [
+          `${prefix} ${compiler}`,
+          `bun run prepare && ${prefix} ${compiler}`,
+          `${expected} || ${prefix} ${compiler}`,
+          `${expected}; ${prefix} ${compiler}`,
+        ])
+          expect(
+            manifest({ dependencies, scripts: { typecheck } }),
+          ).toMatchObject([{ rule: "typescript-layout" }]);
+      }
+      for (const delegated of [
+        "bun scripts/typecheck.ts",
+        "bun --filter app typecheck",
+        "node scripts/typecheck.js",
+      ])
+        expect(
+          manifest({
+            dependencies,
+            scripts: { typecheck: `${prefix} ${delegated}` },
+          }),
+        ).toEqual([]);
+    }
+    expect(
+      manifest({
+        dependencies: { typescript: "7.0.2" },
+        scripts: {
+          typecheck: "env NODE_OPTIONS=--trace-warnings tsc --noEmit",
+        },
+      }),
+    ).toEqual([]);
+    expect(
+      manifest({
+        dependencies: { typescript: "7.0.2" },
+        scripts: { typecheck: "NODE_OPTIONS= tsc --emitDeclarationOnly" },
+      }).some(({ rule }) => rule === "typescript-layout"),
+    ).toBe(true);
+  });
   test("split layout rejects direct compiler paths in each shell segment", () => {
     const dependencies = {
       "@typescript/native": "npm:typescript@7.0.2",
