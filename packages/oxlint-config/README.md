@@ -89,6 +89,11 @@ other majors and prereleases fail. Use `node-version-file` for setup-node.
 `engines.node` remains a support range and must include every stable release
 in major 26; `>=26`, `^26` and `^24 || ^26` pass, while ranges that omit
 part of major 26 fail.
+Release and publish workflows use exact patch version-file selectors for
+reproducible builds; this repository pins `.node-version` to `26.10.0`.
+The series policy accepts that patch without weakening release validation.
+GitHub JavaScript action host runtimes (`runs.using`) are platform-managed
+and do not select the project toolchain Node version.
 
 Run the installed checker from the repository root in CI:
 

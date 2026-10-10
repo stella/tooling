@@ -51,6 +51,12 @@ Node and Python image tags and mise/asdf entries inherit the same pins.
 The Node policy is `26.x`: selectors must select major 26. Bare major,
 major wildcard, minor and stable patch selectors within that major are allowed;
 open ranges, other majors, prereleases and floating aliases fail.
+Release and publish workflows use exact patch version-file selectors for
+reproducible builds; this repository pins `.node-version` to `26.10.0`.
+The series policy accepts that patch without weakening release validation.
+GitHub JavaScript action host runtimes (`runs.using`) are platform-managed
+and do not select the project toolchain Node version.
+
 The Rust stable pin is `1.96.0`; `rustCompilerDevelopment` is
 `nightly-2026-04-16`. Only a `rustc-dev` component declaration selects that
 nightly. A nightly without that component fails.

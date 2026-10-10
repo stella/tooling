@@ -5,6 +5,7 @@ import path from "node:path";
 
 import toolchainPolicy from "../toolchain.json";
 import { checkToolchain } from "./toolchain-guard";
+import { nodeSelectorMatches } from "./toolchain-node";
 import { parseToolchainPolicy } from "./toolchain-schema";
 
 const repositoryRoot = path.resolve(import.meta.dir, "../../..");
@@ -26,6 +27,14 @@ describe("shared toolchain policy", () => {
       }),
     );
   });
+  test("release runtime pins an exact patch inside the shared Node series", async () => {
+    const selector = (
+      await Bun.file(path.join(repositoryRoot, ".node-version")).text()
+    ).trim();
+    expect(selector).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(nodeSelectorMatches(selector, toolchainPolicy.node)).toBe(true);
+  });
+
   test("repository conforms to every shared toolchain rule", () => {
     expect(
       checkToolchain({
