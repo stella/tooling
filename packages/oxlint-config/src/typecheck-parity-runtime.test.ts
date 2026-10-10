@@ -938,6 +938,7 @@ test.skipIf(process.env["CI"] !== "true")(
       for (const configuration of [
         {},
         { outDir: "./dist" },
+        { declaration: true, declarationDir: "./types" },
         { composite: true },
       ]) {
         for (const outside of [false, true]) {

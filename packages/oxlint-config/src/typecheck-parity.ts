@@ -1095,8 +1095,11 @@ export const compareRepository = async ({
         options["composite"] === true;
       options["noEmit"] =
         !graph.build || (options["noEmit"] === true && !declarationsRequired);
-      const relocatesOutput = options["noEmit"] !== true || "outDir" in options;
-      // Explicit rootDir/outDir enforce containment even in noEmit checks.
+      const relocatesOutput =
+        options["noEmit"] !== true ||
+        "outDir" in options ||
+        "declarationDir" in options;
+      // Explicit source/output directories enforce containment in noEmit checks.
       if (!("rootDir" in options) && relocatesOutput)
         options["rootDir"] = dirname(project.path);
       if (relocatesOutput) options["outDir"] = join(outputFolder, "output");
