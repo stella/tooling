@@ -55,7 +55,7 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: 1.4.1
+          bun-version-file: package.json
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -79,6 +79,11 @@ jobs:
 
       - name: Lint
         run: bun run lint
+
+      - name: Shared toolchain check
+        run: |
+          bun run check:toolchain
+          node packages/oxlint-config/dist/toolchain-check-cli.mjs
 
       - name: Publint
         run: bun run publint
