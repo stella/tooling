@@ -134,8 +134,7 @@ export const resolveInstalledManagerBin = async ({
 }: ResolveInstalledManagerBinOptions) => {
   const manifest = await jsonFile(path.join(directory, "package.json"));
   const bin = manifest["bin"];
-  const selector =
-    typeof bin === "string" ? bin : consumerRecord(bin) ? bin[name] : undefined;
+  const selector = consumerRecord(bin) ? bin[name] : bin;
   if (typeof selector !== "string" || selector.length === 0)
     throw new Error(`Installed ${name} package must declare its ${name} bin`);
   const root = await realpath(directory);

@@ -36,14 +36,11 @@ export const consumerBuildApprovals = async ({
       const dependencies = consumerRecord(importer)
         ? importer[field]
         : undefined;
-      const dependency =
-        manager === "npm"
-          ? consumerRecord(packages)
-            ? packages[`node_modules/${key}`]
-            : undefined
-          : consumerRecord(dependencies)
-            ? dependencies[key]
-            : undefined;
+      const source = manager === "npm" ? packages : dependencies;
+      const installedKey = manager === "npm" ? `node_modules/${key}` : key;
+      const dependency = consumerRecord(source)
+        ? source[installedKey]
+        : undefined;
       if (!consumerRecord(dependency)) {
         if (field === "optionalDependencies") continue;
         throw new Error(`missing resolved fixture dependency identity: ${key}`);

@@ -181,7 +181,8 @@ export const parsePublishContract = (value: unknown): PublishContract => {
   };
 };
 
-export type PublishPacker = "npm" | "pnpm";
+const publishPackers = ["npm", "pnpm"] as const;
+export type PublishPacker = (typeof publishPackers)[number];
 
 type ResolveManifestContractOptions = {
   packer: PublishPacker;
@@ -194,7 +195,7 @@ export const resolveManifestContract = ({
   manifest,
   target,
 }: ResolveManifestContractOptions): PublishContract => {
-  if (packer !== "npm" && packer !== "pnpm")
+  if (!publishPackers.includes(packer))
     throw new Error("publish packer must be npm or pnpm");
   const source = object(manifest, "package manifest");
   const config =

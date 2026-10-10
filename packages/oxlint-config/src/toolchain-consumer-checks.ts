@@ -106,19 +106,13 @@ const cronFieldValues = (text: string, field: CronField) => {
     const bounds = base.split("-");
     if (bounds.length > 2) return undefined;
     const lower = bounds.at(0);
-    const start =
-      base === "*"
-        ? field.minimum
-        : lower === undefined
-          ? undefined
-          : value(lower);
+    if (lower === undefined) return undefined;
+    const start = base === "*" ? field.minimum : value(lower);
     const upper = bounds.at(1);
-    const end =
-      base === "*" || (bounds.length === 1 && stepText !== undefined)
-        ? field.maximum
-        : upper === undefined
-          ? start
-          : value(upper);
+    let end = start;
+    if (base === "*" || (bounds.length === 1 && stepText !== undefined))
+      end = field.maximum;
+    else if (upper !== undefined) end = value(upper);
     if (start === undefined || end === undefined || start > end)
       return undefined;
     for (let selected = start; selected <= end; selected += step)
@@ -132,8 +126,11 @@ const validConsumerCron = (text: string) => {
   return (
     fields.length === cronFields.length &&
     cronFields.every((field, index) => {
-      const text = fields.at(index);
-      return text !== undefined && cronFieldValues(text, field) !== undefined;
+      const fieldText = fields.at(index);
+      return (
+        fieldText !== undefined &&
+        cronFieldValues(fieldText, field) !== undefined
+      );
     })
   );
 };

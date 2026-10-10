@@ -269,7 +269,7 @@ describe("consumer compatibility declarations", () => {
             JSON.stringify(pkg.manifest),
           );
           await writeFile(path.join(location, "index.js"), "export {};\n");
-          if (pkg.manifest["private"] !== true) {
+          if (pkg.manifest.private !== true) {
             await mkdir(path.join(location, "vendor"));
             await writeFile(
               path.join(location, "vendor/runtime.js"),

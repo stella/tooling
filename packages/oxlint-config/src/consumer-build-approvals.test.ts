@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import assert from "node:assert/strict";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -87,7 +88,7 @@ test("only declared dependencies receive installed build approvals, including al
       ),
     });
     for (const manager of ["npm", "pnpm"] as const)
-      await expect(
+      await assert.rejects(
         consumerBuildApprovals({
           directory,
           manager,
@@ -101,18 +102,20 @@ test("only declared dependencies receive installed build approvals, including al
                   },
                 },
         }),
-      ).rejects.toThrow("ENOENT");
+        /ENOENT/,
+      );
     expect(() =>
       assertConsumerFixtureManifest({ allowScripts: { "*": true } }),
     ).toThrow("allowScripts");
-    await expect(
+    await assert.rejects(
       consumerBuildApprovals({
         directory,
         manifest,
         manager: "pnpm",
         lock: { importers: {} },
       }),
-    ).rejects.toThrow("missing resolved");
+      /missing resolved/,
+    );
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

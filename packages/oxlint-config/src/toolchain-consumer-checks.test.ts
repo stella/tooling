@@ -166,12 +166,16 @@ test("consumer declarations are closed, canonical and unique", () => {
       "packages/./library",
       "packages/library/",
       "${{ inputs.package }}",
-    ].map((directory) => ({
-      ...declaration,
-      workflow: declaration.workflow,
-      job: declaration.job,
-      packages: [directory],
-    })),
+    ].map(
+      (directory) =>
+        ({
+          workflow: declaration.workflow,
+          job: declaration.job,
+          packages: [directory],
+          toolingVersion: declaration.toolingVersion,
+          fixturePath: declaration.fixturePath,
+        }) satisfies typeof declaration,
+    ),
   ])
     expect(() => parseConsumerChecks([mutation])).toThrow();
   expect(() => parseConsumerChecks([declaration, declaration])).toThrow();
@@ -433,8 +437,9 @@ test("scheduled consumer jobs cannot depend on another job", () => {
 
 test("consumer callers require every declared static input and reject matrix gating", () => {
   for (const field of ["tooling-version", "fixture-path"] as const) {
-    const missing: Record<string, unknown> = { ...job.with };
-    delete missing[field];
+    const missing = Object.fromEntries(
+      Object.entries(job.with).filter(([key]) => key !== field),
+    );
     for (const inputs of [
       missing,
       { ...job.with, [field]: "${{ inputs.value }}" },
