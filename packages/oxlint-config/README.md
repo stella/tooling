@@ -320,3 +320,73 @@ commands and repository adoption are separate configuration steps.
 Environments may cache filesystems without preserving service processes.
 Run `start` at every session start, including sessions that reuse installed files.
 The supported OS, privileges, and pinned runtime requirements are checked explicitly.
+
+## Published package contracts
+
+Run `stll-publish-contract` in PR CI. Every published root or declared workspace
+package commits `publish-contract.json`, recording engines, peer support ranges,
+resolved JavaScript targets, and entry points. `stll-publish-contract --write`
+records an explicit contract decision as a reviewable diff; it also validates
+consumer support and cannot accept development-only requirements.
+
+The consumer policy pins Node 22.23.3, npm 12.2.0, pnpm 12.9.1, and TypeScript
+6.0.3 independently of the development toolchain. Published engines and TypeScript
+peers must support the consumer versions; ranges may include newer versions.
+Bun runtime/compiler requirements are rejected. JSON and declaration-only packages
+record `{"type":"types-only"}` explicitly.
+
+The initial build adapter resolves tsdown 0.22.9 configurations using the installed
+build tool, including engine-derived defaults, format overrides, and object-form
+low-level target overrides. No syntax lowering records `esnext`. Dynamic input
+options, relocated/inherited configurations, additional direct compiler stages,
+and unsupported build tools fail with a diagnostic. Add a reviewed resolver when
+adopting another build tool; a guessed target is never a contract.
+
+Packed-artifact checks run nightly, while the static contract check runs per PR.
+The reusable consumer job declares its exact scope in `stll-toolchain.json`:
+
+```json
+{
+  "consumerChecks": [{
+    "workflow": ".github/workflows/consumer-compat.yml",
+    "job": "consumer",
+    "packages": ["packages/library"]
+  }]
+}
+```
+
+That job calls the immutable shared `package-consumer-compat.yml` workflow with
+`packages` as the same JSON array and `consumer-node` equal to the consumer policy
+pin. Every named package must be tracked, published, and support that Node version.
+Unknown jobs, stale entries, undeclared consumer calls, and inconsistent inputs fail.
+This declaration applies to consumer checks; `engineFloors` retains its separate
+minimum-supported-major contract.
+
+`stll-consumer-compat --packages '["packages/library"]' --consumer-node 22.23.3
+--fixture-path tests/consumer` tests final tarballs in isolated projects with both
+npm and pnpm. The repository builds once with its development toolchain first.
+Workspace protocols are resolved by the package manager before `npm pack` creates
+the final artifact; both consumers install those artifacts. The runner verifies
+the official Node archive checksum and exact runtime/package-manager versions,
+uses the oldest published React satisfying the package peer range, typechecks with
+the consumer TypeScript, and runs each fixture's build and usage smoke.
+
+The fixture directory contains `consumer-compat.json`:
+
+```json
+{
+  "packages": [{
+    "package": "packages/library",
+    "fixture": "library",
+    "kind": "node",
+    "build": ["npm", "run", "build"],
+    "smoke": ["npm", "run", "smoke"]
+  }]
+}
+```
+
+Each fixture is a standalone project with its own source, package manifest, and
+TypeScript configuration. Use `react` for a React peer and a render smoke; use
+`node` for an import and representative call. Dependency bindings, runtime tools,
+and caches belong to the runner. A nightly failure must open or update one issue
+in the consuming repository and use its existing failure notification.

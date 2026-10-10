@@ -99,6 +99,9 @@ jobs:
           node packages/oxlint-config/dist/toolchain-check-cli.mjs
           node packages/oxlint-config/dist/typecheck-parity-cli.mjs
 
+      - name: Published package contracts
+        run: bun run check:publish-contract
+
       - name: Publint
         run: bun run publint
 

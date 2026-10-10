@@ -7,6 +7,8 @@ export default defineConfig({
     "src/no-raw-colors.ts",
     "src/toolchain-check-cli.ts",
     "src/cloud-setup-cli.ts",
+    "src/publish-contract-cli.ts",
+    "src/consumer-compat-cli.ts",
     "src/typecheck-parity-cli.ts",
   ],
   format: ["esm", "cjs"],

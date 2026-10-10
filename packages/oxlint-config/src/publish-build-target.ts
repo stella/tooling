@@ -3,14 +3,18 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import type { PublishTarget } from "./publish-contract";
+import {
+  resolveManifestContract,
+  type PublishTarget,
+} from "./publish-contract";
+import { compilerCommandSegments, decodeShellWord } from "./toolchain-packages";
 
 const supportedTsdownVersion = "0.22.9";
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 const targets = (value: unknown): string[] => {
-  if (value === undefined || value === false) return ["esnext"];
+  if (value === undefined) return ["esnext"];
   if (typeof value === "string")
     return value.split(",").map((item) => item.trim());
   if (
@@ -44,7 +48,7 @@ export const resolvedTsdownTarget = (configs: unknown): PublishTarget => {
     if (transform !== undefined && !record(transform))
       throw new Error("tsdown transform overrides must be an object");
     const target =
-      record(transform) && "target" in transform
+      record(transform) && transform["target"] != null
         ? transform["target"]
         : config["target"];
     for (const item of targets(target)) emitted.add(item);
@@ -70,14 +74,13 @@ export const assetOnlyTarget = (
   if (!record(manifest)) throw new Error("Package manifest must be an object");
   if (record(manifest["scripts"]) && manifest["scripts"]["build"] !== undefined)
     return undefined;
-  const paths = [
-    "exports",
-    "main",
-    "module",
-    "types",
-    "typings",
-    "bin",
-  ].flatMap((key) => exportPaths(manifest[key]));
+  const published = resolveManifestContract({
+    manifest,
+    target: { type: "types-only" },
+  });
+  const paths = (
+    ["exports", "main", "module", "types", "typings", "bin"] as const
+  ).flatMap((key) => exportPaths(published.entryPoints[key]));
   if (
     paths.length === 0 ||
     paths.some((item) => !/(?:\.json|\.d\.(?:ts|mts|cts))$/.test(item))
@@ -103,7 +106,23 @@ export const resolvePublishBuildTarget = async (
       "A JavaScript package needs an explicitly supported build command",
     );
   const build = manifest["scripts"]["build"];
-  if (!/(?:^|&&\s*)tsdown(?:\s*(?:&&|$))/.test(build))
+  const compilerSegments = compilerCommandSegments(build).filter((words) =>
+    words.some(
+      (word) =>
+        /(?:^|\/)(?:tsdown|tsup|tsc|tsgo|vite|esbuild|rolldown|babel|swc)(?:\.[cm]?js)?$/.test(
+          decodeShellWord(word),
+        ) ||
+        /(?:typescript|@typescript\/native)\/bin\/tsc$/.test(
+          decodeShellWord(word),
+        ),
+    ),
+  );
+  const compiler = compilerSegments.at(0);
+  if (
+    compilerSegments.length !== 1 ||
+    compiler?.length !== 1 ||
+    compiler.at(0) !== "tsdown"
+  )
     throw new Error(
       "Supported publish target resolver requires tsdown without CLI overrides",
     );

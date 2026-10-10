@@ -113,12 +113,12 @@ const shellSubstitutions = (command: string) => {
 };
 
 // Preserve quoted assignment values when separating direct shell commands.
-const compilerCommandSegments = (command: string) => {
+export const compilerCommandSegments = (command: string) => {
   const segments: string[][] = [[]];
   for (const source of [command, ...shellSubstitutions(command)]) {
     segments.push([]);
     const shellWords = source.match(
-      /(?:[^\s"'\\;&|()]|\\[^\n]|"(?:[^"\\]|\\.)*"|'[^']*')+|&&|\|\||[();&|\n]/g,
+      /(?:[^\s"'\\;&|()]|\\[\s\S]|"(?:[^"\\]|\\[\s\S])*"|'[^']*')+|&&|\|\||[();&|\n]/g,
     );
     for (const word of shellWords ?? []) {
       if (/^(?:&&|\|\||[;&|\n])$/.test(word)) segments.push([]);
@@ -211,35 +211,36 @@ const launcherValueOptions = new Map(
   }).map(([launcher, options]) => [launcher, new Set(options)]),
 );
 
+export const decodeShellWord = (word: string) => {
+  let result = "";
+  let quote: "'" | '"' | undefined;
+  for (let index = 0; index < word.length; index += 1) {
+    const character = word.at(index);
+    if (character === quote) {
+      quote = undefined;
+      continue;
+    }
+    if (quote === undefined && (character === "'" || character === '"')) {
+      quote = character;
+      continue;
+    }
+    const next = word.at(index + 1);
+    if (
+      character === "\\" &&
+      next !== undefined &&
+      quote !== "'" &&
+      (quote === undefined || /[$`"\\\n]/.test(next))
+    ) {
+      if (next !== "\n") result += next;
+      index += 1;
+    } else result += character;
+  }
+  return result;
+};
+
 // Classification sees launcher arguments; acceptance still uses the declared command.
 const invokesCompiler = (words: string[]) => {
-  const literal = (word: string) => {
-    let result = "";
-    let quote: "'" | '"' | undefined;
-    for (let index = 0; index < word.length; index += 1) {
-      const character = word.at(index);
-      if (character === quote) {
-        quote = undefined;
-        continue;
-      }
-      if (quote === undefined && (character === "'" || character === '"')) {
-        quote = character;
-        continue;
-      }
-      const next = word.at(index + 1);
-      if (
-        character === "\\" &&
-        next !== undefined &&
-        quote !== "'" &&
-        (quote === undefined || /[$`"\\\n]/.test(next))
-      ) {
-        result += next;
-        index += 1;
-      } else result += character;
-    }
-    return result;
-  };
-  const tokens = words.map(literal);
+  const tokens = words.map(decodeShellWord);
   const compiler = (word: string) =>
     /(?:^|\/)(?:tsc|tsgo)(?:\.js)?$/.test(word);
   let start = 0;

@@ -37,6 +37,18 @@ test("resolved targets preserve every emitted configuration and final override",
     );
 });
 
+test("nullish transform target overrides preserve tsdown defaults", () => {
+  for (const ignored of [undefined, null])
+    expect(
+      resolvedTsdownTarget([
+        {
+          target: ["node26"],
+          inputOptions: { transform: { target: ignored } },
+        },
+      ]),
+    ).toEqual({ type: "javascript", targets: ["node26"] });
+});
+
 test("declaration and JSON assets explicitly have no JavaScript target", () => {
   expect(
     assetOnlyTarget({ exports: { "./base.json": "./base.json" } }),
@@ -51,6 +63,29 @@ test("declaration and JSON assets explicitly have no JavaScript target", () => {
     {},
   ])
     expect(assetOnlyTarget(manifest)).toBeUndefined();
+});
+
+test("asset classification follows actual publish overrides in both directions", () => {
+  expect(
+    assetOnlyTarget({
+      exports: { ".": "./base.json" },
+      publishConfig: { exports: { ".": "./dist/index.js" } },
+    }),
+  ).toBeUndefined();
+  expect(
+    assetOnlyTarget({
+      exports: { ".": "./source/index.js" },
+      publishConfig: { exports: { ".": "./base.json" } },
+    }),
+  ).toEqual({ type: "types-only" });
+  expect(
+    assetOnlyTarget({
+      exports: { ".": { types: "./index.d.ts", default: "./base.json" } },
+      publishConfig: {
+        exports: { ".": { types: "./index.d.ts", default: "./index.js" } },
+      },
+    }),
+  ).toBeUndefined();
 });
 
 test("the installed build resolver supplies engine defaults and real config mutations", async () => {
@@ -81,6 +116,16 @@ test("the installed build resolver supplies engine defaults and real config muta
       [1, "{ entry: ['entry.js'], dts: false, target: 'es2020' }", ["es2020"]],
       [2, "{ entry: ['entry.js'], dts: false, target: false }", ["esnext"]],
       [
+        4,
+        "{ entry: ['entry.js'], dts: false, target: 'node26', inputOptions: { transform: { target: undefined } } }",
+        ["node26"],
+      ],
+      [
+        5,
+        "{ entry: ['entry.js'], dts: false, target: 'node26', inputOptions: { transform: { target: null } } }",
+        ["node26"],
+      ],
+      [
         3,
         "{ entry: ['entry.js'], dts: false, inputOptions: { transform: { target: 'node22' } } }",
         ["node22"],
@@ -104,6 +149,29 @@ test("the installed build resolver supplies engine defaults and real config muta
         type: "javascript",
         targets: [...expected],
       });
+    }
+    writeFileSync(
+      path.join(directory, "tsdown.config.mjs"),
+      "export default { entry: ['entry.js'], dts: false, target: 'node22' };\n",
+    );
+    for (const build of [
+      "tsdown && tsdown --target node26",
+      "tsdown --target node26 && tsdown",
+      "tsdown && tsdown",
+      'tsdown && ts"down" --target node26',
+      "tsdown && tsd\\own --target node26",
+      "tsdown && ./node_modules/.bin/tsdown --target node26",
+      ["tsdown && tsd\\", "own --target node26"].join("\n"),
+      ['tsdown && "tsd\\', 'own" --target node26'].join("\n"),
+      'tsdown && t"sc" --target ESNext --outDir dist',
+    ]) {
+      writeFileSync(
+        path.join(directory, "package.json"),
+        JSON.stringify({ ...manifest, scripts: { build } }),
+      );
+      await expect(resolvePublishBuildTarget(directory)).rejects.toThrow(
+        "tsdown",
+      );
     }
   } finally {
     rmSync(directory, { recursive: true, force: true });
