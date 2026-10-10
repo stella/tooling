@@ -43,7 +43,10 @@ test("parity runs without a ref; conditional parity skips only unchanged compile
       });
       const shouldRun =
         since === undefined ||
-        tools.some((tool) => tool === "bun" || tool === "typescript");
+        tools.some(
+          (tool) =>
+            tool === "bun" || tool === "typescript" || tool === "shared",
+        );
       expect(runs).toBe(shouldRun ? 1 : 0);
       expect(passed).toBe(!shouldRun);
       if (shouldRun) expect(report).toBe("");

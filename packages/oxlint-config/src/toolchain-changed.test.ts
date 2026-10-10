@@ -329,6 +329,7 @@ test("runtime changes and workflow fingerprints classify their independent categ
   expect((await detectToolchainChanges({ repo, since })).tools).toEqual([
     "bun",
     "node",
+    "typescript",
     "shared",
   ]);
 });

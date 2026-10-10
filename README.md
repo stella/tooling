@@ -443,7 +443,14 @@ excluded seeds fail instead of producing a vacuous pass. Commands are argv,
 not shell expressions. Cleanup also runs on failure and handled termination.
 Repeat the probe for independently checked projects as needed.
 
-Conditional parity runs when Bun or any resolved TypeScript compiler changes;
+Conditional parity runs when Bun, TypeScript, or shared declarations change;
 otherwise it prints `parity skipped: toolchain unchanged since ...`. An unreadable
 reference runs full parity. Nightly jobs omit `--changed-since` to run full parity.
 Node and lint-tool changes still force full CI through the shared detector.
+
+Workflow, composite-action, Docker, mise, and tool-version declarations are
+conservatively fingerprinted for compiler parity, including referenced tracked
+Bun version files. Catalog and unresolved declaration changes also force parity;
+an unclassifiable reference runs full parity. This may run parity for unrelated
+edits to these declaration files. Active installed compiler comparisons still
+use the owning lockfile resolutions.

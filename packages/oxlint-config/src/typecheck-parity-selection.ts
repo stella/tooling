@@ -8,7 +8,7 @@ type ParitySelectionOptions = {
   output?: (text: string) => void;
 };
 
-/** CI forcing considers every tool; expensive compiler parity considers Bun and TS. */
+/** CI forcing considers every tool; compiler parity includes Bun, TS, and unclassified shared declarations. */
 export const runSelectedTypecheckParity = async ({
   repo,
   since,
@@ -19,7 +19,11 @@ export const runSelectedTypecheckParity = async ({
   if (since === undefined) return run();
   const result = await detect({ repo, since });
   if (result.status === "unreadable") return run();
-  if (result.tools.some((tool) => tool === "bun" || tool === "typescript"))
+  if (
+    result.tools.some(
+      (tool) => tool === "bun" || tool === "typescript" || tool === "shared",
+    )
+  )
     return run();
   output(
     `parity skipped: toolchain unchanged since ${since} (bun ${result.current.bun.join(", ") || "not declared"}, typescript ${result.current.typescript.join(", ") || "not declared"})\n`,

@@ -17,6 +17,7 @@ import {
 import {
   isDockerDefinitionPath,
   githubAutomationFileKind,
+  isMiseConfigPath,
 } from "./toolchain-inputs";
 import { workspaceContains } from "./toolchain-workspaces";
 
@@ -56,7 +57,7 @@ const trackedInput = (file: string) => {
       ".tool-versions",
       "toolchain.json",
     ].includes(name) ||
-    /^(?:\.)?mise(?:\.[\w-]+)?\.toml$/.test(name) ||
+    isMiseConfigPath(file) ||
     githubAutomationFileKind(file) !== undefined ||
     isDockerDefinitionPath(file)
   );
@@ -78,8 +79,8 @@ const readTree = async ({ repo, ref }: { repo: string; ref: string }) => {
     const tab = entry.indexOf("\t");
     if (tab < 0) throw new Error("Invalid Git tree response");
     const file = entry.slice(tab + 1);
-    if (!trackedInput(file)) continue;
     const [mode, type, oid] = entry.slice(0, tab).split(" ");
+    if (type !== "blob" && !trackedInput(file)) continue;
     if (type !== "blob" || !mode || !oid || !/^[a-f0-9]{40,64}$/.test(oid))
       throw new Error("Unreadable tracked toolchain input");
     entries.set(file, { mode, oid });
@@ -167,6 +168,110 @@ const snapshotText = ({
     throw new Error("Toolchain file reference leaves the tracked snapshot");
   return snapshotText({ snapshot, file: target, visited });
 };
+/** Read declared selector files too, without executing workflows or inspecting installed tools. */
+const selectorFiles = (snapshot: GitSnapshot) => {
+  const files = new Set<string>();
+  const visit = (value: unknown) => {
+    if (Array.isArray(value)) {
+      for (const entry of value) visit(entry);
+      return;
+    }
+    if (!changedRecord(value)) return;
+    for (const [key, entry] of Object.entries(value)) {
+      if (key.toLowerCase() !== "bun-version-file") {
+        visit(entry);
+        continue;
+      }
+      if (
+        typeof entry !== "string" ||
+        entry.trim() === "" ||
+        entry.includes("${{") ||
+        path.posix.isAbsolute(entry) ||
+        entry.split("/").includes("..")
+      )
+        throw new Error("Unclassifiable Bun version-file declaration");
+      const file = path.posix.normalize(entry);
+      if (
+        file === "." ||
+        file
+          .split("/")
+          .some((part) => part === "vendor" || part === "node_modules")
+      )
+        throw new Error("Bun version-file leaves the tracked toolchain scope");
+      files.add(file);
+    }
+  };
+  for (const file of snapshot.entries.keys()) {
+    if (githubAutomationFileKind(file) === undefined) continue;
+    const document = parseDocument(snapshotText({ snapshot, file }));
+    if (document.errors.length > 0)
+      throw new Error("Unreadable workflow declaration");
+    const value: unknown = document.toJS({ maxAliasCount: 100 });
+    visit(value);
+  }
+  return files;
+};
+
+const readSnapshots = async ({
+  repo,
+  trees,
+}: {
+  repo: string;
+  trees: Map<string, TreeEntry>[];
+}) => {
+  const selected = trees.map(
+    (tree) => new Map([...tree].filter(([file]) => trackedInput(file))),
+  );
+  const blobs = new Map<string, string>();
+  for (;;) {
+    const pending = [
+      ...new Set(
+        selected.flatMap((entries) =>
+          [...entries.values()].map((entry) => entry.oid),
+        ),
+      ),
+    ].filter((oid) => !blobs.has(oid));
+    for (const [oid, text] of await readBlobs({ repo, oids: pending }))
+      blobs.set(oid, text);
+    let expanded = false;
+    for (let index = 0; index < selected.length; index += 1) {
+      const entries = selected.at(index);
+      const tree = trees.at(index);
+      if (!entries || !tree) throw new Error("Missing Git tree");
+      const required = new Set<string>();
+      for (const [file, entry] of entries) {
+        if (entry.mode !== "120000") continue;
+        const text = blobs.get(entry.oid);
+        if (text === undefined) throw new Error("Missing tracked symlink");
+        const target = path.posix.normalize(
+          path.posix.join(path.posix.dirname(file), text),
+        );
+        if (
+          path.posix.isAbsolute(text) ||
+          target === ".." ||
+          target.startsWith("../")
+        )
+          throw new Error("Toolchain symlink leaves the tracked tree");
+        required.add(target);
+      }
+      // Resolve symlink closure before reading workflow YAML.
+      const unresolvedLinks = [...required].some((file) => !entries.has(file));
+      if (!unresolvedLinks)
+        for (const file of selectorFiles({ entries, blobs }))
+          required.add(file);
+      for (const file of required) {
+        if (entries.has(file)) continue;
+        const entry = tree.get(file);
+        if (!entry)
+          throw new Error(`Missing tracked toolchain selector file: ${file}`);
+        entries.set(file, entry);
+        expanded = true;
+      }
+    }
+    if (!expanded) return selected.map((entries) => ({ entries, blobs }));
+  }
+};
+
 const stableJson = (value: unknown): string => {
   if (Array.isArray(value)) return JSON.stringify(value.map(stableJson));
   if (changedRecord(value))
@@ -207,8 +312,11 @@ const packageTarget = ({
   specifier: string;
 }) => {
   if (!specifier.startsWith("npm:")) return name;
-  const match = /^npm:(@[^/]+\/[^@]+|[^@]+)@/.exec(specifier);
-  return match?.[1] ?? name;
+  const match = /^npm:((?:@[^/@\s]+\/)?[^/@\s]+)(?:@.*)?$/.exec(specifier);
+  const target = match?.[1];
+  if (target === undefined)
+    throw new Error("Unclassifiable npm alias declaration");
+  return target;
 };
 const directoryDepth = (directory: string) =>
   directory.split("/").filter((part) => part !== "." && part !== "").length;
@@ -305,19 +413,47 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
   const locks = new Map<string, ChangedLock>();
   const workspacePatterns = new Map<string, unknown>();
   const typescript = new Set<string>();
+  const bunFiles = selectorFiles(snapshot);
   const addBun = (value: string) => {
     const version = exactBun(value);
     bunVersions.add(version);
     tools.bun.add(version);
   };
+  const catalogs = (file: string, value: Record<string, unknown>) => {
+    for (const field of ["catalog", "catalogs"]) {
+      if (value[field] === undefined) continue;
+      // Catalog names and aliases need their owner's lockfile to classify; unknown
+      // entries conservatively force parity through the shared category.
+      tools.shared.add(`${file}:${field}:${stableJson(value[field])}`);
+      const visit = (entry: unknown, at: string) => {
+        if (!changedRecord(entry)) return;
+        for (const [name, specifier] of Object.entries(entry)) {
+          const target =
+            typeof specifier === "string"
+              ? packageTarget({ name, specifier })
+              : name;
+          if (changedPackageTool(target) === "typescript")
+            tools.typescript.add(
+              `${file}:${at}:${name}:${stableJson(specifier)}`,
+            );
+          visit(specifier, `${at}:${name}`);
+        }
+      };
+      visit(value[field], field);
+    }
+  };
   for (const file of snapshot.entries.keys()) {
     const text = snapshotText({ snapshot, file });
     const name = path.posix.basename(file);
+    if (bunFiles.has(file)) tools.bun.add(`selector-file:${file}:${text}`);
     if (name === "package.json") {
       const manifest = parseChangedJson(text);
       if (!changedRecord(manifest))
         throw new Error(`Invalid tracked manifest: ${file}`);
       manifests.set(file, manifest);
+      catalogs(file, manifest);
+      if (changedRecord(manifest["workspaces"]))
+        catalogs(`${file}:workspaces`, manifest["workspaces"]);
     } else if (name === "pnpm-workspace.yaml") {
       const document = parseDocument(text);
       if (document.errors.length > 0)
@@ -326,6 +462,7 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
       if (!changedRecord(workspace))
         throw new Error("Invalid pnpm workspace configuration");
       workspacePatterns.set(path.posix.dirname(file), workspace["packages"]);
+      catalogs(file, workspace);
     } else if (
       [
         "bun.lock",
@@ -354,6 +491,8 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
       tools.shared.add(`${file}:${stableJson(policy)}`);
       if (typeof policy["bun"] === "string") addBun(policy["bun"]);
     } else if (name === ".tool-versions") {
+      tools.bun.add(`${file}:${text}`);
+      tools.typescript.add(`${file}:${text}`);
       for (const line of text.split(/\r?\n/)) {
         const [tool, ...versions] = line.trim().split(/\s+/);
         const value = versions.join(" ").split("#")[0]?.trim();
@@ -361,7 +500,9 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
         if ((tool === "node" || tool === "nodejs") && value)
           tools.node.add(`${file}:${value}`);
       }
-    } else if (/^(?:\.)?mise(?:\.[\w-]+)?\.toml$/.test(name)) {
+    } else if (isMiseConfigPath(file)) {
+      tools.bun.add(`${file}:${text}`);
+      tools.typescript.add(`${file}:${text}`);
       const parsed: unknown = parseToml(text);
       if (changedRecord(parsed) && changedRecord(parsed["tools"])) {
         for (const [tool, selector] of Object.entries(parsed["tools"])) {
@@ -379,11 +520,15 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
             tools.node.add(`${file}:${stableJson(values)}`);
         }
       }
-    } else if (githubAutomationFileKind(file) !== undefined)
+    } else if (githubAutomationFileKind(file) !== undefined) {
       tools.shared.add(`${file}:${text}`);
-    else if (isDockerDefinitionPath(file)) {
+      tools.bun.add(`${file}:${text}`);
+      tools.typescript.add(`${file}:${text}`);
+    } else if (isDockerDefinitionPath(file)) {
       tools.shared.add(`${file}:${text}`);
       tools.node.add(`${file}:${text}`);
+      tools.bun.add(`${file}:${text}`);
+      tools.typescript.add(`${file}:${text}`);
       for (const match of text.matchAll(
         /^\s*FROM\s+(?:--[^\s]+\s+)*oven\/bun:([\w.+-]+)/gim,
       )) {
@@ -445,7 +590,7 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
     return false;
   };
   for (const [file, manifest] of manifests) {
-    if (!activeManifest(file)) continue;
+    const active = activeManifest(file);
     const manager = manifest["packageManager"];
     if (typeof manager === "string" && manager.startsWith("bun@"))
       addBun(manager.slice(4));
@@ -457,9 +602,32 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
         if (!validRange(engines["bun"]))
           throw new Error("Invalid Bun engine selector");
         bunRanges.push(engines["bun"]);
+        tools.bun.add(`${file}:engines.bun:${engines["bun"]}`);
         if (valid(engines["bun"]) !== null) addBun(engines["bun"]);
       }
     }
+    // Peer declarations do not install a compiler. Excluded manifests have no
+    // modeled workspace lock owner, so preserve their declarations conservatively.
+    for (const field of active
+      ? ["peerDependencies"]
+      : [...installedFields, "peerDependencies"]) {
+      const declarations = manifest[field];
+      if (declarations === undefined) continue;
+      if (!changedRecord(declarations))
+        throw new Error(`Invalid toolchain declarations: ${file}:${field}`);
+      for (const [dependency, specifier] of Object.entries(declarations)) {
+        if (typeof specifier !== "string")
+          throw new Error(
+            `Unclassifiable toolchain declaration: ${file}:${dependency}`,
+          );
+        const tool =
+          changedPackageTool(packageTarget({ name: dependency, specifier })) ??
+          changedPackageTool(dependency);
+        if (tool !== undefined)
+          tools[tool].add(`${file}:${field}:${dependency}:${specifier}`);
+      }
+    }
+    if (!active) continue;
     const ownName = manifest["name"];
     const ownVersion = manifest["version"];
     if (
@@ -628,16 +796,16 @@ export const detectToolchainChanges = async ({
       readTree({ repo, ref: previousRef }),
       readTree({ repo, ref: currentRef }),
     ]);
-    const oids = [
-      ...new Set(
-        [...previousEntries.values(), ...currentEntries.values()].map(
-          (entry) => entry.oid,
-        ),
-      ),
-    ];
-    const blobs = await readBlobs({ repo, oids });
-    const previous = parseSnapshot({ entries: previousEntries, blobs });
-    const current = parseSnapshot({ entries: currentEntries, blobs });
+    const snapshots = await readSnapshots({
+      repo,
+      trees: [previousEntries, currentEntries],
+    });
+    const previousSnapshot = snapshots.at(0);
+    const currentSnapshot = snapshots.at(1);
+    if (!previousSnapshot || !currentSnapshot)
+      throw new Error("Missing toolchain snapshot");
+    const previous = parseSnapshot(previousSnapshot);
+    const current = parseSnapshot(currentSnapshot);
     const tools = toolchainChangedTools.filter(
       (tool) =>
         stableJson([...previous.tools[tool]].sort()) !==
