@@ -1,5 +1,17 @@
 # @stll/oxlint-config
 
+## 0.9.0
+
+### Minor Changes
+
+- [#58](https://github.com/stella/tooling/pull/58) [`3d2db6d`](https://github.com/stella/tooling/commit/3d2db6d40bdd9b82505981bb96f827c974c04810) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Ship stll-typecheck-parity to compare consumer repository diagnostics and seeded compiler-flag coverage, with timing and peak memory measurements.
+
+### Patch Changes
+
+- [#55](https://github.com/stella/tooling/pull/55) [`d2c40e8`](https://github.com/stella/tooling/commit/d2c40e83b9dc6378ef72fcc5535a68e70280c58d) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Use Bun check for typechecking and guard diagnostic coverage against TypeScript.
+
+- [#59](https://github.com/stella/tooling/pull/59) [`e598af1`](https://github.com/stella/tooling/commit/e598af1f0e146b2829a7911a3f5610f4688a5fe0) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Preserve omitted rootDir and outDir in typecheck-only parity projects so files outside the config directory retain the original diagnostics. Add real original-versus-temporary compiler regressions for default, output-directory, and composite configurations.
+
 ## 0.8.0
 
 ### Minor Changes

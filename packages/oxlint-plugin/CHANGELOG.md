@@ -1,5 +1,11 @@
 # @stll/oxlint-plugin
 
+## 0.2.1
+
+### Patch Changes
+
+- [#55](https://github.com/stella/tooling/pull/55) [`d2c40e8`](https://github.com/stella/tooling/commit/d2c40e83b9dc6378ef72fcc5535a68e70280c58d) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Use Bun check for typechecking and guard diagnostic coverage against TypeScript.
+
 ## 0.2.0
 
 ### Minor Changes
