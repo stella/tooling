@@ -43,7 +43,6 @@ updates:
         update-types:
           - minor
           - patch
-    ignore: []
   - package-ecosystem: github-actions
     directory: /
     schedule:

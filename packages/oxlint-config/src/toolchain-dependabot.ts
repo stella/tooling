@@ -389,6 +389,7 @@ export const generateDependabotConfig = ({
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([ecosystem, roots]) => {
       const directories = [...roots].sort();
+      const ignored = ignoredFor(ecosystem, policy);
       const time = new Scalar(policy.schedule.time);
       time.type = Scalar.QUOTE_DOUBLE;
       return {
@@ -408,9 +409,10 @@ export const generateDependabotConfig = ({
             { patterns: group.patterns, "update-types": group.updateTypes },
           ]),
         ),
-        ignore: ignoredFor(ecosystem, policy).map((name) => ({
-          "dependency-name": name,
-        })),
+        ignore:
+          ignored.length > 0
+            ? ignored.map((name) => ({ "dependency-name": name }))
+            : undefined,
       };
     });
   return stringify({ version: 2, updates }, { aliasDuplicateObjects: false });
@@ -616,6 +618,8 @@ export const checkDependabot = ({
       report("groups", `${ecosystem}: groups must match the shared policy`);
     const ignored = ignoredFor(ecosystem, policy);
     const ignore = update["ignore"];
+    if (ignore !== undefined && (!Array.isArray(ignore) || ignore.length === 0))
+      report("ignore", `${ecosystem}: omit ignore or provide a nonempty array`);
     if (
       Array.isArray(ignore) &&
       ignore.some(

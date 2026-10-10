@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { describe, expect, test } from "bun:test";
-import { parseDocument, stringify } from "yaml";
+import { isSeq, parseDocument, stringify } from "yaml";
 
 import {
   checkDependabot,
@@ -37,21 +37,25 @@ const fixtureIgnores = (ecosystem: string) => {
     return ownedDockerImageAliases(policy.ignoredImages);
   return [];
 };
-const update = (ecosystem = "npm", directory = "/") => ({
-  "package-ecosystem": ecosystem,
-  directory,
-  schedule: policy.schedule,
-  cooldown: { "default-days": policy.cooldown.defaultDays },
-  groups: Object.fromEntries(
-    Object.entries(policy.groups).map(([name, group]) => [
-      name,
-      { patterns: group.patterns, "update-types": group.updateTypes },
-    ]),
-  ),
-  ignore: fixtureIgnores(ecosystem).map((name) => ({
-    "dependency-name": name,
-  })),
-});
+const update = (ecosystem = "npm", directory = "/") => {
+  const ignored = fixtureIgnores(ecosystem);
+  return {
+    "package-ecosystem": ecosystem,
+    directory,
+    schedule: policy.schedule,
+    cooldown: { "default-days": policy.cooldown.defaultDays },
+    groups: Object.fromEntries(
+      Object.entries(policy.groups).map(([name, group]) => [
+        name,
+        { patterns: group.patterns, "update-types": group.updateTypes },
+      ]),
+    ),
+    ignore:
+      ignored.length > 0
+        ? ignored.map((name) => ({ "dependency-name": name }))
+        : undefined,
+  };
+};
 
 const check = (
   text: string,
@@ -68,6 +72,75 @@ const config = (updates: unknown[] = [update()]) =>
   stringify({ version: 2, updates });
 
 describe("Dependabot policy", () => {
+  test("generated ecosystem entries omit empty ignore arrays", () => {
+    const files = {
+      "package.json": "{}",
+      "bun/package.json": '{"packageManager":"bun@1.4.3"}',
+      "python/requirements.txt": "requests",
+      "uv/pyproject.toml": '[project]\nname="project"',
+      "uv/uv.lock": "",
+      "rust/Cargo.toml": '[package]\nname="crate"',
+      ".github/workflows/ci.yml": "jobs: {}",
+      "images/Dockerfile": "FROM node:26",
+      "compose/compose.yml": "services:\n  app:\n    image: node:26",
+    };
+    const expectedEcosystems = [
+      "bun",
+      "cargo",
+      "docker",
+      "docker-compose",
+      "github-actions",
+      "npm",
+      "pip",
+      "uv",
+    ];
+    for (const generatedPolicy of [
+      policy,
+      { ...policy, ignoredPackages: [], ignoredActions: [], ignoredImages: [] },
+    ]) {
+      const generated = generateDependabotConfig({
+        files,
+        policy: generatedPolicy,
+      });
+      expect(
+        checkDependabot({
+          files: { ...files, ".github/dependabot.yml": generated },
+          policy: generatedPolicy,
+        }),
+      ).toEqual([]);
+      const document = parseDocument(generated);
+      for (const [index, ecosystem] of expectedEcosystems.entries()) {
+        expect(document.getIn(["updates", index, "package-ecosystem"])).toBe(
+          ecosystem,
+        );
+        const ignored = document.getIn(["updates", index, "ignore"]);
+        if (ignored !== undefined) {
+          expect(isSeq(ignored)).toBe(true);
+          if (isSeq(ignored)) expect(ignored.items).not.toHaveLength(0);
+        }
+        if (
+          generatedPolicy.ignoredPackages.length === 0 ||
+          ["cargo", "pip", "uv"].includes(ecosystem)
+        )
+          expect(ignored).toBeUndefined();
+      }
+      expect(
+        document.getIn(["updates", expectedEcosystems.length]),
+      ).toBeUndefined();
+    }
+  });
+
+  test("explicit ignore values must be nonempty arrays even without shared pins", () => {
+    const files = { "Cargo.toml": '[package]\nname="crate"' };
+    expect(check(config([update("cargo")]), files)).toEqual([]);
+    for (const ignore of [[], {}, "all", null])
+      expect(
+        check(config([{ ...update("cargo"), ignore }]), files).some(
+          ({ message }) => message.includes("provide a nonempty array"),
+        ),
+      ).toBe(true);
+  });
+
   test("rootless pnpm workspaces own their members while exclusions remain separate", () => {
     const files = {
       "pnpm-workspace.yaml": 'packages: ["packages/*", "!packages/excluded"]',
@@ -152,7 +225,12 @@ describe("Dependabot policy", () => {
           config([
             {
               ...entry,
-              ignore: [...entry.ignore, { "dependency-name": name }],
+              ignore: [
+                ...fixtureIgnores("npm").map((name) => ({
+                  "dependency-name": name,
+                })),
+                { "dependency-name": name },
+              ],
             },
           ]),
         ).some(({ message }) => message.includes("ignore only packages owned")),
@@ -861,11 +939,15 @@ describe("Dependabot policy", () => {
   test("rejects restricted ignores and cooldown overrides", () => {
     const base = update();
     const ignores = [
-      base.ignore.map((entry) => ({ ...entry, versions: ["1.x"] })),
-      base.ignore.map((entry) => ({
-        ...entry,
-        "update-types": ["version-update:semver-major"],
-      })),
+      fixtureIgnores("npm")
+        .map((name) => ({ "dependency-name": name }))
+        .map((entry) => ({ ...entry, versions: ["1.x"] })),
+      fixtureIgnores("npm")
+        .map((name) => ({ "dependency-name": name }))
+        .map((entry) => ({
+          ...entry,
+          "update-types": ["version-update:semver-major"],
+        })),
     ];
     for (const ignore of ignores)
       expect(

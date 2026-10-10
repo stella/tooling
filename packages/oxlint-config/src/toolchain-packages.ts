@@ -299,6 +299,7 @@ export const checkPackageFiles = ({
   files,
   policy,
 }: CheckPackageFilesOptions) => {
+  const sources = new Map(Object.entries(files));
   const diagnostics: Diagnostic[] = [];
   const pins = new Map(
     Object.entries({ ...policy.packages, "bun-types": policy.bun }),
@@ -307,11 +308,14 @@ export const checkPackageFiles = ({
   const yamlLocations = new Map<string, number[]>();
   const reportedLines = new Map<string, number>();
   const add = ({ file, rule, key, value, message }: AddDiagnosticOptions) => {
+    const source = sources.get(file);
+    if (source === undefined)
+      throw new Error(`Missing package diagnostic source: ${file}`);
     const serialized = value === undefined ? undefined : JSON.stringify(value);
     const locationKey = `${file}:${key}:${serialized ?? ""}`;
     const previous = reportedLines.get(locationKey) ?? -1;
     const yamlLine = yamlLocations.get(locationKey)?.shift();
-    const index = files[file]
+    const index = source
       .split(/\r?\n/)
       .findIndex(
         (line, lineIndex) =>
@@ -327,7 +331,7 @@ export const checkPackageFiles = ({
       message,
     });
   };
-  for (const [file, text] of Object.entries(files)) {
+  for (const [file, text] of sources) {
     const pnpm = path.posix.basename(file) === "pnpm-workspace.yaml";
     if (!pnpm && path.posix.basename(file) !== "package.json") continue;
     try {
