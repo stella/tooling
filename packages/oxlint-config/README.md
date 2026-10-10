@@ -173,7 +173,9 @@ bunx --no-install stll-cloud-setup
 
 Generation uses the installed policy's Bun, Node, PostgreSQL, and Valkey pins.
 PostgreSQL uses the PGDG major-version packages; minor updates within the pinned
-major are accepted for the disposable database. Valkey uses official versioned
+major are accepted for the disposable database. Before adding PGDG, provisioning
+reuses an existing source only after verifying its signing-key fingerprint;
+conflicts identify the source file. Existing matching-major binaries are reused. Valkey uses official versioned
 binary DEBs for the declared release and architecture, verifies the policy's
 SHA256 pins, and installs those local files with apt. It does not resolve Valkey
 from a mutable package index.
@@ -183,12 +185,10 @@ drifted, or undeclared tracked scripts with mandatory `cloud-setup-drift`.
 Regenerate after changing the policy or declaration. `stll-cloud-setup --help`
 prints usage without reading repository configuration.
 
-| Host lifecycle                    | Command                               |
-| --------------------------------- | ------------------------------------- |
-| Codex install script              | `bash .agents/cloud-setup.sh install` |
-| Codex start script or start skill | `bash .agents/cloud-setup.sh start`   |
-| Claude setup script               | `bash .agents/cloud-setup.sh install` |
-| Claude SessionStart hook          | `bash .agents/cloud-setup.sh start`   |
+| Environment phase       | Command                               |
+| ----------------------- | ------------------------------------- |
+| Networked install       | `bash .agents/cloud-setup.sh install` |
+| Offline session startup | `bash .agents/cloud-setup.sh start`   |
 
 Both commands can be rerun. Missing or unknown subcommands print usage and
 exit 2; there is no implicit lifecycle mode. The script supports Ubuntu 24.04
@@ -206,14 +206,6 @@ URLs, carries a generated ownership marker, and refuses an unowned file or
 symlink. Configure the repository's test runner to load that file; migration
 commands and repository adoption are separate configuration steps.
 
-The [current Codex environment contract](https://learn.chatgpt.com/docs/environments/cloud-environments)
-provides install and start phases; repository refresh retains prepared files
-without rerunning them. The [legacy Codex contract](https://learn.chatgpt.com/docs/environments/cloud-environment)
-is separate and must not be assumed to describe current environments.
-[Claude cloud environments](https://code.claude.com/docs/en/cloud-environments#environment-caching)
-cache files rather than processes and can skip setup; SessionStart restores
-services each session. Claude also documents
-[Bun proxy limitations](https://code.claude.com/docs/en/cloud-environments#limitations-in-cloud-sessions).
-The script's supported OS and privilege requirements are explicit checks.
-These host documents do not guarantee the shared pinned service versions;
-preinstalled inventories do not prove compatibility with the shared pins.
+Environments may cache filesystems without preserving service processes.
+Run `start` at every session start, including sessions that reuse installed files.
+The supported OS, privileges, and pinned runtime requirements are checked explicitly.

@@ -35,6 +35,15 @@ const declaration = {
   envFile: ".env.cloud",
 };
 
+test("generated lifecycle comments describe the portable phase contract", () => {
+  const generated = generate(declaration);
+  expect(generated).toContain(
+    "# Networked installation and offline service startup",
+  );
+  expect(generated).toContain("run start at every session start");
+  expect(generated).not.toMatch(/^#.*https?:\/\//m);
+});
+
 test("generated script rejects missing or unknown modes before platform checks", () => {
   const generated = generate(declaration);
   for (const args of [[], ["unknown"], ["--help"], ["install", "start"]]) {

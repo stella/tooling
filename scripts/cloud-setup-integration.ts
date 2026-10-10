@@ -224,8 +224,8 @@ const main = async () => {
       { stdout: "pipe", stderr: "ignore" },
     );
     let identity: SpawnedIdentity = { status: "pending" };
-    const cleanupChild = async (identity: SpawnedIdentity) => {
-      switch (identity.status) {
+    const cleanupChild = async (childIdentity: SpawnedIdentity) => {
+      switch (childIdentity.status) {
         case "verified": {
           const removeStale = String.raw`
 set -euo pipefail
@@ -240,10 +240,10 @@ done
             [
               "env",
               `STATE=${state}`,
-              `CHILD_PID=${identity.pid}`,
-              `CHILD_UID=${identity.uid}`,
-              `CHILD_EXE=${identity.executable}`,
-              `CHILD_STARTED=${identity.started}`,
+              `CHILD_PID=${childIdentity.pid}`,
+              `CHILD_UID=${childIdentity.uid}`,
+              `CHILD_EXE=${childIdentity.executable}`,
+              `CHILD_STARTED=${childIdentity.started}`,
               "bash",
               "-c",
               removeStale,
@@ -255,7 +255,7 @@ done
         case "pending":
           break;
         default: {
-          const exhaustive: never = identity;
+          const exhaustive: never = childIdentity;
           throw new Error(`Unexpected child state: ${String(exhaustive)}`);
         }
       }

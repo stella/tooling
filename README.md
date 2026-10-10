@@ -105,7 +105,7 @@ foreign repositories, and traversal paths cannot supply mapped runtime files.
 
 The named rules are `bun-pins`, `package-pins`, `typescript-layout`,
 `node-engine`, `node-version`, `python-version`, `rust-version`,
-`runtime-manager`, `runtime-docker`, `runtime-workflow`, `action-pins`, and
+`runtime-manager`, `runtime-docker`, `runtime-workflow`, `action-pins`,
 `dependabot-policy`, and `cloud-setup-drift`. An exception requires a tracked root
 `stll-toolchain.json` listing the rule and its reason:
 
