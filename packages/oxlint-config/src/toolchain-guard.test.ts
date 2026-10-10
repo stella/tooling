@@ -14,7 +14,10 @@ import path from "node:path";
 import toolchain from "../toolchain.json";
 import { cloudSetupPath, generateCloudSetup } from "./cloud-setup";
 import type { parseCloudSetup } from "./cloud-setup-schema";
-import { consumerCheckWorkflow } from "./toolchain-consumer-checks";
+import {
+  consumerCheckWorkflow,
+  consumerRunnerVersion,
+} from "./toolchain-consumer-checks";
 import {
   checkToolchain,
   parseToolchainConfiguration,
@@ -52,12 +55,12 @@ test("consumer check declarations remain mandatory despite runtime and action op
     workflow,
     job: "consumer",
     packages: ["packages/library"],
-    toolingVersion: "0.12.0",
+    toolingVersion: consumerRunnerVersion,
     fixturePath: "tests/consumer",
   };
   const approved = policy.actions[consumerCheckWorkflow];
   const uses = `${consumerCheckWorkflow}@${approved?.sha ?? "1234567890abcdef1234567890abcdef12345678"}`;
-  const invocation = `on:\n  schedule:\n    - cron: "0 3 * * *"\njobs:\n  consumer:\n    uses: ${uses} # ${approved?.version ?? "v1"}\n    with:\n      consumer-node: '${policy.consumerNode}'\n      packages: '["packages/library"]'\n      tooling-version: '0.12.0'\n      fixture-path: tests/consumer\n`;
+  const invocation = `on:\n  schedule:\n    - cron: "0 3 * * *"\njobs:\n  consumer:\n    uses: ${uses} # ${approved?.version ?? "v1"}\n    with:\n      consumer-node: '${policy.consumerNode}'\n      packages: '["packages/library"]'\n      tooling-version: '${consumerRunnerVersion}'\n      fixture-path: tests/consumer\n`;
   const configuration = {
     consumerChecks: [declaration],
     optOuts: [

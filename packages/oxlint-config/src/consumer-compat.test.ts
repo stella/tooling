@@ -171,7 +171,7 @@ describe("consumer compatibility declarations", () => {
               manifest: {
                 name: "library",
                 version: "1.0.0",
-                files: ["index.js"],
+                files: ["index.js", "vendor"],
                 dependencies: {
                   react: "catalog:",
                   typescript: "catalog:compiler",
@@ -201,7 +201,7 @@ describe("consumer compatibility declarations", () => {
               manifest: {
                 name: "child",
                 version: "1.0.0",
-                files: ["index.js"],
+                files: ["index.js", "vendor"],
                 dependencies: { react: "catalog:" },
               },
             },
@@ -265,6 +265,13 @@ describe("consumer compatibility declarations", () => {
             JSON.stringify(pkg.manifest),
           );
           await writeFile(path.join(location, "index.js"), "export {};\n");
+          if (pkg.manifest["private"] !== true) {
+            await mkdir(path.join(location, "vendor"));
+            await writeFile(
+              path.join(location, "vendor/runtime.js"),
+              "export const vendored = true;\n",
+            );
+          }
         }
         for (const [file, text] of Object.entries(files))
           await writeFile(path.join(root, file), text);
@@ -339,6 +346,13 @@ describe("consumer compatibility declarations", () => {
             ),
           );
           expect(manifest).toMatchObject({ dependencies: expected });
+          expect(
+            execFileSync(
+              "tar",
+              ["-xOf", path.join(packed, archive), "package/vendor/runtime.js"],
+              { encoding: "utf8" },
+            ),
+          ).toBe("export const vendored = true;\n");
         }
       } finally {
         await rm(directory, { recursive: true, force: true });

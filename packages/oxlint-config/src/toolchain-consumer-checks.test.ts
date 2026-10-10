@@ -3,6 +3,7 @@ import { expect, test } from "bun:test";
 import {
   checkConsumerChecks,
   consumerCheckWorkflow,
+  consumerRunnerVersion,
   parseConsumerChecks,
 } from "./toolchain-consumer-checks";
 
@@ -12,7 +13,7 @@ const declaration = {
   workflow,
   job: "consumer",
   packages: ["packages/library"],
-  toolingVersion: "0.12.0",
+  toolingVersion: consumerRunnerVersion,
   fixturePath: "tests/consumer",
 };
 const policy = {
@@ -405,4 +406,32 @@ test("consumer callers require every declared static input and reject matrix gat
     }),
   ).not.toEqual([]);
   expect(check()).toEqual([]);
+});
+
+test("consumer declarations and inputs cannot agree on a runner different from the installed tooling", () => {
+  const toolingVersion = "0.0.0";
+  expect(
+    checkConsumerChecks({
+      declarations: [{ ...declaration, toolingVersion }],
+      files: {
+        ...files,
+        [workflow]: JSON.stringify({
+          on: triggers,
+          jobs: {
+            consumer: {
+              ...job,
+              with: { ...job.with, "tooling-version": toolingVersion },
+            },
+          },
+        }),
+      },
+      policy,
+    }),
+  ).toContainEqual(
+    expect.objectContaining({
+      message: expect.stringContaining(
+        `installed @stll/oxlint-config ${consumerRunnerVersion}`,
+      ),
+    }),
+  );
 });

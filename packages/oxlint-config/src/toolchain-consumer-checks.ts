@@ -1,9 +1,12 @@
 import path from "node:path";
 import { parseDocument } from "yaml";
 
+import packageMetadata from "../package.json";
 import { discoverConsumerPackages } from "./consumer-compat-config";
 import { consumerNodeSupportMatches } from "./consumer-node-support";
 import { githubAutomationFileKind } from "./toolchain-inputs";
+
+export const consumerRunnerVersion = packageMetadata.version;
 
 export const consumerCheckWorkflow =
   "stella/.github/.github/workflows/package-consumer-compat.yml";
@@ -285,6 +288,10 @@ export const checkConsumerChecks = ({
         if (inputs["consumer-node"] !== policy.consumerNode)
           throw new Error(
             `${workflow}:${jobName} consumer-node must be ${policy.consumerNode}`,
+          );
+        if (declaration.toolingVersion !== consumerRunnerVersion)
+          throw new Error(
+            `${workflow}:${jobName} toolingVersion must match installed @stll/oxlint-config ${consumerRunnerVersion}`,
           );
         if (inputs["tooling-version"] !== declaration.toolingVersion)
           throw new Error(

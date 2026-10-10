@@ -371,7 +371,7 @@ The reusable consumer job declares its exact scope in `stll-toolchain.json`:
       "workflow": ".github/workflows/consumer-compat.yml",
       "job": "consumer",
       "packages": ["packages/library"],
-      "toolingVersion": "0.12.0",
+      "toolingVersion": "<installed tooling version>",
       "fixturePath": "tests/consumer"
     }
   ]
@@ -386,7 +386,9 @@ The declared workflow requires a nonempty `on.schedule` with validated five-fiel
 `packages` as the same JSON array and `consumer-node` equal to the consumer policy
 pin. Required `tooling-version` and `fixture-path` inputs equal the declared exact
 `toolingVersion` and repository-relative `fixturePath`; its `consumer-compat.json` must
-be tracked. Every named package must be tracked, published, and support that Node version.
+be tracked. Replace `<installed tooling version>` with the exact installed
+`@stll/oxlint-config` release that provides the consumer runner; the guard binds the
+declaration to that package version. Every named package must be tracked, published, and support that Node version.
 Unknown jobs, stale entries, undeclared consumer calls, and inconsistent inputs fail.
 This declaration applies to consumer checks; `engineFloors` retains its separate
 minimum-supported-major contract.
