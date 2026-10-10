@@ -1,6 +1,6 @@
 import path from "node:path";
 import picomatch from "picomatch";
-import { compare, satisfies, validRange } from "semver";
+import { compare, satisfies, valid, validRange } from "semver";
 import { parseDocument } from "yaml";
 
 import { resolveConsumerCatalog } from "./consumer-catalogs";
@@ -107,6 +107,30 @@ export type ConsumerPackage = {
   directory: string;
   name: string;
   manifest: Record<string, unknown>;
+};
+
+export const consumerBundledDependencyFields = [
+  "bundleDependencies",
+  "bundledDependencies",
+] as const;
+
+export const assertConsumerPublishableManifest = ({
+  manifest,
+  directory,
+}: Pick<ConsumerPackage, "manifest" | "directory">) => {
+  const version = manifest["version"];
+  if (
+    manifest["private"] !== true &&
+    (typeof version !== "string" || valid(version) === null)
+  )
+    throw new Error(
+      `public consumer package requires a semver-valid version: ${directory}`,
+    );
+  for (const field of consumerBundledDependencyFields)
+    if (Object.hasOwn(manifest, field))
+      throw new Error(
+        `consumer packaging does not support ${field}: ${directory}`,
+      );
 };
 
 type ConsumerFixtureKindOptions = {
@@ -376,6 +400,7 @@ export const consumerPackageClosure = ({
   const closure = new Map<string, ConsumerPackage>();
   const visit = (pkg: ConsumerPackage) => {
     if (closure.has(pkg.name)) return;
+    assertConsumerPublishableManifest(pkg);
     closure.set(pkg.name, pkg);
     for (const field of consumerPublishedDependencyFields) {
       const dependencies = pkg.manifest[field];

@@ -81,6 +81,7 @@ test("consumer check declarations remain mandatory despite runtime and action op
     [workflow]: invocation,
     "packages/library/package.json": JSON.stringify({
       name: "@example/library",
+      version: "1.0.0",
       engines: { node: ">=20.10.0" },
     }),
     "stll-toolchain.json": JSON.stringify(configuration),

@@ -470,7 +470,7 @@ The reusable consumer job declares its exact scope in `stll-toolchain.json`:
 
 The declared workflow requires valid five-field cron with bounded numeric values,
 month/day names, lists, ranges, and positive steps; manual dispatch is optional.
-Day of week is 0–6 (SUN–SAT), matching the [GitHub Actions schedule contract](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule); numeric 7 is unsupported.
+Day of week is 0–6 (SUN–SAT), matching the [GitHub Actions schedule contract](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule); numeric 7 is unsupported. The combined schedules must cover every weekday with unrestricted month and date fields, so weekly or seasonal schedules cannot satisfy the daily contract. Public packages require a semver-valid version. `bundleDependencies` and `bundledDependencies` are unsupported because artifact staging does not install a bundled dependency tree; remove these fields before declaring consumer checks.
 The reusable consumer job must be stand-alone and unconditional (no `needs`, `if`, or `strategy`), so a job condition
 cannot skip its scheduled execution.
 That job calls `package-consumer-compat.yml` at the approved shared policy SHA with

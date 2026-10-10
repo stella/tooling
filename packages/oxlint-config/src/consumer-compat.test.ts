@@ -33,6 +33,8 @@ import {
   consumerRecord,
   consumerPackageClosure,
   consumerPublishedDependencyFields,
+  consumerBundledDependencyFields,
+  assertConsumerPublishableManifest,
   consumerStagingPaths,
   consumerPackRootManifest,
   bindConsumerManifest,
@@ -811,6 +813,96 @@ describe("consumer compatibility declarations", () => {
     ]).toEqual(["@example/core"]);
   });
 
+  test("public packed manifests require valid versions while private workspace owners may omit them", () => {
+    for (const version of [
+      undefined,
+      null,
+      1,
+      "",
+      "1",
+      "1.0",
+      "^1.0.0",
+      "latest",
+      "1.0.0.0",
+    ])
+      expect(() =>
+        assertConsumerPublishableManifest({
+          directory: "packages/library",
+          manifest:
+            version === undefined
+              ? { name: "library" }
+              : { name: "library", version },
+        }),
+      ).toThrow("semver-valid version");
+    for (const version of ["1.0.0", "0.0.0", "1.0.0-rc.1", "1.0.0+build.1"])
+      expect(() =>
+        assertConsumerPublishableManifest({
+          directory: "packages/library",
+          manifest: { name: "library", version },
+        }),
+      ).not.toThrow();
+    expect(() =>
+      assertConsumerPublishableManifest({
+        directory: ".",
+        manifest: { private: true },
+      }),
+    ).not.toThrow();
+    const selected = {
+      directory: "packages/library",
+      name: "library",
+      manifest: { version: "1.0.0", dependencies: { core: "workspace:*" } },
+    };
+    const core = { directory: "packages/core", name: "core", manifest: {} };
+    expect(() =>
+      consumerPackageClosure({
+        selected,
+        packages: new Map([
+          [selected.name, selected],
+          [core.name, core],
+        ]),
+        files: {},
+      }),
+    ).toThrow("semver-valid version: packages/core");
+  });
+
+  test("both bundled-dependency fields fail closed for selected and transitive package artifacts", () => {
+    for (const field of consumerBundledDependencyFields)
+      for (const value of [[], ["dependency"], true, false, null]) {
+        const selected = {
+          directory: "packages/library",
+          name: "library",
+          manifest: { version: "1.0.0", [field]: value },
+        };
+        expect(() =>
+          consumerPackageClosure({
+            selected,
+            packages: new Map([[selected.name, selected]]),
+            files: {},
+          }),
+        ).toThrow(`does not support ${field}: packages/library`);
+        const core = {
+          directory: "packages/core",
+          name: "core",
+          manifest: { version: "1.0.0", [field]: value },
+        };
+        const parent = {
+          directory: "packages/parent",
+          name: "parent",
+          manifest: { version: "1.0.0", dependencies: { core: "workspace:*" } },
+        };
+        expect(() =>
+          consumerPackageClosure({
+            selected: parent,
+            packages: new Map([
+              [parent.name, parent],
+              [core.name, core],
+            ]),
+            files: {},
+          }),
+        ).toThrow(`does not support ${field}: packages/core`);
+      }
+  });
+
   test("catalog dependencies selecting local packages require explicit workspace intent in every published section", () => {
     for (const source of ["pnpm", "bun"] as const)
       for (const owner of [".", "packages/owner"])
@@ -849,6 +941,7 @@ describe("consumer compatibility declarations", () => {
               }),
               [`${directory}/package.json`]: JSON.stringify({
                 name: "library",
+                version: "1.0.0",
                 [field]: { "@example/core": `catalog:${catalog}` },
               }),
             };
@@ -888,6 +981,7 @@ describe("consumer compatibility declarations", () => {
             expect([...closure().keys()]).toEqual(["library"]);
             files[`${directory}/package.json`] = JSON.stringify({
               name: "library",
+              version: "1.0.0",
               [field]: { external: `catalog:${catalog}` },
             });
             expect([...closure().keys()]).toEqual(["library"]);
@@ -898,7 +992,7 @@ describe("consumer compatibility declarations", () => {
     const pkg = {
       name: "library",
       directory: ".",
-      manifest: { dependencies: { missing: "workspace:*" } },
+      manifest: { version: "1.0.0", dependencies: { missing: "workspace:*" } },
     };
     expect(() =>
       consumerPackageClosure({
@@ -918,7 +1012,10 @@ describe("consumer compatibility declarations", () => {
     const pkg = {
       name: "library",
       directory: ".",
-      manifest: { dependencies: { alias: "workspace:@example/core@*" } },
+      manifest: {
+        version: "1.0.0",
+        dependencies: { alias: "workspace:@example/core@*" },
+      },
     };
     expect(() =>
       consumerPackageClosure({

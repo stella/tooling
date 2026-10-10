@@ -32,6 +32,7 @@ const job = {
 };
 const manifest = JSON.stringify({
   name: "@example/library",
+  version: "1.0.0",
   engines: { node: ">=20.10.0" },
 });
 const fixtureConfig = {
@@ -195,7 +196,7 @@ test("declared consumer workflows require valid scheduled execution", () => {
       check({
         ...files,
         [workflow]: JSON.stringify({
-          on: { schedule: [{ cron }] },
+          on: { schedule: [{ cron }, { cron: "13 2 * * *" }] },
           jobs: { consumer: job },
         }),
       }),
@@ -262,9 +263,9 @@ test("scheduled consumer cron fields enforce syntax and domain bounds", () => {
 
 test("every declared package must be a tracked published manifest supporting consumer Node", () => {
   for (const value of [
-    { name: "@example/library" },
-    { name: "@example/library", engines: {} },
-    { name: "@example/library", engines: { npm: ">=10" } },
+    { name: "@example/library", version: "1.0.0" },
+    { name: "@example/library", version: "1.0.0", engines: {} },
+    { name: "@example/library", version: "1.0.0", engines: { npm: ">=10" } },
   ])
     expect(
       check({
@@ -273,12 +274,17 @@ test("every declared package must be a tracked published manifest supporting con
       }),
     ).toEqual([]);
   for (const value of [
-    { name: "@example/library", private: true, engines: { node: ">=20" } },
+    {
+      name: "@example/library",
+      version: "1.0.0",
+      private: true,
+      engines: { node: ">=20" },
+    },
     { engines: { node: ">=20" } },
-    { name: "@example/library", engines: null },
-    { name: "@example/library", engines: { node: null } },
-    { name: "@example/library", engines: { node: ">=24" } },
-    { name: "@example/library", engines: { node: "latest" } },
+    { name: "@example/library", version: "1.0.0", engines: null },
+    { name: "@example/library", version: "1.0.0", engines: { node: null } },
+    { name: "@example/library", version: "1.0.0", engines: { node: ">=24" } },
+    { name: "@example/library", version: "1.0.0", engines: { node: "latest" } },
   ])
     expect(
       check({
@@ -435,4 +441,50 @@ test("consumer declarations and inputs cannot agree on a runner different from t
       ),
     }),
   );
+});
+
+test("consumer schedules cover every day without month or date gaps", () => {
+  const run = (crons: string[]) =>
+    check({
+      ...files,
+      [workflow]: JSON.stringify({
+        on: { schedule: crons.map((cron) => ({ cron })) },
+        jobs: { consumer: job },
+      }),
+    });
+  for (const crons of [
+    ["0 0 * * 0"],
+    ["0 0 * * MON-FRI"],
+    ["0 0 1-30 * *"],
+    ["0 0 * JAN-NOV *"],
+    ["0 0 * * SUN-FRI", "0 0 * JAN SAT"],
+    ["0 0 */2 * *"],
+  ])
+    expect(run(crons)).not.toEqual([]);
+  for (const crons of [
+    ["0 0 * * SUN-SAT"],
+    ["0 0 * * MON-FRI", "13 2 * * SUN,SAT"],
+    ["0 0 1-31 JAN-DEC 0-6"],
+    ["0 0 * * 0", "0 0 * * 1-6"],
+  ])
+    expect(run(crons)).toEqual([]);
+});
+
+test("consumer declarations reject unpublishable versions and unsupported bundles", () => {
+  for (const fields of [
+    {},
+    { version: "latest" },
+    { version: 1 },
+    { version: "1.0.0", bundleDependencies: [] },
+    { version: "1.0.0", bundledDependencies: false },
+  ])
+    expect(
+      check({
+        ...files,
+        "packages/library/package.json": JSON.stringify({
+          name: "@example/library",
+          ...fields,
+        }),
+      }),
+    ).not.toEqual([]);
 });

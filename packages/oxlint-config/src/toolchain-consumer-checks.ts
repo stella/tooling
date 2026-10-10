@@ -2,7 +2,10 @@ import path from "node:path";
 import { parseDocument } from "yaml";
 
 import packageMetadata from "../package.json";
-import { discoverConsumerPackages } from "./consumer-compat-config";
+import {
+  assertConsumerPublishableManifest,
+  discoverConsumerPackages,
+} from "./consumer-compat-config";
 import { consumerNodeSupportMatches } from "./consumer-node-support";
 import { githubAutomationFileKind } from "./toolchain-inputs";
 
@@ -76,7 +79,7 @@ const cronFields = [
     ),
   },
 ] as const;
-const cronFieldMatches = (text: string, field: CronField) => {
+const cronFieldValues = (text: string, field: CronField) => {
   const value = (token: string) => {
     const number = /^\d+$/.test(token)
       ? Number(token)
@@ -88,38 +91,46 @@ const cronFieldMatches = (text: string, field: CronField) => {
       ? number
       : undefined;
   };
-  return text.split(",").every((part) => {
+  const values = new Set<number>();
+  for (const part of text.split(",")) {
     const split = part.split("/");
-    if (split.length > 2) return false;
-    const [base, step] = split;
-    if (
-      step !== undefined &&
-      (!/^\d+$/.test(step) ||
-        !Number.isSafeInteger(Number(step)) ||
-        Number(step) <= 0)
-    )
-      return false;
-    if (base === "*") return true;
-    if (base === undefined) return false;
+    if (split.length > 2) return undefined;
+    const [base, stepText] = split;
+    const step = stepText === undefined ? 1 : Number(stepText);
+    if (stepText !== undefined && !/^\d+$/.test(stepText)) return undefined;
+    if (!Number.isSafeInteger(step) || step <= 0 || base === undefined)
+      return undefined;
     const bounds = base.split("-");
-    if (bounds.length > 2) return false;
+    if (bounds.length > 2) return undefined;
     const lower = bounds.at(0);
-    if (lower === undefined) return false;
-    const start = value(lower);
-    if (start === undefined) return false;
-    if (bounds.length === 1) return true;
+    const start =
+      base === "*"
+        ? field.minimum
+        : lower === undefined
+          ? undefined
+          : value(lower);
     const upper = bounds.at(1);
-    const end = upper === undefined ? undefined : value(upper);
-    return end !== undefined && start <= end;
-  });
+    const end =
+      base === "*" || (bounds.length === 1 && stepText !== undefined)
+        ? field.maximum
+        : upper === undefined
+          ? start
+          : value(upper);
+    if (start === undefined || end === undefined || start > end)
+      return undefined;
+    for (let selected = start; selected <= end; selected += step)
+      values.add(selected);
+  }
+  return values;
 };
+
 const validConsumerCron = (text: string) => {
   const fields = text.trim().split(/\s+/);
   return (
     fields.length === cronFields.length &&
     cronFields.every((field, index) => {
       const text = fields.at(index);
-      return text !== undefined && cronFieldMatches(text, field);
+      return text !== undefined && cronFieldValues(text, field) !== undefined;
     })
   );
 };
@@ -127,16 +138,26 @@ const validConsumerCron = (text: string) => {
 const nightlySchedule = (value: unknown) => {
   if (!record(value)) return false;
   const schedule = value["schedule"];
-  return (
-    Array.isArray(schedule) &&
-    schedule.length > 0 &&
-    schedule.every(
-      (entry: unknown) =>
-        record(entry) &&
-        typeof entry["cron"] === "string" &&
-        validConsumerCron(entry["cron"]),
+  if (!Array.isArray(schedule) || schedule.length === 0) return false;
+  const coveredDays = new Set<number>();
+  for (const entry of schedule) {
+    if (
+      !record(entry) ||
+      typeof entry["cron"] !== "string" ||
+      !validConsumerCron(entry["cron"])
     )
-  );
+      return false;
+    const fields = entry["cron"].trim().split(/\s+/);
+    const selections = cronFields.map((field, index) => {
+      const text = fields.at(index);
+      return text === undefined ? undefined : cronFieldValues(text, field);
+    });
+    // Month and date restrictions cannot certify a daily schedule.
+    if (selections.at(2)?.size !== 31 || selections.at(3)?.size !== 12)
+      continue;
+    for (const day of selections.at(4) ?? []) coveredDays.add(day);
+  }
+  return coveredDays.size === 7;
 };
 
 export type ConsumerCheck = {
@@ -242,7 +263,7 @@ export const checkConsumerChecks = ({
         }
         if (!nightlySchedule(source["on"]))
           throw new Error(
-            `${workflow} consumer checks require a nonempty valid on.schedule`,
+            `${workflow} consumer checks require a nonempty valid on.schedule covering every day`,
           );
         if ("if" in job || "needs" in job || "strategy" in job)
           throw new Error(
@@ -351,6 +372,7 @@ export const checkConsumerChecks = ({
             throw new Error(
               `consumerChecks requires a named published package: ${manifestPath}`,
             );
+          assertConsumerPublishableManifest({ manifest, directory });
           const engines = manifest["engines"];
           if (
             (engines !== undefined && !record(engines)) ||
