@@ -1,6 +1,6 @@
 /// <reference types="bun-types" />
 
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import {
   mkdtemp,
@@ -9,6 +9,9 @@ import {
   rm,
   writeFile,
   access,
+  chmod,
+  realpath,
+  symlink,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -16,12 +19,12 @@ import { join, resolve } from "node:path";
 import {
   bunCheckArgs,
   compareDiagnosticSets,
-  diagnosticCodes,
   diagnosticSet,
   fixtureParity,
   fixtureRunPassed,
   fixtures,
   resolveCompiler,
+  runTypecheckParity,
 } from "./typecheck-parity";
 
 // These checks launch real compilers; the repository CI owns that workload.
@@ -84,6 +87,17 @@ test.skipIf(process.env["CI"] !== "true")(
           baseline: { status: tsc.status, output: tsc.stdout + tsc.stderr },
           candidate: { status: bun.status, output: bun.stdout + bun.stderr },
         });
+        if (!result.passed)
+          console.error(
+            JSON.stringify({
+              configuration,
+              baseline: { status: tsc.status, output: tsc.stdout + tsc.stderr },
+              candidate: {
+                status: bun.status,
+                output: bun.stdout + bun.stderr,
+              },
+            }),
+          );
         expect(result.active).toBe(configuration.active);
         expect(result.passed).toBe(true);
         expect(result.tscCodes).toEqual(configuration.active ? [2322] : []);
@@ -108,7 +122,7 @@ test.skipIf(process.env["CI"] !== "true")(
 );
 
 test.skipIf(process.env["CI"] !== "true")(
-  "builtin checking bypasses a consumer check script",
+  "consumer check script is rejected before compiler resolution or script execution",
   async () => {
     const project = await mkdtemp(join(tmpdir(), "parity-script-shadow-"));
     try {
@@ -133,14 +147,16 @@ test.skipIf(process.env["CI"] !== "true")(
         join(project, "input.ts"),
         'export const value: number = "wrong";',
       );
-      const checked = spawnSync(process.execPath, bunCheckArgs(project), {
-        cwd: project,
-        encoding: "utf8",
-        timeout: 10_000,
-      });
-      if (checked.error) throw checked.error;
-      expect(checked.status).not.toBe(42);
-      expect(diagnosticCodes(checked.stdout + checked.stderr)).toContain(2322);
+      let failure: unknown;
+      try {
+        await runTypecheckParity({ repo: project, policy: {} });
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toBeInstanceOf(Error);
+      if (failure instanceof Error) {
+        expect(failure.message).toContain('must not define a "check" script');
+      }
       expect(access(join(project, "script-ran"))).rejects.toThrow();
     } finally {
       await rm(project, { recursive: true, force: true });
@@ -238,4 +254,167 @@ test.skipIf(process.env["CI"] !== "true")(
     }
   },
   40_000,
+);
+
+test.skipIf(process.env["CI"] !== "true")(
+  "consumer solution checks each effective config and rejects lost strict-group diagnostics",
+  async () => {
+    const repo = process.cwd();
+    const policy: unknown = JSON.parse(
+      await readFile(
+        resolve(repo, "packages/oxlint-config/toolchain.json"),
+        "utf8",
+      ),
+    );
+    const compiler = await resolveCompiler(repo, policy);
+    const project = await realpath(
+      await mkdtemp(join(tmpdir(), "parity-config-groups-")),
+    );
+    const logs: string[] = [];
+    const errors: string[] = [];
+    const errorLogger = spyOn(console, "error").mockImplementation(
+      (...args: unknown[]) => {
+        errors.push(args.map(String).join(" "));
+      },
+    );
+    const logger = spyOn(console, "log").mockImplementation(
+      (...args: unknown[]) => {
+        logs.push(args.map(String).join(" "));
+      },
+    );
+    try {
+      await mkdir(join(project, "node_modules"));
+      await symlink(
+        resolve(compiler, "../.."),
+        join(project, "node_modules/typescript"),
+        "dir",
+      );
+      await writeFile(
+        join(project, "package.json"),
+        JSON.stringify({ devDependencies: { typescript: "7.0.2" } }),
+      );
+      await writeFile(
+        join(project, "tsconfig.json"),
+        JSON.stringify({
+          files: [],
+          references: [{ path: "./strict" }, { path: "./loose" }],
+        }),
+      );
+      for (const leaf of ["strict", "loose"]) {
+        const folder = join(project, leaf);
+        await mkdir(folder);
+        await writeFile(
+          join(folder, "tsconfig.json"),
+          JSON.stringify({
+            compilerOptions: {
+              composite: true,
+              types: [],
+              target: "ESNext",
+              module: "ESNext",
+              moduleResolution: "Bundler",
+              strict: leaf === "strict",
+              noUncheckedIndexedAccess: leaf === "strict",
+            },
+            files: ["input.ts"],
+          }),
+        );
+        await writeFile(
+          join(folder, "input.ts"),
+          'export const value = "valid";',
+        );
+      }
+      const existingBuildInfo = join(project, "strict/tsconfig.tsbuildinfo");
+      const newBuildInfo = join(project, "loose/tsconfig.tsbuildinfo");
+      const originalBuildInfo = "pre-existing consumer build cache\n";
+      await writeFile(existingBuildInfo, originalBuildInfo);
+      const passed = await runTypecheckParity({ repo: project, policy });
+      if (!passed)
+        console.error(
+          logs
+            .filter(
+              (line) =>
+                line.includes("FAIL") || line.startsWith("Config group"),
+            )
+            .join("\n"),
+        );
+      expect(passed).toBe(true);
+      expect(await readFile(existingBuildInfo, "utf8")).toBe(originalBuildInfo);
+      expect(access(newBuildInfo)).rejects.toThrow();
+      const strictStart = logs.findIndex(
+        (line) =>
+          line.startsWith("Config group ") &&
+          line.includes("strict/tsconfig.json"),
+      );
+      const looseStart = logs.findIndex(
+        (line) =>
+          line.startsWith("Config group ") &&
+          line.includes("loose/tsconfig.json"),
+      );
+      expect(strictStart).toBeGreaterThanOrEqual(0);
+      expect(looseStart).toBeGreaterThan(strictStart);
+      const strictRows = logs.slice(strictStart, looseStart);
+      const looseRows = logs.slice(looseStart);
+      for (const name of ["strict-null", "unchecked-index"]) {
+        expect(
+          strictRows.some(
+            (line) => line.startsWith(`${name} |`) && line.endsWith("PASS"),
+          ),
+        ).toBe(true);
+        expect(
+          looseRows.some(
+            (line) =>
+              line.startsWith(`${name} (inactive under this config) |`) &&
+              line.endsWith("INACTIVE"),
+          ),
+        ).toBe(true);
+      }
+      const wrapper = join(project, "bun-wrapper");
+      await writeFile(
+        wrapper,
+        `#!${process.execPath}\nconst {spawnSync}=require('node:child_process');\nconst {readFileSync}=require('node:fs');\nconst {join}=require('node:path');\nconst args=process.argv.slice(2);\nconst projectArg=args.find(arg=>arg.startsWith('--project='));\nconst folder=projectArg?.slice('--project='.length);\nif(folder&&folder.includes('unchecked-index')){\n const config=JSON.parse(readFileSync(join(folder,'tsconfig.json'),'utf8'));\n const parents=Array.isArray(config.extends)?config.extends:[config.extends];\n if(parents.some(parent=>typeof parent==='string'&&parent.includes('/strict/tsconfig.json')))process.exit(0);\n}\nconst result=spawnSync(${JSON.stringify(process.execPath)},args,{stdio:'inherit'});\nif(result.error)throw result.error;\nprocess.exit(result.status??1);\n`,
+      );
+      await chmod(wrapper, 0o755);
+      logs.length = 0;
+      expect(
+        await runTypecheckParity({ repo: project, policy, bun: wrapper }),
+      ).toBe(false);
+      expect(await readFile(existingBuildInfo, "utf8")).toBe(originalBuildInfo);
+      expect(access(newBuildInfo)).rejects.toThrow();
+      expect(
+        logs.some(
+          (line) =>
+            line.startsWith("unchecked-index |") && line.endsWith("FAIL"),
+        ),
+      ).toBe(true);
+      expect(errors.some((line) => line.includes("zero diagnostics"))).toBe(
+        true,
+      );
+      await writeFile(
+        join(project, "tsconfig.json"),
+        JSON.stringify({
+          compilerOptions: {
+            noCheck: true,
+            strict: false,
+            target: "ESNext",
+            module: "ESNext",
+            moduleResolution: "Bundler",
+            types: [],
+          },
+          files: ["./strict/input.ts"],
+        }),
+      );
+      errors.length = 0;
+      expect(await runTypecheckParity({ repo: project, policy })).toBe(false);
+      expect(
+        errors.some((line) =>
+          line.includes("zero seeded fixture classes active"),
+        ),
+      ).toBe(true);
+    } finally {
+      logger.mockRestore();
+      errorLogger.mockRestore();
+      await rm(project, { recursive: true, force: true });
+    }
+  },
+  180_000,
 );

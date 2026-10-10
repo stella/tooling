@@ -65,16 +65,19 @@ TypeScript compiler (including the declared split layout), compares repository
 diagnostics by file, line, and code, then checks 31 shipped fixture classes under
 the consumer tsconfig flags. TypeScript diagnostics determine each class's
 activation; inactive classes are identified in the table, and zero active classes
-fail the check. The
-command fails on diagnostic differences or lost seeded coverage and reports wall
+fail the check. The command fails on diagnostic differences or lost seeded coverage and reports wall
 time and peak RSS for TypeScript and Bun. It requires Bun and `/usr/bin/time`
 on Linux or macOS, and runs with Node or Bun. Tooling invokes the same bin through
-`bun run check:typecheck-parity`. The bin uses the documented
-[`bun --check`](https://bun.sh/docs/runtime/check#if-package-json-has-a-check-script)
-form, so consumer `check` scripts cannot shadow typechecking. Shared typecheck
-scripts should also use `bun --check` if the repo defines a `check` script.
-Repositories with project references use build mode on both sides. The installed
-compiler must match its selected toolchain layout version; tagged agent diagnostics
+`bun run check:typecheck-parity`. The bin invokes
+`bun check` with its dedicated project/build flags. Consumer repositories must
+not define a `check` script: it shadows Bun's checker, so the parity bin fails
+with a clear error until that script is renamed. Standalone `bun --check`
+checks the current project but does not forward these checker options.
+Repositories with project references use build mode on both sides. Referenced
+configs are discovered recursively and grouped by effective compiler options.
+Each group runs the seeded set under a representative leaf config and must
+activate at least one seeded class. The installed compiler and Bun runtime must match their selected toolchain policy versions.
+Consumer build-info files are restored after the TypeScript baseline; tagged agent diagnostics
 are normalized into the same comparison set.
 
 Use the library TypeScript preset:

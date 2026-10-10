@@ -9,7 +9,8 @@ const main = async () => {
   const policy: unknown = JSON.parse(
     await readFile(new URL("../toolchain.json", import.meta.url), "utf8"),
   );
-  if (!(await runTypecheckParity(process.cwd(), policy))) process.exitCode = 1;
+  if (!(await runTypecheckParity({ repo: process.cwd(), policy })))
+    process.exitCode = 1;
 };
 
 main().catch((error: unknown) => {

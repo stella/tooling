@@ -1,22 +1,64 @@
 /// <reference types="bun-types" />
 
 import { expect, test } from "bun:test";
-import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdtemp,
+  mkdir,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import {
+  assertUnshadowedCheck,
+  assertBunVersion,
   compareDiagnosticSets,
   diagnosticCodes,
   diagnosticSet,
   fixtureParity,
   fixtureRunPassed,
+  groupCompilerConfigs,
   diagnosticParity,
   fixtures,
   resolveCompiler,
 } from "./typecheck-parity";
 
 const repo = resolve("/consumer-repo");
+
+test("compiler config grouping ignores property order but preserves option differences", () => {
+  const entries = [
+    {
+      path: "/repo/strict/tsconfig.json",
+      compilerOptions: { strict: true, paths: { second: ["b"], first: ["a"] } },
+    },
+    {
+      path: "/repo/same/tsconfig.json",
+      compilerOptions: { paths: { first: ["a"], second: ["b"] }, strict: true },
+    },
+    {
+      path: "/repo/loose/tsconfig.json",
+      compilerOptions: {
+        strict: false,
+        paths: { first: ["a"], second: ["b"] },
+      },
+    },
+    {
+      path: "/repo/other-paths/tsconfig.json",
+      compilerOptions: {
+        strict: true,
+        paths: { first: ["different"], second: ["b"] },
+      },
+    },
+  ] as const;
+  expect(groupCompilerConfigs([...entries])).toEqual([
+    { path: entries[0].path, projects: [entries[0].path, entries[1].path] },
+    { path: entries[2].path, projects: [entries[2].path] },
+    { path: entries[3].path, projects: [entries[3].path] },
+  ]);
+});
 
 const compilerPolicy = {
   typescriptInstallLayouts: [
@@ -62,6 +104,50 @@ test("compiler resolution uses a declared direct installation", async () => {
     expect(await resolveCompiler(root, compilerPolicy)).toBe(
       join(root, "node_modules/typescript/bin/tsc.js"),
     );
+  });
+});
+
+test("consumer check-script guard rejects shadowing before any command runs", async () => {
+  await compilerFixture(async (root) => {
+    await writeFile(
+      join(root, "package.json"),
+      JSON.stringify({ scripts: { check: "exit 42" } }),
+    );
+    let failure: unknown;
+    try {
+      await assertUnshadowedCheck(root);
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(Error);
+    if (failure instanceof Error) {
+      expect(failure.message).toContain('must not define a "check" script');
+    }
+  });
+});
+
+test("consumer check-script guard permits other script names", async () => {
+  await compilerFixture(async (root) => {
+    for (const manifest of [
+      {},
+      { scripts: { typecheck: "bun check", build: "tsdown" } },
+    ]) {
+      await writeFile(join(root, "package.json"), JSON.stringify(manifest));
+      await assertUnshadowedCheck(root);
+    }
+  });
+});
+
+test("selected Bun executable must match the policy version", async () => {
+  await compilerFixture(async (root) => {
+    const executable = join(root, "bun-version-fixture");
+    await writeFile(
+      executable,
+      '#!/bin/sh\nif [ "$1" = "--version" ]; then echo 1.4.2; else exit 42; fi\n',
+    );
+    await chmod(executable, 0o755);
+    expect(() => assertBunVersion(executable, { bun: "1.4.3" })).toThrow();
+    expect(() => assertBunVersion(executable, { bun: "1.4.2" })).not.toThrow();
   });
 });
 

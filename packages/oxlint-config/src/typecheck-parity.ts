@@ -1,8 +1,9 @@
 import { spawnSync } from "node:child_process";
+import { realpathSync, statSync } from "node:fs";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { resolve, join, relative } from "node:path";
+import { resolve, join, relative, dirname, basename } from "node:path";
 import { performance } from "node:perf_hooks";
 
 export const fixtures = [
@@ -402,6 +403,23 @@ export const compareDiagnosticSets = (
   };
 };
 
+export const assertUnshadowedCheck = async (repo: string) => {
+  const manifest: unknown = JSON.parse(
+    await readFile(join(repo, "package.json"), "utf8"),
+  );
+  if (typeof manifest !== "object" || manifest === null)
+    throw new Error("Invalid repository package.json");
+  if (
+    "scripts" in manifest &&
+    typeof manifest.scripts === "object" &&
+    manifest.scripts !== null &&
+    "check" in manifest.scripts
+  )
+    throw new Error(
+      'Repository package.json must not define a "check" script: it shadows Bun typechecking; rename that script before running parity',
+    );
+};
+
 export const resolveCompiler = async (repo: string, policy: unknown) => {
   if (
     typeof policy !== "object" ||
@@ -470,13 +488,191 @@ export const resolveCompiler = async (repo: string, policy: unknown) => {
   );
 };
 
+export const assertBunVersion = (bun: string, policy: unknown) => {
+  if (
+    typeof policy !== "object" ||
+    policy === null ||
+    !("bun" in policy) ||
+    typeof policy.bun !== "string"
+  )
+    throw new Error("toolchain.json must define bun");
+  const result = spawnSync(bun, ["--version"], { encoding: "utf8" });
+  if (result.error) throw result.error;
+  const installed = result.stdout.trim();
+  if (result.status !== 0 || installed !== policy.bun)
+    throw new Error(
+      `Bun must be ${policy.bun}; selected runtime reports ${installed || "no version"}`,
+    );
+};
+
+const buildInfoPath = ({ path, compilerOptions }: CompilerConfig) => {
+  const options =
+    typeof compilerOptions === "object" && compilerOptions !== null
+      ? compilerOptions
+      : {};
+  const optionPath = (name: string) => {
+    const value: unknown = Reflect.get(options, name);
+    return typeof value === "string"
+      ? resolve(dirname(path), value)
+      : undefined;
+  };
+  const explicit = optionPath("tsBuildInfoFile");
+  if (explicit !== undefined) return explicit;
+  const outFile = optionPath("outFile");
+  if (outFile !== undefined)
+    return outFile.replace(/\.[^/.]+$/, "") + ".tsbuildinfo";
+  const configStem = path.replace(/\.[^/.]+$/, "");
+  const outDir = optionPath("outDir");
+  const rootDir = optionPath("rootDir");
+  const target =
+    outDir === undefined
+      ? configStem
+      : join(
+          outDir,
+          rootDir === undefined
+            ? basename(configStem)
+            : relative(rootDir, configStem),
+        );
+  return target + ".tsbuildinfo";
+};
+
+type PreserveBuildInfoOptions = {
+  paths: string[];
+  run: () => ReturnType<typeof timedCommand>;
+};
+const preserveBuildInfo = async ({ paths, run }: PreserveBuildInfoOptions) => {
+  const snapshots = await Promise.all(
+    paths.map(async (path) => {
+      try {
+        return { path, content: await readFile(path) };
+      } catch (error) {
+        if (
+          !(error instanceof Error) ||
+          !("code" in error) ||
+          error.code !== "ENOENT"
+        )
+          throw error;
+        return { path, content: undefined };
+      }
+    }),
+  );
+  try {
+    return run();
+  } finally {
+    for (const { path, content } of snapshots) {
+      if (content === undefined) await rm(path, { force: true });
+      else await writeFile(path, content);
+    }
+  }
+};
+
 export const bunCheckArgs = (project?: string, build = false) => [
-  "--check",
+  "check",
   "--no-pretty",
   "--all",
   ...(build ? ["--build"] : []),
-  ...(project === undefined ? [] : ["--project", project]),
+  ...(project === undefined ? [] : [`--project=${project}`]),
 ];
+
+const canonicalOptions = (value: unknown): string => {
+  if (Array.isArray(value)) return `[${value.map(canonicalOptions).join(",")}]`;
+  if (typeof value === "object" && value !== null)
+    return `{${Object.keys(value)
+      .sort()
+      .map(
+        (key) =>
+          `${JSON.stringify(key)}:${canonicalOptions(Reflect.get(value, key))}`,
+      )
+      .join(",")}}`;
+  const serialized = JSON.stringify(value);
+  if (serialized === undefined)
+    throw new Error("Invalid effective compiler option");
+  return serialized;
+};
+
+type CompilerConfig = { path: string; compilerOptions: unknown };
+export const groupCompilerConfigs = (configs: CompilerConfig[]) => {
+  const groups = new Map<string, { path: string; projects: string[] }>();
+  for (const config of configs) {
+    const key = canonicalOptions(config.compilerOptions);
+    const existing = groups.get(key);
+    if (existing) existing.projects.push(config.path);
+    else groups.set(key, { path: config.path, projects: [config.path] });
+  }
+  return [...groups.values()];
+};
+
+type DiscoverConfigGroupsOptions = { repo: string; compiler: string };
+export const discoverConfigGroups = ({
+  repo,
+  compiler,
+}: DiscoverConfigGroupsOptions) => {
+  const configs: CompilerConfig[] = [];
+  const visited = new Set<string>();
+  const buildInfoPaths = new Set<string>();
+  let build = false;
+  const visit = (project: string) => {
+    const path = realpathSync(
+      statSync(project).isDirectory()
+        ? join(project, "tsconfig.json")
+        : project,
+    );
+    if (visited.has(path)) return;
+    visited.add(path);
+    const result = spawnSync(
+      process.execPath,
+      [compiler, "--showConfig", "--project", path],
+      { cwd: repo, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+    );
+    if (result.error) throw result.error;
+    if (result.status !== 0) throw new Error(result.stdout + result.stderr);
+    const config: unknown = JSON.parse(result.stdout);
+    if (typeof config !== "object" || config === null)
+      throw new Error(`Invalid resolved config: ${path}`);
+    const references: unknown[] =
+      "references" in config && Array.isArray(config.references)
+        ? config.references
+        : [];
+    build ||= references.length > 0;
+    buildInfoPaths.add(
+      buildInfoPath({
+        path,
+        compilerOptions:
+          "compilerOptions" in config ? config.compilerOptions : {},
+      }),
+    );
+    const hasFiles =
+      "files" in config &&
+      Array.isArray(config.files) &&
+      config.files.length > 0;
+    if (hasFiles || references.length === 0) {
+      const compilerOptions =
+        "compilerOptions" in config ? config.compilerOptions : {};
+      if (
+        typeof compilerOptions !== "object" ||
+        compilerOptions === null ||
+        Array.isArray(compilerOptions)
+      )
+        throw new Error(`Invalid compiler options: ${path}`);
+      configs.push({ path, compilerOptions });
+    }
+    for (const reference of references) {
+      if (
+        typeof reference !== "object" ||
+        reference === null ||
+        !("path" in reference) ||
+        typeof reference.path !== "string"
+      )
+        throw new Error(`Invalid project reference: ${path}`);
+      visit(resolve(dirname(path), reference.path));
+    }
+  };
+  visit(join(repo, "tsconfig.json"));
+  const groups = groupCompilerConfigs(configs);
+  if (groups.length === 0)
+    throw new Error("No consumer compiler configurations to compare");
+  return { build, groups, buildInfoPaths: [...buildInfoPaths] };
+};
 
 type TimedCommandOptions = { command: string; args: string[]; repo: string };
 const timedCommand = ({ command, args, repo }: TimedCommandOptions) => {
@@ -501,34 +697,40 @@ const timedCommand = ({ command, args, repo }: TimedCommandOptions) => {
   };
 };
 
-export const runTypecheckParity = async (repo: string, policy: unknown) => {
+const NO_WORK_MAX_RSS_KIB = 16 * 1024;
+const NO_WORK_MAX_WALL_SECONDS = 0.25;
+
+type RunTypecheckParityOptions = {
+  repo: string;
+  policy: unknown;
+  bun?: string;
+};
+export const runTypecheckParity = async ({
+  repo,
+  policy,
+  bun = process.versions.bun ? process.execPath : "bun",
+}: RunTypecheckParityOptions) => {
+  await assertUnshadowedCheck(repo);
+  assertBunVersion(bun, policy);
   const compiler = await resolveCompiler(repo, policy);
-  const bun = process.versions.bun ? process.execPath : "bun";
-  const configuration = spawnSync(
-    process.execPath,
-    [compiler, "--showConfig"],
-    { cwd: repo, encoding: "utf8" },
-  );
-  if (configuration.error) throw configuration.error;
-  if (configuration.status !== 0)
-    throw new Error(configuration.stdout + configuration.stderr);
-  const config: unknown = JSON.parse(configuration.stdout);
-  const build =
-    typeof config === "object" &&
-    config !== null &&
-    "references" in config &&
-    Array.isArray(config.references) &&
-    config.references.length > 0;
-  const baseline = timedCommand({
-    command: process.execPath,
-    args: [
-      compiler,
-      ...(build ? ["--build", "--force"] : []),
-      "--noEmit",
-      "--pretty",
-      "false",
-    ],
+  const { build, groups, buildInfoPaths } = discoverConfigGroups({
     repo,
+    compiler,
+  });
+  const baseline = await preserveBuildInfo({
+    paths: buildInfoPaths,
+    run: () =>
+      timedCommand({
+        command: process.execPath,
+        args: [
+          compiler,
+          ...(build ? ["--build", "--force"] : []),
+          "--noEmit",
+          "--pretty",
+          "false",
+        ],
+        repo,
+      }),
   });
   const candidate = timedCommand({
     command: bun,
@@ -556,66 +758,97 @@ export const runTypecheckParity = async (repo: string, policy: unknown) => {
     `repository bun: wall=${candidate.wall.toFixed(3)}s maxRSS=${candidate.maxRssKiB}KiB`,
   );
   const scratch = await mkdtemp(join(tmpdir(), "typecheck-parity-"));
-  const results = [];
-  let tscWall = 0;
-  let bunWall = 0;
-  let tscRss = 0;
-  let bunRss = 0;
+  const groupResults = [];
   try {
-    for (const fixture of fixtures) {
-      const folder = join(scratch, fixture.name);
-      await mkdir(folder);
-      await writeFile(
-        join(folder, "tsconfig.json"),
-        JSON.stringify({
-          extends: join(repo, "tsconfig.json"),
-          compilerOptions: {
-            types: [],
-            composite: false,
-            incremental: true,
-            noEmit: true,
-            rootDir: ".",
-            outDir: "./output",
-            tsBuildInfoFile: "./output/fixture.tsbuildinfo",
-          },
-          files: [],
-          include: ["*.ts", "*.js", "*.cts"],
-          exclude: [],
-        }),
-      );
-      for (const [name, content] of Object.entries(fixture.files))
-        await writeFile(join(folder, name), content);
-      const tsc = timedCommand({
-        command: process.execPath,
-        args: [compiler, "--noEmit", "--pretty", "false", "-p", folder],
-        repo,
-      });
-      const checked = timedCommand({
-        command: bun,
-        args: [...bunCheckArgs(folder), "--threads=1"],
-        repo,
-      });
-      const result = fixtureParity({
-        expected: fixture.codes,
-        match: fixture.anyCode ? "any" : "all",
-        baseline: tsc,
-        candidate: checked,
-      });
-      results.push(result);
-      tscWall += tsc.wall;
-      bunWall += checked.wall;
-      tscRss = Math.max(tscRss, tsc.maxRssKiB);
-      bunRss = Math.max(bunRss, checked.maxRssKiB);
+    for (const [index, group] of groups.entries()) {
       console.log(
-        `${fixture.name}${result.active ? "" : " (inactive under this config)"} | ${result.tscCodes.join(",")} | ${result.bunCodes.join(",")} | ${result.passed ? "PASS" : "FAIL"}`,
+        `Config group ${index + 1}: ${relative(repo, group.path)} (${group.projects.length} projects)`,
       );
+      const results = [];
+      let tscWall = 0;
+      let bunWall = 0;
+      let tscRss = 0;
+      let bunRss = 0;
+      const groupFolder = join(scratch, `config-${index + 1}`);
+      await mkdir(groupFolder);
+      for (const fixture of fixtures) {
+        const folder = join(groupFolder, fixture.name);
+        await mkdir(folder);
+        await writeFile(
+          join(folder, "tsconfig.json"),
+          JSON.stringify({
+            extends: group.path,
+            compilerOptions: {
+              types: [],
+              composite: false,
+              incremental: true,
+              noEmit: true,
+              rootDir: ".",
+              outDir: "./output",
+              tsBuildInfoFile: "./output/fixture.tsbuildinfo",
+            },
+            files: [],
+            include: ["*.ts", "*.js", "*.cts"],
+            exclude: [],
+          }),
+        );
+        for (const [name, content] of Object.entries(fixture.files))
+          await writeFile(join(folder, name), content);
+        const tsc = timedCommand({
+          command: process.execPath,
+          args: [compiler, "--noEmit", "--pretty", "false", "-p", folder],
+          repo,
+        });
+        const checked = timedCommand({
+          command: bun,
+          args: [...bunCheckArgs(folder), "--threads=1"],
+          repo,
+        });
+        const result = fixtureParity({
+          expected: fixture.codes,
+          match: fixture.anyCode ? "any" : "all",
+          baseline: tsc,
+          candidate: checked,
+        });
+        results.push(result);
+        tscWall += tsc.wall;
+        bunWall += checked.wall;
+        tscRss = Math.max(tscRss, tsc.maxRssKiB);
+        bunRss = Math.max(bunRss, checked.maxRssKiB);
+        console.log(
+          `${fixture.name}${result.active ? "" : " (inactive under this config)"} | ${result.tscCodes.join(",")} | ${result.bunCodes.join(",")} | ${result.active ? (result.passed ? "PASS" : "FAIL") : "INACTIVE"}`,
+        );
+        if (!result.active && !result.passed)
+          console.error(
+            `FAIL: diagnostic comparison differs for inactive class ${fixture.name}`,
+          );
+        if (result.active && result.bunCodes.length === 0) {
+          console.error(
+            `FAIL: Bun returned zero diagnostics for active class ${fixture.name} (exit ${checked.status})`,
+          );
+          if (
+            checked.maxRssKiB <= NO_WORK_MAX_RSS_KIB &&
+            checked.wall <= NO_WORK_MAX_WALL_SECONDS
+          )
+            console.error(
+              `Bun measured little checker work: wall=${checked.wall.toFixed(3)}s maxRSS=${checked.maxRssKiB}KiB; verify the checker invocation`,
+            );
+        }
+      }
+      console.log(
+        `fixtures tsc: wall=${tscWall.toFixed(3)}s maxRSS=${tscRss}KiB`,
+      );
+      console.log(
+        `fixtures bun: wall=${bunWall.toFixed(3)}s maxRSS=${bunRss}KiB`,
+      );
+      if (!results.some(({ active }) => active))
+        console.error(
+          `FAIL: zero seeded fixture classes active under config group ${index + 1}`,
+        );
+      groupResults.push(fixtureRunPassed(results));
     }
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }
-  console.log(`fixtures tsc: wall=${tscWall.toFixed(3)}s maxRSS=${tscRss}KiB`);
-  console.log(`fixtures bun: wall=${bunWall.toFixed(3)}s maxRSS=${bunRss}KiB`);
-  if (!results.some(({ active }) => active))
-    console.error("FAIL: zero seeded fixture classes active under this config");
-  return repository.passed && fixtureRunPassed(results);
+  return repository.passed && groupResults.every((passed) => passed);
 };
