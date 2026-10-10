@@ -274,6 +274,7 @@ export const diagnosticParity = ({
       ? expected.some((code) => tscCodes.includes(code))
       : expected.every((code) => tscCodes.includes(code));
   const missing = tscCodes.filter((code) => !bunCodes.includes(code));
+  const extra = bunCodes.filter((code) => !tscCodes.includes(code));
   const exitsMatch =
     expected.length === 0
       ? baseline.status === 0 &&
@@ -288,7 +289,13 @@ export const diagnosticParity = ({
     tscCodes,
     bunCodes,
     missing,
-    passed: seeded && exitsMatch && missing.length === 0,
+    extra,
+    passed:
+      seeded &&
+      exitsMatch &&
+      baseline.status === candidate.status &&
+      missing.length === 0 &&
+      extra.length === 0,
   };
 };
 
@@ -313,7 +320,12 @@ export const fixtureParity = ({ active, ...options }: FixtureParityOptions) => {
       : candidate.status !== 0);
   return {
     ...result,
-    passed: seeded && validExits && result.missing.length === 0,
+    passed:
+      seeded &&
+      validExits &&
+      baseline.status === candidate.status &&
+      result.missing.length === 0 &&
+      result.extra.length === 0,
   };
 };
 
@@ -359,6 +371,7 @@ export const compareDiagnosticSets = (
     passed:
       valid(baseline) &&
       valid(candidate) &&
+      baseline.status === candidate.status &&
       missing.length === 0 &&
       extra.length === 0,
   };

@@ -412,3 +412,81 @@ test("alternative diagnostic classes accept each supported code and reject unrel
     ).toBe(false);
   }
 });
+
+test("fixture parity rejects unexpected positive-control diagnostics in either direction", () => {
+  const clean = { status: 0, output: "" };
+  const error = {
+    status: 1,
+    output: "input.ts(1,1): error TS2322: unexpected",
+  };
+  for (const active of [true, false]) {
+    const options = { expected: [], match: "all", active } as const;
+    const extra = fixtureParity({
+      ...options,
+      baseline: clean,
+      candidate: error,
+    });
+    expect(extra.extra).toEqual([2322]);
+    expect(extra.passed).toBe(false);
+    const missing = fixtureParity({
+      ...options,
+      baseline: error,
+      candidate: clean,
+    });
+    expect(missing.missing).toEqual([2322]);
+    expect(missing.passed).toBe(false);
+  }
+});
+
+test("fixture parity rejects extra or missing codes even with equal failing statuses", () => {
+  const baseline = { status: 1, output: "input.ts(1,1): error TS2322: seeded" };
+  const extra = {
+    status: 1,
+    output: baseline.output + "\ninput.ts(2,1): error TS7006: extra",
+  };
+  const options = { expected: [2322], match: "all", active: true } as const;
+  expect(
+    fixtureParity({ ...options, baseline, candidate: extra }).extra,
+  ).toEqual([7006]);
+  expect(fixtureParity({ ...options, baseline, candidate: extra }).passed).toBe(
+    false,
+  );
+  expect(
+    fixtureParity({ ...options, baseline: extra, candidate: baseline }).missing,
+  ).toEqual([7006]);
+  expect(
+    fixtureParity({ ...options, baseline: extra, candidate: baseline }).passed,
+  ).toBe(false);
+  expect(
+    diagnosticParity({ ...options, baseline, candidate: extra }).passed,
+  ).toBe(false);
+  expect(
+    diagnosticParity({ ...options, baseline: extra, candidate: baseline })
+      .passed,
+  ).toBe(false);
+});
+
+test("equal diagnostic sets require equal exit statuses in both comparisons", () => {
+  const baseline = { status: 1, output: "input.ts(1,1): error TS2322: seeded" };
+  const candidate = { ...baseline, status: 2 };
+  const options = { expected: [2322], match: "all", active: true } as const;
+  for (const [left, right] of [
+    [baseline, candidate],
+    [candidate, baseline],
+  ]) {
+    if (left === undefined || right === undefined)
+      throw new Error("Missing result");
+    expect(
+      fixtureParity({ ...options, baseline: left, candidate: right }).passed,
+    ).toBe(false);
+    expect(
+      diagnosticParity({ ...options, baseline: left, candidate: right }).passed,
+    ).toBe(false);
+    expect(
+      compareDiagnosticSets(
+        { status: left.status, diagnostics: ["input.ts:1:2322"] },
+        { status: right.status, diagnostics: ["input.ts:1:2322"] },
+      ).passed,
+    ).toBe(false);
+  }
+});
