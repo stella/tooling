@@ -1,7 +1,16 @@
 import { describe, expect, spyOn, test } from "bun:test";
+import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  readdir,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -13,6 +22,8 @@ import {
   verifyConsumerNodeArchive,
   writeConsumerToolWrappers,
   runConsumerCompat,
+  stageConsumerWorkspace,
+  assertConsumerInstalledToolBins,
 } from "./consumer-compat";
 import { parseConsumerCompatArguments } from "./consumer-compat-arguments";
 import {
@@ -25,9 +36,114 @@ import {
   parseConsumerFixtures,
   type ConsumerFixture,
   assertConsumerFixtureKind,
+  assertConsumerFixtureSelection,
 } from "./consumer-compat-config";
 
 describe("consumer compatibility declarations", () => {
+  test("selected and declared consumer fixture sets must agree in both directions", () => {
+    const fixtures = parseConsumerFixtures({
+      packages: ["packages/a", "packages/b"].map((directory) => ({
+        package: directory,
+        fixture: directory,
+        kind: "node",
+        build: ["npm", "run", "build"],
+        smoke: ["node", "smoke.mjs"],
+      })),
+    });
+    expect(() =>
+      assertConsumerFixtureSelection({
+        selected: ["packages/b", "packages/a"],
+        fixtures,
+      }),
+    ).not.toThrow();
+    for (const selected of [
+      ["packages/a"],
+      ["packages/a", "packages/b", "packages/c"],
+      ["packages/a", "packages/c"],
+    ])
+      expect(() =>
+        assertConsumerFixtureSelection({ selected, fixtures }),
+      ).toThrow("exactly match");
+  });
+  test("a private workspace root stages its manifest without copying unrelated root files", async () => {
+    const directory = await mkdtemp(
+      path.join(tmpdir(), "consumer-private-root-"),
+    );
+    try {
+      const root = path.join(directory, "source");
+      const staging = path.join(directory, "stage");
+      await mkdir(path.join(root, "packages/library"), { recursive: true });
+      await mkdir(staging);
+      await writeFile(path.join(root, "root-only.txt"), "unrelated root file");
+      await writeFile(
+        path.join(root, "packages/library/index.js"),
+        "export {};\n",
+      );
+      const packages = new Map([
+        ["root", { directory: ".", name: "root", manifest: { private: true } }],
+        [
+          "library",
+          {
+            directory: "packages/library",
+            name: "library",
+            manifest: { private: false },
+          },
+        ],
+      ]);
+      await stageConsumerWorkspace({
+        root: await realpath(root),
+        staging,
+        packages,
+      });
+      expect((await readdir(staging)).toSorted()).toEqual([
+        "package.json",
+        "packages",
+      ]);
+      expect(
+        JSON.parse(await readFile(path.join(staging, "package.json"), "utf8")),
+      ).toEqual({ private: true });
+      expect(
+        await readFile(path.join(staging, "packages/library/index.js"), "utf8"),
+      ).toBe("export {};\n");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+  test("installed tool-bin collisions fail before running fixture commands", async () => {
+    const directory = await mkdtemp(
+      path.join(tmpdir(), "consumer-bin-collision-"),
+    );
+    try {
+      await mkdir(path.join(directory, "node_modules/.bin"), {
+        recursive: true,
+      });
+      await assertConsumerInstalledToolBins(directory);
+      await writeFile(
+        path.join(directory, "node_modules/.bin/npm"),
+        "#!/bin/sh\necho local-manager\n",
+        { mode: 0o755 },
+      );
+      let lifecycleStarted = false;
+      const lifecycle = async () => {
+        await assertConsumerInstalledToolBins(directory);
+        lifecycleStarted = true;
+        return Bun.spawnSync(["/bin/sh", "-c", "npm --version"], {
+          cwd: directory,
+          env: {
+            ...process.env,
+            PATH: path.join(directory, "node_modules/.bin"),
+          },
+        });
+      };
+      await assert.rejects(
+        lifecycle(),
+        /installed consumer binary npm conflicts/u,
+      );
+      expect(lifecycleStarted).toBe(false);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
   test("a React package cannot select a node fixture before provisioning or installing", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "consumer-kind-"));
     const fetchSpy = spyOn(globalThis, "fetch").mockRejectedValue(
@@ -66,7 +182,7 @@ describe("consumer compatibility declarations", () => {
       );
       execFileSync("git", ["init", "-q"], { cwd: root });
       execFileSync("git", ["add", "."], { cwd: root });
-      await expect(
+      await assert.rejects(
         runConsumerCompat({
           root,
           packages: ["."],
@@ -74,7 +190,8 @@ describe("consumer compatibility declarations", () => {
           fixturePath: "fixtures",
           policy,
         }),
-      ).rejects.toThrow("requires fixture kind react");
+        /requires fixture kind react/u,
+      );
       expect(fetchSpy).not.toHaveBeenCalled();
     } finally {
       fetchSpy.mockRestore();
@@ -160,15 +277,14 @@ describe("consumer compatibility declarations", () => {
         JSON.stringify({ private: true, scripts: { build: "tsc" } }),
       );
       await writeFile(path.join(directory, "src/use.ts"), "export {};\n");
-      await expect(
-        assertConsumerFixtureFiles(directory),
-      ).resolves.toBeUndefined();
+      await assertConsumerFixtureFiles(directory);
       await writeFile(
         path.join(directory, ".npmrc"),
         "legacy-peer-deps=true\n",
       );
-      await expect(assertConsumerFixtureFiles(directory)).rejects.toThrow(
-        "dependency-manager configuration",
+      await assert.rejects(
+        assertConsumerFixtureFiles(directory),
+        /dependency-manager configuration/u,
       );
     } finally {
       await rm(directory, { recursive: true, force: true });

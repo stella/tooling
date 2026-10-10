@@ -20,12 +20,12 @@ const record = (value: unknown): value is Record<string, unknown> =>
 const targets = (value: unknown): string[] => {
   if (value === undefined) return ["esnext"];
   if (typeof value === "string") {
-    const identifiers = value.split(",").map((item) => item.trim());
-    if (identifiers.some((item) => item === ""))
+    const identifier = value.trim();
+    if (identifier === "" || identifier.includes(","))
       throw new Error(
-        "Resolved JavaScript target identifiers must be nonempty",
+        "Resolved JavaScript target identifiers must be nonempty and contain no commas",
       );
-    return identifiers;
+    return [identifier];
   }
   if (
     Array.isArray(value) &&
@@ -135,9 +135,10 @@ export const resolvePublishBuildTarget = async (
     );
   const words = compiler.map(decodeShellWord);
   if (words.length === 2 && words.at(1) === "build") {
-    if (words.at(0) === "vite") return resolveVitePublishTarget(directory);
+    if (words.at(0) === "vite")
+      return await resolveVitePublishTarget(directory);
     if (words.at(0) === "nuxt-module-build")
-      return resolveNuxtPublishTarget(directory);
+      return await resolveNuxtPublishTarget(directory);
   }
   if (words.length !== 1 || words.at(0) !== "tsdown")
     throw new Error(
@@ -252,7 +253,7 @@ for (const config of configs) {
       throw new Error('tsdown transform overrides must be an object');
     if (record(input)) rejectOptionsHooks(input.plugins);
     const target = record(transform) && transform.target != null ? transform.target : entry.target;
-    const nonemptyIdentifiers = value => typeof value === 'string' && value.split(',').every(item => item.trim() !== '');
+    const nonemptyIdentifiers = value => typeof value === 'string' && value.trim() !== '' && !value.includes(',');
     if (target !== undefined && !nonemptyIdentifiers(target) &&
         !(Array.isArray(target) && target.length > 0 && Array.from(target).every(nonemptyIdentifiers)))
       throw new Error('Build tool returned an unsupported resolved JavaScript target');

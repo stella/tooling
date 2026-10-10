@@ -64,6 +64,7 @@ describe("published contract schema", () => {
       { type: "javascript", targets: [] },
       { type: "javascript", targets: [" "] },
       { type: "javascript", targets: ["node22", 22] },
+      { type: "javascript", targets: ["es2022,node26"] },
       { type: "javascript", targets: ["node22"], platform: "node" },
     ])
       expect(() =>

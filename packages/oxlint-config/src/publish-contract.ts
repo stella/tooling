@@ -150,7 +150,13 @@ const publishTarget = (value: unknown): PublishTarget => {
     throw new Error("target.targets must be a nonempty array");
   const targets = Array.from(source["targets"]).map((entry: unknown) => {
     const target = text(entry, "target.targets");
-    if (/\s|[\u0000-\u001f\u007f]/.test(target))
+    if (
+      /[\s,]/.test(target) ||
+      Array.from(target).some(
+        (character) =>
+          character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
+      )
+    )
       throw new Error(
         "target.targets must contain resolved target identifiers",
       );

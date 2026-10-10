@@ -12,6 +12,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import policy from "../toolchain.json";
 import {
   publishConfigOverrideKeys,
   resolveManifestContract,
@@ -27,11 +28,13 @@ const pnpmExecutable = () => {
   const installed: unknown = JSON.parse(readFileSync(packageFile, "utf8"));
   if (
     !object(installed) ||
-    installed["version"] !== "12.9.1" ||
+    installed["version"] !== policy.consumerPnpm ||
     !object(installed["bin"]) ||
     typeof installed["bin"]["pnpm"] !== "string"
   )
-    throw new Error("pack contract fixture requires pnpm 12.9.1");
+    throw new Error(
+      `pack contract fixture requires pnpm ${policy.consumerPnpm}`,
+    );
   return path.resolve(path.dirname(packageFile), installed["bin"]["pnpm"]);
 };
 

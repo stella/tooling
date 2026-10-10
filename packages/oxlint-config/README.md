@@ -360,15 +360,19 @@ The reusable consumer job declares its exact scope in `stll-toolchain.json`:
 
 ```json
 {
-  "consumerChecks": [{
-    "workflow": ".github/workflows/consumer-compat.yml",
-    "job": "consumer",
-    "packages": ["packages/library"]
-  }]
+  "consumerChecks": [
+    {
+      "workflow": ".github/workflows/consumer-compat.yml",
+      "job": "consumer",
+      "packages": ["packages/library"]
+    }
+  ]
 }
 ```
 
-That job calls the immutable shared `package-consumer-compat.yml` workflow with
+The declared workflow requires a nonempty `on.schedule` with five-field POSIX cron;
+`workflow_dispatch` may also be enabled. That job calls the shared
+`package-consumer-compat.yml` workflow at its approved immutable policy pin, with
 `packages` as the same JSON array and `consumer-node` equal to the consumer policy
 pin. Every named package must be tracked, published, and support that Node version.
 Unknown jobs, stale entries, undeclared consumer calls, and inconsistent inputs fail.
@@ -388,13 +392,15 @@ The fixture directory contains `consumer-compat.json`:
 
 ```json
 {
-  "packages": [{
-    "package": "packages/library",
-    "fixture": "library",
-    "kind": "node",
-    "build": ["npm", "run", "build"],
-    "smoke": ["npm", "run", "smoke"]
-  }]
+  "packages": [
+    {
+      "package": "packages/library",
+      "fixture": "library",
+      "kind": "node",
+      "build": ["npm", "run", "build"],
+      "smoke": ["npm", "run", "smoke"]
+    }
+  ]
 }
 ```
 

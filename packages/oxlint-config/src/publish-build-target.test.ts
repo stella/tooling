@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import assert from "node:assert/strict";
 import {
   mkdtempSync,
   mkdirSync,
@@ -37,13 +38,14 @@ test("resolved targets preserve every emitted configuration and final override",
     );
 });
 
-test("every emitted configuration requires nonempty target identifiers", () => {
+test("every emitted configuration requires valid target identifiers", () => {
   for (const target of [
     [],
     [""],
     [" "],
     ["es2022", ""],
     "es2022,",
+    "es2022,node26",
     ",es2022",
     ",",
     Array(1),
@@ -168,6 +170,7 @@ test("the installed build resolver supplies engine defaults and real config muta
     }
     for (const config of [
       "{ entry: ['entry.js'], dts: false, target: [] }",
+      "{ entry: ['entry.js'], dts: false, target: 'es2022,node26' }",
       "[{ entry: ['entry.js'], dts: false, target: 'es2022' }, { entry: ['entry.js'], dts: false, target: [] }]",
       "{ entry: ['entry.js'], dts: false, inputOptions: { transform: { target: [''] } } }",
     ]) {
@@ -175,8 +178,9 @@ test("the installed build resolver supplies engine defaults and real config muta
         path.join(directory, "tsdown.config.mjs"),
         `export default ${config};\n`,
       );
-      await expect(resolvePublishBuildTarget(directory)).rejects.toThrow(
-        "JavaScript target",
+      await assert.rejects(
+        () => resolvePublishBuildTarget(directory),
+        /JavaScript target/,
       );
     }
     writeFileSync(
@@ -198,8 +202,9 @@ test("the installed build resolver supplies engine defaults and real config muta
         path.join(directory, "package.json"),
         JSON.stringify({ ...manifest, scripts: { build } }),
       );
-      await expect(resolvePublishBuildTarget(directory)).rejects.toThrow(
-        "resolver",
+      await assert.rejects(
+        () => resolvePublishBuildTarget(directory),
+        /resolver/,
       );
     }
   } finally {
@@ -252,8 +257,9 @@ test("the CLI loader parser transpiles TypeScript configs and their relative imp
       "{ entry: ['entry.js'], dts: false, plugins: [{ name: 'change-target', options: options => ({ ...options, transform: { target: 'node26' } }) }] }",
     ]) {
       writeFileSync(configFile, `export default ${unsupported};\n`);
-      await expect(resolvePublishBuildTarget(directory)).rejects.toThrow(
-        "supported target resolver",
+      await assert.rejects(
+        () => resolvePublishBuildTarget(directory),
+        /supported target resolver/,
       );
     }
     writeFileSync(

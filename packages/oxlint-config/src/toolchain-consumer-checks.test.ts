@@ -13,7 +13,11 @@ const declaration = {
   job: "consumer",
   packages: ["packages/library"],
 };
-const policy = { consumerNode: "22.21.1", actions: {} };
+const policy = {
+  consumerNode: "22.21.1",
+  actions: { [consumerCheckWorkflow]: { sha, version: "v1" } },
+};
+const triggers = { schedule: [{ cron: "13 2 * * *" }], workflow_dispatch: {} };
 const job = {
   uses: `${consumerCheckWorkflow}@${sha}`,
   with: {
@@ -27,7 +31,7 @@ const manifest = JSON.stringify({
 });
 const files = {
   "package.json": JSON.stringify({ private: true, workspaces: ["packages/*"] }),
-  [workflow]: JSON.stringify({ jobs: { consumer: job } }),
+  [workflow]: JSON.stringify({ on: triggers, jobs: { consumer: job } }),
   "packages/library/package.json": manifest,
 };
 const check = (inputs: Record<string, string> = files) =>
@@ -64,6 +68,7 @@ test("consumer declarations select only the runner's discovered workspace member
         }),
         [`${nested}/package.json`]: manifest,
         [workflow]: JSON.stringify({
+          on: triggers,
           jobs: {
             consumer: {
               ...job,
@@ -94,7 +99,11 @@ test("consumer declarations are closed, canonical and unique", () => {
       "packages/./library",
       "packages/library/",
       "${{ inputs.package }}",
-    ].map((directory) => ({ ...declaration, packages: [directory] })),
+    ].map((directory) => ({
+      workflow: declaration.workflow,
+      job: declaration.job,
+      packages: [directory],
+    })),
   ])
     expect(() => parseConsumerChecks([mutation])).toThrow();
   expect(() => parseConsumerChecks([declaration, declaration])).toThrow();
@@ -103,6 +112,13 @@ test("consumer declarations are closed, canonical and unique", () => {
 
 test("only a declared immutable reusable invocation validates published consumer support", () => {
   expect(check()).toEqual([]);
+  expect(
+    checkConsumerChecks({
+      declarations: [declaration],
+      files,
+      policy: { consumerNode: policy.consumerNode, actions: {} },
+    }),
+  ).toMatchObject([{ message: expect.stringContaining("approved immutable") }]);
   for (const mutation of [
     { ...job, uses: `${consumerCheckWorkflow}@main` },
     { ...job, uses: `${consumerCheckWorkflow}@${sha}@extra` },
@@ -129,7 +145,10 @@ test("only a declared immutable reusable invocation validates published consumer
     expect(
       check({
         ...files,
-        [workflow]: JSON.stringify({ jobs: { consumer: mutation } }),
+        [workflow]: JSON.stringify({
+          on: triggers,
+          jobs: { consumer: mutation },
+        }),
       }),
     ).not.toEqual([]);
   expect(
@@ -148,6 +167,35 @@ test("only a declared immutable reusable invocation validates published consumer
     }),
   ).not.toEqual([]);
   expect(check({ "packages/library/package.json": manifest })).not.toEqual([]);
+});
+
+test("declared consumer workflows require valid scheduled execution", () => {
+  for (const cron of ["13 2 * * *", "0 0 1 JAN MON", "20/15 0-4 * * 1,3,5"])
+    expect(
+      check({
+        ...files,
+        [workflow]: JSON.stringify({
+          on: { schedule: [{ cron }] },
+          jobs: { consumer: job },
+        }),
+      }),
+    ).toEqual([]);
+  for (const on of [
+    undefined,
+    { push: {} },
+    { workflow_dispatch: {} },
+    { schedule: [] },
+    { schedule: { cron: "13 2 * * *" } },
+    { schedule: [{ cron: 13 }] },
+    { schedule: [{ cron: "" }] },
+    { schedule: [{ cron: "13 2 * * *" }, { cron: "invalid" }] },
+  ])
+    expect(
+      check({
+        ...files,
+        [workflow]: JSON.stringify({ on, jobs: { consumer: job } }),
+      }),
+    ).toMatchObject([{ message: expect.stringContaining("on.schedule") }]);
 });
 
 test("every declared package must be a tracked published manifest supporting consumer Node", () => {
@@ -183,6 +231,7 @@ test("every declared package must be a tracked published manifest supporting con
       declarations: [root],
       files: {
         [workflow]: JSON.stringify({
+          on: triggers,
           jobs: {
             consumer: { ...job, with: { ...job.with, packages: '["."]' } },
           },
@@ -195,7 +244,7 @@ test("every declared package must be a tracked published manifest supporting con
 });
 
 test("semantic aliases and merges cannot conceal consumer input conflicts", () => {
-  const text = `template: &job\n  uses: ${job.uses}\n  with: &inputs\n    packages: '${job.with.packages}'\n    consumer-node: ${policy.consumerNode}\njobs:\n  consumer:\n    <<: *job\n`;
+  const text = `on:\n  schedule:\n    - cron: "13 2 * * *"\n  workflow_dispatch: {}\ntemplate: &job\n  uses: ${job.uses}\n  with: &inputs\n    packages: '${job.with.packages}'\n    consumer-node: ${policy.consumerNode}\njobs:\n  consumer:\n    <<: *job\n`;
   expect(check({ ...files, [workflow]: text })).toEqual([]);
   expect(
     check({

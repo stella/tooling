@@ -22,6 +22,7 @@ import {
   consumerPackRootManifest,
   assertConsumerFixtureManifest,
   assertConsumerFixtureKind,
+  assertConsumerFixtureSelection,
   bindConsumerManifest,
   consumerDependencyConfigFiles,
   consumerRecord,
@@ -292,6 +293,55 @@ const copyWithoutDependencies = async (source: string, destination: string) => {
   });
 };
 
+type StageConsumerWorkspaceOptions = {
+  root: string;
+  staging: string;
+  packages: Map<string, ConsumerPackage>;
+};
+export const stageConsumerWorkspace = async ({
+  root,
+  staging,
+  packages,
+}: StageConsumerWorkspaceOptions) => {
+  const directories = new Map<string, string>();
+  const paths = consumerStagingPaths(packages);
+  const ordered = [...packages.values()].sort(
+    (left, right) => left.directory.length - right.directory.length,
+  );
+  for (const pkg of ordered) {
+    const relative = paths.get(pkg.name);
+    if (!relative) throw new Error(`missing staging path: ${pkg.name}`);
+    const destination = path.join(staging, relative);
+    if (pkg.directory !== "." || pkg.manifest["private"] !== true)
+      await copyWithoutDependencies(
+        await containedDirectory(root, pkg.directory),
+        destination,
+      );
+    directories.set(pkg.name, destination);
+  }
+  await writeFile(
+    path.join(staging, "package.json"),
+    JSON.stringify(consumerPackRootManifest(packages)),
+  );
+  return directories;
+};
+
+export const assertConsumerInstalledToolBins = async (directory: string) => {
+  for (const name of ["node", "npm", "pnpm"]) {
+    const file = path.join(directory, "node_modules/.bin", name);
+    try {
+      await lstat(file);
+    } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT")
+        continue;
+      throw error;
+    }
+    throw new Error(
+      `installed consumer binary ${name} conflicts with the pinned tool before lifecycle scripts`,
+    );
+  }
+};
+
 export const assertConsumerFixtureFiles = async (directory: string) => {
   const visit = async (location: string) => {
     for (const entry of await readdir(location, { withFileTypes: true })) {
@@ -330,26 +380,14 @@ const packConsumerArtifacts = async ({
   const artifacts = new Map<string, string>();
   const staging = path.join(scratch, "pack-workspace");
   await mkdir(staging);
-  const stagedDirectories = new Map<string, string>();
-  const stagingPaths = consumerStagingPaths(workspacePackages);
-  // Copy the root first so its published files and package identity remain intact.
-  const ordered = [...workspacePackages.values()].sort(
-    (left, right) => left.directory.length - right.directory.length,
-  );
-  for (const pkg of ordered) {
-    const relative = stagingPaths.get(pkg.name);
-    if (!relative) throw new Error(`missing staging path: ${pkg.name}`);
-    const destination = path.join(staging, relative);
-    await copyWithoutDependencies(
-      await containedDirectory(root, pkg.directory),
-      destination,
-    );
-    stagedDirectories.set(pkg.name, destination);
-  }
-  await writeFile(
-    path.join(staging, "package.json"),
-    JSON.stringify(consumerPackRootManifest(workspacePackages)),
-  );
+  const stagedDirectories = await stageConsumerWorkspace({
+    root,
+    staging,
+    packages: workspacePackages,
+  });
+  const packHome = path.join(scratch, "pack-home");
+  await mkdir(packHome);
+  await writeFile(path.join(packHome, "npmrc"), "");
   await writeFile(
     path.join(staging, "pnpm-workspace.yaml"),
     `packages:\n${[...stagedDirectories.values()].map((directory) => `  - ${JSON.stringify(path.relative(staging, directory).split(path.sep).join("/"))}`).join("\n")}\n`,
@@ -363,7 +401,7 @@ const packConsumerArtifacts = async ({
     if (!directory)
       throw new Error(`missing pack workspace member: ${pkg.name}`);
     await execute(
-      process.execPath,
+      tools.node,
       [
         tools.pnpm,
         "--config.ignore-scripts=true",
@@ -373,7 +411,10 @@ const packConsumerArtifacts = async ({
         "--pack-destination",
         packed,
       ],
-      { cwd: directory },
+      {
+        cwd: directory,
+        env: consumerCommandEnvironment({ tools, directory, home: packHome }),
+      },
     );
     const archive = await packFilename(packed);
     const extracted = path.join(packed, "published");
@@ -384,9 +425,16 @@ const packConsumerArtifacts = async ({
       { cwd: packed },
     );
     await execute(
-      process.execPath,
+      tools.node,
       [tools.npm, "pack", "--ignore-scripts", "--pack-destination", final],
-      { cwd: path.join(extracted, "package") },
+      {
+        cwd: path.join(extracted, "package"),
+        env: consumerCommandEnvironment({
+          tools,
+          directory: path.join(extracted, "package"),
+          home: packHome,
+        }),
+      },
     );
     const artifact = await packFilename(final);
     artifacts.set(pkg.name, artifact);
@@ -632,6 +680,7 @@ const runFixture = async ({
     });
     process.stdout.write(output);
     if (index === 0) {
+      await assertConsumerInstalledToolBins(directory);
       const installed = await jsonFile(
         path.join(directory, "node_modules/typescript/package.json"),
       );
@@ -671,6 +720,7 @@ export const runConsumerCompat = async ({
   const fixtures = parseConsumerFixtures(
     await jsonFile(path.join(fixtureRoot, "consumer-compat.json")),
   );
+  assertConsumerFixtureSelection({ selected, fixtures });
   const packages = discoverConsumerPackages(await trackedManifests(root));
   const selections: {
     pkg: ConsumerPackage;

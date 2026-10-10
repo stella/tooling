@@ -16,7 +16,10 @@ const repositoryDirectory = (value: unknown): value is string =>
   value !== "" &&
   !value.includes("\\") &&
   !value.includes("${{") &&
-  !/[\u0000-\u001f\u007f]/.test(value) &&
+  ![...value].some((character) => {
+    const code = character.charCodeAt(0);
+    return code < 32 || code === 127;
+  }) &&
   !/^[A-Za-z]:/.test(value) &&
   !path.posix.isAbsolute(value) &&
   (value === "." ||
@@ -29,6 +32,21 @@ const packageDirectories = (value: unknown): value is string[] =>
   value.length > 0 &&
   value.every(repositoryDirectory) &&
   new Set(value).size === value.length;
+
+const nightlySchedule = (value: unknown) => {
+  if (!record(value)) return false;
+  const schedule = value["schedule"];
+  return (
+    Array.isArray(schedule) &&
+    schedule.length > 0 &&
+    schedule.every(
+      (entry: unknown) =>
+        record(entry) &&
+        typeof entry["cron"] === "string" &&
+        entry["cron"].trim().split(/\s+/).length === 5,
+    )
+  );
+};
 
 export type ConsumerCheck = {
   workflow: string;
@@ -116,6 +134,10 @@ export const checkConsumerChecks = ({
           continue;
         }
         exercised.add(declaration);
+        if (!nightlySchedule(source["on"]))
+          throw new Error(
+            `${workflow} consumer checks require a nonempty valid on.schedule`,
+          );
         const approved = Object.entries(policy.actions).find(
           ([name]) => name.toLowerCase() === consumerCheckWorkflow,
         )?.[1];
@@ -123,7 +145,8 @@ export const checkConsumerChecks = ({
           job["uses"].split("@").length !== 2 ||
           ref === undefined ||
           !/^[a-f0-9]{40}$/.test(ref) ||
-          (approved !== undefined && ref !== approved.sha) ||
+          approved === undefined ||
+          ref !== approved.sha ||
           "steps" in job ||
           "runs-on" in job
         )

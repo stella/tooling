@@ -25,7 +25,13 @@ const plugins = (config: unknown): unknown[] => {
   )
     throw new Error("Invalid Vite plugin configuration");
   const environment =
-    config["environments"][config["build"]["ssr"] ? "ssr" : "client"];
+    config["environments"][
+      config["build"]["ssr"] === true ||
+      (typeof config["build"]["ssr"] === "string" &&
+        config["build"]["ssr"] !== "")
+        ? "ssr"
+        : "client"
+    ];
   if (
     !record(environment) ||
     !Array.isArray(environment["plugins"]) ||
@@ -105,7 +111,13 @@ export const resolveVitePublishTarget = async (
         "Custom Vite builders require a supported target resolver",
       );
     const environment =
-      resolved["environments"][resolved["build"]["ssr"] ? "ssr" : "client"];
+      resolved["environments"][
+        resolved["build"]["ssr"] === true ||
+        (typeof resolved["build"]["ssr"] === "string" &&
+          resolved["build"]["ssr"] !== "")
+          ? "ssr"
+          : "client"
+      ];
     if (!record(environment) || !record(environment["build"]))
       throw new Error("Missing resolved Vite build environment");
     resolved["build"] = { ...environment["build"] };

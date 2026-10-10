@@ -460,7 +460,8 @@ The reusable consumer job declares its exact scope in `stll-toolchain.json`:
 }
 ```
 
-That job calls the immutable shared `package-consumer-compat.yml` workflow with
+The declared workflow must include a nonempty schedule; manual dispatch is optional.
+That job calls `package-consumer-compat.yml` at the approved shared policy SHA with
 `packages` as the same JSON array and `consumer-node` equal to the consumer policy
 pin. Every named package must be tracked, published, and support that Node version.
 Unknown jobs, stale entries, undeclared consumer calls, and inconsistent inputs fail.
@@ -475,7 +476,10 @@ the final artifact; both consumers install those artifacts. Workspace alias
 specifiers are unsupported: use the package name as the dependency key. The runner verifies
 the official Node archive checksum and exact runtime/package-manager versions,
 uses the oldest published React satisfying the package peer range, typechecks with
-the consumer TypeScript, and runs each fixture's build and usage smoke.
+the consumer TypeScript, and runs each fixture's build and usage smoke. Both
+publication packers and fixture commands use the provisioned consumer Node with
+isolated package-manager settings. Installed binaries named `node`, `npm`, or
+`pnpm` are rejected before fixture build and smoke commands.
 
 The fixture directory contains `consumer-compat.json`:
 
@@ -493,6 +497,7 @@ The fixture directory contains `consumer-compat.json`:
 }
 ```
 
+The selected package set must exactly match the fixture declaration set.
 Each fixture is a standalone project with its own source, package manifest, and
 TypeScript configuration. The package peers determine its fixture kind: a React
 peer requires `react` and a render smoke; other packages require `node` and an

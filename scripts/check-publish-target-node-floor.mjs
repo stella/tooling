@@ -66,7 +66,7 @@ try {
     assert.equal(
       result.status,
       0,
-      `Built publish-contract CLI failed on Node ${process.versions.node}: ${result.stderr || result.stdout}`,
+      `Built publish-contract CLI failed on Node ${process.versions.node}: ${result.stderr !== "" ? result.stderr : result.stdout}`,
     );
   }
   const contract = JSON.parse(

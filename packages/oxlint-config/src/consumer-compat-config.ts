@@ -78,6 +78,29 @@ export const parseConsumerFixtures = (input: unknown): ConsumerFixture[] => {
   });
 };
 
+type ConsumerFixtureSelectionOptions = {
+  selected: readonly string[];
+  fixtures: readonly ConsumerFixture[];
+};
+export const assertConsumerFixtureSelection = ({
+  selected,
+  fixtures,
+}: ConsumerFixtureSelectionOptions) => {
+  const directories = selected.map((entry) =>
+    consumerRelativePath(entry, "selected package"),
+  );
+  const declared = new Set(fixtures.map((entry) => entry.package));
+  if (new Set(directories).size !== directories.length)
+    throw new Error("duplicate selected consumer package");
+  if (
+    directories.length !== declared.size ||
+    directories.some((entry) => !declared.has(entry))
+  )
+    throw new Error(
+      "selected consumer packages must exactly match declared fixtures",
+    );
+};
+
 export type ConsumerPackage = {
   directory: string;
   name: string;
