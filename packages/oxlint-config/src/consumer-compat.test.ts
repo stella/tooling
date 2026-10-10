@@ -1067,6 +1067,40 @@ describe("consumer compatibility declarations", () => {
 });
 
 describe("isolated consumer runtime", () => {
+  test("a dev-only executable on the inherited PATH is unavailable to consumers", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "consumer-dev-path-"));
+    try {
+      const devBin = path.join(directory, "dev-bin");
+      const pinnedBin = path.join(directory, "pinned-bin");
+      await mkdir(devBin);
+      await mkdir(pinnedBin);
+      await writeFile(
+        path.join(devBin, "consumer-dev-only"),
+        "#!/bin/sh\nprintf dev-only\n",
+        { mode: 0o755 },
+      );
+      const inherited = { ...process.env, PATH: devBin };
+      const control = Bun.spawnSync(["/bin/sh", "-c", "consumer-dev-only"], {
+        env: inherited,
+      });
+      expect(control.exitCode).toBe(0);
+      expect(control.stdout.toString()).toBe("dev-only");
+      const env = consumerCommandEnvironment({
+        tools: { bin: pinnedBin },
+        directory,
+        home: directory,
+        environment: inherited,
+      });
+      const result = Bun.spawnSync(["/bin/sh", "-c", "consumer-dev-only"], {
+        env,
+      });
+      expect(result.exitCode).toBe(127);
+      expect(result.stdout.toString()).toBe("");
+      expect(result.stderr.toString()).toContain("consumer-dev-only");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
   test("nested manager invocations execute pinned wrappers before bundled and inherited producers", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "consumer-wrappers-"));
     try {
@@ -1210,9 +1244,9 @@ describe("isolated consumer runtime", () => {
     ).toThrow("checksum mismatch");
   });
 
-  test("consumer runtime precedes local tools and inherited dev runtime; module lookup cannot inherit repository paths", () => {
+  test("consumer environment excludes inherited runtime and module lookup paths", () => {
     const env = consumerCommandEnvironment({
-      tools: { bin: "/isolated/managers/bin:/isolated/node/bin" },
+      tools: { bin: "/isolated/managers/bin" },
       directory: "/isolated/fixture",
       home: "/isolated/home",
       environment: {
@@ -1227,10 +1261,11 @@ describe("isolated consumer runtime", () => {
         KEEP: "value",
       },
     });
-    expect(env["PATH"]?.split(":").slice(0, 3)).toEqual([
+    expect(env["PATH"]?.split(path.delimiter)).toEqual([
       "/isolated/managers/bin",
-      "/isolated/node/bin",
       "/isolated/fixture/node_modules/.bin",
+      "/usr/bin",
+      "/bin",
     ]);
     expect(env["NODE_PATH"]).toBeUndefined();
     expect(env["NODE_OPTIONS"]).toBeUndefined();

@@ -498,7 +498,7 @@ the official Node archive checksum and exact runtime/package-manager versions,
 uses the oldest published React satisfying the package peer range and, when ReactDOM is required, its compatible renderer peer range, typechecks with
 the consumer TypeScript, and runs each fixture's build and usage smoke. Both
 publication packers and fixture commands use the provisioned consumer Node with
-isolated package-manager settings. Installed binaries named `node`, `npm`, `npx`, or
+isolated package-manager settings. Consumer command PATH contains only pinned wrappers, fixture binaries, and `/usr/bin:/bin`; it never inherits development tool directories. Installed binaries named `node`, `npm`, `npx`, or
 `pnpm` are rejected before fixture build and smoke commands.
 
 The fixture directory contains `consumer-compat.json`:

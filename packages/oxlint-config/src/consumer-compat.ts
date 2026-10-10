@@ -133,6 +133,11 @@ export const writeConsumerToolWrappers = async ({
   const wrappers = directory;
   await mkdir(wrappers);
   const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+  await writeFile(
+    path.join(wrappers, "node"),
+    `#!/bin/sh\nexec ${quote(node)} "$@"\n`,
+    { mode: 0o755 },
+  );
   for (const [name, cli] of [
     ["npm", npm],
     ["npx", path.join(path.dirname(npm), "npx-cli.js")],
@@ -149,7 +154,7 @@ export const writeConsumerToolWrappers = async ({
     node,
     npm,
     pnpm,
-    bin: `${wrappers}${path.delimiter}${path.dirname(node)}`,
+    bin: wrappers,
   };
 };
 
@@ -539,7 +544,7 @@ export const consumerCommandEnvironment = ({
     ),
   );
   Object.assign(env, {
-    PATH: `${tools.bin}${path.delimiter}${path.join(directory, "node_modules/.bin")}${path.delimiter}${environment["PATH"] ?? ""}`,
+    PATH: `${tools.bin}${path.delimiter}${path.join(directory, "node_modules/.bin")}${path.delimiter}/usr/bin${path.delimiter}/bin`,
     HOME: home,
     npm_config_cache: path.join(home, "npm-cache"),
     npm_config_userconfig: path.join(home, "npmrc"),
