@@ -746,14 +746,11 @@ export const checkPackageFiles = ({
               if (resolved === specifier) return false;
               if (qualifier === undefined || validRange(qualifier) === null)
                 return true;
-              const release =
-                typeof specifier === "string"
-                  ? valid(
-                      specifier.startsWith("npm:")
-                        ? specifier.slice(specifier.lastIndexOf("@") + 1)
-                        : specifier,
-                    )
-                  : null;
+              if (typeof specifier !== "string") return false;
+              const versionSpecifier = specifier.startsWith("npm:")
+                ? specifier.slice(specifier.lastIndexOf("@") + 1)
+                : specifier;
+              const release = valid(versionSpecifier);
               return release !== null && satisfies(release, qualifier);
             }) &&
             typeof resolved === "string" &&
