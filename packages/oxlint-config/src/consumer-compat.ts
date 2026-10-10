@@ -154,7 +154,7 @@ export const writeConsumerToolWrappers = async ({
   };
 };
 
-const provisionConsumerTools = async (
+export const provisionConsumerTools = async (
   scratch: string,
   policy: ReturnType<typeof parseToolchainPolicy>,
 ): Promise<ConsumerTools> => {
@@ -594,17 +594,26 @@ export const consumerFixtureCommands = ({
 }: ConsumerFixtureCommandOptions) => {
   const install =
     manager === "npm"
-      ? [tools.node, tools.npm, "install", "--no-audit", "--no-fund"]
+      ? [
+          tools.node,
+          tools.npm,
+          "install",
+          "--ignore-scripts",
+          "--no-audit",
+          "--no-fund",
+        ]
       : [
           tools.node,
           tools.pnpm,
           "install",
+          "--ignore-scripts",
           "--no-frozen-lockfile",
           "--config.store-dir",
           path.join(home, "pnpm-store"),
         ];
   return [
     install,
+    [tools.node, tools[manager], "rebuild"],
     [
       tools.node,
       path.join(directory, "node_modules/typescript/bin/tsc"),
@@ -613,6 +622,22 @@ export const consumerFixtureCommands = ({
     fixtureCommand(fixture.build, tools),
     fixtureCommand(fixture.smoke, tools),
   ];
+};
+
+export const installConsumerFixtureDependencies = async (
+  options: ConsumerFixtureCommandOptions,
+) => {
+  const env = consumerCommandEnvironment(options);
+  const commands = consumerFixtureCommands(options);
+  for (const argv of commands.slice(0, 2)) {
+    const executable = argv.at(0);
+    if (!executable) throw new Error("missing consumer dependency command");
+    process.stdout.write(
+      await execute(executable, argv.slice(1), { cwd: options.directory, env }),
+    );
+    // Installation cannot execute scripts; validate bins before any lifecycle execution.
+    await assertConsumerInstalledToolBins(options.directory);
+  }
 };
 
 type FixtureOptions = {
@@ -731,29 +756,21 @@ const runFixture = async ({
   const home = path.join(directory, ".consumer-home");
   await mkdir(home);
   await writeFile(path.join(home, "npmrc"), "");
-  const env = consumerCommandEnvironment({ tools, directory, home });
-  for (const [index, argv] of consumerFixtureCommands({
-    manager,
-    tools,
-    directory,
-    home,
-    fixture,
-  }).entries()) {
+  const options = { manager, tools, directory, home, fixture };
+  await installConsumerFixtureDependencies(options);
+  const installed = await jsonFile(
+    path.join(directory, "node_modules/typescript/package.json"),
+  );
+  if (installed["version"] !== policy.consumerTypescript)
+    throw new Error("installed consumer TypeScript does not match policy");
+  const env = consumerCommandEnvironment(options);
+  for (const argv of consumerFixtureCommands(options).slice(2)) {
+    await assertConsumerInstalledToolBins(directory);
     const executable = argv.at(0);
     if (!executable) throw new Error("missing consumer command");
-    const output = await execute(executable, argv.slice(1), {
-      cwd: directory,
-      env,
-    });
-    process.stdout.write(output);
-    if (index === 0) {
-      await assertConsumerInstalledToolBins(directory);
-      const installed = await jsonFile(
-        path.join(directory, "node_modules/typescript/package.json"),
-      );
-      if (installed["version"] !== policy.consumerTypescript)
-        throw new Error("installed consumer TypeScript does not match policy");
-    }
+    process.stdout.write(
+      await execute(executable, argv.slice(1), { cwd: directory, env }),
+    );
   }
   process.stdout.write(
     `${pkg.name}: ${manager} consumer build/types/smoke passed\n`,

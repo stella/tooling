@@ -91,6 +91,9 @@ jobs:
       - name: Test
         run: bun run test
 
+      - name: Validate consumer install lifecycle isolation
+        run: bun scripts/check-consumer-install-lifecycle.ts
+
       - name: Lint
         run: bun run lint
 

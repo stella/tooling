@@ -35,9 +35,18 @@ const manifest = JSON.stringify({
   version: "1.0.0",
   engines: { node: ">=20.10.0" },
 });
-const fixtureConfig = {
-  "tests/consumer/consumer-compat.json": JSON.stringify({ packages: [] }),
-};
+const fixtureConfiguration = (directories: readonly string[]) => ({
+  [`${declaration.fixturePath}/consumer-compat.json`]: JSON.stringify({
+    packages: directories.map((directory) => ({
+      package: directory,
+      fixture: "library",
+      kind: "node",
+      build: ["npm", "run", "build"],
+      smoke: ["node", "smoke.mjs"],
+    })),
+  }),
+});
+const fixtureConfig = fixtureConfiguration(declaration.packages);
 const files = {
   ...fixtureConfig,
   "package.json": JSON.stringify({ private: true, workspaces: ["packages/*"] }),
@@ -71,7 +80,7 @@ test("consumer declarations select only the runner's discovered workspace member
     checkConsumerChecks({
       declarations: [{ ...declaration, packages: [nested] }],
       files: {
-        ...fixtureConfig,
+        ...fixtureConfiguration([nested]),
         "package.json": files["package.json"],
         "packages/owner/package.json": JSON.stringify({
           private: true,
@@ -91,6 +100,51 @@ test("consumer declarations select only the runner's discovered workspace member
       policy,
     }),
   ).toEqual([]);
+});
+
+test("tracked fixture declarations must parse and select exactly the declared packages", () => {
+  for (const directories of [
+    [],
+    ["packages/other"],
+    [...declaration.packages, "packages/other"],
+  ])
+    expect(
+      check({ ...files, ...fixtureConfiguration(directories) }),
+    ).toContainEqual(
+      expect.objectContaining({
+        message:
+          "selected consumer packages must exactly match declared fixtures",
+      }),
+    );
+  for (const configuration of [
+    {
+      packages: [
+        { package: "packages/library", fixture: "library", kind: "node" },
+      ],
+    },
+    {
+      packages: [
+        {
+          package: "packages/library",
+          fixture: "library",
+          kind: "unknown",
+          build: ["npm", "run", "build"],
+          smoke: ["node", "smoke.mjs"],
+        },
+      ],
+    },
+    { packages: [], extra: true },
+    null,
+  ])
+    expect(
+      check({
+        ...files,
+        "tests/consumer/consumer-compat.json": JSON.stringify(configuration),
+      }),
+    ).not.toEqual([]);
+  expect(
+    check({ ...files, "tests/consumer/consumer-compat.json": "invalid JSON" }),
+  ).not.toEqual([]);
 });
 
 test("consumer declarations are closed, canonical and unique", () => {
@@ -298,7 +352,7 @@ test("every declared package must be a tracked published manifest supporting con
     checkConsumerChecks({
       declarations: [root],
       files: {
-        ...fixtureConfig,
+        ...fixtureConfiguration(root.packages),
         [workflow]: JSON.stringify({
           on: triggers,
           jobs: {

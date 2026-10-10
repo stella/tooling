@@ -477,7 +477,7 @@ That job calls `package-consumer-compat.yml` at the approved shared policy SHA w
 `packages` as the same JSON array and `consumer-node` equal to the consumer policy
 pin. Required `tooling-version` and `fixture-path` inputs equal the declared exact
 `toolingVersion` and repository-relative `fixturePath`; its `consumer-compat.json` must
-be tracked. Replace `<installed tooling version>` with the exact installed
+be tracked, parse with the runner’s fixture schema, and select exactly the declared package set. Replace `<installed tooling version>` with the exact installed
 `@stll/oxlint-config` release that provides the consumer runner; the guard binds the
 declaration to that package version. Every named package must be tracked, published, and support that Node version.
 Unknown jobs, stale entries, undeclared consumer calls, and inconsistent inputs fail.
@@ -488,7 +488,7 @@ minimum-supported-major contract.
 --fixture-path tests/consumer` tests final tarballs in isolated projects with both
 npm and pnpm. The repository builds once with its development toolchain first.
 Workspace protocols are resolved by the package manager before `npm pack` creates
-the final artifact; both consumers install those artifacts. Catalog entries that resolve to a local workspace
+the final artifact; both consumers install those artifacts. Fixture installs disable scripts, reject reserved runtime/manager bins, then run an explicit rebuild under the pinned consumer runtime before typecheck, build and smoke. Catalog entries that resolve to a local workspace
 package are unsupported: use `workspace:` for that dependency. Registry catalog
 dependencies remain supported. Workspace alias
 specifiers are unsupported: use the package name as the dependency key. The runner verifies

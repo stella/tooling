@@ -890,14 +890,25 @@ describe("consumer compatibility declarations", () => {
           name: "parent",
           manifest: { version: "1.0.0", dependencies: { core: "workspace:*" } },
         };
+        const files = {
+          "package.json": JSON.stringify({
+            private: true,
+            workspaces: ["packages/*"],
+          }),
+          "packages/parent/package.json": JSON.stringify({
+            name: parent.name,
+            ...parent.manifest,
+          }),
+          "packages/core/package.json": JSON.stringify({
+            name: core.name,
+            ...core.manifest,
+          }),
+        };
         expect(() =>
           consumerPackageClosure({
             selected: parent,
-            packages: new Map([
-              [parent.name, parent],
-              [core.name, core],
-            ]),
-            files: {},
+            packages: discoverConsumerPackages(files),
+            files,
           }),
         ).toThrow(`does not support ${field}: packages/core`);
       }
@@ -1125,20 +1136,22 @@ describe("isolated consumer runtime", () => {
           smoke: [...fixture.smoke],
         },
       });
-      expect(commands).toHaveLength(4);
+      expect(commands).toHaveLength(5);
       expect(commands.every((argv) => argv[0] === tools.node)).toBe(true);
       expect(commands[0]?.slice(0, 3)).toEqual([
         tools.node,
         tools[manager],
         "install",
       ]);
-      expect(commands[1]).toEqual([
+      expect(commands[0]).toContain("--ignore-scripts");
+      expect(commands[1]).toEqual([tools.node, tools[manager], "rebuild"]);
+      expect(commands[2]).toEqual([
         tools.node,
         "/fixture/node_modules/typescript/bin/tsc",
         "--noEmit",
       ]);
-      expect(commands[2]).toEqual([tools.node, tools.npm, "run", "build"]);
-      expect(commands[3]).toEqual([tools.node, "smoke.mjs"]);
+      expect(commands[3]).toEqual([tools.node, tools.npm, "run", "build"]);
+      expect(commands[4]).toEqual([tools.node, "smoke.mjs"]);
     }
     expect(() =>
       consumerFixtureCommands({

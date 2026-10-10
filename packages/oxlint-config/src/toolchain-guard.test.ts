@@ -73,7 +73,17 @@ test("consumer check declarations remain mandatory despite runtime and action op
     ],
   };
   const files = {
-    "tests/consumer/consumer-compat.json": JSON.stringify({ packages: [] }),
+    "tests/consumer/consumer-compat.json": JSON.stringify({
+      packages: [
+        {
+          package: "packages/library",
+          fixture: "library",
+          kind: "node",
+          build: ["npm", "run", "build"],
+          smoke: ["node", "smoke.mjs"],
+        },
+      ],
+    }),
     "package.json": JSON.stringify({
       private: true,
       workspaces: ["packages/*"],
@@ -94,6 +104,10 @@ test("consumer check declarations remain mandatory despite runtime and action op
     ),
   ).toBe(true);
   for (const mutation of [
+    {
+      ...files,
+      "tests/consumer/consumer-compat.json": JSON.stringify({ packages: [] }),
+    },
     { ...files, [workflow]: invocation.replace(policy.consumerNode, "26.0.0") },
     {
       ...files,

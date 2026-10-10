@@ -3,7 +3,9 @@ import { parseDocument } from "yaml";
 
 import packageMetadata from "../package.json";
 import {
+  assertConsumerFixtureSelection,
   assertConsumerPublishableManifest,
+  parseConsumerFixtures,
   discoverConsumerPackages,
 } from "./consumer-compat-config";
 import { consumerNodeSupportMatches } from "./consumer-node-support";
@@ -326,10 +328,16 @@ export const checkConsumerChecks = ({
           declaration.fixturePath,
           "consumer-compat.json",
         );
-        if (files[fixtureManifest] === undefined)
+        const fixtureSource = files[fixtureManifest];
+        if (fixtureSource === undefined)
           throw new Error(
             `consumerChecks fixture configuration must be tracked: ${fixtureManifest}`,
           );
+        const fixtureConfiguration: unknown = JSON.parse(fixtureSource);
+        assertConsumerFixtureSelection({
+          selected: declaration.packages,
+          fixtures: parseConsumerFixtures(fixtureConfiguration),
+        });
         const rawPackages = inputs["packages"];
         if (typeof rawPackages !== "string")
           throw new Error(
