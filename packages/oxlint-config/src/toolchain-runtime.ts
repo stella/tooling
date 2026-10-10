@@ -865,6 +865,43 @@ export const checkRuntimeFile = ({
     tool: "node" | "python" | "bun";
     line: number;
   };
+  const checkoutProvidersFor = (selector: string | undefined) => {
+    if (selector === undefined) return checkoutBindings;
+    let deepest: CheckoutBinding | undefined;
+    for (const entry of checkoutBindings) {
+      if (
+        entry.path !== "." &&
+        selector !== entry.path &&
+        !selector.startsWith(`${entry.path}/`)
+      )
+        continue;
+      if (
+        deepest === undefined ||
+        (entry.path !== "." &&
+          (deepest.path === "." || entry.path.length > deepest.path.length))
+      )
+        deepest = entry;
+    }
+    return checkoutBindings.filter((entry) => entry.path === deepest?.path);
+  };
+  const hasAmbiguousCheckoutWriters = (
+    selector: string | undefined,
+    providers: readonly CheckoutBinding[],
+  ) => {
+    if (providers.length > 0)
+      return providers.some(
+        (entry) => (checkoutDestinations.get(entry.path) ?? 0) > 1,
+      );
+    // A selector before checkout cannot borrow a tracked shadow of an ambiguous destination.
+    return [...checkoutDestinations].some(
+      ([prefix, count]) =>
+        count > 1 &&
+        (selector === undefined ||
+          prefix === "." ||
+          selector === prefix ||
+          selector.startsWith(`${prefix}/`)),
+    );
+  };
   const checkReference = ({ value, tool, line }: RuntimeReferenceOptions) => {
     const selectors = {
       node: [".node-version", ".nvmrc"],
@@ -876,30 +913,10 @@ export const checkRuntimeFile = ({
     const selector = staticRepositoryPath(value)
       ? path.posix.normalize(value)
       : undefined;
-    const binding =
-      selector === undefined
-        ? undefined
-        : checkoutBindings.findLast(
-            (entry) =>
-              entry.path === "." ||
-              selector === entry.path ||
-              selector.startsWith(`${entry.path}/`),
-          );
-    const dynamicSource = checkoutBindings.some(
-      (entry) =>
-        entry.dynamicSource &&
-        (entry.path === "." ||
-          selector === entry.path ||
-          selector?.startsWith(`${entry.path}/`)),
-    );
-    const sparseFailure = checkoutBindings.find((entry) => {
-      if (
-        selector !== undefined &&
-        entry.path !== "." &&
-        selector !== entry.path &&
-        !selector.startsWith(`${entry.path}/`)
-      )
-        return false;
+    const providers = checkoutProvidersFor(selector);
+    const binding = selector === undefined ? undefined : providers.at(-1);
+    const dynamicSource = providers.some((entry) => entry.dynamicSource);
+    const sparseFailure = providers.find((entry) => {
       if (entry.sparse.mode === "invalid") return true;
       if (entry.sparse.mode !== "files" && entry.sparse.mode !== "mixed")
         return false;
@@ -941,13 +958,7 @@ export const checkRuntimeFile = ({
     }
     if (
       unknownCheckoutDestination ||
-      [...checkoutDestinations].some(
-        ([prefix, count]) =>
-          count > 1 &&
-          (prefix === "." ||
-            selector === prefix ||
-            selector.startsWith(`${prefix}/`)),
-      )
+      hasAmbiguousCheckoutWriters(selector, providers)
     ) {
       if (
         tool === "bun" &&
@@ -1279,26 +1290,13 @@ export const checkRuntimeFile = ({
       const selector = staticRepositoryPath(value)
         ? path.posix.normalize(value)
         : undefined;
-      const binding =
-        selector === undefined
-          ? undefined
-          : checkoutBindings.findLast(
-              (entry) =>
-                entry.path === "." ||
-                selector === entry.path ||
-                selector.startsWith(`${entry.path}/`),
-            );
+      const providers = checkoutProvidersFor(selector);
+      const binding = selector === undefined ? undefined : providers.at(-1);
       if (
         selector === undefined ||
         unknownCheckoutDestination ||
         (binding !== undefined && binding.source !== "tracked") ||
-        [...checkoutDestinations].some(
-          ([prefix, count]) =>
-            count > 1 &&
-            (prefix === "." ||
-              selector === prefix ||
-              selector.startsWith(`${prefix}/`)),
-        )
+        hasAmbiguousCheckoutWriters(selector, providers)
       )
         add({
           rule: "action-pins",

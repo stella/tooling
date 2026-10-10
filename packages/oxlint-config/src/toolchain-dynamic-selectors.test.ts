@@ -545,3 +545,75 @@ test("dynamic sparse acknowledgement retains inspected manifest validation", () 
     expect(check(source, [bunDecision]).diagnostics).toEqual([]);
   }
 });
+
+test("deepest checkout owns sparse validation independently of ancestor checkouts", () => {
+  type NestedCheckoutOptions = {
+    rootSparse: string | undefined;
+    nestedSparse: string | undefined;
+    reverse: boolean;
+    selector: string;
+  };
+  const source = ({
+    rootSparse,
+    nestedSparse,
+    reverse,
+    selector,
+  }: NestedCheckoutOptions) => {
+    const checkout = (destination: string, sparse: string | undefined) =>
+      `      - uses: ${action("actions/checkout")}\n        with:\n          path: ${destination}\n${sparse === undefined ? "" : `          sparse-checkout: '${sparse}'\n`}`;
+    const root = checkout(".", rootSparse);
+    const nested = checkout("snapshot", nestedSparse);
+    return `on: push\njobs:\n  example:\n    steps:\n${reverse ? nested + root : root + nested}      - id: setup\n        uses: ${action("oven-sh/setup-bun")}\n        with: {bun-version-file: '${selector}'}\n`;
+  };
+  for (const reverse of [false, true]) {
+    const nestedAction =
+      source({
+        rootSparse: "src",
+        nestedSparse: undefined,
+        reverse,
+        selector: "snapshot/package.json",
+      }) + "      - uses: ./snapshot/.github/actions/example\n";
+    expect(check(nestedAction).diagnostics).toEqual([]);
+    const delegatedAction = nestedAction.replace(
+      "          path: snapshot\n",
+      "          path: snapshot\n          ref: '${{ inputs.ref }}'\n",
+    );
+    expect(check(delegatedAction).diagnostics).toMatchObject([
+      { rule: "action-pins" },
+    ]);
+    for (const sparse of ["package.json", "src", "!package.json"]) {
+      expect(
+        check(
+          source({
+            rootSparse: sparse,
+            nestedSparse: undefined,
+            reverse,
+            selector: "snapshot/package.json",
+          }),
+        ),
+      ).toEqual({ diagnostics: [], matched: [] });
+      expect(
+        check(
+          source({
+            rootSparse: undefined,
+            nestedSparse: sparse,
+            reverse,
+            selector: "package.json",
+          }),
+        ),
+      ).toEqual({ diagnostics: [], matched: [] });
+    }
+    for (const sparse of ["src", "!package.json", "*.json"])
+      expect(
+        check(
+          source({
+            rootSparse: "package.json",
+            nestedSparse: sparse,
+            reverse,
+            selector: "snapshot/package.json",
+          }),
+          [bunDecision],
+        ),
+      ).toMatchObject({ diagnostics: [{ rule: "bun-pins" }], matched: [] });
+  }
+});
