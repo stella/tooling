@@ -279,7 +279,7 @@ export const bindConsumerManifest = ({
           "fixture dependencies must resolve from registry or generated artifact bindings",
         );
     result[field] = Object.fromEntries(
-      Object.entries(entries).filter(([name]) => !(name in owned)),
+      Object.entries(entries).filter(([name]) => !Object.hasOwn(owned, name)),
     );
   }
   result["dependencies"] = {

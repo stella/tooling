@@ -345,7 +345,7 @@ export const checkPublishContract = ({
   if ("bun" in current.engines)
     add("engines.bun", "published packages must not require Bun");
   for (const peer of ["bun", "bun-types", "@types/bun", "@typescript/native"])
-    if (peer in current.peerDependencies)
+    if (Object.hasOwn(current.peerDependencies, peer))
       add(
         `peerDependencies.${peer}`,
         "published packages must not require development runtime or compiler packages",

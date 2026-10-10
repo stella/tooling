@@ -656,6 +656,38 @@ describe("consumer compatibility declarations", () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+  test("both managers preserve prototype-named dependencies unless explicitly bound", () => {
+    for (const manager of ["npm", "pnpm"] as const)
+      for (const field of [
+        "dependencies",
+        "devDependencies",
+        "optionalDependencies",
+        "peerDependencies",
+      ]) {
+        const options = {
+          manifest: { [field]: { constructor: "1.0.0" } },
+          artifacts: new Map<string, string>(),
+          typescript: "6.0.3",
+          react: {},
+          manager,
+        };
+        const bound = bindConsumerManifest(options);
+        expect(bound.manifest[field]).toMatchObject({ constructor: "1.0.0" });
+        const explicit = bindConsumerManifest({
+          ...options,
+          artifacts: new Map([["constructor", "/artifacts/constructor.tgz"]]),
+        });
+        expect(explicit.manifest["dependencies"]).toMatchObject({
+          constructor: "file:/artifacts/constructor.tgz",
+        });
+        if (field !== "dependencies") {
+          const remaining = explicit.manifest[field];
+          if (!consumerRecord(remaining))
+            throw new Error("missing dependency section");
+          expect(Object.hasOwn(remaining, "constructor")).toBe(false);
+        }
+      }
+  });
   test("both managers bind direct and transitive closure to identical artifacts and consumer pins", () => {
     const artifacts = new Map([
       ["@example/library", "/artifacts/library.tgz"],
