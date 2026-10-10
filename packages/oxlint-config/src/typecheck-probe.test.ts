@@ -14,7 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { runTypecheckProbe } from "./typecheck-probe";
+import { insideProbePath, runTypecheckProbe } from "./typecheck-probe";
 
 type ProjectFixture = { repo: string; project: string; directory: string };
 const withProject = async (
@@ -355,3 +355,44 @@ test.skipIf(process.env["CI"] !== "true")(
     });
   },
 );
+
+test("probe containment rejects Windows sibling projects and seed directories", () => {
+  const paths = path.win32;
+  const root = String.raw`C:\work\repo`;
+  const projectDirectory = paths.join(root, "packages", "library");
+  expect(
+    insideProbePath({
+      root,
+      candidate: paths.join(root, "tsconfig.json"),
+      paths,
+    }),
+  ).toBe(true);
+  expect(
+    insideProbePath({
+      root,
+      candidate: paths.join(root, "..", "sibling", "tsconfig.json"),
+      paths,
+    }),
+  ).toBe(false);
+  expect(
+    insideProbePath({
+      root: projectDirectory,
+      candidate: paths.join(projectDirectory, "..", "sibling"),
+      paths,
+    }),
+  ).toBe(false);
+  expect(
+    insideProbePath({
+      root: projectDirectory,
+      candidate: paths.join(projectDirectory, "src"),
+      paths,
+    }),
+  ).toBe(true);
+  expect(
+    insideProbePath({
+      root,
+      candidate: String.raw`D:\work\repo\tsconfig.json`,
+      paths,
+    }),
+  ).toBe(false);
+});

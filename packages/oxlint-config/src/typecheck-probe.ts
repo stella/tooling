@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { open, realpath, stat, unlink } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import path, { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 import { diagnosticSet } from "./typecheck-parity";
 
@@ -36,10 +36,22 @@ const runProbeCommand = ({ command, cwd, signal }: ProbeCommandOptions) =>
     child.once("close", (status) => done({ status, output }));
   });
 
-const inside = (repo: string, candidate: string) => {
-  const location = relative(repo, candidate);
+type ProbePathContainmentOptions = {
+  root: string;
+  candidate: string;
+  paths?: Pick<typeof path, "relative" | "isAbsolute" | "sep">;
+};
+
+export const insideProbePath = ({
+  root,
+  candidate,
+  paths = path,
+}: ProbePathContainmentOptions) => {
+  const location = paths.relative(root, candidate);
   return (
-    location !== ".." && !location.startsWith("../") && !isAbsolute(location)
+    location !== ".." &&
+    !location.startsWith(".." + paths.sep) &&
+    !paths.isAbsolute(location)
   );
 };
 
@@ -73,12 +85,12 @@ export const runTypecheckProbe = async ({
     throw new Error("typecheck probe requires an explicit project file");
   const root = await realpath(repo);
   const requested = resolve(root, project);
-  if (!inside(root, requested))
+  if (!insideProbePath({ root, candidate: requested }))
     throw new Error(
       `typecheck probe project is outside the repository: ${project}`,
     );
   const config = await realpath(requested);
-  if (!inside(root, config))
+  if (!insideProbePath({ root, candidate: config }))
     throw new Error(
       `typecheck probe project resolves outside the repository: ${project}`,
     );
@@ -91,12 +103,15 @@ export const runTypecheckProbe = async ({
         "typecheck probe seed directory must be repository-relative",
       );
     const requestedSeedParent = resolve(root, seedDirectory);
-    if (!inside(root, requestedSeedParent))
+    if (!insideProbePath({ root, candidate: requestedSeedParent }))
       throw new Error(
         `typecheck probe seed directory is outside the repository: ${seedDirectory}`,
       );
     seedParent = await realpath(requestedSeedParent);
-    if (!inside(root, seedParent) || !inside(dirname(config), seedParent))
+    if (
+      !insideProbePath({ root, candidate: seedParent }) ||
+      !insideProbePath({ root: dirname(config), candidate: seedParent })
+    )
       throw new Error(
         `typecheck probe seed directory must be inside the declared project: ${seedDirectory}`,
       );
