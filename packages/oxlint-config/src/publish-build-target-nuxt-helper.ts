@@ -1,7 +1,8 @@
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-const knownHooks = new WeakSet<object>();
+const targetHookBrand = Symbol.for("@stll/oxlint-config.build-target.nuxt");
+const targetHookVersion = 1;
 
 /** Configure both module and runtime JavaScript without replacing Nuxt entries. */
 export const nuxtModuleTarget = (target: string | string[]) => {
@@ -36,10 +37,34 @@ export const nuxtModuleTarget = (target: string | string[]) => {
       throw new Error("Invalid Nuxt module transform options");
     options["rollup"]["esbuild"] = { ...esbuild, target: [...targets] };
   };
-  knownHooks.add(before);
+  Object.defineProperty(before, targetHookBrand, {
+    value: Object.freeze({
+      version: targetHookVersion,
+      targets: Object.freeze([...targets]),
+    }),
+  });
   return before;
 };
 
-/** Recognize callbacks created by this module instance, without executing them. */
-export const isNuxtModuleTargetHook = (value: unknown) =>
-  typeof value === "function" && knownHooks.has(value);
+/** Recognize the same declared target hook across ESM and CommonJS modules. */
+export const isNuxtModuleTargetHook = (value: unknown) => {
+  if (typeof value !== "function") return false;
+  const descriptor = Object.getOwnPropertyDescriptor(value, targetHookBrand);
+  if (
+    descriptor === undefined ||
+    descriptor.enumerable !== false ||
+    descriptor.writable !== false ||
+    descriptor.configurable !== false
+  )
+    return false;
+  const marker: unknown = descriptor.value;
+  return (
+    record(marker) &&
+    marker["version"] === targetHookVersion &&
+    Array.isArray(marker["targets"]) &&
+    marker["targets"].length > 0 &&
+    marker["targets"].every(
+      (target: unknown) => typeof target === "string" && target.length > 0,
+    )
+  );
+};

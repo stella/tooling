@@ -68,6 +68,10 @@ test("consumer check declarations remain mandatory despite runtime and action op
     ],
   };
   const files = {
+    "package.json": JSON.stringify({
+      private: true,
+      workspaces: ["packages/*"],
+    }),
     [workflow]: invocation,
     "packages/library/package.json": JSON.stringify({
       name: "@example/library",

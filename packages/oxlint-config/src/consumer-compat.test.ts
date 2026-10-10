@@ -52,14 +52,13 @@ describe("consumer compatibility declarations", () => {
     expect(paths.get(root.name)).toBe(".");
     const libraryPath = paths.get(library.name);
     if (!libraryPath) throw new Error("missing staged library");
-    expect(path.posix.join(libraryPath, "../core")).toBe(paths.get(core.name));
+    const corePath = paths.get(core.name);
+    if (!corePath) throw new Error("missing staged core");
+    expect(path.posix.join(libraryPath, "../core")).toBe(corePath);
     expect(consumerPackRootManifest(packages)).toEqual(root.manifest);
     expect(
       consumerPackRootManifest(
-        new Map([
-          [library.name, library],
-          [core.name, core],
-        ]),
+        new Map([...packages].filter(([name]) => name !== root.name)),
       ),
     ).toEqual({ private: true });
   });
@@ -141,7 +140,7 @@ describe("consumer compatibility declarations", () => {
       kind: "react",
       build: ["npm", "run", "build"],
       smoke: ["node", "smoke.mjs"],
-    };
+    } satisfies ConsumerFixture;
     expect(parseConsumerFixtures({ packages: [entry] })).toEqual([entry]);
     for (const patch of [
       { fixture: "../source" },

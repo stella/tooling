@@ -2,6 +2,7 @@ import path from "node:path";
 import { satisfies, validRange } from "semver";
 import { parseDocument } from "yaml";
 
+import { discoverConsumerPackages } from "./consumer-compat-config";
 import { githubAutomationFileKind } from "./toolchain-inputs";
 
 export const consumerCheckWorkflow =
@@ -165,6 +166,12 @@ export const checkConsumerChecks = ({
           throw new Error(
             `${workflow}:${jobName} packages must exactly match consumerChecks`,
           );
+        const workspacePackages = new Map(
+          [...discoverConsumerPackages(files).values()].map((entry) => [
+            entry.directory,
+            entry.manifest,
+          ]),
+        );
         for (const directory of declaration.packages) {
           const manifestPath = path.posix.join(directory, "package.json");
           const manifestText = files[manifestPath];
@@ -172,9 +179,12 @@ export const checkConsumerChecks = ({
             throw new Error(
               `consumerChecks package manifest must be tracked: ${manifestPath}`,
             );
-          const manifest: unknown = JSON.parse(manifestText);
+          const manifest = workspacePackages.get(directory);
+          if (manifest === undefined)
+            throw new Error(
+              `consumerChecks package must be a discovered workspace member: ${manifestPath}`,
+            );
           if (
-            !record(manifest) ||
             manifest["private"] === true ||
             typeof manifest["name"] !== "string" ||
             manifest["name"].trim() === ""

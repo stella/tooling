@@ -61,6 +61,7 @@ describe("published contract schema", () => {
       { type: "unknown" },
       { type: "types-only", targets: [] },
       { type: "javascript" },
+      { type: "javascript", targets: [] },
       { type: "javascript", targets: [" "] },
       { type: "javascript", targets: ["node22", 22] },
       { type: "javascript", targets: ["node22"], platform: "node" },
@@ -89,7 +90,7 @@ describe("published contract schema", () => {
         ).toThrow();
   });
 
-  test("types-only and unconstrained JavaScript targets remain distinct", () => {
+  test("types-only and JavaScript without lowering remain distinct", () => {
     const declarations = resolveManifestContract({
       manifest: { types: "./index.d.ts" },
       target: { type: "types-only" },
@@ -106,9 +107,9 @@ describe("published contract schema", () => {
     expect(
       resolveManifestContract({
         manifest: {},
-        target: { type: "javascript", targets: [] },
+        target: { type: "javascript", targets: ["esnext"] },
       }).target,
-    ).toEqual({ type: "javascript", targets: [] });
+    ).toEqual({ type: "javascript", targets: ["esnext"] });
     expect(() =>
       parsePublishContract({ ...declarations, target: undefined }),
     ).toThrow();

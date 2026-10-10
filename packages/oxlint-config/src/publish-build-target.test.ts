@@ -37,6 +37,22 @@ test("resolved targets preserve every emitted configuration and final override",
     );
 });
 
+test("every emitted configuration requires nonempty target identifiers", () => {
+  for (const target of [
+    [],
+    [""],
+    [" "],
+    ["es2022", ""],
+    "es2022,",
+    ",es2022",
+    ",",
+    Array(1),
+  ]) {
+    for (const configs of [[{ target }], [{ target: "es2022" }, { target }]])
+      expect(() => resolvedTsdownTarget(configs)).toThrow();
+  }
+});
+
 test("nullish transform target overrides preserve tsdown defaults", () => {
   for (const ignored of [undefined, null])
     expect(
@@ -149,6 +165,19 @@ test("the installed build resolver supplies engine defaults and real config muta
         type: "javascript",
         targets: [...expected],
       });
+    }
+    for (const config of [
+      "{ entry: ['entry.js'], dts: false, target: [] }",
+      "[{ entry: ['entry.js'], dts: false, target: 'es2022' }, { entry: ['entry.js'], dts: false, target: [] }]",
+      "{ entry: ['entry.js'], dts: false, inputOptions: { transform: { target: [''] } } }",
+    ]) {
+      writeFileSync(
+        path.join(directory, "tsdown.config.mjs"),
+        `export default ${config};\n`,
+      );
+      await expect(resolvePublishBuildTarget(directory)).rejects.toThrow(
+        "JavaScript target",
+      );
     }
     writeFileSync(
       path.join(directory, "tsdown.config.mjs"),

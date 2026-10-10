@@ -19,11 +19,18 @@ const record = (value: unknown): value is Record<string, unknown> =>
 
 const targets = (value: unknown): string[] => {
   if (value === undefined) return ["esnext"];
-  if (typeof value === "string")
-    return value.split(",").map((item) => item.trim());
+  if (typeof value === "string") {
+    const identifiers = value.split(",").map((item) => item.trim());
+    if (identifiers.some((item) => item === ""))
+      throw new Error(
+        "Resolved JavaScript target identifiers must be nonempty",
+      );
+    return identifiers;
+  }
   if (
     Array.isArray(value) &&
-    value.every((item: unknown) => typeof item === "string")
+    value.length > 0 &&
+    Array.from(value).every((item: unknown) => typeof item === "string")
   )
     return value.flatMap((item: string) => targets(item));
   throw new Error(
@@ -245,8 +252,9 @@ for (const config of configs) {
       throw new Error('tsdown transform overrides must be an object');
     if (record(input)) rejectOptionsHooks(input.plugins);
     const target = record(transform) && transform.target != null ? transform.target : entry.target;
-    if (target !== undefined && typeof target !== 'string' &&
-        !(Array.isArray(target) && target.every(item => typeof item === 'string')))
+    const nonemptyIdentifiers = value => typeof value === 'string' && value.split(',').every(item => item.trim() !== '');
+    if (target !== undefined && !nonemptyIdentifiers(target) &&
+        !(Array.isArray(target) && target.length > 0 && Array.from(target).every(nonemptyIdentifiers)))
       throw new Error('Build tool returned an unsupported resolved JavaScript target');
     resolved.push({ target, dts: { emitDtsOnly: record(entry.dts) && entry.dts.emitDtsOnly === true } });
   }

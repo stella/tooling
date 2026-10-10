@@ -10,7 +10,7 @@ test("Vite final transform overrides take precedence, including explicit undefin
       ["node22", "es2022", "node22"],
       ["es2022", "node22"],
     ],
-  ])
+  ] as const)
     expect(
       resolvedViteTarget({
         build: { target: "es2020", rolldownOptions: { transform: { target } } },

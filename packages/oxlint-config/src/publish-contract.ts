@@ -140,9 +140,9 @@ const publishTarget = (value: unknown): PublishTarget => {
   if (source["type"] !== "javascript")
     throw new Error("target.type must be javascript or types-only");
   closedKeys(source, ["type", "targets"], "target");
-  if (!Array.isArray(source["targets"]))
-    throw new Error("target.targets must be an array");
-  const targets = source["targets"].map((entry: unknown) => {
+  if (!Array.isArray(source["targets"]) || source["targets"].length === 0)
+    throw new Error("target.targets must be a nonempty array");
+  const targets = Array.from(source["targets"]).map((entry: unknown) => {
     const target = text(entry, "target.targets");
     if (/\s|[\u0000-\u001f\u007f]/.test(target))
       throw new Error(

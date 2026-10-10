@@ -26,11 +26,56 @@ const manifest = JSON.stringify({
   engines: { node: ">=20.10.0" },
 });
 const files = {
+  "package.json": JSON.stringify({ private: true, workspaces: ["packages/*"] }),
   [workflow]: JSON.stringify({ jobs: { consumer: job } }),
   "packages/library/package.json": manifest,
 };
 const check = (inputs: Record<string, string> = files) =>
   checkConsumerChecks({ declarations: [declaration], files: inputs, policy });
+
+test("consumer declarations select only the runner's discovered workspace members", () => {
+  for (const workspaces of [
+    [],
+    ["apps/*"],
+    ["packages/*", "!packages/library"],
+  ]) {
+    expect(
+      check({
+        ...files,
+        "package.json": JSON.stringify({ private: true, workspaces }),
+      }),
+    ).toMatchObject([
+      {
+        rule: "configuration",
+        message:
+          "consumerChecks package must be a discovered workspace member: packages/library/package.json",
+      },
+    ]);
+  }
+  const nested = "packages/owner/libraries/nested";
+  expect(
+    checkConsumerChecks({
+      declarations: [{ ...declaration, packages: [nested] }],
+      files: {
+        "package.json": files["package.json"],
+        "packages/owner/package.json": JSON.stringify({
+          private: true,
+          workspaces: ["libraries/*"],
+        }),
+        [`${nested}/package.json`]: manifest,
+        [workflow]: JSON.stringify({
+          jobs: {
+            consumer: {
+              ...job,
+              with: { ...job.with, packages: JSON.stringify([nested]) },
+            },
+          },
+        }),
+      },
+      policy,
+    }),
+  ).toEqual([]);
+});
 
 test("consumer declarations are closed, canonical and unique", () => {
   expect(parseConsumerChecks(undefined)).toEqual([]);

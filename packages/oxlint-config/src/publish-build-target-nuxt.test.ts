@@ -9,8 +9,10 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   resolvedNuxtTarget,
@@ -126,13 +128,13 @@ test("Nuxt helper targets every actual JavaScript entry and preserves entry layo
       builder: "mkdist",
       outDir: "/project/dist/runtime",
       ext: "js",
-      esbuild: { jsx: "automatic", jsxImportSource: "vue" },
+      esbuild: { jsx: "automatic", jsxImportSource: "vue", target: ["esnext"] },
     },
   ];
   const context = {
     options: {
       entries,
-      rollup: { esbuild: { target: "esnext", jsx: "preserve" } },
+      rollup: { esbuild: { target: ["esnext"], jsx: "preserve" } },
     },
   };
   const before = nuxtModuleTarget("es2022");
@@ -158,6 +160,85 @@ test("Nuxt helper targets every actual JavaScript entry and preserves entry layo
     },
   ]);
 });
+
+test("Nuxt helper supplies an absent runtime target", () => {
+  const context = {
+    options: {
+      entries: [{ builder: "mkdist", esbuild: { jsx: "automatic" } }],
+      rollup: { esbuild: { target: "esnext" } },
+    },
+  };
+  nuxtModuleTarget("es2022")(context);
+  expect(resolvedNuxtTarget(context.options)).toEqual({
+    type: "javascript",
+    targets: ["es2022"],
+  });
+});
+
+const builtEsmHelper = fileURLToPath(
+  new URL("../dist/publish-build-target-nuxt-helper.mjs", import.meta.url),
+);
+const builtCjsHelper = fileURLToPath(
+  new URL("../dist/publish-build-target-nuxt-helper.cjs", import.meta.url),
+);
+test.skipIf(
+  process.env["CI"] !== "true" &&
+    (!existsSync(builtEsmHelper) || !existsSync(builtCjsHelper)),
+)(
+  "built Nuxt ESM and CommonJS helpers recognize each other's callbacks",
+  async () => {
+    const esm: unknown = await import(pathToFileURL(builtEsmHelper).href);
+    const cjs: unknown = createRequire(import.meta.url)(builtCjsHelper);
+    const helper = (module: unknown) => {
+      if (
+        typeof module !== "object" ||
+        module === null ||
+        !("nuxtModuleTarget" in module) ||
+        typeof module.nuxtModuleTarget !== "function" ||
+        !("isNuxtModuleTargetHook" in module) ||
+        typeof module.isNuxtModuleTargetHook !== "function"
+      )
+        throw new Error(
+          "Built Nuxt helper must export its callback and recognizer",
+        );
+      return module;
+    };
+    const esmHelper = helper(esm);
+    const cjsHelper = helper(cjs);
+    const directory = mkdtempSync(path.join(tmpdir(), "nuxt-dual-helper-"));
+    try {
+      const esmConfig = path.join(directory, "build.config.mjs");
+      const cjsConfig = path.join(directory, "build.config.cjs");
+      writeFileSync(
+        esmConfig,
+        `import {nuxtModuleTarget} from ${JSON.stringify(pathToFileURL(builtEsmHelper).href)}; export default {hooks:{'build:before':nuxtModuleTarget('es2022')}};`,
+      );
+      writeFileSync(
+        cjsConfig,
+        `const {nuxtModuleTarget}=require(${JSON.stringify(builtCjsHelper)}); module.exports={hooks:{'build:before':nuxtModuleTarget('es2022')}};`,
+      );
+      const esmHook: unknown = (await import(pathToFileURL(esmConfig).href))
+        .default.hooks["build:before"];
+      const cjsHook: unknown = createRequire(import.meta.url)(cjsConfig).hooks[
+        "build:before"
+      ];
+      expect(esmHelper.isNuxtModuleTargetHook(cjsHook)).toBe(true);
+      expect(cjsHelper.isNuxtModuleTargetHook(esmHook)).toBe(true);
+      expect(
+        Object.getOwnPropertyDescriptor(
+          esmHook,
+          Symbol.for("@stll/oxlint-config.build-target.nuxt"),
+        ),
+      ).toMatchObject({
+        enumerable: false,
+        configurable: false,
+        writable: false,
+      });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
 
 test("Nuxt helper rejects unsupported entry builders and transform shapes", () => {
   for (const builder of ["copy", "untyped", "other"])
