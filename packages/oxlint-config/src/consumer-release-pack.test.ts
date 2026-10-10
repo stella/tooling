@@ -68,3 +68,24 @@ test("release packing requires one exact setup and one supported pack command", 
   ])
     expect(() => resolveConsumerReleasePack(files)).toThrow();
 });
+
+test("unrelated pnpm setup jobs do not constrain the release packer", () => {
+  const unrelated = `.github/workflows/unrelated.yml`;
+  for (const setup of [
+    "      - uses: pnpm/action-setup@v4\n        with: {version: latest}\n",
+    "      - uses: pnpm/action-setup@v4\n        if: false\n",
+    "      - run: npm install --global pnpm@latest\n",
+  ]) {
+    const npm = resolveConsumerReleasePack({
+      [workflow]: source,
+      [unrelated]: `jobs:\n  other:\n    steps:\n${setup}      - run: pnpm test\n`,
+    });
+    expect(npm.manager).toBe("npm");
+    expect(npm.version).toBe("11.11.1");
+    expect(() =>
+      resolveConsumerReleasePack({
+        [workflow]: `jobs:\n  pack:\n    steps:\n${setup}      - run: pnpm pack --ignore-scripts --pack-destination artifacts\n`,
+      }),
+    ).toThrow();
+  }
+});

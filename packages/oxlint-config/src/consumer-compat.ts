@@ -123,6 +123,42 @@ export const verifyConsumerNodeArchive = ({
     throw new Error(`Node archive checksum mismatch: ${filename}`);
 };
 
+type ResolveInstalledManagerBinOptions = {
+  directory: string;
+  name: "npm" | "pnpm";
+};
+export const resolveInstalledManagerBin = async ({
+  directory,
+  name,
+}: ResolveInstalledManagerBinOptions) => {
+  const manifest = await jsonFile(path.join(directory, "package.json"));
+  const bin = manifest["bin"];
+  const selector =
+    typeof bin === "string" ? bin : consumerRecord(bin) ? bin[name] : undefined;
+  if (typeof selector !== "string" || selector.length === 0)
+    throw new Error(`Installed ${name} package must declare its ${name} bin`);
+  const root = await realpath(directory);
+  const resolved = path.resolve(root, selector);
+  const relative = path.relative(root, resolved);
+  if (
+    relative === ".." ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative)
+  )
+    throw new Error(`Installed ${name} bin leaves its package`);
+  const cli = await realpath(resolved);
+  const actualRelative = path.relative(root, cli);
+  if (
+    actualRelative === ".." ||
+    actualRelative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(actualRelative)
+  )
+    throw new Error(`Installed ${name} bin leaves its package`);
+  if (!(await lstat(cli)).isFile())
+    throw new Error(`Installed ${name} bin must be a file`);
+  return cli;
+};
+
 type ConsumerTools = { node: string; npm: string; pnpm: string; bin: string };
 type WriteConsumerToolWrappersOptions = {
   node: string;
@@ -229,9 +265,14 @@ export const provisionConsumerTools = async (
     ],
     { cwd: scratch, env },
   );
-  const npm = path.join(prefix, "node_modules/npm/bin/npm-cli.js");
-  // pnpm 12 retains its Node launcher when lifecycle scripts are disabled.
-  const pnpm = path.join(prefix, "node_modules/pnpm/pnpm");
+  const npm = await resolveInstalledManagerBin({
+    directory: path.join(prefix, "node_modules/npm"),
+    name: "npm",
+  });
+  const pnpm = await resolveInstalledManagerBin({
+    directory: path.join(prefix, "node_modules/pnpm"),
+    name: "pnpm",
+  });
   for (const [cli, expected] of [
     [npm, policy.consumerNpm],
     [pnpm, policy.consumerPnpm],
@@ -461,12 +502,10 @@ const provisionConsumerReleasePacker = async ({
     ],
     { cwd: scratch, env },
   );
-  const cli = path.join(
-    prefix,
-    "node_modules",
-    release.manager,
-    release.manager === "npm" ? "bin/npm-cli.js" : "pnpm",
-  );
+  const cli = await resolveInstalledManagerBin({
+    directory: path.join(prefix, "node_modules", release.manager),
+    name: release.manager,
+  });
   const actual = (
     await execute(tools.node, [cli, "--version"], { cwd: scratch, env })
   ).trim();
@@ -572,7 +611,10 @@ export const consumerCommandEnvironment = ({
     npm_config_registry: "https://registry.npmjs.org/",
     // Project packageManager fields cannot replace the verified consumer/release tools.
     pnpm_config_pm_on_fail: "ignore",
+    // Pre-11 release packers use this setting instead of pmOnFail.
+    npm_config_manage_package_manager_versions: "false",
     COREPACK_ENABLE_PROJECT_SPEC: "0",
+    COREPACK_ENABLE_STRICT: "0",
     COREPACK_ENABLE_AUTO_PIN: "0",
     COREPACK_ENABLE_NETWORK: "0",
     COREPACK_ENV_FILE: "0",

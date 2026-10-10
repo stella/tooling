@@ -6,6 +6,7 @@ import path from "node:path";
 import {
   consumerCommandEnvironment,
   packConsumerArtifacts,
+  resolveInstalledManagerBin,
 } from "../packages/oxlint-config/src/consumer-compat";
 import { discoverConsumerPackages } from "../packages/oxlint-config/src/consumer-compat-config";
 import policy from "../packages/oxlint-config/toolchain.json";
@@ -95,17 +96,29 @@ export const assertConsumerReleasePackParity = async ({
   );
 };
 
-export const assertPinnedPnpmReleasePack = async ({
+type PnpmReleasePackVersionOptions = ReleasePackParityOptions & {
+  version: string;
+  packageManager: string;
+};
+const assertPnpmReleasePackVersion = async ({
   tools,
   scratch,
-}: ReleasePackParityOptions) => {
-  const root = path.join(scratch, "pnpm-release-pack-fixture");
-  const packing = path.join(scratch, "pnpm-release-pack-check");
+  version: pinnedVersion,
+  packageManager,
+}: PnpmReleasePackVersionOptions) => {
+  const root = path.join(
+    scratch,
+    `pnpm-release-pack-fixture-${pinnedVersion}-${packageManager.split("@")[0]}`,
+  );
+  const packing = path.join(
+    scratch,
+    `pnpm-release-pack-check-${pinnedVersion}-${packageManager.split("@")[0]}`,
+  );
   await mkdir(packing);
   const files = {
     "package.json": JSON.stringify({
       private: true,
-      packageManager: "pnpm@0.0.0",
+      packageManager,
       workspaces: ["packages/*"],
     }),
     "pnpm-workspace.yaml": "packages:\n  - packages/*\n",
@@ -120,7 +133,7 @@ jobs:
   pack:
     runs-on: ubuntu-latest
     steps:
-      - run: npm install --global --ignore-scripts pnpm@${policy.consumerPnpm}
+      - run: npm install --global --ignore-scripts pnpm@${pinnedVersion}
       - run: pnpm pack --ignore-scripts --pack-destination artifacts
 `,
   };
@@ -151,10 +164,16 @@ jobs:
   });
   const version = execFileSync(
     tools.node,
-    [path.join(packing, "release-packer/node_modules/pnpm/pnpm"), "--version"],
+    [
+      await resolveInstalledManagerBin({
+        directory: path.join(packing, "release-packer/node_modules/pnpm"),
+        name: "pnpm",
+      }),
+      "--version",
+    ],
     { cwd: directory, env, encoding: "utf8" },
   ).trim();
-  assert.equal(version, policy.consumerPnpm);
+  assert.equal(version, pinnedVersion);
   const staged: unknown = JSON.parse(
     await readFile(path.join(packing, "pack-workspace/package.json"), "utf8"),
   );
@@ -163,10 +182,22 @@ jobs:
   );
   assert.equal(
     staged.packageManager,
-    "pnpm@0.0.0",
+    packageManager,
     "retain the staged declaration without allowing it to select the executed packer",
   );
   process.stdout.write(
-    "pnpm release packing: conflicting staged packageManager retains the verified pinned version\n",
+    `pnpm ${pinnedVersion} release packing: conflicting staged packageManager retains the verified pinned version\n`,
   );
+};
+
+export const assertPinnedPnpmReleasePack = async (
+  options: ReleasePackParityOptions,
+) => {
+  for (const version of ["10.0.0", policy.consumerPnpm])
+    for (const packageManager of ["pnpm@0.0.0", `bun@${policy.bun}`])
+      await assertPnpmReleasePackVersion({
+        ...options,
+        version,
+        packageManager,
+      });
 };

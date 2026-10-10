@@ -72,6 +72,19 @@ export const resolveConsumerReleasePack = (
     if (!record(source) || !record(source["jobs"])) continue;
     for (const [jobName, job] of Object.entries(source["jobs"])) {
       if (!record(job) || !Array.isArray(job["steps"])) continue;
+      const packsRelease = job["steps"].some(
+        (step: unknown) =>
+          record(step) &&
+          typeof step["run"] === "string" &&
+          step["run"]
+            .split("\n")
+            .some(
+              (line) =>
+                !line.trimStart().startsWith("#") &&
+                /\b(?:npm|pnpm)\s+pack\b/.test(line),
+            ),
+      );
+      if (!packsRelease) continue;
       const versions = new Map<string, string[]>();
       let packed: ConsumerReleasePack | undefined;
       for (const step of job["steps"]) {

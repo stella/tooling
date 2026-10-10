@@ -19,6 +19,7 @@ import { parse, stringify } from "yaml";
 import policy from "../toolchain.json";
 import {
   consumerCommandEnvironment,
+  resolveInstalledManagerBin,
   consumerReservedToolBins,
   assertConsumerFixtureFiles,
   consumerFixtureCommands,
@@ -1271,7 +1272,9 @@ describe("isolated consumer runtime", () => {
         NPM_CONFIG_PREFIX: "/shared/prefix",
         PNPM_HOME: "/shared/pnpm",
         pnpm_config_pm_on_fail: "download",
+        npm_config_manage_package_manager_versions: "true",
         COREPACK_ENABLE_PROJECT_SPEC: "1",
+        COREPACK_ENABLE_STRICT: "1",
         COREPACK_ENABLE_NETWORK: "1",
         COREPACK_ENABLE_AUTO_PIN: "1",
         COREPACK_ENV_FILE: "/shared/corepack.env",
@@ -1296,7 +1299,9 @@ describe("isolated consumer runtime", () => {
     expect(env["NPM_CONFIG_PREFIX"]).toBeUndefined();
     expect(env["PNPM_HOME"]).toBeUndefined();
     expect(env["pnpm_config_pm_on_fail"]).toBe("ignore");
+    expect(env["npm_config_manage_package_manager_versions"]).toBe("false");
     expect(env["COREPACK_ENABLE_PROJECT_SPEC"]).toBe("0");
+    expect(env["COREPACK_ENABLE_STRICT"]).toBe("0");
     expect(env["COREPACK_ENABLE_AUTO_PIN"]).toBe("0");
     expect(env["COREPACK_ENABLE_NETWORK"]).toBe("0");
     expect(env["COREPACK_ENV_FILE"]).toBe("0");
@@ -1305,4 +1310,39 @@ describe("isolated consumer runtime", () => {
     expect(env["XDG_CONFIG_HOME"]).toBe("/isolated/home/config");
     expect(env["KEEP"]).toBe("value");
   });
+});
+
+test("installed manager bins come from declared package metadata across versions", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "consumer-manager-bin-"));
+  try {
+    for (const [version, selector] of [
+      ["10.0.0", "bin/pnpm.cjs"],
+      ["12.9.1", "bin/pnpm.mjs"],
+    ]) {
+      if (version === undefined || selector === undefined)
+        throw new Error("missing manager fixture");
+      const directory = path.join(root, version);
+      await mkdir(path.join(directory, "bin"), { recursive: true });
+      await writeFile(
+        path.join(directory, selector),
+        "console.log('declared bin');\n",
+      );
+      const file = path.join(directory, "package.json");
+      for (const bin of [{ pnpm: selector }, selector]) {
+        await writeFile(file, JSON.stringify({ name: "pnpm", version, bin }));
+        expect(
+          await resolveInstalledManagerBin({ directory, name: "pnpm" }),
+        ).toBe(await realpath(path.join(directory, selector)));
+      }
+      for (const bin of [{ pnpx: selector }, {}, "../outside.js"]) {
+        await writeFile(file, JSON.stringify({ name: "pnpm", version, bin }));
+        await assert.rejects(
+          resolveInstalledManagerBin({ directory, name: "pnpm" }),
+          /must declare|leaves its package/,
+        );
+      }
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
