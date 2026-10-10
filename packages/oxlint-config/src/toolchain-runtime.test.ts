@@ -293,6 +293,57 @@ test("input case-folding covers caches, local actions, merges and checkout prove
   ).toBeGreaterThan(0);
 });
 
+const runtimeImageSurfaces = (image: string) => [
+  { file: "Dockerfile", text: `FROM ${image}` },
+  {
+    file: ".github/workflows/ci.yml",
+    text: `jobs: {test: {container: '${image}', steps: []}}`,
+  },
+  {
+    file: ".github/workflows/ci.yml",
+    text: `jobs: {test: {services: {runtime: {image: '${image}'}}, steps: []}}`,
+  },
+  {
+    file: "action.yml",
+    text: `runs: {using: docker, image: 'docker://${image}'}`,
+  },
+  { file: "compose.yaml", text: `services: {app: {image: '${image}'}}` },
+  {
+    file: "deploy/pod.yaml",
+    text: `apiVersion: v1\nkind: Pod\nspec: {containers: [{image: '${image}'}]}`,
+  },
+];
+
+test("runtime image families are classified before unresolved tag variables", () => {
+  for (const image of [
+    "rust:${RUST_VERSION}-bookworm",
+    "rust:${RUST_VERSION:-1.96.0}-bookworm",
+    "rust:${RUST_VERSION:-1.96.0@sha256:example}",
+    "docker.io/library/rust:${RUST_VERSION}-bookworm",
+    "ghcr.io/example/rust:${RUST_VERSION}",
+  ])
+    for (const { file, text } of runtimeImageSurfaces(image))
+      expect(check(file, text)).toEqual([]);
+  for (const image of [
+    "node:${NODE_VERSION}-bookworm",
+    "python:${PYTHON_VERSION}-slim",
+    "oven/bun:${BUN_VERSION}",
+    "${BASE_IMAGE}",
+    "${RUNTIME}:26.0.0",
+    "oven/${RUNTIME}:1.4.3",
+  ])
+    for (const { file, text } of runtimeImageSurfaces(image))
+      expect(
+        check(file, text).some(({ rule }) => rule === "runtime-docker"),
+      ).toBe(true);
+  expect(
+    check(
+      "Dockerfile",
+      "ARG NODE_VERSION=26.11.1\nFROM node:${NODE_VERSION}-bookworm",
+    ),
+  ).toEqual([]);
+});
+
 test("runtime image variants preserve stable pins across every image consumer", () => {
   const families = [
     {
@@ -311,21 +362,12 @@ test("runtime image variants preserve stable pins across every image consumer", 
       variants: ["", "-alpine", "-slim", "-debian"],
     },
   ];
-  const surfaces = (image: string) => [
-    { file: "Dockerfile", text: `FROM ${image}` },
-    {
-      file: ".github/workflows/ci.yml",
-      text: `jobs: {test: {container: '${image}', steps: []}}`,
-    },
-    { file: "compose.yaml", text: `services: {app: {image: '${image}'}}` },
-    {
-      file: "deploy/pod.yaml",
-      text: `apiVersion: v1\nkind: Pod\nspec: {containers: [{image: '${image}'}]}`,
-    },
-  ];
+
   for (const { image, version, variants } of families)
     for (const variant of variants) {
-      for (const { file, text } of surfaces(`${image}:${version}${variant}`))
+      for (const { file, text } of runtimeImageSurfaces(
+        `${image}:${version}${variant}`,
+      ))
         expect(check(file, text, {}, "3.13")).toEqual([]);
       for (const channel of [
         "rc",
@@ -337,7 +379,7 @@ test("runtime image variants preserve stable pins across every image consumer", 
         "dev",
         "unknown",
       ])
-        for (const { file, text } of surfaces(
+        for (const { file, text } of runtimeImageSurfaces(
           `${image}:${version}-${channel}${variant}`,
         ))
           expect(
@@ -349,7 +391,7 @@ test("runtime image variants preserve stable pins across every image consumer", 
 });
 
 test("Compose and Kubernetes declarations share semantic image validation", () => {
-  const digest = `node:26.0.0@sha256:${"b".repeat(64)}`;
+  const digest = `node:25.0.0@sha256:${"b".repeat(64)}`;
   for (const file of [
     "compose.yaml",
     "docker-compose.yml",
@@ -585,32 +627,90 @@ test("Cargo MSRV is a stable support floor with tracked workspace inheritance", 
   expect(reads).toBe(0);
 });
 
-test("runtime image digests cannot override approved tags on any image surface", () => {
-  for (const [image, rule] of [
-    ["node:26.0.0", "runtime-docker"],
-    [`python:${policy.python}`, "runtime-docker"],
-    [`oven/bun:${policy.bun}`, "bun-pins"],
-  ] as const) {
-    const digest = `${image}@sha256:${"b".repeat(64)}`;
-    for (const [file, text] of [
-      ["Dockerfile", `FROM ${digest}`],
-      [".github/workflows/ci.yml", `jobs:\n  test:\n    container: ${digest}`],
-      [
-        ".github/workflows/ci.yml",
-        `jobs:\n  test:\n    services:\n      db: {image: '${digest}'}`,
-      ],
-      ["action.yml", `runs: {using: docker, image: 'docker://${digest}'}`],
-    ] as const)
+test("runtime image digests require exact approved tags on every image surface", () => {
+  const sha256 = `sha256:${"b".repeat(64)}`;
+  const trackedNode = { ".node-version": "26.11.1\n" };
+  for (const { image, version, wrongVersion, variants, rule } of [
+    {
+      image: "node",
+      version: "26.11.1",
+      wrongVersion: "25.11.1",
+      variants: ["", "-alpine", "-alpine3.24", "-slim", "-bookworm-slim"],
+      rule: "runtime-docker",
+    },
+    {
+      image: "python",
+      version: "3.13.7",
+      wrongVersion: "3.12.9",
+      variants: ["", "-alpine", "-slim", "-bookworm-slim"],
+      rule: "runtime-docker",
+    },
+    {
+      image: "oven/bun",
+      version: policy.bun,
+      wrongVersion: "1.4.0",
+      variants: ["", "-alpine", "-slim", "-debian"],
+      rule: "bun-pins",
+    },
+  ]) {
+    for (const variant of variants)
+      for (const { file, text } of runtimeImageSurfaces(
+        `${image}:${version}${variant}@${sha256}`,
+      ))
+        expect(check(file, text, trackedNode, "3.13")).toEqual([]);
+    for (const reference of [
+      `${image}:${wrongVersion}@${sha256}`,
+      `${image}@${sha256}`,
+      `${image}:${version}@sha256:${"b".repeat(63)}`,
+      `${image}:${version}@sha512:${"b".repeat(64)}`,
+    ])
+      for (const { file, text } of runtimeImageSurfaces(reference))
+        expect(
+          check(file, text, trackedNode, "3.13").some(
+            (entry) => entry.rule === rule,
+          ),
+        ).toBe(true);
+  }
+  for (const floating of ["node:26", "node:26.x", "node:26.11", "python:3.13"])
+    for (const { file, text } of runtimeImageSurfaces(`${floating}@${sha256}`))
       expect(
-        check(file, text).some(
-          (entry) => entry.rule === rule && entry.message.includes("digest"),
+        check(file, text, trackedNode, "3.13").some(
+          (entry) => entry.rule === "runtime-docker",
         ),
       ).toBe(true);
-    expect(check("Dockerfile", `FROM ${image}`)).toEqual([]);
+  for (const { file, text } of runtimeImageSurfaces(`postgres:17@${sha256}`))
+    expect(check(file, text)).toEqual([]);
+});
+
+test("Node image digest tags share the tracked root selector when present", () => {
+  const image = `node:26.11.1-alpine@sha256:${"b".repeat(64)}`;
+  for (const { file, text } of runtimeImageSurfaces(image)) {
+    expect(check(file, text, { ".node-version": "26.11.1\n" })).toEqual([]);
+    for (const selected of ["26.11.2", "26.x", "not-a-version"])
+      expect(check(file, text, { ".node-version": selected })).toMatchObject([
+        { rule: "runtime-docker" },
+      ]);
+    expect(
+      checkRuntimeFile({
+        file,
+        text,
+        policy,
+        trackedFiles: new Set(),
+        readFile: () => {
+          throw new Error("An untracked selector must not be read");
+        },
+      }),
+    ).toEqual([]);
+    expect(
+      checkRuntimeFile({
+        file,
+        text,
+        policy,
+        trackedFiles: new Set([".node-version"]),
+        readFile: () => undefined,
+      }),
+    ).toMatchObject([{ rule: "runtime-docker" }]);
   }
-  expect(
-    check("Dockerfile", `FROM postgres:17@sha256:${"b".repeat(64)}`),
-  ).toEqual([]);
 });
 
 test("workflow and composite local actions share checkout source provenance", () => {

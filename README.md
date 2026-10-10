@@ -54,6 +54,12 @@ open ranges, other majors, prereleases and floating aliases fail.
 Release and publish workflows use exact patch version-file selectors for
 reproducible builds; this repository pins `.node-version` to `26.10.0`.
 The series policy accepts that patch without weakening release validation.
+Runtime images may retain a full SHA256 digest alongside an exact stable patch
+tag: Node must be inside its policy series and match tracked root `.node-version`
+when present; Python must be a patch in its policy series; Bun must equal its
+policy version. Supported image variants remain allowed. Static image families
+outside Node, Python, and Bun are outside this runtime check; unresolved image
+names still fail.
 GitHub JavaScript action host runtimes (`runs.using`) are platform-managed
 and do not select the project toolchain Node version.
 
