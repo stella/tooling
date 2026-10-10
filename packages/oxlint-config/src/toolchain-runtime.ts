@@ -3,7 +3,11 @@ import { parse as parseToml } from "smol-toml";
 import { isAlias, isMap, isScalar, isSeq, parseDocument } from "yaml";
 
 import { canonicalDockerRuntime } from "./toolchain-images";
-import { githubAutomationFileKind, isMiseConfigPath } from "./toolchain-inputs";
+import {
+  githubAutomationFileKind,
+  isMiseConfigPath,
+  isDockerDefinitionPath,
+} from "./toolchain-inputs";
 
 export const runtimeRules = [
   "bun-pins",
@@ -361,7 +365,7 @@ export const checkRuntimeFile = ({
         });
     });
   }
-  if (name.startsWith("Dockerfile") || name === "Containerfile") {
+  if (isDockerDefinitionPath(file)) {
     const variables = new Map<string, string>();
     const escape = /^\s*#\s*escape\s*=\s*([\\`])\s*$/m.exec(text)?.[1] ?? "\\";
     const continuation = new RegExp(`${escape === "`" ? "`" : "\\\\"}\\s*$`);

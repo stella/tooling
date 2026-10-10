@@ -291,7 +291,7 @@ export const checkPackageFiles = ({
         : undefined;
       if (selectedLayout !== undefined && typeof command === "string") {
         const directCompiler =
-          /^bun\s+check(?:\s|$)|^(?:(?:bunx|npx|bun run|bun x)\s+(?:--[\w-]+\s+)*)?(?:tsc|tsgo)(?:\s|$)|^node\s+\S*\/bin\/(?:tsc|tsgo)(?:\.js)?(?:\s|$)/;
+          /^bun\s+check(?:\s|$)|^(?:(?:bunx|npx|bun run|bun x)\s+(?:--[\w-]+\s+)*)?(?:\S*\/)?(?:tsc|tsgo)(?:\.js)?(?:\s|$)|^node\s+\S*\/bin\/(?:tsc|tsgo)(?:\.js)?(?:\s|$)/;
         const normalizedExpected = selectedLayout.typecheckCommand
           .replace(/\s+/g, " ")
           .trim();

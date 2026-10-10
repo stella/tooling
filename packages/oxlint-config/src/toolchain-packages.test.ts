@@ -345,6 +345,37 @@ describe("TypeScript install layouts", () => {
       }),
     ).toEqual([]);
   });
+  test("split layout rejects direct compiler paths in each shell segment", () => {
+    const dependencies = {
+      "@typescript/native": "npm:typescript@7.0.2",
+      typescript: "6.0.3",
+    };
+    const expected = "node ./node_modules/@typescript/native/bin/tsc --noEmit";
+    for (const executable of [
+      "./node_modules/.bin/tsc",
+      "node_modules/.bin/tsc",
+      "../node_modules/.bin/tsc",
+      "./node_modules/typescript/bin/tsc",
+      "./node_modules/typescript/bin/tsc.js",
+      "./node_modules/.bin/tsgo",
+    ]) {
+      for (const typecheck of [
+        `${executable} --noEmit`,
+        `bun run prepare && ${executable} --noEmit`,
+        `${expected} && ${executable} --noEmit`,
+        `${executable} --noEmit || ${expected}`,
+      ]) {
+        expect(
+          manifest({ dependencies, scripts: { typecheck } }),
+        ).toMatchObject([
+          {
+            rule: "typescript-layout",
+            message: `typecheck compiler invocation must use ${expected}`,
+          },
+        ]);
+      }
+    }
+  });
   test("a Bun check layout validates its direct compiler command", () => {
     const selectedPolicy = {
       ...policy,

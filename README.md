@@ -63,6 +63,9 @@ layout command. Delegated wrappers and workspace runners are checked by the
 consumer typecheck parity contract rather than inferred from manifests.
 
 Listed shared actions require their approved SHA and matching `# vX` comment.
+CI also checks the shared release policy's runtime selector action set against
+`toolchain.json`, deriving its immutable checkout ref from the existing
+release-policy workflow reference.
 Other remote actions and reusable workflows require a full SHA. Local actions
 are repository-owned. The checker resolves YAML aliases and TOML tool tables.
 

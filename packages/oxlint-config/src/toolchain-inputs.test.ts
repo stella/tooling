@@ -4,6 +4,9 @@ import { expect, test } from "bun:test";
 
 import {
   githubAutomationFileKind,
+  isDependabotGithubActionsPath,
+  isDockerDefinitionPath,
+  pythonDependencyManifestKind,
   isPythonDependencyManifest,
   toolchainInputKind,
 } from "./toolchain-inputs";
@@ -66,5 +69,46 @@ test("Python dependency filename classification is shared and scoped to manifest
   ]) {
     expect(isPythonDependencyManifest(file)).toBe(false);
     expect(toolchainInputKind(file)).toBeUndefined();
+  }
+});
+
+test("Pipenv lockfiles provide ecosystem presence without dependency graph reads", () => {
+  expect(pythonDependencyManifestKind("python/Pipfile")).toBe("pipfile");
+  expect(toolchainInputKind("python/Pipfile")).toBe("config");
+  expect(pythonDependencyManifestKind("python/Pipfile.lock")).toBe(
+    "pipfile-lock",
+  );
+  expect(toolchainInputKind("python/Pipfile.lock")).toBe("presence");
+});
+
+test("runtime metadata coverage includes nested actions while Dependabot uses documented roots", () => {
+  for (const file of [
+    "action.yml",
+    "action.yaml",
+    ".github/workflows/ci.yml",
+  ]) {
+    expect(isDependabotGithubActionsPath(file)).toBe(true);
+    expect(toolchainInputKind(file)).toBe("config");
+  }
+  for (const file of ["nested/action.yml", "nested/action.yaml"]) {
+    expect(githubAutomationFileKind(file)).toBe("action");
+    expect(isDependabotGithubActionsPath(file)).toBe(false);
+    expect(toolchainInputKind(file)).toBe("config");
+  }
+});
+
+test("all Docker definition suffixes remain in the shared reader and runtime class", () => {
+  for (const name of [
+    "Dockerfile",
+    "Dockerfile.production",
+    "Containerfile",
+    "Containerfile.production",
+  ]) {
+    expect(isDockerDefinitionPath(`image/${name}`)).toBe(true);
+    expect(toolchainInputKind(`image/${name}`)).toBe("config");
+    for (const prefix of ["vendor", "node_modules"]) {
+      expect(isDockerDefinitionPath(`${prefix}/${name}`)).toBe(false);
+      expect(toolchainInputKind(`${prefix}/${name}`)).toBeUndefined();
+    }
   }
 });

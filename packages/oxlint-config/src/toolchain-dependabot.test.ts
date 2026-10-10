@@ -317,13 +317,8 @@ describe("Dependabot policy", () => {
     expect([...exercised].sort()).toEqual([...dependabotRules].sort());
   });
 
-  test("infers GitHub Actions from root and nested action metadata", () => {
-    for (const file of [
-      "action.yml",
-      "action.yaml",
-      "actions/composite/action.yml",
-      "nested/action.yaml",
-    ]) {
+  test("infers GitHub Actions from root action metadata", () => {
+    for (const file of ["action.yml", "action.yaml"]) {
       const files = {
         [file]: "name: Example\nruns:\n  using: composite\n  steps: []",
       };
@@ -334,6 +329,53 @@ describe("Dependabot policy", () => {
       expect(
         check(config([]), files).some(({ message }) =>
           message.includes("github-actions"),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  test("nested action metadata alone does not require an unsupported Dependabot update root", () => {
+    for (const file of ["actions/composite/action.yml", "nested/action.yaml"]) {
+      const files = {
+        [file]: "name: Example\nruns:\n  using: composite\n  steps: []",
+      };
+      expect(checkDependabot({ files, policy })).toEqual([]);
+      expect(generateDependabotConfig({ files, policy })).not.toContain(
+        "github-actions",
+      );
+    }
+  });
+
+  test("Pipenv manifest and lock roots require pip entries even alongside uv markers", () => {
+    for (const name of ["Pipfile", "Pipfile.lock"]) {
+      const files = { [`python/${name}`]: "", "python/uv.lock": "" };
+      const good = config([update("pip", "/python"), update("uv", "/python")]);
+      expect(check(good, files)).toEqual([]);
+      expect(
+        check(config([update("uv", "/python")]), files).some(({ message }) =>
+          message.includes("add a pip update entry covering /python"),
+        ),
+      ).toBe(true);
+      expect(check(generateDependabotConfig({ files, policy }), files)).toEqual(
+        [],
+      );
+    }
+  });
+
+  test("Docker and Containerfile suffix variants derive the same update root", () => {
+    for (const name of [
+      "Dockerfile",
+      "Dockerfile.production",
+      "Containerfile",
+      "Containerfile.production",
+    ]) {
+      const files = { [`image/${name}`]: "FROM node:24.15.0" };
+      expect(check(generateDependabotConfig({ files, policy }), files)).toEqual(
+        [],
+      );
+      expect(
+        check(config([]), files).some(({ message }) =>
+          message.includes("add a docker update entry covering /image"),
         ),
       ).toBe(true);
     }

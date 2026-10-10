@@ -713,3 +713,21 @@ test("self-repository actions and workflows use their running commit without a r
       ).some(({ rule }) => rule === "action-pins"),
     ).toBe(true);
 });
+
+test("every shared Docker definition suffix enforces base image pins", () => {
+  for (const name of [
+    "Dockerfile",
+    "Dockerfile.production",
+    "Containerfile",
+    "Containerfile.production",
+  ]) {
+    const file = `images/${name}`;
+    expect(toolchainInputKind(file)).toBe("config");
+    expect(check(file, `FROM node:${policy.node}`)).toEqual([]);
+    expect(
+      check(file, "FROM node:latest").some(
+        ({ rule }) => rule === "runtime-docker",
+      ),
+    ).toBe(true);
+  }
+});

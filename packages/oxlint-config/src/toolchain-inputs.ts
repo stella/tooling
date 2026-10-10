@@ -21,20 +21,46 @@ export const githubAutomationFileKind = (file: string) => {
   return undefined;
 };
 
-/** Project manifests and requirements-prefixed text files declare Python dependencies. */
+/** Dependabot updates workflows and repository-root action metadata. */
+export const isDependabotGithubActionsPath = (file: string) => {
+  const kind = githubAutomationFileKind(file);
+  return kind === "workflow" || (kind === "action" && !file.includes("/"));
+};
+
+/** Use one filename discriminator for reader selection and Python ecosystem decisions. */
+export const pythonDependencyManifestKind = (file: string) => {
+  if (excludedInputPath(file)) return undefined;
+  const name = file.split("/").at(-1);
+  if (name === "pyproject.toml") return "project";
+  if (name === "Pipfile") return "pipfile";
+  if (name === "Pipfile.lock") return "pipfile-lock";
+  if (name !== undefined && /^requirements[^/]*\.txt$/.test(name))
+    return "requirements";
+  return undefined;
+};
+
 export const isPythonDependencyManifest = (file: string) =>
+  pythonDependencyManifestKind(file) !== undefined;
+
+/** Docker and Containerfile suffix variants share runtime and update policy coverage. */
+export const isDockerDefinitionPath = (file: string) =>
   !excludedInputPath(file) &&
-  /(?:^|\/)(?:pyproject\.toml|requirements[^/]*\.txt)$/.test(file);
+  /(?:^|\/)(?:Dockerfile|Containerfile)[^/]*$/.test(file);
 
 /** Lockfiles establish ecosystem presence without reading their dependency graphs. */
 export const toolchainInputKind = (file: string) => {
   if (excludedInputPath(file)) return undefined;
-  if (/(?:^|\/)(?:bun\.lock|uv\.lock)$/.test(file)) return "presence";
+  if (
+    pythonDependencyManifestKind(file) === "pipfile-lock" ||
+    /(?:^|\/)(?:bun\.lock|uv\.lock)$/.test(file)
+  )
+    return "presence";
   if (
     githubAutomationFileKind(file) !== undefined ||
     isMiseConfigPath(file) ||
     isPythonDependencyManifest(file) ||
-    /(?:^|\/)(?:package\.json|stll-toolchain\.json|\.bun-version|\.node-version|\.nvmrc|\.python-version|rust-toolchain(?:\.toml)?|\.tool-versions|\.?mise\.toml|uv\.toml|\.uv\.toml|\.github\/dependabot\.ya?ml|Dockerfile[^/]*|Containerfile|Cargo\.toml)$/.test(
+    isDockerDefinitionPath(file) ||
+    /(?:^|\/)(?:package\.json|stll-toolchain\.json|\.bun-version|\.node-version|\.nvmrc|\.python-version|rust-toolchain(?:\.toml)?|\.tool-versions|\.?mise\.toml|uv\.toml|\.uv\.toml|\.github\/dependabot\.ya?ml|Cargo\.toml)$/.test(
       file,
     )
   )

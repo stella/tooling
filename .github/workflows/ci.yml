@@ -105,6 +105,21 @@ jobs:
       - name: Pack dry run
         run: bun run pack:dry-run
 
+      - name: Read shared release policy ref
+        id: shared-policy
+        run: bun scripts/check-release-selector-contract.ts ref >> "$GITHUB_OUTPUT"
+
+      - name: Check out shared release policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: stella/.github
+          ref: ${{ steps.shared-policy.outputs.ref }}
+          path: .shared-policy
+          persist-credentials: false
+
+      - name: Check shared runtime selector contract
+        run: bun scripts/check-release-selector-contract.ts check .shared-policy/.github/actions/release-policy/check.ts
+
   rust-lints:
     runs-on: ubuntu-latest
     steps:

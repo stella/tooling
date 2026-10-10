@@ -5,7 +5,9 @@ import { isNode, LineCounter, parseDocument, stringify } from "yaml";
 
 import { ownedDockerImageAliases } from "./toolchain-images";
 import {
-  githubAutomationFileKind,
+  isDependabotGithubActionsPath,
+  isDockerDefinitionPath,
+  pythonDependencyManifestKind,
   isPythonDependencyManifest,
 } from "./toolchain-inputs";
 
@@ -132,9 +134,6 @@ type CheckDependabotOptions = {
   policy: DependabotPolicy;
 };
 
-const isDockerfile = (file: string) =>
-  /^(?:Dockerfile|Containerfile)/.test(path.posix.basename(file));
-
 const javascriptEcosystem = (
   directory: string,
   files: Record<string, string>,
@@ -158,6 +157,9 @@ const javascriptEcosystem = (
 };
 
 const pythonEcosystem = (file: string, files: Record<string, string>) => {
+  const manifestKind = pythonDependencyManifestKind(file);
+  if (manifestKind === "pipfile" || manifestKind === "pipfile-lock")
+    return "pip";
   const root = path.posix.dirname(file);
   if (
     files[path.posix.join(root, "uv.lock")] !== undefined ||
@@ -196,10 +198,9 @@ const ecosystemRoots = (files: Record<string, string>) => {
     );
   }
   for (const file of Object.keys(files)) {
-    if (githubAutomationFileKind(file) !== undefined)
-      requireRoot("github-actions", "/");
+    if (isDependabotGithubActionsPath(file)) requireRoot("github-actions", "/");
     const name = path.posix.basename(file);
-    if (isDockerfile(file)) requireRoot("docker", directoryOf(file));
+    if (isDockerDefinitionPath(file)) requireRoot("docker", directoryOf(file));
     if (
       name === "uv.lock" ||
       name === "uv.toml" ||
