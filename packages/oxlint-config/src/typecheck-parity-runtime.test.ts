@@ -916,3 +916,100 @@ test.skipIf(process.env["CI"] !== "true")(
   },
   60_000,
 );
+
+test.skipIf(process.env["CI"] !== "true")(
+  "original and temporary configs have equivalent diagnostics with omitted rootDir and outside sources",
+  async () => {
+    const repo = process.cwd();
+    const policy: unknown = JSON.parse(
+      await readFile(
+        resolve(repo, "packages/oxlint-config/toolchain.json"),
+        "utf8",
+      ),
+    );
+    const compiler = await resolveCompiler(repo, policy);
+    const project = await realpath(
+      await mkdtemp(join(tmpdir(), "parity-rootdir-equivalence-")),
+    );
+    const consumer = join(project, "app");
+    try {
+      await mkdir(consumer);
+      await writeFile(join(project, "shared.ts"), "export const shared = 1;");
+      for (const configuration of [
+        {},
+        { outDir: "./dist" },
+        { composite: true },
+      ]) {
+        for (const outside of [false, true]) {
+          await writeFile(
+            join(consumer, "tsconfig.json"),
+            JSON.stringify({
+              compilerOptions: {
+                noEmit: true,
+                types: [],
+                target: "ESNext",
+                module: "ESNext",
+                moduleResolution: "Bundler",
+                ...configuration,
+              },
+              files: outside ? ["input.ts", "../shared.ts"] : ["input.ts"],
+            }),
+          );
+          for (const seeded of [false, true]) {
+            await writeFile(
+              join(consumer, "input.ts"),
+              seeded
+                ? 'export const value: number = "wrong";'
+                : "export const value: number = 1;",
+            );
+            const original = spawnSync(
+              process.execPath,
+              [
+                compiler,
+                "--noEmit",
+                "--pretty",
+                "false",
+                "--project",
+                join(consumer, "tsconfig.json"),
+              ],
+              { cwd: consumer, encoding: "utf8", timeout: 10_000 },
+            );
+            if (original.error) throw original.error;
+            const originalOutput = original.stdout + original.stderr;
+            const compared = await compareRepository({
+              repo: consumer,
+              compiler,
+              bun: process.execPath,
+              graph: discoverConfigGroups({ repo: consumer, compiler }),
+            });
+            const expected = diagnosticSet(originalOutput, consumer);
+            const actual = diagnosticSet(compared.baseline.output, consumer);
+            if (JSON.stringify(actual) !== JSON.stringify(expected))
+              throw new Error(
+                `Configuration: ${JSON.stringify({ configuration, outside, seeded })}\nOriginal diagnostics:\n${originalOutput}\nTemporary diagnostics:\n${compared.baseline.output}`,
+              );
+            expect(actual).toEqual(expected);
+            expect(original.status).not.toBeNull();
+            expect(original.status === 0).toBe(
+              compared.baseline.rawStatus === 0,
+            );
+            if (!originalOutput.includes("TS6059"))
+              expect(
+                expected.some((diagnostic) => diagnostic.includes(":2322")),
+              ).toBe(seeded);
+            if (!outside)
+              expect(
+                expected.some((diagnostic) => diagnostic.includes(":6059")),
+              ).toBe(false);
+            expect(compared.baseline.output.includes("TS6059")).toBe(
+              originalOutput.includes("TS6059"),
+            );
+          }
+        }
+      }
+    } finally {
+      await rm(project, { recursive: true, force: true });
+    }
+  },
+  60_000,
+);
