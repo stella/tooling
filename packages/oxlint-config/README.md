@@ -127,3 +127,20 @@ rules, empty reasons, and malformed configuration fail validation. See the
 [shared toolchain reference](https://github.com/stella/tooling#shared-toolchain)
 for the schema, rule list, runtime support ranges, and generated Dependabot
 template.
+
+## Typecheck parity project selection
+
+Run `stll-typecheck-parity` from the repository root. Without flags, it checks
+the root `tsconfig.json` and recursively discovers project references in build
+mode. Repeat `--project` to check exactly the selected configs:
+
+```sh
+stll-typecheck-parity --project packages/api/tsconfig.json --project packages/web/tsconfig.json
+```
+
+Selected configs run independently using the repository-root compiler
+installation; child packages need no compiler declaration and a root tsconfig
+is unnecessary. Their original reference metadata is preserved without
+discovering or building referenced projects. Missing, unreadable, and zero-input
+selected configs fail the check. `--help` prints usage and exits successfully;
+unknown arguments fail.
