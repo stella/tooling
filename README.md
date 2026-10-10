@@ -445,5 +445,5 @@ Repeat the probe for independently checked projects as needed.
 
 Conditional parity runs when Bun or any resolved TypeScript compiler changes;
 otherwise it prints `parity skipped: toolchain unchanged since ...`. An unreadable
-reference fails parity. Nightly jobs omit `--changed-since` to run full parity.
+reference runs full parity. Nightly jobs omit `--changed-since` to run full parity.
 Node and lint-tool changes still force full CI through the shared detector.

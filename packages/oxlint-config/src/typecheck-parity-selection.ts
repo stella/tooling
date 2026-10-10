@@ -18,8 +18,7 @@ export const runSelectedTypecheckParity = async ({
 }: ParitySelectionOptions) => {
   if (since === undefined) return run();
   const result = await detect({ repo, since });
-  if (result.status === "unreadable")
-    throw new Error(`cannot compare toolchain since ${since}: ${result.error}`);
+  if (result.status === "unreadable") return run();
   if (result.tools.some((tool) => tool === "bun" || tool === "typescript"))
     return run();
   output(

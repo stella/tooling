@@ -1,12 +1,21 @@
 import { afterEach, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  rmSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseDocument } from "yaml";
 
 import { detectToolchainChanges } from "./toolchain-changed";
 import { parseChangedJson, parseChangedLock } from "./toolchain-changed-locks";
+import { parseParityArguments } from "./typecheck-parity-args";
+import { runSelectedTypecheckParity } from "./typecheck-parity-selection";
 
 test("the repository's actual HEAD resolves without executing installed tooling", async () => {
   const repo = fileURLToPath(new URL("../../../", import.meta.url));
@@ -384,4 +393,102 @@ test("supported lock generations resolve aliases and reject unknown tool resolut
       }),
     }),
   ).toThrow("Unresolved");
+});
+
+test("CI event-base wiring invokes parity for a committed compiler bump", async () => {
+  const workflow = parseDocument(
+    readFileSync(
+      new URL("../../../.github/workflows/ci.yml", import.meta.url),
+      "utf8",
+    ),
+  );
+  const baseExpression = workflow.getIn([
+    "jobs",
+    "checks",
+    "env",
+    "TOOLCHAIN_BASE",
+  ]);
+  expect(typeof baseExpression).toBe("string");
+  if (typeof baseExpression !== "string") throw new Error("missing event base");
+  for (const source of [
+    "github.event.pull_request.base.sha",
+    "github.event.merge_group.base_sha",
+    "github.event.before",
+    "unavailable-toolchain-base",
+  ])
+    expect(baseExpression).toContain(source);
+  expect(
+    workflow.getIn(["jobs", "checks", "steps", 0, "with", "fetch-depth"]),
+  ).toBe(0);
+  const steps = workflow.getIn(["jobs", "checks", "steps"]);
+  if (
+    !steps ||
+    typeof steps !== "object" ||
+    !("items" in steps) ||
+    !Array.isArray(steps.items)
+  )
+    throw new Error("missing workflow steps");
+  let parityCommand = "";
+  let detectorCommand = "";
+  for (let i = 0; i < steps.items.length; i += 1) {
+    const name = workflow.getIn(["jobs", "checks", "steps", i, "name"]);
+    const run = workflow.getIn(["jobs", "checks", "steps", i, "run"]);
+    if (typeof run !== "string") continue;
+    if (name === "Typecheck diagnostic parity") parityCommand = run;
+    if (name === "Shared toolchain check")
+      detectorCommand =
+        run
+          .split("\n")
+          .find((line) => line.includes("toolchain-changed-cli")) ?? "";
+  }
+  expect(parityCommand).not.toBe("");
+  expect(detectorCommand).toContain('--since "$TOOLCHAIN_BASE"');
+  const { repo, write, commit } = fixture();
+  write("package.json", {
+    packageManager: "bun@1.4.2",
+    devDependencies: { typescript: "7.0.2" },
+  });
+  write("bun.lock", {
+    lockfileVersion: 1,
+    workspaces: { "": { devDependencies: { typescript: "7.0.2" } } },
+    packages: { typescript: ["typescript@7.0.2"] },
+  });
+  const base = commit();
+  write("package.json", {
+    packageManager: "bun@1.4.3",
+    devDependencies: { typescript: "7.0.2" },
+  });
+  commit();
+  for (const ref of [base, "0".repeat(40), "unavailable-toolchain-base"]) {
+    // Execute the real workflow shell command; capture only the compiler command's argv.
+    const captured = execFileSync(
+      "bash",
+      ["-c", 'bun() { printf "%s\\n" "$@"; }; ' + parityCommand],
+      {
+        cwd: repo,
+        env: { ...process.env, TOOLCHAIN_BASE: ref },
+        encoding: "utf8",
+      },
+    )
+      .trim()
+      .split("\n");
+    expect(captured.slice(0, 2)).toEqual(["run", "check:typecheck-parity"]);
+    const args = parseParityArguments(captured.slice(2));
+    if (args.mode === "help")
+      throw new Error("workflow must select event-based parity");
+    expect(args.changedSince).toBe(ref);
+    let invocations = 0;
+    await runSelectedTypecheckParity({
+      repo,
+      since: args.changedSince,
+      run: async () => {
+        invocations += 1;
+        return true;
+      },
+      output: () => {
+        throw new Error("a compiler bump must not skip parity");
+      },
+    });
+    expect(invocations).toBe(1);
+  }
 });

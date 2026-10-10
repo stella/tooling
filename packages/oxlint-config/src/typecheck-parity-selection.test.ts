@@ -55,31 +55,28 @@ test("parity runs without a ref; conditional parity skips only unchanged compile
   }
 });
 
-test("unreadable ref fails parity without skipping or running compilers", async () => {
+test("unreadable ref runs full parity without skipping", async () => {
   let runs = 0;
-  await expect(
-    runSelectedTypecheckParity({
-      repo: "/repo",
-      since: "missing-ref",
-      run: async () => {
-        runs += 1;
-        return true;
-      },
-      detect: async () =>
-        ({
-          status: "unreadable",
-          changed: true,
-          tools: ["bun"],
-          error: "missing commit",
-        }) satisfies Changes,
-      output: () => {
-        throw new Error("must not report a skip");
-      },
-    }),
-  ).rejects.toThrow(
-    "cannot compare toolchain since missing-ref: missing commit",
-  );
-  expect(runs).toBe(0);
+  const passed = await runSelectedTypecheckParity({
+    repo: "/repo",
+    since: "missing-ref",
+    run: async () => {
+      runs += 1;
+      return true;
+    },
+    detect: async () =>
+      ({
+        status: "unreadable",
+        changed: true,
+        tools: ["bun"],
+        error: "missing commit",
+      }) satisfies Changes,
+    output: () => {
+      throw new Error("must not report a skip");
+    },
+  });
+  expect(passed).toBe(true);
+  expect(runs).toBe(1);
 });
 
 test("CLI grammars reject missing, repeated, or unknown selectors before running commands", () => {
