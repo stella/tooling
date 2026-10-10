@@ -13,8 +13,9 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { satisfies } from "semver";
-import { stringify } from "yaml";
+import { parseDocument, stringify } from "yaml";
 
 import {
   consumerPackageClosure,
@@ -285,7 +286,12 @@ const copyWithoutDependencies = async (source: string, destination: string) => {
   await cp(source, destination, {
     recursive: true,
     filter: async (file) => {
-      if (["node_modules", ".git"].includes(path.basename(file))) return false;
+      if (
+        ["node_modules", ".git", "pnpm-workspace.yaml"].includes(
+          path.basename(file),
+        )
+      )
+        return false;
       if ((await lstat(file)).isSymbolicLink())
         throw new Error(`consumer staging does not accept symlinks: ${file}`);
       return true;
@@ -293,12 +299,82 @@ const copyWithoutDependencies = async (source: string, destination: string) => {
   });
 };
 
+const catalogMapping = (value: unknown, field: string) => {
+  if (!consumerRecord(value)) throw new Error(`${field} must be a mapping`);
+  const entries = new Map<string, string>();
+  for (const [name, specifier] of Object.entries(value)) {
+    if (name === "" || typeof specifier !== "string" || specifier.trim() === "")
+      throw new Error(`${field} must contain nonempty package specifiers`);
+    entries.set(name, specifier);
+  }
+  return Object.fromEntries(entries);
+};
+
+const catalogState = (source: Record<string, unknown>, file: string) => {
+  const result: {
+    catalog?: Record<string, string>;
+    catalogs?: Record<string, Record<string, string>>;
+  } = {};
+  if (Object.hasOwn(source, "catalog"))
+    result.catalog = catalogMapping(source["catalog"], `${file}: catalog`);
+  if (Object.hasOwn(source, "catalogs")) {
+    if (!consumerRecord(source["catalogs"]))
+      throw new Error(`${file}: catalogs must be a mapping`);
+    const named = new Map<string, Record<string, string>>();
+    for (const [name, entries] of Object.entries(source["catalogs"])) {
+      if (name === "")
+        throw new Error(`${file}: catalog names must be nonempty`);
+      named.set(name, catalogMapping(entries, `${file}: catalogs.${name}`));
+    }
+    result.catalogs = Object.fromEntries(named);
+  }
+  return result;
+};
+
+const bunCatalogState = (manifest: Record<string, unknown>) => {
+  const sources = [manifest];
+  if (consumerRecord(manifest["workspaces"]))
+    sources.push(manifest["workspaces"]);
+  const merged: Record<string, unknown> = {};
+  for (const source of sources) {
+    const state = catalogState(source, "package.json");
+    for (const [field, value] of Object.entries(state)) {
+      if (
+        Object.hasOwn(merged, field) &&
+        !isDeepStrictEqual(merged[field], value)
+      )
+        throw new Error(`conflicting Bun ${field} definitions in package.json`);
+      merged[field] = value;
+    }
+  }
+  return catalogState(merged, "package.json");
+};
+
+const pnpmWorkspaceState = (source: string, file: string) => {
+  const document = parseDocument(source, { uniqueKeys: true });
+  if (document.errors.length !== 0)
+    throw new Error(`invalid pnpm workspace: ${file}`);
+  const workspace: unknown = document.toJS({ maxAliasCount: 100 });
+  if (!consumerRecord(workspace))
+    throw new Error(`invalid pnpm workspace: ${file}`);
+  const packages = workspace["packages"];
+  if (
+    packages !== undefined &&
+    (!Array.isArray(packages) ||
+      !packages.every((entry: unknown) => typeof entry === "string"))
+  )
+    throw new Error(`invalid pnpm workspace packages: ${file}`);
+  return { packages: packages ?? [], ...catalogState(workspace, file) };
+};
+
 type StageConsumerWorkspaceOptions = {
+  files: Record<string, string>;
   root: string;
   staging: string;
   packages: Map<string, ConsumerPackage>;
 };
 export const stageConsumerWorkspace = async ({
+  files,
   root,
   staging,
   packages,
@@ -319,10 +395,59 @@ export const stageConsumerWorkspace = async ({
       );
     directories.set(pkg.name, destination);
   }
+  const rootManifest = consumerPackRootManifest(packages);
   await writeFile(
     path.join(staging, "package.json"),
-    JSON.stringify(consumerPackRootManifest(packages)),
+    JSON.stringify(rootManifest),
   );
+  const rootSource = files["pnpm-workspace.yaml"];
+  const rootCatalogs =
+    rootSource === undefined
+      ? bunCatalogState(rootManifest)
+      : catalogState(
+          pnpmWorkspaceState(rootSource, "pnpm-workspace.yaml"),
+          "pnpm-workspace.yaml",
+        );
+  await writeFile(
+    path.join(staging, "pnpm-workspace.yaml"),
+    stringify({
+      packages: [...directories.values()].map(
+        (directory) =>
+          path.relative(staging, directory).split(path.sep).join("/") || ".",
+      ),
+      ...rootCatalogs,
+    }),
+  );
+  for (const pkg of packages.values()) {
+    if (pkg.directory === ".") continue;
+    const file = `${pkg.directory}/pnpm-workspace.yaml`;
+    const source = files[file];
+    let workspace: Record<string, unknown>;
+    if (source !== undefined) workspace = pnpmWorkspaceState(source, file);
+    else {
+      const catalogs = bunCatalogState(pkg.manifest);
+      if (Object.keys(catalogs).length === 0) continue;
+      const declaration = pkg.manifest["workspaces"];
+      const patterns = consumerRecord(declaration)
+        ? declaration["packages"]
+        : declaration;
+      if (
+        !Array.isArray(patterns) ||
+        !patterns.every((entry: unknown) => typeof entry === "string")
+      )
+        throw new Error(
+          `catalog owner requires declared workspace packages: ${pkg.directory}`,
+        );
+      workspace = { packages: patterns, ...catalogs };
+    }
+    const destination = directories.get(pkg.name);
+    if (destination === undefined)
+      throw new Error(`missing staging directory: ${pkg.name}`);
+    await writeFile(
+      path.join(destination, "pnpm-workspace.yaml"),
+      stringify(workspace),
+    );
+  }
   return directories;
 };
 
@@ -364,6 +489,7 @@ export const assertConsumerFixtureFiles = async (directory: string) => {
 };
 
 type PackOptions = {
+  files: Record<string, string>;
   root: string;
   scratch: string;
   tools: ConsumerTools;
@@ -371,6 +497,7 @@ type PackOptions = {
   workspacePackages: Map<string, ConsumerPackage>;
 };
 const packConsumerArtifacts = async ({
+  files,
   root,
   scratch,
   tools,
@@ -381,6 +508,7 @@ const packConsumerArtifacts = async ({
   const staging = path.join(scratch, "pack-workspace");
   await mkdir(staging);
   const stagedDirectories = await stageConsumerWorkspace({
+    files,
     root,
     staging,
     packages: workspacePackages,
@@ -388,10 +516,6 @@ const packConsumerArtifacts = async ({
   const packHome = path.join(scratch, "pack-home");
   await mkdir(packHome);
   await writeFile(path.join(packHome, "npmrc"), "");
-  await writeFile(
-    path.join(staging, "pnpm-workspace.yaml"),
-    `packages:\n${[...stagedDirectories.values()].map((directory) => `  - ${JSON.stringify(path.relative(staging, directory).split(path.sep).join("/"))}`).join("\n")}\n`,
-  );
   for (const [index, pkg] of [...packages.values()].entries()) {
     const packed = path.join(scratch, `packed-${index}`);
     const final = path.join(scratch, `artifact-${index}`);
@@ -721,7 +845,8 @@ export const runConsumerCompat = async ({
     await jsonFile(path.join(fixtureRoot, "consumer-compat.json")),
   );
   assertConsumerFixtureSelection({ selected, fixtures });
-  const packages = discoverConsumerPackages(await trackedManifests(root));
+  const files = await trackedManifests(root);
+  const packages = discoverConsumerPackages(files);
   const selections: {
     pkg: ConsumerPackage;
     fixture: ConsumerFixture;
@@ -770,6 +895,7 @@ export const runConsumerCompat = async ({
   try {
     const tools = await provisionConsumerTools(scratch, policy);
     const artifacts = await packConsumerArtifacts({
+      files,
       root,
       scratch,
       tools,

@@ -292,3 +292,22 @@ test("scheduled consumer jobs cannot be gated by conditions", () => {
   }
   expect(check()).toEqual([]);
 });
+
+test("scheduled consumer jobs cannot depend on another job", () => {
+  for (const needs of ["build", ["build"], [], null]) {
+    expect(
+      check({
+        ...files,
+        [workflow]: JSON.stringify({
+          on: triggers,
+          jobs: { consumer: { ...job, needs } },
+        }),
+      }),
+    ).toContainEqual(
+      expect.objectContaining({
+        message: expect.stringContaining("without if or needs"),
+      }),
+    );
+  }
+  expect(check()).toEqual([]);
+});

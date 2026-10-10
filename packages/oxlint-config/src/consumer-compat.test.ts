@@ -11,8 +11,10 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { parse, stringify } from "yaml";
 
 import policy from "../toolchain.json";
 import {
@@ -91,6 +93,7 @@ describe("consumer compatibility declarations", () => {
         ],
       ]);
       await stageConsumerWorkspace({
+        files: {},
         root: await realpath(root),
         staging,
         packages,
@@ -98,6 +101,7 @@ describe("consumer compatibility declarations", () => {
       expect((await readdir(staging)).toSorted()).toEqual([
         "package.json",
         "packages",
+        "pnpm-workspace.yaml",
       ]);
       expect(
         JSON.parse(await readFile(path.join(staging, "package.json"), "utf8")),
@@ -109,6 +113,248 @@ describe("consumer compatibility declarations", () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+  test("staging preserves default and named catalogs for real publication without copying unrelated config", async () => {
+    const require = createRequire(import.meta.url);
+    const metadata: unknown = JSON.parse(
+      await readFile(require.resolve("pnpm/package.json"), "utf8"),
+    );
+    if (
+      !metadata ||
+      typeof metadata !== "object" ||
+      !("version" in metadata) ||
+      metadata.version !== policy.consumerPnpm ||
+      !("bin" in metadata) ||
+      !metadata.bin ||
+      typeof metadata.bin !== "object" ||
+      !("pnpm" in metadata.bin) ||
+      typeof metadata.bin.pnpm !== "string"
+    )
+      throw new Error("installed pnpm must match consumer policy");
+    const executable = path.resolve(
+      path.dirname(require.resolve("pnpm/package.json")),
+      metadata.bin.pnpm,
+    );
+    for (const source of ["pnpm", "bun"] as const) {
+      const directory = await mkdtemp(
+        path.join(tmpdir(), "consumer-catalog-staging-"),
+      );
+      try {
+        const root = path.join(directory, "source");
+        const staging = path.join(directory, "stage");
+        await mkdir(staging, { recursive: true });
+        const defaultCatalog = { react: "18.3.1" };
+        const namedCatalog = { compiler: { typescript: "6.0.3" } };
+        const nestedCatalog = { react: "19.2.0" };
+        const packages = new Map([
+          [
+            "root",
+            {
+              directory: ".",
+              name: "root",
+              manifest: {
+                private: true,
+                workspaces:
+                  source === "bun"
+                    ? {
+                        packages: ["packages/*"],
+                        catalog: defaultCatalog,
+                        catalogs: namedCatalog,
+                      }
+                    : ["packages/*"],
+              },
+            },
+          ],
+          [
+            "library",
+            {
+              directory: "packages/library",
+              name: "library",
+              manifest: {
+                name: "library",
+                version: "1.0.0",
+                files: ["index.js"],
+                dependencies: {
+                  react: "catalog:",
+                  typescript: "catalog:compiler",
+                },
+              },
+            },
+          ],
+          [
+            "owner",
+            {
+              directory: "packages/owner",
+              name: "owner",
+              manifest: {
+                private: true,
+                workspaces:
+                  source === "bun"
+                    ? { packages: ["children/*"], catalog: nestedCatalog }
+                    : ["children/*"],
+              },
+            },
+          ],
+          [
+            "child",
+            {
+              directory: "packages/owner/children/child",
+              name: "child",
+              manifest: {
+                name: "child",
+                version: "1.0.0",
+                files: ["index.js"],
+                dependencies: { react: "catalog:" },
+              },
+            },
+          ],
+        ]);
+        const files: Record<string, string> =
+          source === "pnpm"
+            ? {
+                "pnpm-workspace.yaml": stringify({
+                  packages: ["packages/*"],
+                  catalog: defaultCatalog,
+                  catalogs: namedCatalog,
+                  overrides: { react: "0.0.0" },
+                }),
+                "packages/owner/pnpm-workspace.yaml": stringify({
+                  packages: ["children/*"],
+                  catalog: nestedCatalog,
+                  onlyBuiltDependencies: ["unrelated"],
+                }),
+              }
+            : {};
+        for (const pkg of packages.values()) {
+          const location = path.join(root, pkg.directory);
+          await mkdir(location, { recursive: true });
+          await writeFile(
+            path.join(location, "package.json"),
+            JSON.stringify(pkg.manifest),
+          );
+          await writeFile(path.join(location, "index.js"), "export {};\n");
+        }
+        for (const [file, text] of Object.entries(files))
+          await writeFile(path.join(root, file), text);
+        // Untracked workspace metadata is outside the captured source snapshot.
+        await writeFile(
+          path.join(root, "packages/library/pnpm-workspace.yaml"),
+          stringify({ catalog: { react: "0.0.0" } }),
+        );
+        const staged = await stageConsumerWorkspace({
+          files,
+          root: await realpath(root),
+          staging,
+          packages,
+        });
+        const rootWorkspace: unknown = parse(
+          await readFile(path.join(staging, "pnpm-workspace.yaml"), "utf8"),
+        );
+        expect(rootWorkspace).toMatchObject({
+          catalog: defaultCatalog,
+          catalogs: namedCatalog,
+        });
+        if (!rootWorkspace || typeof rootWorkspace !== "object")
+          throw new Error("missing staged workspace");
+        expect(Object.keys(rootWorkspace).sort()).toEqual([
+          "catalog",
+          "catalogs",
+          "packages",
+        ]);
+        expect(
+          parse(
+            await readFile(
+              path.join(staging, "packages/owner/pnpm-workspace.yaml"),
+              "utf8",
+            ),
+          ),
+        ).toEqual({ packages: ["children/*"], catalog: nestedCatalog });
+        for (const [name, expected] of [
+          ["library", { react: "18.3.1", typescript: "6.0.3" }],
+          ["child", { react: "19.2.0" }],
+        ] as const) {
+          const member = staged.get(name);
+          if (member === undefined) throw new Error("missing staged package");
+          const packed = path.join(directory, name);
+          await mkdir(packed);
+          execFileSync(
+            executable,
+            [
+              "--config.ignore-scripts=true",
+              "--config.manage-package-manager-versions=false",
+              "pack",
+              "--pack-destination",
+              packed,
+            ],
+            { cwd: member, stdio: "pipe" },
+          );
+          const archive = (await readdir(packed)).at(0);
+          if (archive === undefined)
+            throw new Error("pack did not produce archive");
+          const manifest: unknown = JSON.parse(
+            execFileSync(
+              "tar",
+              ["-xOf", path.join(packed, archive), "package/package.json"],
+              { encoding: "utf8" },
+            ),
+          );
+          expect(manifest).toMatchObject({ dependencies: expected });
+        }
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test("malformed catalog sources and conflicting Bun definitions fail before packing", async () => {
+    const cases = [
+      { source: "catalog: [react]", manifest: { private: true } },
+      { source: "catalog: {react: 18}", manifest: { private: true } },
+      { source: "catalogs: {compiler: []}", manifest: { private: true } },
+      {
+        source: "catalogs: {compiler: {typescript: ''}}",
+        manifest: { private: true },
+      },
+      { source: "catalog: {}\ncatalog: {}", manifest: { private: true } },
+      { source: "[invalid", manifest: { private: true } },
+      {
+        source: undefined,
+        manifest: {
+          private: true,
+          catalog: { react: "18.3.1" },
+          workspaces: { packages: [], catalog: { react: "19.2.0" } },
+        },
+      },
+    ];
+    for (const item of cases) {
+      const root = await mkdtemp(
+        path.join(tmpdir(), "consumer-invalid-catalog-"),
+      );
+      try {
+        const staging = path.join(root, "stage");
+        await mkdir(staging);
+        const files: Record<string, string> =
+          item.source === undefined
+            ? {}
+            : { "pnpm-workspace.yaml": item.source };
+        await assert.rejects(() =>
+          stageConsumerWorkspace({
+            files,
+            root,
+            staging,
+            packages: new Map([
+              [
+                "root",
+                { directory: ".", name: "root", manifest: item.manifest },
+              ],
+            ]),
+          }),
+        );
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  });
+
   test("installed tool-bin collisions fail before running fixture commands", async () => {
     const directory = await mkdtemp(
       path.join(tmpdir(), "consumer-bin-collision-"),

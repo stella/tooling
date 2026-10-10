@@ -14,8 +14,44 @@ const supportedVersions = {
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+/** Only the reviewed builder and branded target hook may introduce executable build behavior. */
+export const assertNuxtOutputOptions = (options: unknown) => {
+  const visit = (value: unknown) => {
+    if (typeof value === "function")
+      throw new Error(
+        "Unreviewed Nuxt output transform requires a supported target resolver",
+      );
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
+    if (typeof value !== "object" || value === null) return;
+    if (value instanceof RegExp) return;
+    const prototype: unknown = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null)
+      throw new Error("Unsupported Nuxt output option prototype");
+    for (const key of Reflect.ownKeys(value)) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (typeof key !== "string" || !descriptor || !("value" in descriptor))
+        throw new Error("Unsupported Nuxt output option property");
+      const entry: unknown = descriptor.value;
+      if (
+        key === "plugins" &&
+        entry !== undefined &&
+        (!Array.isArray(entry) || entry.length > 0)
+      )
+        throw new Error(
+          "Unreviewed Nuxt output plugins require a supported target resolver",
+        );
+      visit(entry);
+    }
+  };
+  visit(options);
+};
+
 /** Read actual normalized entry targets, including mkdist's separate transform. */
 export const resolvedNuxtTarget = (options: unknown): PublishTarget => {
+  assertNuxtOutputOptions(options);
   if (
     !record(options) ||
     !Array.isArray(options["entries"]) ||
@@ -96,6 +132,9 @@ export const build = (root, stub, input) => actualBuild(root, stub, {
       // unbuild 3.6.1 normalizes entries before build:before, then cleans output.
       // Append after all registered config hooks so the target helper runs first.
       context.hooks.hook('build:before', final => {
+        // The reviewed constructor owns its later hooks; user config accepts only nuxtModuleTarget.
+        // Validate executable output options before projecting away functions for the capture.
+        (${assertNuxtOutputOptions.toString()})({entries: final.options.entries, rollup: final.options.rollup});
         globalThis.__stllNuxtCapture = {
           entries: final.options.entries.map(entry => ({builder: entry.builder, esbuild: entry.esbuild})),
           rollup: {esbuild: final.options.rollup.esbuild}

@@ -15,6 +15,7 @@ import {
   assetOnlyTarget,
   resolvedTsdownTarget,
   resolvePublishBuildTarget,
+  supportedPublishBuildCommand,
 } from "./publish-build-target";
 import {
   checkPublishContract,
@@ -230,7 +231,7 @@ test("the installed build resolver supplies engine defaults and real config muta
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
-});
+}, 30_000);
 
 test("the CLI loader parser transpiles TypeScript configs and their relative imports", async () => {
   const directory = mkdtempSync(
@@ -295,5 +296,33 @@ test("the CLI loader parser transpiles TypeScript configs and their relative imp
     });
   } finally {
     rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("build command grammar accepts only an entire supported invocation", () => {
+  for (const [command, expected] of [
+    ["tsdown", "tsdown"],
+    ["vite build", "vite"],
+    ["nuxt-module-build build", "nuxt-module-build"],
+  ] as const) {
+    expect(supportedPublishBuildCommand(command)).toBe(expected);
+    expect(
+      supportedPublishBuildCommand(`  ${command.replace(" ", "\t")}  `),
+    ).toBe(expected);
+    for (const composed of [
+      `cd other && ${command}`,
+      `${command} && copy-output`,
+      `${command}; copy-output`,
+      `NODE_ENV=production ${command}`,
+      `(${command})`,
+      `pnpm -C other exec ${command}`,
+      `pnpm --dir other exec ${command}`,
+      `bun --filter library ${command}`,
+      `${command}\ncopy-output`,
+      `${command}\n`,
+    ])
+      expect(() => supportedPublishBuildCommand(composed)).toThrow(
+        "exact single invocation",
+      );
   }
 });

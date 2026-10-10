@@ -423,9 +423,15 @@ record `{"type":"types-only"}` explicitly.
 Build adapters use the installed configuration loaders and bind their behavior to
 tsdown 0.22.9, Vite 8.1.5, or @nuxt/module-builder 1.0.3 (unbuild 3.6.1 and
 mkdist 2.4.1). They record final transform targets, including separate Nuxt module
-and runtime entries. No syntax lowering records `esnext`. Unsupported overrides,
-additional compiler stages, and unrecognized late build hooks fail with a diagnostic.
-Add a reviewed resolver when adopting another build tool.
+and runtime entries. No syntax lowering records `esnext`.
+Only exact single build invocations (`tsdown`, `vite build`, or
+`nuxt-module-build build`) are supported. Shell composition, environment prefixes,
+launchers, directory changes, workspace filters, and CLI overrides fail.
+Vite accepts its version-bound default plugin pipeline and the default
+`@vitejs/plugin-vue` 6.0.8 factory; custom Vue compiler, template, script, and feature
+options are unsupported. Nuxt accepts the version-bound builder and owned target
+hook. Unapproved plugins, output transforms, and execution-order changes fail. The static guard validates the supported configuration, without parsing the
+emitted JavaScript syntax. Add a reviewed adapter when adopting another build tool.
 
 Nuxt modules can set both emitted targets without replacing the builder's entries:
 
@@ -461,7 +467,7 @@ The reusable consumer job declares its exact scope in `stll-toolchain.json`:
 ```
 
 The declared workflow must include a nonempty schedule; manual dispatch is optional.
-The reusable consumer job must be unconditional (no `if` condition), so a job condition
+The reusable consumer job must be stand-alone and unconditional (no `needs` or `if`), so a job condition
 cannot skip its scheduled execution.
 That job calls `package-consumer-compat.yml` at the approved shared policy SHA with
 `packages` as the same JSON array and `consumer-node` equal to the consumer policy

@@ -39,6 +39,45 @@ test("Nuxt module and runtime targets are resolved independently", () => {
     );
 });
 
+test("Nuxt output plugins and late transforms cannot escape target capture", () => {
+  for (const hook of [
+    "renderChunk",
+    "generateBundle",
+    "writeBundle",
+    "transform",
+  ]) {
+    expect(() =>
+      resolvedNuxtTarget({
+        entries: [{ builder: "rollup" }],
+        rollup: {
+          esbuild: { target: "es2022" },
+          plugins: [{ name: "custom-output", [hook]: () => undefined }],
+        },
+      }),
+    ).toThrow("Unreviewed Nuxt output plugins");
+    expect(() =>
+      resolvedNuxtTarget({
+        entries: [{ builder: "mkdist", [hook]: () => undefined }],
+        rollup: {},
+      }),
+    ).toThrow("Unreviewed Nuxt output transform");
+  }
+  expect(() =>
+    resolvedNuxtTarget({
+      entries: [{ builder: "rollup" }],
+      rollup: {},
+      hooks: { "rollup:options": () => undefined },
+    }),
+  ).toThrow("Unreviewed Nuxt output transform");
+  const hidden = { esbuild: { target: "es2022" } };
+  Object.defineProperty(hidden, "plugins", {
+    value: [{ name: "late-output" }],
+  });
+  expect(() =>
+    resolvedNuxtTarget({ entries: [{ builder: "rollup" }], rollup: hidden }),
+  ).toThrow("Unreviewed Nuxt output plugins");
+});
+
 test("Nuxt isolated interception stops before cleanup and output writes", () => {
   const directory = mkdtempSync(path.join(tmpdir(), "nuxt-target-"));
   const write = (file: string, value: string) => {
@@ -90,6 +129,23 @@ test("Nuxt isolated interception stops before cleanup and output writes", () => 
       readFileSync(path.join(directory, "dist/existing.txt"), "utf8"),
     ).toBe("keep existing output\n");
     expect(existsSync(path.join(directory, "built.txt"))).toBe(false);
+    const unbuildPath = path.join(
+      directory,
+      "node_modules/unbuild/dist/index.mjs",
+    );
+    const unbuildSource = readFileSync(unbuildPath, "utf8");
+    writeFileSync(
+      unbuildPath,
+      unbuildSource.replace(
+        "for(const callback of hooks['build:before']??[])",
+        "context.options.rollup.plugins=[{name:'late-output',renderChunk(){return 'changed'}}];for(const callback of hooks['build:before']??[])",
+      ),
+    );
+    expect(() => resolveNuxtPublishTarget(directory)).toThrow(
+      "Unreviewed Nuxt output plugins",
+    );
+    expect(existsSync(path.join(directory, "built.txt"))).toBe(false);
+    writeFileSync(unbuildPath, unbuildSource);
     write(
       "node_modules/@nuxt/module-builder/dist/constructor/index.mjs",
       readFileSync(

@@ -11,7 +11,6 @@ import {
   resolveManifestContract,
   type PublishTarget,
 } from "./publish-contract";
-import { compilerCommandSegments, decodeShellWord } from "./toolchain-packages";
 
 const supportedTsdownVersion = "0.22.9";
 const record = (value: unknown): value is Record<string, unknown> =>
@@ -100,6 +99,22 @@ export const assetOnlyTarget = (
   return { type: "types-only" };
 };
 
+/** Supported build commands have no shell composition or runtime relocation. */
+export const supportedPublishBuildCommand = (build: string) => {
+  const command = build.replace(/[ \t]+/g, " ").replace(/^ | $/g, "");
+  switch (command) {
+    case "tsdown":
+      return "tsdown";
+    case "vite build":
+      return "vite";
+    case "nuxt-module-build build":
+      return "nuxt-module-build";
+  }
+  throw new Error(
+    "Publish target resolver requires an exact single invocation: tsdown, vite build, or nuxt-module-build build; shell composition, launchers, filters and CLI overrides are unsupported",
+  );
+};
+
 export const resolvePublishBuildTarget = async (
   directory: string,
 ): Promise<PublishTarget> => {
@@ -116,34 +131,15 @@ export const resolvePublishBuildTarget = async (
     throw new Error(
       "A JavaScript package needs an explicitly supported build command",
     );
-  const build = manifest["scripts"]["build"];
-  const compilerSegments = compilerCommandSegments(build).filter((words) =>
-    words.some(
-      (word) =>
-        /(?:^|\/)(?:tsdown|tsup|tsc|tsgo|vite|nuxt-module-build|esbuild|rolldown|babel|swc)(?:\.[cm]?js)?$/.test(
-          decodeShellWord(word),
-        ) ||
-        /(?:typescript|@typescript\/native)\/bin\/tsc$/.test(
-          decodeShellWord(word),
-        ),
-    ),
-  );
-  const compiler = compilerSegments.at(0);
-  if (compilerSegments.length !== 1 || compiler === undefined)
-    throw new Error(
-      "Publish target resolver requires exactly one supported compiler stage",
-    );
-  const words = compiler.map(decodeShellWord);
-  if (words.length === 2 && words.at(1) === "build") {
-    if (words.at(0) === "vite")
+  const compiler = supportedPublishBuildCommand(manifest["scripts"]["build"]);
+  switch (compiler) {
+    case "vite":
       return await resolveVitePublishTarget(directory);
-    if (words.at(0) === "nuxt-module-build")
-      return await resolveNuxtPublishTarget(directory);
+    case "nuxt-module-build":
+      return resolveNuxtPublishTarget(directory);
+    case "tsdown":
+      break;
   }
-  if (words.length !== 1 || words.at(0) !== "tsdown")
-    throw new Error(
-      "Supported publish target resolver requires tsdown, vite build, or nuxt-module-build build without CLI overrides",
-    );
   const configFiles = ["ts", "mts", "cts", "js", "mjs", "cjs", "json"]
     .map((extension) => path.join(directory, `tsdown.config.${extension}`))
     .filter(existsSync);

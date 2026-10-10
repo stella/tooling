@@ -16,7 +16,7 @@ const repositoryDirectory = (value: unknown): value is string =>
   value !== "" &&
   !value.includes("\\") &&
   !value.includes("${{") &&
-  ![...value].some((character) => {
+  !value.split("").some((character) => {
     const code = character.charCodeAt(0);
     return code < 32 || code === 127;
   }) &&
@@ -137,9 +137,9 @@ export const checkConsumerChecks = ({
           throw new Error(
             `${workflow} consumer checks require a nonempty valid on.schedule`,
           );
-        if ("if" in job)
+        if ("if" in job || "needs" in job)
           throw new Error(
-            `${workflow}:${jobName} consumer checks require an unconditional reusable job without if`,
+            `${workflow}:${jobName} consumer checks require an stand-alone unconditional reusable job without if or needs`,
           );
         exercised.add(declaration);
         const approved = Object.entries(policy.actions).find(
