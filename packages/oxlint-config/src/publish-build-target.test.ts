@@ -13,6 +13,7 @@ import path from "node:path";
 
 import {
   assetOnlyTarget,
+  assertTsdownBuildExtensions,
   resolvedTsdownTarget,
   resolvePublishBuildTarget,
   supportedPublishBuildCommand,
@@ -21,6 +22,56 @@ import {
   checkPublishContract,
   resolveManifestContract,
 } from "./publish-contract";
+
+test("tsdown rejects the entire unreviewed plugin and late output hook class", () => {
+  for (const hook of [
+    "options",
+    "transform",
+    "renderChunk",
+    "generateBundle",
+    "writeBundle",
+    "buildEnd",
+    "closeBundle",
+  ])
+    for (const location of ["plugins", "inputOptions", "outputOptions"]) {
+      const plugins = [
+        { name: "custom-output", [hook]: () => "custom output" },
+      ];
+      const extension =
+        location === "plugins" ? { plugins } : { [location]: { plugins } };
+      expect(() => assertTsdownBuildExtensions(extension)).toThrow(
+        "supported target resolver",
+      );
+    }
+  for (const key of ["banner", "footer", "intro", "outro"])
+    for (const value of ["custom output", () => "custom output"])
+      expect(() =>
+        assertTsdownBuildExtensions({ outputOptions: { [key]: value } }),
+      ).toThrow("supported target resolver");
+  const hidden = { name: "hidden-output" };
+  Object.defineProperty(hidden, "renderChunk", {
+    value: () => "custom output",
+  });
+  expect(() => assertTsdownBuildExtensions({ plugins: [hidden] })).toThrow(
+    "supported target resolver",
+  );
+  expect(() =>
+    assertTsdownBuildExtensions({
+      plugins: [
+        {
+          name: "config-target",
+          tsdownConfig: () => undefined,
+          tsdownConfigResolved: () => undefined,
+        },
+      ],
+    }),
+  ).not.toThrow();
+  expect(() =>
+    assertTsdownBuildExtensions({
+      outputOptions: () => ({ banner: "custom output" }),
+    }),
+  ).toThrow("supported target resolver");
+});
 
 test("resolved targets preserve every emitted configuration and final override", () => {
   expect(
@@ -276,6 +327,10 @@ test("the CLI loader parser transpiles TypeScript configs and their relative imp
       "{ entry: ['entry.js'], dts: false, inputOptions: () => ({ transform: { target: 'node26' } }) }",
       "{ entry: ['entry.js'], dts: false, hooks: { 'build:prepare': ({ options }) => { options.target = ['node26']; } } }",
       "{ entry: ['entry.js'], dts: false, plugins: [{ name: 'change-target', options: options => ({ ...options, transform: { target: 'node26' } }) }] }",
+      "{ entry: ['entry.js'], dts: false, plugins: [{ name: 'change-output', renderChunk: () => 'custom output' }] }",
+      "{ entry: ['entry.js'], dts: false, inputOptions: { plugins: [{ name: 'change-output', generateBundle() {} }] } }",
+      "{ entry: ['entry.js'], dts: false, outputOptions: { plugins: [{ name: 'change-output', renderChunk: () => 'custom output' }] } }",
+      "{ entry: ['entry.js'], dts: false, outputOptions: () => ({ banner: 'custom output' }) }",
     ]) {
       writeFileSync(configFile, `export default ${unsupported};\n`);
       await assert.rejects(

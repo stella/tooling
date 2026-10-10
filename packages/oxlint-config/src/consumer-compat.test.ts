@@ -19,6 +19,7 @@ import { parse, stringify } from "yaml";
 import policy from "../toolchain.json";
 import {
   consumerCommandEnvironment,
+  consumerReservedToolBins,
   assertConsumerFixtureFiles,
   consumerFixtureCommands,
   verifyConsumerNodeArchive,
@@ -29,6 +30,7 @@ import {
 } from "./consumer-compat";
 import { parseConsumerCompatArguments } from "./consumer-compat-arguments";
 import {
+  consumerRecord,
   consumerPackageClosure,
   consumerStagingPaths,
   consumerPackRootManifest,
@@ -119,20 +121,15 @@ describe("consumer compatibility declarations", () => {
       await readFile(require.resolve("pnpm/package.json"), "utf8"),
     );
     if (
-      !metadata ||
-      typeof metadata !== "object" ||
-      !("version" in metadata) ||
-      metadata.version !== policy.consumerPnpm ||
-      !("bin" in metadata) ||
-      !metadata.bin ||
-      typeof metadata.bin !== "object" ||
-      !("pnpm" in metadata.bin) ||
-      typeof metadata.bin.pnpm !== "string"
+      !consumerRecord(metadata) ||
+      metadata["version"] !== policy.consumerPnpm ||
+      !consumerRecord(metadata["bin"]) ||
+      typeof metadata["bin"]["pnpm"] !== "string"
     )
       throw new Error("installed pnpm must match consumer policy");
     const executable = path.resolve(
       path.dirname(require.resolve("pnpm/package.json")),
-      metadata.bin.pnpm,
+      metadata["bin"]["pnpm"],
     );
     for (const source of ["pnpm", "bun"] as const) {
       const directory = await mkdtemp(
@@ -224,6 +221,24 @@ describe("consumer compatibility declarations", () => {
                 }),
               }
             : {};
+        const sourceRoot = packages.get("root");
+        if (sourceRoot === undefined) throw new Error("missing root fixture");
+        files["package.json"] = JSON.stringify(sourceRoot.manifest);
+        for (const pkg of packages.values()) {
+          if (pkg.directory !== ".")
+            files[`${pkg.directory}/package.json`] = JSON.stringify(
+              pkg.manifest,
+            );
+        }
+        const discovered = discoverConsumerPackages(files);
+        expect(
+          [...discovered.values()].some((pkg) => pkg.directory === "."),
+        ).toBe(false);
+        expect(
+          [...discovered.values()].some(
+            (pkg) => pkg.directory === "packages/owner",
+          ),
+        ).toBe(false);
         for (const pkg of packages.values()) {
           const location = path.join(root, pkg.directory);
           await mkdir(location, { recursive: true });
@@ -244,8 +259,13 @@ describe("consumer compatibility declarations", () => {
           files,
           root: await realpath(root),
           staging,
-          packages,
+          packages: discovered,
         });
+        expect(
+          JSON.parse(
+            await readFile(path.join(staging, "package.json"), "utf8"),
+          ),
+        ).toEqual(sourceRoot.manifest);
         const rootWorkspace: unknown = parse(
           await readFile(path.join(staging, "pnpm-workspace.yaml"), "utf8"),
         );
@@ -253,7 +273,7 @@ describe("consumer compatibility declarations", () => {
           catalog: defaultCatalog,
           catalogs: namedCatalog,
         });
-        if (!rootWorkspace || typeof rootWorkspace !== "object")
+        if (!consumerRecord(rootWorkspace))
           throw new Error("missing staged workspace");
         expect(Object.keys(rootWorkspace).sort()).toEqual([
           "catalog",
@@ -268,6 +288,9 @@ describe("consumer compatibility declarations", () => {
             ),
           ),
         ).toEqual({ packages: ["children/*"], catalog: nestedCatalog });
+        expect(
+          (await readdir(path.join(staging, "packages/owner"))).sort(),
+        ).toEqual(["children", "package.json", "pnpm-workspace.yaml"]);
         for (const [name, expected] of [
           ["library", { react: "18.3.1", typescript: "6.0.3" }],
           ["child", { react: "19.2.0" }],
@@ -364,28 +387,31 @@ describe("consumer compatibility declarations", () => {
         recursive: true,
       });
       await assertConsumerInstalledToolBins(directory);
-      await writeFile(
-        path.join(directory, "node_modules/.bin/npm"),
-        "#!/bin/sh\necho local-manager\n",
-        { mode: 0o755 },
-      );
-      let lifecycleStarted = false;
-      const lifecycle = async () => {
-        await assertConsumerInstalledToolBins(directory);
-        lifecycleStarted = true;
-        return Bun.spawnSync(["/bin/sh", "-c", "npm --version"], {
-          cwd: directory,
-          env: {
-            ...process.env,
-            PATH: path.join(directory, "node_modules/.bin"),
-          },
-        });
-      };
-      await assert.rejects(
-        lifecycle(),
-        /installed consumer binary npm conflicts/u,
-      );
-      expect(lifecycleStarted).toBe(false);
+      for (const name of consumerReservedToolBins) {
+        await writeFile(
+          path.join(directory, `node_modules/.bin/${name}`),
+          "#!/bin/sh\necho local-manager\n",
+          { mode: 0o755 },
+        );
+        let lifecycleStarted = false;
+        const lifecycle = async () => {
+          await assertConsumerInstalledToolBins(directory);
+          lifecycleStarted = true;
+          return Bun.spawnSync(["/bin/sh", "-c", `${name} --version`], {
+            cwd: directory,
+            env: {
+              ...process.env,
+              PATH: path.join(directory, "node_modules/.bin"),
+            },
+          });
+        };
+        await assert.rejects(
+          lifecycle(),
+          new RegExp(`installed consumer binary ${name} conflicts`, "u"),
+        );
+        expect(lifecycleStarted).toBe(false);
+        await rm(path.join(directory, `node_modules/.bin/${name}`));
+      }
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -507,10 +533,11 @@ describe("consumer compatibility declarations", () => {
     const corePath = paths.get(core.name);
     if (!corePath) throw new Error("missing staged core");
     expect(path.posix.join(libraryPath, "../core")).toBe(corePath);
-    expect(consumerPackRootManifest(packages)).toEqual(root.manifest);
+    expect(consumerPackRootManifest(packages, {})).toEqual(root.manifest);
     expect(
       consumerPackRootManifest(
         new Map([...packages].filter(([name]) => name !== root.name)),
+        {},
       ),
     ).toEqual({ private: true });
   });
@@ -741,11 +768,11 @@ describe("isolated consumer runtime", () => {
       await Promise.all([mkdir(nodeBin), mkdir(managerBin), mkdir(fixture)]);
       const node = path.join(nodeBin, "node");
       await writeFile(node, '#!/bin/sh\nexec /bin/sh "$@"\n', { mode: 0o755 });
-      for (const manager of ["npm", "pnpm"] as const) {
+      for (const manager of ["npm", "npx", "pnpm"] as const) {
         const version =
-          manager === "npm" ? policy.consumerNpm : policy.consumerPnpm;
+          manager === "pnpm" ? policy.consumerPnpm : policy.consumerNpm;
         await writeFile(
-          path.join(managerBin, manager),
+          path.join(managerBin, manager === "npx" ? "npx-cli.js" : manager),
           `#!/bin/sh\n[ "$1" = --version ] || exit 1\nprintf '%s\\n' '${version}'\n`,
           { mode: 0o755 },
         );
@@ -764,7 +791,7 @@ describe("isolated consumer runtime", () => {
       const script = path.join(fixture, "nested.sh");
       await writeFile(
         script,
-        "#!/bin/sh\nset -eu\nnpm --version\npnpm --version\n",
+        "#!/bin/sh\nset -eu\nnpm --version\nnpx --version\npnpm --version\n",
       );
       const env = consumerCommandEnvironment({
         tools,
@@ -774,7 +801,7 @@ describe("isolated consumer runtime", () => {
       const result = Bun.spawnSync(["/bin/sh", script], { cwd: fixture, env });
       expect(result.exitCode).toBe(0);
       expect(result.stdout.toString()).toBe(
-        `${policy.consumerNpm}\n${policy.consumerPnpm}\n`,
+        `${policy.consumerNpm}\n${policy.consumerNpm}\n${policy.consumerPnpm}\n`,
       );
       const oldOrder = `${nodeBin}${path.delimiter}${tools.bin}`;
       const regression = Bun.spawnSync(["/bin/sh", script], {
@@ -782,7 +809,7 @@ describe("isolated consumer runtime", () => {
         env: { ...env, PATH: oldOrder },
       });
       expect(regression.stdout.toString()).toBe(
-        "bundled-manager\nbundled-manager\n",
+        "bundled-manager\nbundled-manager\nbundled-manager\n",
       );
     } finally {
       await rm(directory, { recursive: true, force: true });

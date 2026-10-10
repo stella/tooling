@@ -37,6 +37,84 @@ const targets = (value: unknown): string[] => {
   );
 };
 
+/** Only hooks completed by configuration resolution may run before target capture. */
+export const assertTsdownBuildExtensions = (options: unknown) => {
+  const isRecord = (value: unknown): value is Record<string, unknown> =>
+    typeof value === "object" && value !== null && !Array.isArray(value);
+  const entries = (value: object): [string, unknown][] => {
+    const prototype: unknown = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null)
+      throw new Error(
+        "Unreviewed build option prototype requires a supported target resolver",
+      );
+    return Reflect.ownKeys(value).map((key) => {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (typeof key !== "string" || !descriptor || !("value" in descriptor))
+        throw new Error(
+          "Unreviewed build option property requires a supported target resolver",
+        );
+      return [key, descriptor.value];
+    });
+  };
+  const plugins = (value: unknown, phase: "configuration" | "output") => {
+    if (value === undefined || value === null || value === false) return;
+    if (Array.isArray(value)) {
+      for (const plugin of value) plugins(plugin, phase);
+      return;
+    }
+    if (!isRecord(value))
+      throw new Error("Dynamic plugins require a supported target resolver");
+    for (const [key, item] of entries(value)) {
+      if (item === undefined) continue;
+      if (key === "name" && typeof item === "string") continue;
+      if (
+        phase === "configuration" &&
+        ["tsdownConfig", "tsdownConfigResolved"].includes(key) &&
+        typeof item === "function"
+      )
+        continue;
+      throw new Error(
+        "Unreviewed plugin hooks require a supported target resolver",
+      );
+    }
+  };
+  const output = (value: unknown) => {
+    if (value === undefined) return;
+    if (!isRecord(value))
+      throw new Error(
+        "Dynamic output options require a supported target resolver",
+      );
+    for (const [key, item] of entries(value)) {
+      if (key === "plugins") plugins(item, "output");
+      if (
+        ["banner", "footer", "intro", "outro"].includes(key) &&
+        item !== undefined &&
+        item !== ""
+      )
+        throw new Error("Output addons require a supported target resolver");
+    }
+  };
+  if (!isRecord(options)) throw new Error("Invalid build configuration");
+  const properties = new Map(entries(options));
+  if (properties.get("hooks") !== undefined)
+    throw new Error("Build hooks require a supported target resolver");
+  plugins(properties.get("plugins"), "configuration");
+  output(properties.get("outputOptions"));
+  for (const key of ["banner", "footer"]) {
+    const addon = properties.get(key);
+    if (addon !== undefined && addon !== "")
+      throw new Error("Output addons require a supported target resolver");
+  }
+  const input = properties.get("inputOptions");
+  if (input !== undefined) {
+    if (!isRecord(input))
+      throw new Error(
+        "Dynamic tsdown inputOptions require a supported target resolver",
+      );
+    plugins(new Map(entries(input)).get("plugins"), "output");
+  }
+};
+
 /** Extract the final target after supported format and low-level overrides. */
 export const resolvedTsdownTarget = (configs: unknown): PublishTarget => {
   if (!Array.isArray(configs) || configs.length === 0)
@@ -46,6 +124,7 @@ export const resolvedTsdownTarget = (configs: unknown): PublishTarget => {
   for (const config of configs) {
     if (!record(config))
       throw new Error("Invalid resolved tsdown configuration");
+    assertTsdownBuildExtensions(config);
     if (record(config["dts"]) && config["dts"]["emitDtsOnly"] === true)
       continue;
     javascript = true;
@@ -219,17 +298,10 @@ if (typeof exported === 'function')
   throw new Error('Dynamic root tsdown configurations require a supported target resolver');
 const configs = Array.isArray(exported) ? exported : [exported];
 const resolved = [];
-const rejectOptionsHooks = plugins => {
-  if (plugins === undefined || plugins === null || plugins === false) return;
-  if (Array.isArray(plugins)) {
-    for (const plugin of plugins) rejectOptionsHooks(plugin);
-    return;
-  }
-  if (!record(plugins) || typeof plugins.then === 'function' || plugins.options !== undefined)
-    throw new Error('Dynamic plugin options hooks require a supported target resolver');
-};
+const assertTsdownBuildExtensions = ${assertTsdownBuildExtensions.toString()};
 for (const config of configs) {
   if (!record(config)) throw new Error('tsdown configurations must be objects');
+  assertTsdownBuildExtensions(config);
   if (config.cwd !== undefined || config.workspace !== undefined || config.fromVite !== undefined)
     throw new Error('Relocated or inherited build configurations require a supported target resolver');
   const output = await tool.resolveUserConfig(
@@ -238,16 +310,13 @@ for (const config of configs) {
   if (!Array.isArray(output)) throw new Error('Invalid tsdown resolved configuration');
   for (const entry of output) {
     if (!record(entry)) throw new Error('Invalid resolved tsdown configuration');
-    if (entry.hooks !== undefined)
-      throw new Error('Build hooks require a supported target resolver');
-    rejectOptionsHooks(entry.plugins);
+    assertTsdownBuildExtensions(entry);
     const input = entry.inputOptions;
     if (input !== undefined && !record(input))
       throw new Error('Dynamic tsdown inputOptions require a supported target resolver');
     const transform = record(input) ? input.transform : undefined;
     if (transform !== undefined && !record(transform))
       throw new Error('tsdown transform overrides must be an object');
-    if (record(input)) rejectOptionsHooks(input.plugins);
     const target = record(transform) && transform.target != null ? transform.target : entry.target;
     const nonemptyIdentifiers = value => typeof value === 'string' && value.trim() !== '' && !value.includes(',');
     if (target !== undefined && !nonemptyIdentifiers(target) &&

@@ -52,6 +52,8 @@ export type ConsumerCheck = {
   workflow: string;
   job: string;
   packages: string[];
+  toolingVersion: string;
+  fixturePath: string;
 };
 
 export const parseConsumerChecks = (input: unknown): ConsumerCheck[] => {
@@ -62,17 +64,29 @@ export const parseConsumerChecks = (input: unknown): ConsumerCheck[] => {
     if (
       !record(entry) ||
       Object.keys(entry).some(
-        (key) => !["workflow", "job", "packages"].includes(key),
+        (key) =>
+          ![
+            "workflow",
+            "job",
+            "packages",
+            "toolingVersion",
+            "fixturePath",
+          ].includes(key),
       ) ||
       typeof entry["workflow"] !== "string" ||
       githubAutomationFileKind(entry["workflow"]) !== "workflow" ||
       !/^\.github\/workflows\/[^/]+\.ya?ml$/.test(entry["workflow"]) ||
       typeof entry["job"] !== "string" ||
       !/^[A-Za-z_][A-Za-z0-9_-]*$/.test(entry["job"]) ||
-      !packageDirectories(entry["packages"])
+      !packageDirectories(entry["packages"]) ||
+      typeof entry["toolingVersion"] !== "string" ||
+      !/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(
+        entry["toolingVersion"],
+      ) ||
+      !repositoryDirectory(entry["fixturePath"])
     )
       throw new Error(
-        "consumerChecks requires canonical workflow, job and unique package directories",
+        "consumerChecks requires canonical workflow, job, unique package directories, exact toolingVersion and repository-relative fixturePath",
       );
     const target = `${entry["workflow"]}:${entry["job"]}`;
     if (targets.has(target))
@@ -82,6 +96,8 @@ export const parseConsumerChecks = (input: unknown): ConsumerCheck[] => {
       workflow: entry["workflow"],
       job: entry["job"],
       packages: entry["packages"],
+      toolingVersion: entry["toolingVersion"],
+      fixturePath: entry["fixturePath"],
     };
   });
 };
@@ -137,9 +153,9 @@ export const checkConsumerChecks = ({
           throw new Error(
             `${workflow} consumer checks require a nonempty valid on.schedule`,
           );
-        if ("if" in job || "needs" in job)
+        if ("if" in job || "needs" in job || "strategy" in job)
           throw new Error(
-            `${workflow}:${jobName} consumer checks require an stand-alone unconditional reusable job without if or needs`,
+            `${workflow}:${jobName} consumer checks require a stand-alone unconditional reusable job without if or needs or strategy`,
           );
         exercised.add(declaration);
         const approved = Object.entries(policy.actions).find(
@@ -165,8 +181,13 @@ export const checkConsumerChecks = ({
           const normalized = key.toLowerCase();
           if (
             names.has(normalized) ||
-            ((normalized === "packages" || normalized === "consumer-node") &&
-              normalized !== key)
+            ![
+              "packages",
+              "consumer-node",
+              "tooling-version",
+              "fixture-path",
+            ].includes(normalized) ||
+            normalized !== key
           )
             throw new Error(
               `${workflow}:${jobName} requires unique canonical consumer input names`,
@@ -176,6 +197,22 @@ export const checkConsumerChecks = ({
         if (inputs["consumer-node"] !== policy.consumerNode)
           throw new Error(
             `${workflow}:${jobName} consumer-node must be ${policy.consumerNode}`,
+          );
+        if (inputs["tooling-version"] !== declaration.toolingVersion)
+          throw new Error(
+            `${workflow}:${jobName} tooling-version must match consumerChecks.toolingVersion`,
+          );
+        if (inputs["fixture-path"] !== declaration.fixturePath)
+          throw new Error(
+            `${workflow}:${jobName} fixture-path must match consumerChecks.fixturePath`,
+          );
+        const fixtureManifest = path.posix.join(
+          declaration.fixturePath,
+          "consumer-compat.json",
+        );
+        if (files[fixtureManifest] === undefined)
+          throw new Error(
+            `consumerChecks fixture configuration must be tracked: ${fixtureManifest}`,
           );
         const rawPackages = inputs["packages"];
         if (typeof rawPackages !== "string")

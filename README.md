@@ -460,18 +460,22 @@ The reusable consumer job declares its exact scope in `stll-toolchain.json`:
     {
       "workflow": ".github/workflows/consumer-compat.yml",
       "job": "consumer",
-      "packages": ["packages/library"]
+      "packages": ["packages/library"],
+      "toolingVersion": "0.12.0",
+      "fixturePath": "tests/consumer"
     }
   ]
 }
 ```
 
 The declared workflow must include a nonempty schedule; manual dispatch is optional.
-The reusable consumer job must be stand-alone and unconditional (no `needs` or `if`), so a job condition
+The reusable consumer job must be stand-alone and unconditional (no `needs`, `if`, or `strategy`), so a job condition
 cannot skip its scheduled execution.
 That job calls `package-consumer-compat.yml` at the approved shared policy SHA with
 `packages` as the same JSON array and `consumer-node` equal to the consumer policy
-pin. Every named package must be tracked, published, and support that Node version.
+pin. Required `tooling-version` and `fixture-path` inputs equal the declared exact
+`toolingVersion` and repository-relative `fixturePath`; its `consumer-compat.json` must
+be tracked. Every named package must be tracked, published, and support that Node version.
 Unknown jobs, stale entries, undeclared consumer calls, and inconsistent inputs fail.
 This declaration applies to consumer checks; `engineFloors` retains its separate
 minimum-supported-major contract.

@@ -12,6 +12,8 @@ const declaration = {
   workflow,
   job: "consumer",
   packages: ["packages/library"],
+  toolingVersion: "0.12.0",
+  fixturePath: "tests/consumer",
 };
 const policy = {
   consumerNode: "22.21.1",
@@ -23,13 +25,19 @@ const job = {
   with: {
     packages: JSON.stringify(declaration.packages),
     "consumer-node": policy.consumerNode,
+    "tooling-version": declaration.toolingVersion,
+    "fixture-path": declaration.fixturePath,
   },
 };
 const manifest = JSON.stringify({
   name: "@example/library",
   engines: { node: ">=20.10.0" },
 });
+const fixtureConfig = {
+  "tests/consumer/consumer-compat.json": JSON.stringify({ packages: [] }),
+};
 const files = {
+  ...fixtureConfig,
   "package.json": JSON.stringify({ private: true, workspaces: ["packages/*"] }),
   [workflow]: JSON.stringify({ on: triggers, jobs: { consumer: job } }),
   "packages/library/package.json": manifest,
@@ -61,6 +69,7 @@ test("consumer declarations select only the runner's discovered workspace member
     checkConsumerChecks({
       declarations: [{ ...declaration, packages: [nested] }],
       files: {
+        ...fixtureConfig,
         "package.json": files["package.json"],
         "packages/owner/package.json": JSON.stringify({
           private: true,
@@ -87,6 +96,8 @@ test("consumer declarations are closed, canonical and unique", () => {
   expect(parseConsumerChecks([declaration])).toEqual([declaration]);
   for (const mutation of [
     { ...declaration, extra: true },
+    { ...declaration, toolingVersion: "latest" },
+    { ...declaration, fixturePath: "../outside" },
     { ...declaration, workflow: "tools/consumer.yml" },
     { ...declaration, job: "${{ inputs.job }}" },
     { ...declaration, packages: [] },
@@ -100,6 +111,7 @@ test("consumer declarations are closed, canonical and unique", () => {
       "packages/library/",
       "${{ inputs.package }}",
     ].map((directory) => ({
+      ...declaration,
       workflow: declaration.workflow,
       job: declaration.job,
       packages: [directory],
@@ -234,6 +246,7 @@ test("every declared package must be a tracked published manifest supporting con
     checkConsumerChecks({
       declarations: [root],
       files: {
+        ...fixtureConfig,
         [workflow]: JSON.stringify({
           on: triggers,
           jobs: {
@@ -248,7 +261,7 @@ test("every declared package must be a tracked published manifest supporting con
 });
 
 test("semantic aliases and merges cannot conceal consumer input conflicts", () => {
-  const text = `on:\n  schedule:\n    - cron: "13 2 * * *"\n  workflow_dispatch: {}\ntemplate: &job\n  uses: ${job.uses}\n  with: &inputs\n    packages: '${job.with.packages}'\n    consumer-node: ${policy.consumerNode}\njobs:\n  consumer:\n    <<: *job\n`;
+  const text = `on:\n  schedule:\n    - cron: "13 2 * * *"\n  workflow_dispatch: {}\ntemplate: &job\n  uses: ${job.uses}\n  with: &inputs\n    packages: '${job.with.packages}'\n    consumer-node: ${policy.consumerNode}\n    tooling-version: ${declaration.toolingVersion}\n    fixture-path: ${declaration.fixturePath}\njobs:\n  consumer:\n    <<: *job\n`;
   expect(check({ ...files, [workflow]: text })).toEqual([]);
   expect(
     check({
@@ -309,5 +322,43 @@ test("scheduled consumer jobs cannot depend on another job", () => {
       }),
     );
   }
+  expect(check()).toEqual([]);
+});
+
+test("consumer callers require every declared static input and reject matrix gating", () => {
+  for (const field of ["tooling-version", "fixture-path"] as const) {
+    const missing: Record<string, unknown> = { ...job.with };
+    delete missing[field];
+    for (const inputs of [
+      missing,
+      { ...job.with, [field]: "${{ inputs.value }}" },
+      { ...job.with, [field.toUpperCase()]: job.with[field] },
+    ])
+      expect(
+        check({
+          ...files,
+          [workflow]: JSON.stringify({
+            on: triggers,
+            jobs: { consumer: { ...job, with: inputs } },
+          }),
+        }),
+      ).not.toEqual([]);
+  }
+  expect(
+    check({
+      ...files,
+      [workflow]: JSON.stringify({
+        on: triggers,
+        jobs: {
+          consumer: {
+            ...job,
+            strategy: {
+              matrix: { value: ["one"], exclude: [{ value: "one" }] },
+            },
+          },
+        },
+      }),
+    }),
+  ).not.toEqual([]);
   expect(check()).toEqual([]);
 });

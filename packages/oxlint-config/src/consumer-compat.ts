@@ -28,6 +28,7 @@ import {
   consumerDependencyConfigFiles,
   consumerRecord,
   consumerRelativePath,
+  discoverConsumerManifests,
   discoverConsumerPackages,
   oldestPublishedConsumerVersion,
   parseConsumerFixtures,
@@ -131,6 +132,7 @@ export const writeConsumerToolWrappers = async ({
   const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
   for (const [name, cli] of [
     ["npm", npm],
+    ["npx", path.join(path.dirname(npm), "npx-cli.js")],
     ["pnpm", pnpm],
   ]) {
     if (!name || !cli) throw new Error("missing package manager binding");
@@ -395,7 +397,7 @@ export const stageConsumerWorkspace = async ({
       );
     directories.set(pkg.name, destination);
   }
-  const rootManifest = consumerPackRootManifest(packages);
+  const rootManifest = consumerPackRootManifest(packages, files);
   await writeFile(
     path.join(staging, "package.json"),
     JSON.stringify(rootManifest),
@@ -418,16 +420,16 @@ export const stageConsumerWorkspace = async ({
       ...rootCatalogs,
     }),
   );
-  for (const pkg of packages.values()) {
-    if (pkg.directory === ".") continue;
-    const file = `${pkg.directory}/pnpm-workspace.yaml`;
+  for (const [directory, manifest] of discoverConsumerManifests(files)) {
+    if (directory === ".") continue;
+    const file = `${directory}/pnpm-workspace.yaml`;
     const source = files[file];
     let workspace: Record<string, unknown>;
     if (source !== undefined) workspace = pnpmWorkspaceState(source, file);
     else {
-      const catalogs = bunCatalogState(pkg.manifest);
+      const catalogs = bunCatalogState(manifest);
       if (Object.keys(catalogs).length === 0) continue;
-      const declaration = pkg.manifest["workspaces"];
+      const declaration = manifest["workspaces"];
       const patterns = consumerRecord(declaration)
         ? declaration["packages"]
         : declaration;
@@ -436,13 +438,16 @@ export const stageConsumerWorkspace = async ({
         !patterns.every((entry: unknown) => typeof entry === "string")
       )
         throw new Error(
-          `catalog owner requires declared workspace packages: ${pkg.directory}`,
+          `catalog owner requires declared workspace packages: ${directory}`,
         );
       workspace = { packages: patterns, ...catalogs };
     }
-    const destination = directories.get(pkg.name);
-    if (destination === undefined)
-      throw new Error(`missing staging directory: ${pkg.name}`);
+    const destination = path.join(staging, directory);
+    await mkdir(destination, { recursive: true });
+    await writeFile(
+      path.join(destination, "package.json"),
+      JSON.stringify(manifest),
+    );
     await writeFile(
       path.join(destination, "pnpm-workspace.yaml"),
       stringify(workspace),
@@ -451,8 +456,10 @@ export const stageConsumerWorkspace = async ({
   return directories;
 };
 
+export const consumerReservedToolBins = ["node", "npm", "npx", "pnpm"] as const;
+
 export const assertConsumerInstalledToolBins = async (directory: string) => {
-  for (const name of ["node", "npm", "pnpm"]) {
+  for (const name of consumerReservedToolBins) {
     const file = path.join(directory, "node_modules/.bin", name);
     try {
       await lstat(file);

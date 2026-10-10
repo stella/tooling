@@ -131,33 +131,30 @@ export const assertReviewedVueOptions = ({
   plugin,
   reviewed,
 }: ReviewedVueOptions) => {
-  const fail = () => {
-    throw new Error(
-      "Custom Vue plugin options require a supported target resolver",
-    );
-  };
+  const fail = () =>
+    new Error("Custom Vue plugin options require a supported target resolver");
   if (
     !record(plugin) ||
     !record(reviewed) ||
     !record(plugin["api"]) ||
     !record(reviewed["api"])
   )
-    return fail();
+    throw fail();
   const api = plugin["api"];
   const defaults = reviewed["api"];
   const options = api["options"];
   const defaultOptions = defaults["options"];
-  if (!record(options) || !record(defaultOptions)) return fail();
+  if (!record(options) || !record(defaultOptions)) throw fail();
   if (
     Object.getPrototypeOf(options) !== Object.prototype &&
     Object.getPrototypeOf(options) !== null
   )
-    return fail();
+    throw fail();
   if (
     metadataSource(api["include"]) !== metadataSource(defaults["include"]) ||
     api["exclude"] !== undefined
   )
-    return fail();
+    throw fail();
   const lifecycleFields = new Set([
     "isProduction",
     "sourceMap",
@@ -166,32 +163,62 @@ export const assertReviewedVueOptions = ({
   ]);
   for (const [key, value] of ownEntries(options)) {
     if (key === "root") {
-      if (typeof value !== "string") return fail();
+      if (typeof value !== "string") throw fail();
       continue;
     }
     if (lifecycleFields.has(key)) {
-      if (typeof value !== "boolean") return fail();
+      if (typeof value !== "boolean") throw fail();
       continue;
     }
     if (key === "compiler") {
-      if (value !== null && value !== undefined) return fail();
+      if (value !== null && value !== undefined) throw fail();
       continue;
     }
     if (
       !Object.hasOwn(defaultOptions, key) ||
       metadataSource(value) !== metadataSource(defaultOptions[key])
     )
-      return fail();
+      throw fail();
   }
   for (const [key] of ownEntries(defaultOptions)) {
-    if (!Object.hasOwn(options, key) && key !== "compiler") return fail();
+    if (!Object.hasOwn(options, key) && key !== "compiler") throw fail();
   }
 };
 const vitePluginMetadata = new Set([
   "enforce",
   "_options",
   "perEnvironmentStartEndDuringDev",
+  "perEnvironmentWatchChangeDuringDev",
 ]);
+const nativeCallbackFields = new Map([
+  ["builtin:vite-resolve", "resolveSubpathImports"],
+  ["builtin:vite-dynamic-import-vars", "resolver"],
+  ["builtin:vite-reporter", "logInfo"],
+]);
+const nativeOptionsSource = (name: string, value: unknown) => {
+  if (!record(value)) return metadataSource(value);
+  if (
+    Object.getPrototypeOf(value) !== Object.prototype &&
+    Object.getPrototypeOf(value) !== null
+  )
+    throw new Error("Unsupported Vite native options");
+  return JSON.stringify(
+    ownEntries(value)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, item]) => {
+        if (
+          key === nativeCallbackFields.get(name) &&
+          typeof item === "function"
+        )
+          return [
+            key,
+            "reviewed-callback",
+            Function.prototype.toString.call(item),
+          ];
+        return [key, "metadata", metadataSource(item)];
+      }),
+  );
+};
 const pluginSources = (plugin: object) => {
   const entries = pluginEntries(plugin);
   for (const key of [...vitePluginMetadata, "apply"])
@@ -199,11 +226,18 @@ const pluginSources = (plugin: object) => {
   const sources = new Map<string, string>();
   for (const [key, value] of entries) {
     if (key === "name" || key === "api") continue;
+    if (key === "_options") {
+      const name = entries.get("name");
+      if (typeof name !== "string") throw new Error("Invalid Vite plugin name");
+      sources.set(key, `native:${nativeOptionsSource(name, value)}`);
+      continue;
+    }
     if (
       vitePluginMetadata.has(key) ||
       (key === "apply" && typeof value !== "function")
     )
       sources.set(key, `metadata:${metadataSource(value)}`);
+    else if (value === undefined) sources.set(key, "absent-hook");
     else sources.set(key, `hook:${hookSource(value)}`);
   }
   return sources;
@@ -297,6 +331,48 @@ export const resolvedViteTarget = (config: unknown): PublishTarget => {
   return { type: "javascript", targets: [...emitted].sort() };
 };
 
+/** Only static build settings needed by the installed tool's canonical profile cross this boundary. */
+export const reviewedViteBuild = (build: unknown) => {
+  if (!record(build)) throw new Error("Invalid Vite build configuration");
+  const properties = new Map(ownEntries(build));
+  const result: Record<string, unknown> = {};
+  for (const key of [
+    "target",
+    "sourcemap",
+    "minify",
+    "ssr",
+    "cssCodeSplit",
+    "assetsInlineLimit",
+    "assetsDir",
+    "reportCompressedSize",
+    "chunkSizeWarningLimit",
+    "modulePreload",
+  ]) {
+    const value = properties.get(key);
+    metadataSource(value);
+    result[key] = value;
+  }
+  const library = properties.get("lib");
+  if (record(library)) {
+    if (
+      Object.getPrototypeOf(library) !== Object.prototype &&
+      Object.getPrototypeOf(library) !== null
+    )
+      throw new Error("Unsupported Vite library configuration");
+    const libraryProperties = new Map(ownEntries(library));
+    const fields: Record<string, unknown> = {};
+    for (const key of ["entry", "formats", "name"]) {
+      const value = libraryProperties.get(key);
+      metadataSource(value);
+      fields[key] = value;
+    }
+    result["lib"] = fields;
+  } else if (library === undefined || library === false)
+    result["lib"] = library;
+  else throw new Error("Unsupported Vite library configuration");
+  return result;
+};
+
 export const resolveVitePublishTarget = async (
   directory: string,
 ): Promise<PublishTarget> => {
@@ -348,27 +424,10 @@ export const resolveVitePublishTarget = async (
     false,
     patchConfig,
   );
-  const canonical: unknown = await tool["resolveConfig"](
-    { root: canonicalDirectory, configFile: false },
-    "build",
-    "production",
-    "production",
-    false,
-    patchConfig,
-  );
-  if (
-    !record(config) ||
-    !record(config["build"]) ||
-    !record(canonical) ||
-    !record(canonical["build"]) ||
-    hookSource(config["build"]["createEnvironment"]) !==
-      hookSource(canonical["build"]["createEnvironment"])
-  )
-    throw new Error(
-      "Custom Vite createEnvironment requires a supported target resolver",
-    );
-  const reviewedPlugins = plugins(canonical);
+  if (!record(config) || !record(config["build"]))
+    throw new Error("Invalid Vite build configuration");
   const resolvedPlugins = plugins(config);
+  const canonicalVuePlugins: unknown[] = [];
   if (
     resolvedPlugins.some(
       (plugin) => record(plugin) && plugin["name"] === "vite:vue",
@@ -392,8 +451,32 @@ export const resolveVitePublishTarget = async (
       if (record(resolved) && resolved["name"] === "vite:vue")
         assertReviewedVueOptions({ plugin: resolved, reviewed: plugin });
     }
-    reviewedPlugins.push(plugin);
+    canonicalVuePlugins.push(plugin);
   }
+  const canonicalBuild = reviewedViteBuild(config["build"]);
+  const canonical: unknown = await tool["resolveConfig"](
+    {
+      root: canonicalDirectory,
+      configFile: false,
+      plugins: canonicalVuePlugins,
+      build: canonicalBuild,
+    },
+    "build",
+    "production",
+    "production",
+    false,
+    patchConfig,
+  );
+  if (
+    !record(canonical) ||
+    !record(canonical["build"]) ||
+    hookSource(config["build"]["createEnvironment"]) !==
+      hookSource(canonical["build"]["createEnvironment"])
+  )
+    throw new Error(
+      "Custom Vite createEnvironment requires a supported target resolver",
+    );
+  const reviewedPlugins = plugins(canonical);
   assertReviewedVitePlugins({
     resolved: resolvedPlugins,
     reviewed: reviewedPlugins,

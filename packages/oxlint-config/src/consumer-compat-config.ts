@@ -148,7 +148,15 @@ export const consumerStagingPaths = (
 
 export const consumerPackRootManifest = (
   packages: Map<string, ConsumerPackage>,
+  files: Record<string, string>,
 ) => {
+  const source = files["package.json"];
+  if (source !== undefined) {
+    const manifest: unknown = JSON.parse(source);
+    if (!consumerRecord(manifest))
+      throw new Error("root package manifest must be an object");
+    return manifest;
+  }
   const root = [...packages.values()].find((pkg) => pkg.directory === ".");
   return root?.manifest ?? { private: true };
 };

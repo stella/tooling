@@ -52,10 +52,12 @@ test("consumer check declarations remain mandatory despite runtime and action op
     workflow,
     job: "consumer",
     packages: ["packages/library"],
+    toolingVersion: "0.12.0",
+    fixturePath: "tests/consumer",
   };
   const approved = policy.actions[consumerCheckWorkflow];
   const uses = `${consumerCheckWorkflow}@${approved?.sha ?? "1234567890abcdef1234567890abcdef12345678"}`;
-  const invocation = `on:\n  schedule:\n    - cron: "0 3 * * *"\njobs:\n  consumer:\n    uses: ${uses} # ${approved?.version ?? "v1"}\n    with:\n      consumer-node: '${policy.consumerNode}'\n      packages: '["packages/library"]'\n`;
+  const invocation = `on:\n  schedule:\n    - cron: "0 3 * * *"\njobs:\n  consumer:\n    uses: ${uses} # ${approved?.version ?? "v1"}\n    with:\n      consumer-node: '${policy.consumerNode}'\n      packages: '["packages/library"]'\n      tooling-version: '0.12.0'\n      fixture-path: tests/consumer\n`;
   const configuration = {
     consumerChecks: [declaration],
     optOuts: [
@@ -68,6 +70,7 @@ test("consumer check declarations remain mandatory despite runtime and action op
     ],
   };
   const files = {
+    "tests/consumer/consumer-compat.json": JSON.stringify({ packages: [] }),
     "package.json": JSON.stringify({
       private: true,
       workspaces: ["packages/*"],

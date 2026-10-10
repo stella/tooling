@@ -4,7 +4,73 @@ import {
   assertReviewedVitePlugins,
   assertReviewedVueOptions,
   resolvedViteTarget,
+  reviewedViteBuild,
 } from "./publish-build-target-vite";
+
+test("Vite native callbacks are version-profile-bound at their exact option paths", () => {
+  const callback = () => undefined;
+  for (const [name, field] of [
+    ["builtin:vite-resolve", "resolveSubpathImports"],
+    ["builtin:vite-dynamic-import-vars", "resolver"],
+    ["builtin:vite-reporter", "logInfo"],
+  ] as const) {
+    const reviewed = [{ name, _options: { [field]: callback } }];
+    expect(() =>
+      assertReviewedVitePlugins({ reviewed, resolved: reviewed }),
+    ).not.toThrow();
+    expect(() =>
+      assertReviewedVitePlugins({
+        reviewed,
+        resolved: [{ name, _options: { [field]: () => "custom output" } }],
+      }),
+    ).toThrow("Unreviewed Vite hook");
+    expect(() =>
+      assertReviewedVitePlugins({
+        reviewed,
+        resolved: [
+          {
+            name,
+            _options: { [field]: callback, nested: { transform: callback } },
+          },
+        ],
+      }),
+    ).toThrow("Unsupported Vite hook metadata");
+  }
+  expect(() =>
+    assertReviewedVitePlugins({
+      reviewed: [
+        { name: "builtin:vite-json", _options: { resolver: callback } },
+      ],
+      resolved: [],
+    }),
+  ).toThrow("Unsupported Vite hook metadata");
+});
+
+test("Vite canonical library profile copies only static build settings", () => {
+  const profile = reviewedViteBuild({
+    target: "node20.19",
+    lib: { entry: "entry.ts", formats: ["es"], name: "Library" },
+    plugins: [() => "custom plugin"],
+    rolldownOptions: { plugins: [() => "custom output"] },
+  });
+  expect(profile["target"]).toBe("node20.19");
+  expect(profile["lib"]).toEqual({
+    entry: "entry.ts",
+    formats: ["es"],
+    name: "Library",
+  });
+  expect(Object.hasOwn(profile, "plugins")).toBe(false);
+  expect(Object.hasOwn(profile, "rolldownOptions")).toBe(false);
+  for (const build of [
+    { target: () => "node26" },
+    { lib: { entry: () => "entry.ts" } },
+    { modulePreload: { resolveDependencies: () => [] } },
+  ])
+    expect(() => reviewedViteBuild(build)).toThrow(
+      "Unsupported Vite hook metadata",
+    );
+  expect(reviewedViteBuild({})["lib"]).toBeUndefined();
+});
 
 test("Vue default options allow lifecycle values but reject custom compiler closures", () => {
   const options = {
@@ -165,7 +231,7 @@ test("Vite plugin execution order and native compiler options match the reviewed
     expect(() =>
       assertReviewedVitePlugins({
         reviewed,
-        resolved: reviewed.map((plugin) => ({ ...plugin, ...override })),
+        resolved: reviewed.map((plugin) => Object.assign({}, plugin, override)),
       }),
     ).toThrow("Unreviewed Vite hook");
 });
