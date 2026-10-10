@@ -32,7 +32,7 @@ jobs:
 
       - name: Enforce release intent
         # The repository owner publishes this versioned shared contract.
-        uses: stella/.github/.github/actions/changeset-policy@5dafee16c28009f17d3bc088f8aecdf9ce47a6d5
+        uses: stella/.github/.github/actions/changeset-policy@608900bde4c0847e5224a0dd93a5cc4c911960d6
         with:
           release-paths: ${{ steps.release-packages.outputs.release-paths }}
           generated-paths: ${{ steps.release-packages.outputs.generated-paths }}
