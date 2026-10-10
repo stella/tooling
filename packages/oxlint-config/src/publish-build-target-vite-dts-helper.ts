@@ -5,6 +5,7 @@ import type { Plugin } from "vite";
 
 import { compilerPackages } from "./compiler-packages";
 import {
+  createDeclarationEmissionLedger,
   guardDeclarationHook,
   reviewedViteDtsOptions,
   reviewedViteDtsVersions,
@@ -100,11 +101,15 @@ export const declarationOnlyDts = ({
   )
     throw new Error("Unreviewed installed declaration plugin identity");
   const outputDirectories: string[] = [];
+  // Only the dts producer is confined here; JS emitted by other plugins is out of scope.
+  // Resolve its emitter references at both output hooks, including deferred assets.
+  const ledger = createDeclarationEmissionLedger();
   const hook = (name: (typeof hookNames)[number]) =>
     guardDeclarationHook({
       hook: plugin[name],
       hookName: name,
       outputDirectories,
+      ledger,
     });
   const configResolved = hook("configResolved");
   return {
@@ -156,7 +161,19 @@ export const declarationOnlyDts = ({
     buildStart: hook("buildStart"),
     transform: hook("transform"),
     watchChange: hook("watchChange"),
-    generateBundle: hook("generateBundle"),
-    writeBundle: hook("writeBundle"),
+    generateBundle: {
+      order: "post",
+      async handler(outputOptions, bundle, isWrite) {
+        await hook("generateBundle").call(this, outputOptions, bundle, isWrite);
+        ledger.audit();
+      },
+    },
+    writeBundle: {
+      order: "post",
+      async handler(outputOptions, bundle) {
+        await hook("writeBundle").call(this, outputOptions, bundle);
+        ledger.audit();
+      },
+    },
   };
 };

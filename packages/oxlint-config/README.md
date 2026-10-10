@@ -381,7 +381,7 @@ The resolver proves a direct helper import and call in a literal plugin array;
 raw declaration plugins, opaque plugin arrays, and additional emitters fail.
 Options are closed and static: include/exclude, entryRoot, pathsToAliases,
 compilerOptions.declarationMap=false, strictOutput=true, and declarationOnly=false. Hooks may
-emit only `.d.ts`, `.d.mts`, and their maps. Bundle and on-disk non-declaration
+emit only `.d.ts`, `.d.mts`, `.d.cts`, and their maps. Bundle and on-disk non-declaration
 bytes must remain unchanged across each declaration hook; this is checked during
 the actual build, without a comparison build.
 

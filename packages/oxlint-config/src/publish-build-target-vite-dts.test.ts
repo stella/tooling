@@ -5,6 +5,7 @@ import path from "node:path";
 
 import {
   assertDeclarationOnlyOutput,
+  createDeclarationEmissionLedger,
   guardDeclarationHook,
   reviewedViteDtsOptions,
   snapshotDeclarationBundle,
@@ -92,7 +93,13 @@ test("bundle snapshots retain original bytes despite later producer mutation", (
 });
 
 test("only declaration files and their maps can be emitted or changed", () => {
-  for (const file of ["index.d.ts", "index.d.mts", "index.d.ts.map"]) {
+  for (const file of [
+    "index.d.ts",
+    "index.d.mts",
+    "index.d.cts",
+    "index.d.ts.map",
+    "index.d.cts.map",
+  ]) {
     const after = snapshotDeclarationBundle({
       [file]: { type: "asset", fileName: file, source: "declaration" },
     });
@@ -100,13 +107,7 @@ test("only declaration files and their maps can be emitted or changed", () => {
       assertDeclarationOnlyOutput({ before: {}, after }),
     ).not.toThrow();
   }
-  for (const file of [
-    "index.js",
-    "index.mjs",
-    "index.cjs",
-    "index.css",
-    "index.d.cts",
-  ]) {
+  for (const file of ["index.js", "index.mjs", "index.cjs", "index.css"]) {
     const after = snapshotDeclarationBundle({
       [file]: { type: "asset", fileName: file, source: "code" },
     });
@@ -127,7 +128,8 @@ test("the actual wrapped hook preserves its receiver and arguments while guardin
     "index.js": { type: "chunk", fileName: "index.js", code: "original" },
   };
   function producer(this: unknown, ...args: unknown[]) {
-    expect(this).toBe(receiver);
+    expect(this).not.toBe(receiver);
+    expect(Reflect.get(Object(this), "marker")).toBe("original");
     expect(args).toEqual([{}, bundle]);
     writeFileSync(
       path.join(directory, "index.d.ts"),
@@ -158,6 +160,79 @@ test("the actual wrapped hook preserves its receiver and arguments while guardin
     expect(failure).toBeInstanceOf(Error);
     if (failure instanceof Error) expect(failure.message).toContain(file);
   }
+});
+
+test("the emission ledger rejects deferred JavaScript and foreign asset updates", () => {
+  const ledger = createDeclarationEmissionLedger();
+  const assets = new Map<string, string>();
+  const host = {
+    emitFile: (asset: unknown) => {
+      if (
+        typeof asset !== "object" ||
+        asset === null ||
+        !("fileName" in asset) ||
+        typeof asset.fileName !== "string"
+      )
+        throw new Error("Invalid fixture asset");
+      const reference = `asset-${assets.size}`;
+      assets.set(reference, asset.fileName);
+      return reference;
+    },
+    getFileName: (reference: unknown) =>
+      typeof reference === "string" ? assets.get(reference) : undefined,
+    setAssetSource: () => undefined,
+    emitChunk: () => {
+      throw new Error("Unknown API reached host");
+    },
+  };
+  const context = ledger.wrapContext(host);
+  const emit = context["emitFile"];
+  if (typeof emit !== "function") throw new Error("Missing fixture emitFile");
+  expect(() =>
+    emit({ type: "asset", fileName: "index.js", source: "deferred" }),
+  ).toThrow("Declaration plugin");
+  const reference: unknown = emit({
+    type: "asset",
+    fileName: "index.d.cts",
+    source: "declaration",
+  });
+  expect(reference).toBe("asset-0");
+  expect(() => ledger.audit()).not.toThrow();
+  const update = context["setAssetSource"];
+  if (typeof update !== "function")
+    throw new Error("Missing fixture setAssetSource");
+  expect(() => update(reference, "updated declaration")).not.toThrow();
+  expect(() => update("foreign", "modified JS")).toThrow("foreign");
+  expect(() => Reflect.get(context, "emitChunk")).toThrow("Declaration plugin");
+  assets.set("asset-0", "index.js");
+  expect(() => ledger.audit()).toThrow("Declaration plugin");
+});
+
+test("a shared emitter ledger audits deferred references in output hooks", async () => {
+  const ledger = createDeclarationEmissionLedger();
+  let resolved = "index.d.ts";
+  const host = {
+    emitFile: () => "deferred-asset",
+    getFileName: () => resolved,
+  };
+  const context = ledger.wrapContext(host);
+  const emit = context["emitFile"];
+  if (typeof emit !== "function") throw new Error("Missing fixture emitFile");
+  emit({ type: "asset", fileName: "index.d.ts" });
+  const guarded = guardDeclarationHook({
+    hook: () => undefined,
+    hookName: "generateBundle",
+    outputDirectories: [],
+    ledger,
+  });
+  await guarded.call(host, {}, {});
+  resolved = "index.mjs";
+  const failed = await guarded
+    .call(host, {}, {})
+    .catch((error: unknown) => error);
+  expect(failed).toBeInstanceOf(Error);
+  if (failed instanceof Error)
+    expect(failed.message).toContain("Declaration plugin");
 });
 
 test("wrapped bundle mutations and dynamic hook return values fail", async () => {

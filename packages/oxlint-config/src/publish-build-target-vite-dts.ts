@@ -106,14 +106,20 @@ export const reviewedViteDtsOptions = (value: unknown = {}) => {
 export type DeclarationOutputSnapshot = Readonly<Record<string, string>>;
 const hash = (value: string | Uint8Array) =>
   createHash("sha256").update(value).digest("hex");
-const declarationPath = (file: string) =>
-  /\.d\.(?:ts|mts)(?:\.map)?$/.test(file);
+export const declarationPath = (file: string) =>
+  /\.d\.(?:ts|mts|cts)(?:\.map)?$/.test(file);
 const safeOutputPath = (file: string) => {
   if (
     file === "" ||
     path.posix.isAbsolute(file) ||
     /^[A-Za-z]:/.test(file) ||
     file.includes("\\") ||
+    file
+      .split("")
+      .some(
+        (character) =>
+          character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
+      ) ||
     file.split("/").includes("..")
   )
     throw new Error("Declaration plugin emitted an unsafe output path");
@@ -191,16 +197,175 @@ export const assertDeclarationOnlyOutput = ({
   }
 };
 
+const passiveContextMethods = new Set([
+  "warn",
+  "error",
+  "info",
+  "debug",
+  "addWatchFile",
+  "getWatchFiles",
+  "parse",
+  "resolve",
+  "getModuleInfo",
+  "getModuleIds",
+  "getFileName",
+]);
+const contextData = (value: unknown): unknown => {
+  if (
+    value === null ||
+    ["string", "number", "boolean", "undefined"].includes(typeof value)
+  )
+    return value;
+  if (Array.isArray(value)) return Object.freeze(value.map(contextData));
+  const snapshot = {};
+  Object.setPrototypeOf(snapshot, null);
+  for (const [key, entry] of staticEntries(value))
+    Object.defineProperty(snapshot, key, {
+      value: contextData(entry),
+      enumerable: true,
+    });
+  return Object.freeze(snapshot);
+};
+const declarationAssetName = (value: unknown) => {
+  if (typeof value !== "string")
+    throw new Error("Declaration plugin requires an explicit asset fileName");
+  safeOutputPath(value);
+  if (!declarationPath(value))
+    throw new Error(
+      `Declaration plugin emitted non-declaration asset: ${value}`,
+    );
+  return value;
+};
+
+/** One build owns all emitter references, including assets materialized after the producer hook. */
+export const createDeclarationEmissionLedger = () => {
+  const references = new Map<
+    string,
+    { fileName: string; getFileName: () => unknown }
+  >();
+  const wrapContext = (host: unknown) => {
+    const receiver = record(host) ? host : {};
+    const hostMethod = (name: string) => {
+      const method: unknown = receiver[name];
+      if (typeof method !== "function")
+        throw new Error(`Declaration plugin host method unavailable: ${name}`);
+      return (...args: unknown[]): unknown =>
+        Reflect.apply(method, receiver, args);
+    };
+    const methods = new Map<string, (...args: unknown[]) => unknown>();
+    methods.set("emitFile", (asset: unknown) => {
+      const entries = staticEntries(asset);
+      if (!record(asset) || asset["type"] !== "asset")
+        throw new Error("Declaration plugin may only emit assets");
+      const fileName = declarationAssetName(asset["fileName"]);
+      for (const [, value] of entries)
+        if (typeof value === "function")
+          throw new Error("Declaration plugin asset metadata must be static");
+      const source = asset["source"];
+      if (
+        source !== undefined &&
+        typeof source !== "string" &&
+        !(source instanceof Uint8Array)
+      )
+        throw new Error(
+          "Declaration plugin asset source must be text or bytes",
+        );
+      const getFileName = hostMethod("getFileName");
+      const emitted: Record<string, unknown> = {};
+      for (const [key, value] of entries) {
+        const copied =
+          value instanceof Uint8Array
+            ? new Uint8Array(value)
+            : contextData(value);
+        Object.defineProperty(emitted, key, {
+          value: copied,
+          enumerable: true,
+        });
+      }
+      const reference = hostMethod("emitFile")(emitted);
+      if (typeof reference !== "string" || references.has(reference))
+        throw new Error(
+          "Declaration plugin emitted an invalid asset reference",
+        );
+      references.set(reference, {
+        fileName,
+        getFileName: () => getFileName(reference),
+      });
+      return reference;
+    });
+    methods.set("setAssetSource", (reference: unknown, source: unknown) => {
+      if (typeof reference !== "string" || !references.has(reference))
+        throw new Error(
+          "Declaration plugin cannot update a foreign asset reference",
+        );
+      if (typeof source !== "string" && !(source instanceof Uint8Array))
+        throw new Error(
+          "Declaration plugin asset source must be text or bytes",
+        );
+      return hostMethod("setAssetSource")(reference, source);
+    });
+    const surrogate: Record<string, unknown> = {};
+    Object.setPrototypeOf(surrogate, null);
+    return new Proxy(surrogate, {
+      get: (_target, key) => {
+        if (typeof key !== "string")
+          throw new Error("Declaration plugin context symbols are unsupported");
+        const method = methods.get(key);
+        if (method !== undefined) return method;
+        if (passiveContextMethods.has(key)) {
+          const forwarded = hostMethod(key);
+          methods.set(key, forwarded);
+          return forwarded;
+        }
+        const value: unknown = receiver[key];
+        if (key === "meta") return contextData(value);
+        if (
+          value === null ||
+          ["string", "number", "boolean"].includes(typeof value)
+        )
+          return value;
+        throw new Error(
+          `Declaration plugin context capability is unsupported: ${key}`,
+        );
+      },
+      set: () => {
+        throw new Error("Declaration plugin context is readonly");
+      },
+      defineProperty: () => {
+        throw new Error("Declaration plugin context is readonly");
+      },
+      setPrototypeOf: () => {
+        throw new Error("Declaration plugin context is readonly");
+      },
+    });
+  };
+  const audit = () => {
+    for (const [reference, emission] of references) {
+      const resolved = declarationAssetName(emission.getFileName());
+      if (resolved !== emission.fileName)
+        throw new Error(
+          `Declaration plugin asset reference changed filename: ${reference}`,
+        );
+    }
+  };
+  return { wrapContext, audit };
+};
+export type DeclarationEmissionLedger = ReturnType<
+  typeof createDeclarationEmissionLedger
+>;
+
 type GuardDeclarationHookOptions = {
   hook: unknown;
   hookName: string;
   outputDirectories: readonly string[];
+  ledger?: DeclarationEmissionLedger;
 };
-/** Preserve receiver, arguments and result while guarding the actual hook invocation. */
+/** Substitute a closed producer context while guarding the actual hook invocation. */
 export const guardDeclarationHook = ({
   hook,
   hookName,
   outputDirectories,
+  ledger = createDeclarationEmissionLedger(),
 }: GuardDeclarationHookOptions) => {
   if (typeof hook !== "function")
     throw new Error("Invalid reviewed declaration hook");
@@ -214,10 +379,14 @@ export const guardDeclarationHook = ({
       : undefined;
     const beforeBundle =
       bundle === undefined ? undefined : snapshotDeclarationBundle(bundle);
-    const result: unknown = await Reflect.apply(producer, this, args);
+    const result: unknown = await Reflect.apply(
+      producer,
+      ledger.wrapContext(this),
+      args,
+    );
     if (result !== undefined)
       throw new Error(
-        `Declaration hook ${hookName} returned a dynamic build change`,
+        `Declaration plugin hook ${hookName} returned a dynamic build change`,
       );
     if (beforeBundle !== undefined)
       assertDeclarationOnlyOutput({
@@ -233,6 +402,7 @@ export const guardDeclarationHook = ({
         after: snapshotDeclarationDirectory(directory),
       });
     }
+    if (["generateBundle", "writeBundle"].includes(hookName)) ledger.audit();
     return result;
   }
   return guarded;

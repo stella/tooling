@@ -86,19 +86,32 @@ export default defineConfig({ plugins: [declarationOnlyDts({ directory: import.m
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 const require = createRequire(import.meta.url);
-if (process.argv.includes('--mutate-dts')) {
+const mutate = process.argv.includes('--mutate-dts');
+const emitJavaScript = process.argv.includes('--emit-js');
+const emitDeclaration = process.argv.includes('--emit-declaration');
+if (mutate || emitJavaScript || emitDeclaration) {
   const loaded = require('vite-plugin-dts');
   const factory = loaded.default;
   loaded.default = options => {
     const plugin = factory(options);
-    const original = plugin.writeBundle;
-    plugin.writeBundle = async function (...args) {
-      await original.apply(this, args);
-      const output = path.join(import.meta.dirname, 'dist');
-      const file = readdirSync(output).find(file => /\\.(?:js|mjs|cjs)$/.test(file));
-      if (!file) throw new Error('missing JavaScript output before declaration mutation');
-      writeFileSync(path.join(output, file), 'export const changedByDeclaration = true;');
-    };
+    if (mutate) {
+      const original = plugin.writeBundle;
+      plugin.writeBundle = async function (...args) {
+        await original.apply(this, args);
+        const output = path.join(import.meta.dirname, 'dist');
+        const file = readdirSync(output).find(file => /\\.(?:js|mjs|cjs)$/.test(file));
+        if (!file) throw new Error('missing JavaScript output before declaration mutation');
+        writeFileSync(path.join(output, file), 'export const changedByDeclaration = true;');
+      };
+    } else {
+      const original = plugin.buildStart;
+      const handler = typeof original === 'function' ? original : original?.handler;
+      if (original !== undefined && typeof handler !== 'function') throw new Error('Unsupported declaration buildStart hook');
+      plugin.buildStart = async function (...args) {
+        if (handler) await handler.apply(this, args);
+        this.emitFile({ type: 'asset', fileName: emitJavaScript ? 'extra.js' : 'index-extra.d.ts', source: emitJavaScript ? 'export const extra = true;' : 'export declare const extra: boolean;' });
+      };
+    }
     return plugin;
   };
 }
@@ -108,11 +121,17 @@ const output = path.join(import.meta.dirname, 'dist');
 const files = readdirSync(output);
 if (!files.includes('index.d.ts') || !files.some(file => /\\.(?:js|mjs|cjs)$/.test(file))) throw new Error('actual build did not emit JS and declarations');
 if (!readFileSync(path.join(output, 'index.d.ts'), 'utf8').includes('profileValue')) throw new Error('missing actual generated declaration');
+if (emitDeclaration && (!files.includes('index-extra.d.ts') || !readFileSync(path.join(output, 'index-extra.d.ts'), 'utf8').includes('extra: boolean'))) throw new Error('missing extra declaration emitted through buildStart');
 `,
   );
-  for (const mode of ["normal", "mutate-dts"] as const) {
+  for (const mode of [
+    "normal",
+    "mutate-dts",
+    "emit-js",
+    "emit-declaration",
+  ] as const) {
     const args = [path.join(fixture, "run-profile.mjs")];
-    if (mode === "mutate-dts") args.push("--mutate-dts");
+    if (mode !== "normal") args.push(`--${mode}`);
     const result = spawnSync("node", args, {
       cwd: fixture,
       encoding: "utf8",
@@ -120,7 +139,10 @@ if (!readFileSync(path.join(output, 'index.d.ts'), 'utf8').includes('profileValu
       maxBuffer: 1024 * 1024,
     });
     if (result.error) throw result.error;
-    if (mode === "normal" && result.status !== 0)
+    if (
+      (mode === "normal" || mode === "emit-declaration") &&
+      result.status !== 0
+    )
       throw new Error(
         `Reviewed actual Vite/dts build failed: ${result.stderr}`,
       );
@@ -133,6 +155,16 @@ if (!readFileSync(path.join(output, 'index.d.ts'), 'utf8').includes('profileValu
     )
       throw new Error(
         `Actual declaration hook mutation was not rejected: ${result.stderr}`,
+      );
+    if (
+      mode === "emit-js" &&
+      (result.status === 0 ||
+        !/Declaration plugin|declaration-only (?:plugin|output|asset|hook|profile)/.test(
+          result.stderr,
+        ))
+    )
+      throw new Error(
+        `Actual declaration hook JavaScript asset emission was not rejected: ${result.stderr}`,
       );
   }
   process.stdout.write(
