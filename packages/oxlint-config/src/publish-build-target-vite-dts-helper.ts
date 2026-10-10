@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import type { Plugin } from "vite";
 
+import { compilerPackages } from "./compiler-packages";
 import {
   guardDeclarationHook,
   reviewedViteDtsOptions,
@@ -44,11 +45,11 @@ export const declarationOnlyDts = ({
       return undefined;
     }
   };
-  const primaryCompiler = compilerVersion("typescript");
+  const primaryCompiler = compilerVersion(compilerPackages.typescript);
   const compatibleCompiler =
     primaryCompiler === "6.0.3" ||
     (primaryCompiler?.startsWith("7.") === true &&
-      compilerVersion("@typescript/typescript6") === "6.0.3");
+      compilerVersion(compilerPackages.typescriptCompatibility) === "6.0.3");
   if (!compatibleCompiler)
     throw new Error(
       "Declaration-only adapter requires TypeScript 6.0.3 as typescript or the TypeScript 7 @typescript/typescript6 fallback in the declaration plugin's dependency scope",

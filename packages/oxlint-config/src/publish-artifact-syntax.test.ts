@@ -65,7 +65,7 @@ test("declared target mappings form a closed grammar and combine at the strictes
   for (const value of [
     "eslatest",
     "es2026",
-    "node20",
+    `node${Number(node.split(".").at(0)) + 1}`,
     "chrome130",
     "es2022,node26",
   ])
@@ -155,7 +155,10 @@ test("nested manifests and explicit extensions determine module grammar", () => 
 });
 
 test("unbounded targets still pass through native Node parsing without executing artifact code", async () => {
-  const version = execFileSync("node", ["--version"], { encoding: "utf8" })
+  const executable = execFileSync("node", ["-p", "process.execPath"], {
+    encoding: "utf8",
+  }).trim();
+  const version = execFileSync(executable, ["--version"], { encoding: "utf8" })
     .trim()
     .slice(1);
   const content = files({
@@ -166,7 +169,7 @@ test("unbounded targets still pass through native Node parsing without executing
     files: content,
     target: { type: "javascript", targets: ["esnext"] },
     node: version,
-    executable: "node",
+    executable,
   });
   content.set("package/index.mjs", "await = 1;");
   await assert.rejects(
@@ -174,7 +177,7 @@ test("unbounded targets still pass through native Node parsing without executing
       files: content,
       target,
       node: version,
-      executable: "node",
+      executable,
     }),
     /index.mjs/,
   );
