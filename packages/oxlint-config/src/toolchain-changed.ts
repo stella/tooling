@@ -446,6 +446,19 @@ const boundResolution = ({
     `Missing resolved toolchain dependency: ${file}:${dependency}`,
   );
 };
+const stableBunImageVersion = (image: string) => {
+  const match = /^oven\/bun(?::([^@]+))?(?:@[^\s]+)?$/.exec(image);
+  if (match === null) return undefined;
+  const version = match[1]?.replace(/-(?:alpine|slim|debian|distroless)$/, "");
+  if (
+    version === undefined ||
+    !/^\d+\.\d+\.\d+$/.test(version) ||
+    valid(version) !== version
+  )
+    throw new Error("Bun image selector is not an exact stable version");
+  return version;
+};
+
 const assertLiteralDockerImages = (text: string) => {
   const defaults = new Map<string, string>();
   for (const line of text.replace(/\\\r?\n/g, " ").split(/\r?\n/)) {
@@ -468,6 +481,7 @@ const assertLiteralDockerImages = (text: string) => {
     );
     if (expanded.includes("$"))
       throw new Error("Unclassifiable Docker image selector");
+    stableBunImageVersion(expanded);
   }
 };
 
@@ -617,7 +631,10 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
         /^\s*FROM\s+(?:--[^\s]+\s+)*oven\/bun:([\w.+-]+)/gim,
       )) {
         const tag = match[1];
-        if (tag) addBun(tag.replace(/-(?:alpine|slim|debian)$/, ""));
+        if (tag !== undefined) {
+          const version = stableBunImageVersion(`oven/bun:${tag}`);
+          if (version !== undefined) addBun(version);
+        }
       }
     } else if (containerDefinition(file)) {
       for (const document of parseAllDocuments(text)) {
@@ -639,6 +656,7 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
         for (const { image } of container.images) {
           if (typeof image !== "string" || image.includes("$"))
             throw new Error(`Unclassifiable container image selector: ${file}`);
+          stableBunImageVersion(image);
         }
         for (const tool of ["bun", "node", "typescript", "shared"] as const)
           tools[tool].add(`${file}:${text}`);

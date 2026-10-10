@@ -68,6 +68,48 @@ const fixture = () => {
   };
   return { repo, write, commit };
 };
+test("exact Bun image variants normalize while floating selectors always run parity", async () => {
+  for (const variant of ["alpine", "slim", "debian", "distroless"]) {
+    const { repo, write, commit } = fixture();
+    write("package.json", { packageManager: "bun@1.4.3" });
+    write("Dockerfile", `FROM oven/bun:1.4.3-${variant}\n`);
+    commit();
+    const result = await detectToolchainChanges({ repo, since: "HEAD" });
+    expect(result.status).toBe("compared");
+    expect(result.changed).toBe(false);
+    if (result.status === "compared")
+      expect(result.current.bun).toEqual(["1.4.3"]);
+  }
+  for (const tag of ["", ":latest", ":1", ":1.4", ":canary", ":1-alpine"]) {
+    for (const file of ["Dockerfile", "compose.yaml"]) {
+      const { repo, write, commit } = fixture();
+      write("package.json", { packageManager: "bun@1.4.3" });
+      const image = `oven/bun${tag}`;
+      write(
+        file,
+        file === "Dockerfile"
+          ? `FROM ${image}\n`
+          : `services:\n  runtime:\n    image: ${image}\n`,
+      );
+      commit();
+      const result = await detectToolchainChanges({ repo, since: "HEAD" });
+      expect(result.status).toBe("unreadable");
+      expect(result.changed).toBe(true);
+      let calls = 0;
+      await runSelectedTypecheckParity({
+        repo,
+        since: "HEAD",
+        detect: async () => result,
+        run: async () => {
+          calls += 1;
+          return true;
+        },
+      });
+      expect(calls).toBe(1);
+    }
+  }
+});
+
 const bunLock = (swap: boolean) => ({
   lockfileVersion: 1,
   workspaces: {
@@ -423,8 +465,8 @@ test("CI event-base wiring invokes parity for a committed compiler bump", async 
   ).toBe(0);
   const steps: unknown = workflow.getIn(["jobs", "checks", "steps"]);
   if (
-    !steps ||
     typeof steps !== "object" ||
+    steps === null ||
     !("items" in steps) ||
     !Array.isArray(steps.items)
   )
