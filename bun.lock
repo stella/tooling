@@ -20,7 +20,7 @@
     },
     "packages/oxlint-config": {
       "name": "@stll/oxlint-config",
-      "version": "0.9.1",
+      "version": "0.10.0",
       "bin": {
         "stll-toolchain-check": "./dist/toolchain-check-cli.mjs",
         "stll-typecheck-parity": "./dist/typecheck-parity-cli.mjs",
@@ -38,7 +38,7 @@
     },
     "packages/oxlint-plugin": {
       "name": "@stll/oxlint-plugin",
-      "version": "0.2.1",
+      "version": "0.2.2",
       "devDependencies": {
         "@oxlint/plugins": "1.87.0",
         "@stll/typescript-config": "workspace:*",

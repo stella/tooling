@@ -1,5 +1,12 @@
 # @stll/oxlint-plugin
 
+## 0.2.2
+
+### Patch Changes
+
+- [#62](https://github.com/stella/tooling/pull/62) [`1cf8d1e`](https://github.com/stella/tooling/commit/1cf8d1e1206fbc6d5ddbd1cd0e76824a48344f75) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Adopt oxlint and @oxlint/plugins 1.87.0, oxfmt 0.72.0, and
+  oxlint-tsgolint 7.0.2003 in the shared toolchain.
+
 ## 0.2.1
 
 ### Patch Changes
