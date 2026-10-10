@@ -41,6 +41,7 @@ const packArguments = (line: string) => {
     }
     if (
       token !== "--ignore-scripts" &&
+      !(manager === "pnpm" && token === "--config.ignore-scripts=true") &&
       token !== "--json" &&
       token !== "--silent"
     )
@@ -48,9 +49,13 @@ const packArguments = (line: string) => {
     if (args.includes(token)) throw new Error("Repeated release pack flag");
     args.push(token);
   }
-  if (!destination || !args.includes("--ignore-scripts"))
+  if (
+    !destination ||
+    (!args.includes("--ignore-scripts") &&
+      !args.includes("--config.ignore-scripts=true"))
+  )
     throw new Error(
-      "Release pack requires --ignore-scripts and --pack-destination",
+      "Release pack requires scripts disabled and --pack-destination",
     );
   return { manager, arguments: args } satisfies Pick<
     ConsumerReleasePack,

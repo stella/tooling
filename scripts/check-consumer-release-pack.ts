@@ -134,7 +134,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: npm install --global --ignore-scripts pnpm@${pinnedVersion}
-      - run: pnpm pack --ignore-scripts --pack-destination artifacts
+      - run: pnpm pack --config.ignore-scripts=true --pack-destination artifacts
 `,
   };
   for (const [file, contents] of Object.entries(files)) {

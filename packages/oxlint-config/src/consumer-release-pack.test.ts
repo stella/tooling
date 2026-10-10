@@ -69,6 +69,41 @@ test("release packing requires one exact setup and one supported pack command", 
     expect(() => resolveConsumerReleasePack(files)).toThrow();
 });
 
+test("pnpm config script suppression preserves the release flags without allowing scripts", () => {
+  const packer = resolveConsumerReleasePack(
+    fixture(
+      "npm install --global --ignore-scripts pnpm@10.0.0",
+      "pnpm pack --config.ignore-scripts=true --pack-destination artifacts",
+    ),
+  );
+  expect(
+    consumerReleasePackArguments({ packer, directory: "/tmp/artifacts" }),
+  ).toEqual([
+    "pack",
+    "--config.ignore-scripts=true",
+    "--pack-destination",
+    "/tmp/artifacts",
+  ]);
+  for (const command of [
+    "pnpm pack --pack-destination artifacts",
+    "pnpm pack --config.ignore-scripts=false --pack-destination artifacts",
+    "pnpm pack --config.ignore-scripts=latest --pack-destination artifacts",
+  ])
+    expect(() =>
+      resolveConsumerReleasePack(
+        fixture("npm install --global pnpm@10.0.0", command),
+      ),
+    ).toThrow();
+  expect(() =>
+    resolveConsumerReleasePack(
+      fixture(
+        "npm install --global npm@11.11.1",
+        "npm pack --config.ignore-scripts=true --pack-destination artifacts",
+      ),
+    ),
+  ).toThrow();
+});
+
 test("unrelated pnpm setup jobs do not constrain the release packer", () => {
   const unrelated = `.github/workflows/unrelated.yml`;
   for (const setup of [
