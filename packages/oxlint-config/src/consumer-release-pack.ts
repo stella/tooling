@@ -6,6 +6,12 @@ const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 const exactVersion = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/;
 const outputDirectory = "<consumer-release-pack-output>";
+const packerSetupExpression =
+  /^npm\s+install\s+((?:(?:--global|-g|--ignore-scripts)\s+)+)(npm|pnpm)@([^\s]+)$/;
+const defaultRunShell = (defaults: unknown) => {
+  if (!record(defaults) || !record(defaults["run"])) return undefined;
+  return defaults["run"]["shell"];
+};
 
 export type ConsumerReleasePack = {
   manager: "npm" | "pnpm";
@@ -63,6 +69,110 @@ const packArguments = (line: string) => {
   >;
 };
 
+type ReleaseShellContextOptions = {
+  step: Record<string, unknown>;
+  kind: "setup" | "pack";
+  location: string;
+  inheritedShell: unknown;
+};
+
+/** Both setup provenance and packing require unconditional shell commands. */
+const assertReleaseShellContext = ({
+  step,
+  kind,
+  location,
+  inheritedShell,
+}: ReleaseShellContextOptions) => {
+  const run = step["run"];
+  if (typeof run !== "string")
+    throw new Error(`Unsupported release ${kind} shell context: ${location}`);
+  const shell = step["shell"] === undefined ? inheritedShell : step["shell"];
+  if (shell !== undefined && shell !== "bash" && shell !== "sh")
+    throw new Error(`Unsupported release ${kind} shell context: ${location}`);
+  let quote: "single" | "double" | undefined;
+  let code = "";
+  for (let index = 0; index < run.length; index += 1) {
+    const char = run[index];
+    if (char === "\n") {
+      if (quote !== undefined)
+        throw new Error(
+          `Unsupported release ${kind} shell context: ${location}`,
+        );
+      code += "\n";
+      continue;
+    }
+    if (quote !== "single" && char === "\\") {
+      if (
+        run[index + 1] === "\n" ||
+        (run[index + 1] === "\r" && run[index + 2] === "\n")
+      )
+        throw new Error(
+          `Unsupported release ${kind} shell context: ${location}`,
+        );
+      index += 1;
+      code += " ";
+      continue;
+    }
+    if (
+      quote !== "single" &&
+      (char === "`" || (char === "$" && run[index + 1] === "("))
+    )
+      throw new Error(`Unsupported release ${kind} shell context: ${location}`);
+    if (quote === "single") {
+      if (char === "'") quote = undefined;
+      code += " ";
+      continue;
+    }
+    if (quote === "double") {
+      if (char === '"') quote = undefined;
+      code += " ";
+      continue;
+    }
+    if (char === "'") {
+      quote = "single";
+      code += " ";
+      continue;
+    }
+    if (char === '"') {
+      quote = "double";
+      code += " ";
+      continue;
+    }
+    if (char === "#" && (index === 0 || /\s/.test(run[index - 1] ?? ""))) {
+      while (index + 1 < run.length && run[index + 1] !== "\n") index += 1;
+      continue;
+    }
+    code += char;
+  }
+  if (
+    quote !== undefined ||
+    /[;&|<>]/.test(code) ||
+    code
+      .split("\n")
+      .some((line) =>
+        /^\s*(?:if|then|elif|else|fi|for|do|done|while|until|case|esac|function|select|exit|return|exec|break|continue|trap|eval|source|hash|alias|unalias)\b/.test(
+          line,
+        ),
+      ) ||
+    /(?:^|\n)\s*\.(?:\s|$)/.test(code) ||
+    /(?:^|\n)\s*[A-Za-z_]\w*\s*\(\s*\)\s*[{(]/.test(code) ||
+    (kind === "setup" && /[(){}]/.test(code))
+  )
+    throw new Error(`Unsupported release ${kind} shell context: ${location}`);
+  if (kind !== "setup") return;
+  for (const line of run.split("\n")) {
+    const command = line.trim();
+    if (command === "" || command.startsWith("#")) continue;
+    if (
+      packerSetupExpression.test(command) ||
+      /^(?:npm|pnpm)\s+pack(?:\s|$)/.test(command) ||
+      ["set -e", "set -eu", "set -euo pipefail"].includes(command)
+    )
+      continue;
+    throw new Error(`Unsupported release setup command context: ${location}`);
+  }
+};
+
 /** Resolve the repository's release packer without substituting another manager. */
 export const resolveConsumerReleasePack = (
   files: Record<string, string>,
@@ -90,6 +200,9 @@ export const resolveConsumerReleasePack = (
             ),
       );
       if (!packsRelease) continue;
+      const jobShell = defaultRunShell(job["defaults"]);
+      const inheritedShell =
+        jobShell === undefined ? defaultRunShell(source["defaults"]) : jobShell;
       const versions = new Map<string, string[]>();
       let packed: ConsumerReleasePack | undefined;
       for (const step of job["steps"]) {
@@ -119,9 +232,19 @@ export const resolveConsumerReleasePack = (
         for (const rawLine of step["run"].split("\n")) {
           const line = rawLine.trim();
           if (line.startsWith("#")) continue;
-          const setup =
-            /^npm\s+install\s+((?:(?:--global|-g|--ignore-scripts)\s+)+)(npm|pnpm)@([^\s]+)$/.exec(
-              line,
+          const setupCommand =
+            /\bnpm\s+(?:install|i)\b[^\n]*\b(?:npm|pnpm)@/.test(line);
+          if (setupCommand)
+            assertReleaseShellContext({
+              step,
+              kind: "setup",
+              location: `${file}:${jobName}`,
+              inheritedShell,
+            });
+          const setup = packerSetupExpression.exec(line);
+          if (setupCommand && setup === null)
+            throw new Error(
+              `Unsupported release packer setup command: ${file}:${jobName}`,
             );
           if (
             setup !== null &&
@@ -158,21 +281,12 @@ export const resolveConsumerReleasePack = (
             throw new Error(
               `Ambiguous release pack command: ${file}:${jobName}`,
             );
-          if (
-            (step["shell"] !== undefined &&
-              step["shell"] !== "bash" &&
-              step["shell"] !== "sh") ||
-            step["run"]
-              .split("\n")
-              .some((context) =>
-                /^\s*(?:if|elif|else|fi|for|while|until|case|esac|function)\b/.test(
-                  context,
-                ),
-              )
-          )
-            throw new Error(
-              `Unsupported release pack shell context: ${file}:${jobName}`,
-            );
+          assertReleaseShellContext({
+            step,
+            kind: "pack",
+            location: `${file}:${jobName}`,
+            inheritedShell,
+          });
           const command = packArguments(line);
           const selected = versions.get(command.manager);
           const version = selected?.at(0);

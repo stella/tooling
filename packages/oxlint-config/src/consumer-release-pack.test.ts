@@ -124,3 +124,119 @@ test("unrelated pnpm setup jobs do not constrain the release packer", () => {
     ).toThrow();
   }
 });
+
+const shellWorkflow = (commands: readonly string[]) => ({
+  [workflow]: JSON.stringify({
+    jobs: {
+      pack: {
+        "runs-on": "ubuntu-latest",
+        steps: commands.map((run) => ({ shell: "bash", run })),
+      },
+    },
+  }),
+});
+
+test("release setup must be a literal top-level command in separate and shared pack steps", () => {
+  for (const manager of ["npm", "pnpm"] as const) {
+    const version = manager === "npm" ? "11.11.1" : "12.9.1";
+    const setup = `npm install --global --ignore-scripts ${manager}@${version}`;
+    const pack = `${manager} pack --ignore-scripts --pack-destination artifacts`;
+    for (const commands of [
+      [setup, pack],
+      [`set -euo pipefail\n${setup}\n${pack}`],
+    ]) {
+      const selected = resolveConsumerReleasePack(shellWorkflow(commands));
+      expect(selected.manager).toBe(manager);
+      expect(selected.version).toBe(version);
+    }
+    for (const conditional of [
+      `if false; then\n${setup}\nfi`,
+      `false && ${setup}`,
+      `true || ${setup}`,
+      `for package in npm; do\n${setup}\ndone`,
+      `while false; do\n${setup}\ndone`,
+      `until true; do\n${setup}\ndone`,
+      `case "$MODE" in\nrelease)\n${setup}\n;;\nesac`,
+      `(\n${setup}\n)`,
+      `setup_packer() {\n${setup}\n}\nsetup_packer`,
+      `function setup_packer {\n${setup}\n}`,
+      `{\n${setup}\n} &\nwait`,
+      `${setup} &\nwait`,
+    ])
+      for (const commands of [[conditional, pack], [`${conditional}\n${pack}`]])
+        expect(() =>
+          resolveConsumerReleasePack(shellWorkflow(commands)),
+        ).toThrow();
+  }
+});
+
+test("top-level setup permits the release workflow's unconditional directory pack subshell", () => {
+  const selected = resolveConsumerReleasePack(
+    shellWorkflow([
+      "npm install --global --ignore-scripts npm@11.11.1",
+      'set -euo pipefail\n(\n  cd "packages/library"\n  npm pack --ignore-scripts --pack-destination "$GITHUB_WORKSPACE/release-artifacts"\n)',
+    ]),
+  );
+  expect(selected.manager).toBe("npm");
+  expect(selected.version).toBe("11.11.1");
+  expect(
+    consumerReleasePackArguments({
+      packer: selected,
+      directory: "/tmp/artifacts",
+    }),
+  ).toEqual([
+    "pack",
+    "--ignore-scripts",
+    "--pack-destination",
+    "/tmp/artifacts",
+  ]);
+});
+
+test("quoted command text and terminated setup steps cannot establish a release packer", () => {
+  const setup = "npm install --global --ignore-scripts npm@11.11.1";
+  const pack = "npm pack --ignore-scripts --pack-destination artifacts";
+  for (const commands of [
+    [`printf '%s\\n' '\n${setup}\n'`, pack],
+    [`exit 0\n${setup}`, pack],
+    [`exec true\n${setup}`, pack],
+    [setup, `printf '%s\\n' '\n${pack}\n'`],
+    [`printf '%s\\n' '\n${setup}\n'\n${pack}`],
+    [`exit 0\n${setup}\n${pack}`],
+    [`exec true\n${setup}\n${pack}`],
+  ])
+    expect(() => resolveConsumerReleasePack(shellWorkflow(commands))).toThrow();
+});
+
+test("inherited non-shell release setup and pack steps fail closed", () => {
+  const commands = [
+    { run: "npm install --global --ignore-scripts npm@11.11.1" },
+    { run: "npm pack --ignore-scripts --pack-destination artifacts" },
+  ];
+  for (const workflowSource of [
+    {
+      defaults: { run: { shell: "python" } },
+      jobs: { pack: { steps: commands } },
+    },
+    {
+      jobs: {
+        pack: { defaults: { run: { shell: "python" } }, steps: commands },
+      },
+    },
+  ])
+    expect(() =>
+      resolveConsumerReleasePack({
+        [workflow]: JSON.stringify(workflowSource),
+      }),
+    ).toThrow();
+});
+
+test("shell command hashing cannot replace the declared release packer", () => {
+  expect(() =>
+    resolveConsumerReleasePack(
+      shellWorkflow([
+        "npm install --global --ignore-scripts npm@11.11.1",
+        "hash -p /bin/true npm\nnpm pack --ignore-scripts --pack-destination artifacts",
+      ]),
+    ),
+  ).toThrow();
+});
