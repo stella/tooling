@@ -850,11 +850,11 @@ export const discoverConfigGroups = ({
         typeof reference.path !== "string"
       )
         throw new Error(`Invalid project reference: ${path}`);
-      const project = resolve(dirname(path), reference.path);
+      const referencedProject = resolve(dirname(path), reference.path);
       const referencePath = realpathSync(
-        statSync(project).isDirectory()
-          ? join(project, "tsconfig.json")
-          : project,
+        statSync(referencedProject).isDirectory()
+          ? join(referencedProject, "tsconfig.json")
+          : referencedProject,
       );
       referencePaths.push(referencePath);
       visit(referencePath);
