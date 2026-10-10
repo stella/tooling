@@ -550,76 +550,67 @@ test("deepest checkout owns sparse validation independently of ancestor checkout
   type NestedCheckoutOptions = {
     rootSparse: string | undefined;
     nestedSparse: string | undefined;
-    reverse: boolean;
     selector: string;
   };
   const source = ({
     rootSparse,
     nestedSparse,
-    reverse,
     selector,
   }: NestedCheckoutOptions) => {
     const checkout = (destination: string, sparse: string | undefined) =>
       `      - uses: ${action("actions/checkout")}\n        with:\n          path: ${destination}\n${sparse === undefined ? "" : `          sparse-checkout: '${sparse}'\n`}`;
-    const root =
-      checkout(".", rootSparse) + (reverse ? "          clean: false\n" : "");
+    const root = checkout(".", rootSparse);
     const nested = checkout("snapshot", nestedSparse);
-    return `on: push\njobs:\n  example:\n    steps:\n${reverse ? nested + root : root + nested}      - id: setup\n        uses: ${action("oven-sh/setup-bun")}\n        with: {bun-version-file: '${selector}'}\n`;
+    return `on: push\njobs:\n  example:\n    steps:\n${root + nested}      - id: setup\n        uses: ${action("oven-sh/setup-bun")}\n        with: {bun-version-file: '${selector}'}\n`;
   };
-  for (const reverse of [false, true]) {
-    const nestedAction =
-      source({
-        rootSparse: "src",
-        nestedSparse: undefined,
-        reverse,
-        selector: "snapshot/package.json",
-      }) + "      - uses: ./snapshot/.github/actions/example\n";
-    expect(check(nestedAction).diagnostics).toEqual([]);
-    const delegatedAction = nestedAction.replace(
-      "          path: snapshot\n",
-      "          path: snapshot\n          ref: '${{ inputs.ref }}'\n",
-    );
-    expect(check(delegatedAction).diagnostics).toMatchObject([
-      { rule: "action-pins" },
-    ]);
-    for (const sparse of ["package.json", "src", "!package.json"]) {
-      expect(
-        check(
-          source({
-            rootSparse: sparse,
-            nestedSparse: undefined,
-            reverse,
-            selector: "snapshot/package.json",
-          }),
-        ),
-      ).toEqual({ diagnostics: [], matched: [] });
-      expect(
-        check(
-          source({
-            rootSparse: undefined,
-            nestedSparse: sparse,
-            reverse,
-            selector: "package.json",
-          }),
-        ),
-      ).toEqual({ diagnostics: [], matched: [] });
-    }
-    for (const sparse of ["src", "!package.json", "*.json"])
-      expect(
-        check(
-          source({
-            rootSparse: "package.json",
-            nestedSparse: sparse,
-            reverse,
-            selector: "snapshot/package.json",
-          }),
-          [bunDecision],
-        ),
-      ).toMatchObject({ diagnostics: [{ rule: "bun-pins" }], matched: [] });
+  const nestedAction =
+    source({
+      rootSparse: "src",
+      nestedSparse: undefined,
+      selector: "snapshot/package.json",
+    }) + "      - uses: ./snapshot/.github/actions/example\n";
+  expect(check(nestedAction).diagnostics).toEqual([]);
+  const delegatedAction = nestedAction.replace(
+    "          path: snapshot\n",
+    "          path: snapshot\n          ref: '${{ inputs.ref }}'\n",
+  );
+  expect(check(delegatedAction).diagnostics).toMatchObject([
+    { rule: "action-pins" },
+  ]);
+  for (const sparse of ["package.json", "src", "!package.json"]) {
+    expect(
+      check(
+        source({
+          rootSparse: sparse,
+          nestedSparse: undefined,
+          selector: "snapshot/package.json",
+        }),
+      ),
+    ).toEqual({ diagnostics: [], matched: [] });
+    expect(
+      check(
+        source({
+          rootSparse: undefined,
+          nestedSparse: sparse,
+          selector: "package.json",
+        }),
+      ),
+    ).toEqual({ diagnostics: [], matched: [] });
   }
+  for (const sparse of ["src", "!package.json", "*.json"])
+    expect(
+      check(
+        source({
+          rootSparse: "package.json",
+          nestedSparse: sparse,
+          selector: "snapshot/package.json",
+        }),
+        [bunDecision],
+      ),
+    ).toMatchObject({ diagnostics: [{ rule: "bun-pins" }], matched: [] });
 });
 
-test("ancestor checkout cleaning invalidates earlier descendant provenance in order", () => {
+test("any later ancestor checkout invalidates earlier descendant provenance", () => {
   for (const destination of ["snapshot", "snapshot/deep"]) {
     const nested = `      - uses: ${action("actions/checkout")}\n        with: {path: ${destination}}\n`;
     const setup = `      - id: setup\n        uses: ${action("oven-sh/setup-bun")}\n        with: {bun-version-file: ${destination}/package.json}\n      - uses: ./${destination}/.github/actions/example\n`;
@@ -631,6 +622,9 @@ test("ancestor checkout cleaning invalidates earlier descendant provenance in or
       undefined,
       "true",
       "'true'",
+      "false",
+      "'false'",
+      "' FALSE '",
       "'${{ inputs.clean }}'",
       "'${{ false }}'",
     ]) {
@@ -642,8 +636,6 @@ test("ancestor checkout cleaning invalidates earlier descendant provenance in or
       ]);
     }
     expect(check(source(root(undefined) + nested)).diagnostics).toEqual([]);
-    for (const clean of ["false", "'false'", "' FALSE '"])
-      expect(check(source(nested + root(clean))).diagnostics).toEqual([]);
   }
 });
 

@@ -1419,11 +1419,6 @@ export const checkRuntimeFile = ({
       const clean = getInput(node, "clean");
       const cleanIsResolved =
         clean === undefined || (isScalar(clean) && !dynamic(clean.value));
-      const cleanIsDisabled =
-        isScalar(clean) &&
-        (clean.value === false ||
-          (typeof clean.value === "string" &&
-            clean.value.trim().toLowerCase() === "false"));
       let repo: unknown;
       if (checkoutRepository !== undefined)
         repo = isScalar(checkoutRepository) ? checkoutRepository.value : null;
@@ -1494,25 +1489,23 @@ export const checkRuntimeFile = ({
         });
       } else {
         const destination = normalizeCheckoutPath(prefix);
-        if (!cleanIsDisabled)
-          checkoutBindings = checkoutBindings.map((entry) => {
-            if (
-              entry.path === destination ||
-              (destination !== "." && !entry.path.startsWith(`${destination}/`))
-            )
-              return entry;
-            // A later ancestor clean removes the independent descendant writer.
-            return {
-              path: entry.path,
-              sparse: { mode: "all" },
-              dynamicSource: false,
-              source: "untrusted",
-              reason: cleanIsResolved
-                ? "a later ancestor checkout cleans this descendant destination"
-                : "ancestor checkout clean must be statically resolved",
-              line,
-            };
-          });
+        checkoutBindings = checkoutBindings.map((entry) => {
+          if (
+            entry.path === destination ||
+            (destination !== "." && !entry.path.startsWith(`${destination}/`))
+          )
+            return entry;
+          // Ancestor checkout may clear an uninitialized destination even with clean: false.
+          return {
+            path: entry.path,
+            sparse: { mode: "all" },
+            dynamicSource: false,
+            source: "untrusted",
+            reason:
+              "a later ancestor checkout invalidates this descendant destination",
+            line,
+          };
+        });
         const trustedWriter =
           cleanIsResolved &&
           ref === approved?.sha &&

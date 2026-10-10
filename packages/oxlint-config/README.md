@@ -75,8 +75,9 @@ adjoining an expression. The deepest checkout destination containing a static se
 file. Sparse validation checks that provider, including every writer at the same
 destination, before expression acknowledgement; ancestor sparse settings do not
 constrain an independent nested checkout. Checkout writes are processed in step
-order: a later ancestor checkout invalidates earlier descendants unless its clean
-input is literally false. Unresolved clean values remain untrusted. Unknown
+order: any later ancestor checkout invalidates earlier descendants, regardless of
+its clean input. Checkout may clear a destination without a matching Git repository
+even when clean is false. Unresolved clean values remain untrusted. Unknown
 selectors remain fail closed. Mixed literal/expression sparse
 configurations retain their literal paths: those paths must explicitly include a
 static selected manifest. A declaration acknowledges only expression additions;
