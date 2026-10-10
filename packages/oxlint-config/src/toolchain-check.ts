@@ -244,13 +244,15 @@ export const checkToolchain = ({
         const heading = original.match(/^\s*\[([^\]]+)\]/);
         if (heading !== null) section = heading[1] ?? "";
         const checkMiseVersion = (value: string) => {
-          const inlineVersion = value.match(
-            /^\s*\{\s*version\s*=\s*(["'][^"']+["'])\s*(?:,|\})/,
-          );
+          const inlineVersion = [
+            ...value.matchAll(
+              /[,{]\s*([\w-]+|"[^"]+"|'[^']+')\s*=\s*("(?:\\.|[^"\\])*"|'[^']*'|[^,{}]+)\s*(?=[,}])/g,
+            ),
+          ].find((field) => scalar(field[1] ?? "") === "version");
           checkVersion(
             file,
             line,
-            scalar(inlineVersion?.[1] ?? value),
+            scalar(inlineVersion?.[2] ?? value),
             "mise Bun version",
           );
         };
@@ -268,7 +270,7 @@ export const checkToolchain = ({
         const inlineTools = original.match(/^\s*tools\s*=\s*\{(.*)\}/);
         if (inlineTools !== null && section === "") {
           const inlineBun = inlineTools[1]?.match(
-            /(?:^|,)\s*["']?bun["']?\s*=\s*([^,}]+)/,
+            /(?:^|,)\s*["']?bun["']?\s*=\s*(\{[^}]*\}|[^,}]+)/,
           );
           if (inlineBun !== null && inlineBun !== undefined)
             checkMiseVersion(inlineBun[1] ?? "");

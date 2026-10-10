@@ -402,6 +402,46 @@ describe("consumer toolchain guard", () => {
     });
   }
 
+  for (const file of ["mise.toml", ".mise.toml"]) {
+    for (const prefix of [
+      "[tools]\nbun = ",
+      "tools.bun = ",
+      "tools = { bun = ",
+    ]) {
+      const wrap = (table: string) =>
+        `${prefix}${table}${prefix.startsWith("tools =") ? " }" : ""}\n`;
+      test(`checks version after another mise inline-table field in ${file} ${prefix}`, () => {
+        expect(
+          checkFixture({
+            files: { [file]: wrap('{ os = "linux", version = "1.4.3" }') },
+          }),
+        ).toEqual([]);
+        expect(
+          checkFixture({
+            files: { [file]: wrap('{ os = "linux", version = "1.4.1" }') },
+          }),
+        ).toEqual([
+          {
+            path: file,
+            line: prefix.startsWith("[tools]") ? 2 : 1,
+            message: expect.stringContaining(
+              "mise Bun version must be 1.4.3, found 1.4.1",
+            ),
+          },
+        ]);
+        expect(
+          checkFixture({ files: { [file]: wrap('{ os = "linux" }') } }),
+        ).toEqual([
+          {
+            path: file,
+            line: prefix.startsWith("[tools]") ? 2 : 1,
+            message: expect.stringContaining("mise Bun version must be"),
+          },
+        ]);
+      });
+    }
+  }
+
   test("checks inline mise tools", () => {
     expect(
       checkFixture({
