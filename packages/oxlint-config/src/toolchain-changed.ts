@@ -3,7 +3,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { satisfies, valid, validRange } from "semver";
 import { parse as parseToml } from "smol-toml";
-import { parseDocument } from "yaml";
+import { parseAllDocuments, parseDocument } from "yaml";
 
 import {
   changedPackageTool,
@@ -14,6 +14,11 @@ import {
   type ChangedLock,
   type ToolchainChangedTool,
 } from "./toolchain-changed-locks";
+import {
+  containerDocumentImages,
+  isComposeDefinitionPath,
+  isKubernetesDefinitionPath,
+} from "./toolchain-container-inputs";
 import {
   isDockerDefinitionPath,
   githubAutomationFileKind,
@@ -36,6 +41,25 @@ export type ToolchainChanges =
     };
 
 const git = promisify(execFile);
+const otherRuntimeFiles = new Set([
+  ".python-version",
+  "rust-toolchain",
+  "rust-toolchain.toml",
+  ".go-version",
+  "go.mod",
+  "go.work",
+  ".java-version",
+  ".ruby-version",
+  ".sdkmanrc",
+  ".dotnet-version",
+  "global.json",
+  ".terraform-version",
+  ".deno-version",
+]);
+const containerDefinition = (file: string) =>
+  isDockerDefinitionPath(file) ||
+  isComposeDefinitionPath(file) ||
+  isKubernetesDefinitionPath(file);
 const trackedInput = (file: string) => {
   if (
     file.split("/").some((part) => part === "node_modules" || part === "vendor")
@@ -56,10 +80,12 @@ const trackedInput = (file: string) => {
       ".bun-version",
       ".tool-versions",
       "toolchain.json",
+      ".npmrc",
     ].includes(name) ||
+    otherRuntimeFiles.has(name) ||
     isMiseConfigPath(file) ||
     githubAutomationFileKind(file) !== undefined ||
-    isDockerDefinitionPath(file)
+    containerDefinition(file)
   );
 };
 type TreeEntry = { mode: string; oid: string };
@@ -170,7 +196,7 @@ const snapshotText = ({
 };
 /** Read declared selector files too, without executing workflows or inspecting installed tools. */
 const selectorFiles = (snapshot: GitSnapshot) => {
-  const files = new Set<string>();
+  const files = new Map<string, Set<ToolchainChangedTool>>();
   const visit = (value: unknown) => {
     if (Array.isArray(value)) {
       for (const entry of value) visit(entry);
@@ -178,7 +204,13 @@ const selectorFiles = (snapshot: GitSnapshot) => {
     }
     if (!changedRecord(value)) return;
     for (const [key, entry] of Object.entries(value)) {
-      if (key.toLowerCase() !== "bun-version-file") {
+      const input = key.toLowerCase();
+      if (
+        !/(?:^|-)version-file$/.test(input) &&
+        !["toolchain-file", "rust-toolchain-file", "global-json-file"].includes(
+          input,
+        )
+      ) {
         visit(entry);
         continue;
       }
@@ -189,7 +221,7 @@ const selectorFiles = (snapshot: GitSnapshot) => {
         path.posix.isAbsolute(entry) ||
         entry.split("/").includes("..")
       )
-        throw new Error("Unclassifiable Bun version-file declaration");
+        throw new Error("Unclassifiable setup version-file declaration");
       const file = path.posix.normalize(entry);
       if (
         file === "." ||
@@ -197,8 +229,18 @@ const selectorFiles = (snapshot: GitSnapshot) => {
           .split("/")
           .some((part) => part === "vendor" || part === "node_modules")
       )
-        throw new Error("Bun version-file leaves the tracked toolchain scope");
-      files.add(file);
+        throw new Error(
+          "Setup version-file leaves the tracked toolchain scope",
+        );
+      const tool =
+        input === "node-version-file"
+          ? "node"
+          : input === "bun-version-file"
+            ? "bun"
+            : "shared";
+      const selected = files.get(file) ?? new Set<ToolchainChangedTool>();
+      selected.add(tool);
+      files.set(file, selected);
     }
   };
   for (const file of snapshot.entries.keys()) {
@@ -257,7 +299,7 @@ const readSnapshots = async ({
       // Resolve symlink closure before reading workflow YAML.
       const unresolvedLinks = [...required].some((file) => !entries.has(file));
       if (!unresolvedLinks)
-        for (const file of selectorFiles({ entries, blobs }))
+        for (const file of selectorFiles({ entries, blobs }).keys())
           required.add(file);
       for (const file of required) {
         if (entries.has(file)) continue;
@@ -406,6 +448,31 @@ const boundResolution = ({
     `Missing resolved toolchain dependency: ${file}:${dependency}`,
   );
 };
+const assertLiteralDockerImages = (text: string) => {
+  const defaults = new Map<string, string>();
+  for (const line of text.replace(/\\\r?\n/g, " ").split(/\r?\n/)) {
+    const arg = /^\s*ARG\s+([A-Za-z_]\w*)(?:=(\S+))?\s*(?:#.*)?$/i.exec(line);
+    if (arg?.[1]) {
+      const value = arg[2];
+      if (value !== undefined && /^[A-Za-z0-9_.:/@+-]+$/.test(value))
+        defaults.set(arg[1], value);
+      else defaults.delete(arg[1]);
+    }
+    const image = /^\s*FROM\s+(?:--[^\s]+\s+)*(\S+)/i.exec(line)?.[1];
+    if (image === undefined) continue;
+    const expanded = image.replace(
+      /\$\{([A-Za-z_]\w*)\}|\$([A-Za-z_]\w*)/g,
+      (
+        original: string,
+        braced: string | undefined,
+        plain: string | undefined,
+      ) => defaults.get(braced ?? plain ?? "") ?? original,
+    );
+    if (expanded.includes("$"))
+      throw new Error("Unclassifiable Docker image selector");
+  }
+};
+
 type ParsedSnapshot = {
   tools: ReturnType<typeof inventory>;
   current: { bun: string[]; typescript: string[] };
@@ -418,7 +485,7 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
   const locks = new Map<string, ChangedLock>();
   const workspacePatterns = new Map<string, unknown>();
   const typescript = new Set<string>();
-  const bunFiles = selectorFiles(snapshot);
+  const selectedFiles = selectorFiles(snapshot);
   const addBun = (value: string) => {
     const version = exactBun(value);
     bunVersions.add(version);
@@ -450,7 +517,8 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
   for (const file of snapshot.entries.keys()) {
     const text = snapshotText({ snapshot, file });
     const name = path.posix.basename(file);
-    if (bunFiles.has(file)) tools.bun.add(`selector-file:${file}:${text}`);
+    for (const tool of selectedFiles.get(file) ?? [])
+      tools[tool].add(`selector-file:${file}:${text}`);
     if (name === "package.json") {
       const manifest = parseChangedJson(text);
       if (!changedRecord(manifest))
@@ -459,6 +527,13 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
       catalogs(file, manifest);
       if (changedRecord(manifest["workspaces"]))
         catalogs(`${file}:workspaces`, manifest["workspaces"]);
+    } else if (name === ".npmrc") {
+      for (const line of text.split(/\r?\n/)) {
+        if (!/^\s*(?:use-node-version|node-version)\s*=/i.test(line)) continue;
+        if (/\$\{/.test(line))
+          throw new Error("Unclassifiable npm Node selector");
+        tools.node.add(`${file}:${line.trim()}`);
+      }
     } else if (name === "pnpm-workspace.yaml") {
       const document = parseDocument(text);
       if (document.errors.length > 0)
@@ -468,6 +543,10 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
         throw new Error("Invalid pnpm workspace configuration");
       workspacePatterns.set(path.posix.dirname(file), workspace["packages"]);
       catalogs(file, workspace);
+      for (const key of ["useNodeVersion", "nodeVersion"]) {
+        if (workspace[key] !== undefined)
+          tools.node.add(`${file}:${key}:${stableJson(workspace[key])}`);
+      }
     } else if (
       [
         "bun.lock",
@@ -487,6 +566,7 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
           "Binary Bun lockfile cannot be resolved without executing Bun",
         );
     } else if (name === ".bun-version") addBun(text.trim());
+    else if (otherRuntimeFiles.has(name)) tools.shared.add(`${file}:${text}`);
     else if (name === ".node-version" || name === ".nvmrc")
       tools.node.add(`${file}:${text.trim()}`);
     else if (name === "toolchain.json") {
@@ -530,6 +610,7 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
       tools.bun.add(`${file}:${text}`);
       tools.typescript.add(`${file}:${text}`);
     } else if (isDockerDefinitionPath(file)) {
+      assertLiteralDockerImages(text);
       tools.shared.add(`${file}:${text}`);
       tools.node.add(`${file}:${text}`);
       tools.bun.add(`${file}:${text}`);
@@ -539,6 +620,30 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
       )) {
         const tag = match[1];
         if (tag) addBun(tag.replace(/-(?:alpine|slim|debian)$/, ""));
+      }
+    } else if (containerDefinition(file)) {
+      for (const document of parseAllDocuments(text)) {
+        if (document.errors.length > 0) {
+          if (
+            isComposeDefinitionPath(file) ||
+            /(?:^|\n)\s*(?:apiVersion|kind)\s*:/.test(text)
+          )
+            throw new Error(`Unreadable container declaration: ${file}`);
+          continue;
+        }
+        const value: unknown = document.toJS({ maxAliasCount: 100 });
+        const container = containerDocumentImages(value, file);
+        if (container === undefined) {
+          if (isComposeDefinitionPath(file))
+            throw new Error(`Unclassifiable Compose declaration: ${file}`);
+          continue;
+        }
+        for (const { image } of container.images) {
+          if (typeof image !== "string" || image.includes("$"))
+            throw new Error(`Unclassifiable container image selector: ${file}`);
+        }
+        for (const tool of ["bun", "node", "typescript", "shared"] as const)
+          tools[tool].add(`${file}:${text}`);
       }
     }
   }
@@ -597,8 +702,17 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
   for (const [file, manifest] of manifests) {
     const active = activeManifest(file);
     const manager = manifest["packageManager"];
-    if (typeof manager === "string" && manager.startsWith("bun@"))
-      addBun(manager.slice(4));
+    if (manager !== undefined) {
+      if (typeof manager !== "string")
+        throw new Error(`Unclassifiable package manager: ${file}`);
+      if (manager.startsWith("bun@")) addBun(manager.slice(4));
+      else tools.shared.add(`${file}:packageManager:${manager}`);
+    }
+    for (const field of ["volta", "devEngines"]) {
+      if (manifest[field] === undefined) continue;
+      for (const tool of ["bun", "node", "typescript", "shared"] as const)
+        tools[tool].add(`${file}:${field}:${stableJson(manifest[field])}`);
+    }
     const engines = manifest["engines"];
     if (changedRecord(engines)) {
       if (typeof engines["node"] === "string")

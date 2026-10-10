@@ -278,7 +278,7 @@ test("switching the declared manager binds a different effective compiler in a f
   commit();
   const result = await detectToolchainChanges({ repo, since });
   expect(result.status).toBe("compared");
-  expect(result.tools).toEqual(["typescript"]);
+  expect(result.tools).toEqual(["typescript", "shared"]);
 });
 
 test("nearest lock ownership outranks a longer root lock filename", async () => {

@@ -367,7 +367,10 @@ Node and lint-tool changes still force full CI through the shared detector.
 
 Workflow, composite-action, Docker, mise, and tool-version declarations are
 conservatively fingerprinted for compiler parity, including referenced tracked
-Bun version files. Catalog and unresolved declaration changes also force parity;
+setup-action version files (Node, Bun, Python, Go, Java and other runtimes).
+Rust toolchain-file selectors and conventional runtime files are included;
+cache-dependency-path is not a runtime selector. Compose and Kubernetes image
+definitions are conservatively fingerprinted alongside Dockerfiles. Catalog and unresolved declaration changes also force parity;
 an unclassifiable reference runs full parity. This may run parity for unrelated
 edits to these declaration files. Active installed compiler comparisons still
 use the owning lockfile resolutions.
