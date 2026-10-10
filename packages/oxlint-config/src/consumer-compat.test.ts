@@ -805,12 +805,12 @@ describe("consumer compatibility declarations", () => {
         }).keys(),
       ].sort(),
     ).toEqual(["@example/core", "root"]);
-    expect([
-      ...discoverConsumerPackages({
+    expect(() =>
+      discoverConsumerPackages({
         "pnpm-workspace.yaml": "packages:\n  - packages/core\n",
         "packages/core/package.json": files["packages/core/package.json"],
-      }).keys(),
-    ]).toEqual(["@example/core"]);
+      }),
+    ).toThrow("adjacent tracked package.json: pnpm-workspace.yaml");
   });
 
   test("public packed manifests require valid versions while private workspace owners may omit them", () => {
@@ -850,7 +850,11 @@ describe("consumer compatibility declarations", () => {
     const selected = {
       directory: "packages/library",
       name: "library",
-      manifest: { version: "1.0.0", dependencies: { core: "workspace:*" } },
+      manifest: {
+        name: "library",
+        version: "1.0.0",
+        dependencies: { core: "workspace:*" },
+      },
     };
     const core = { directory: "packages/core", name: "core", manifest: {} };
     expect(() =>
@@ -871,7 +875,7 @@ describe("consumer compatibility declarations", () => {
         const selected = {
           directory: "packages/library",
           name: "library",
-          manifest: { version: "1.0.0", [field]: value },
+          manifest: { name: "library", version: "1.0.0", [field]: value },
         };
         expect(() =>
           consumerPackageClosure({
@@ -883,12 +887,16 @@ describe("consumer compatibility declarations", () => {
         const core = {
           directory: "packages/core",
           name: "core",
-          manifest: { version: "1.0.0", [field]: value },
+          manifest: { name: "core", version: "1.0.0", [field]: value },
         };
         const parent = {
           directory: "packages/parent",
           name: "parent",
-          manifest: { version: "1.0.0", dependencies: { core: "workspace:*" } },
+          manifest: {
+            name: "parent",
+            version: "1.0.0",
+            dependencies: { core: "workspace:*" },
+          },
         };
         const files = {
           "package.json": JSON.stringify({
@@ -1003,7 +1011,11 @@ describe("consumer compatibility declarations", () => {
     const pkg = {
       name: "library",
       directory: ".",
-      manifest: { version: "1.0.0", dependencies: { missing: "workspace:*" } },
+      manifest: {
+        name: "library",
+        version: "1.0.0",
+        dependencies: { missing: "workspace:*" },
+      },
     };
     expect(() =>
       consumerPackageClosure({
@@ -1018,12 +1030,13 @@ describe("consumer compatibility declarations", () => {
     const core = {
       name: "@example/core",
       directory: "packages/core",
-      manifest: { version: "1.0.0" },
+      manifest: { name: "@example/core", version: "1.0.0" },
     };
     const pkg = {
       name: "library",
       directory: ".",
       manifest: {
+        name: "library",
         version: "1.0.0",
         dependencies: { alias: "workspace:@example/core@*" },
       },

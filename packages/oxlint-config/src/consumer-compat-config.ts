@@ -114,6 +114,27 @@ export const consumerBundledDependencyFields = [
   "bundledDependencies",
 ] as const;
 
+const consumerPackageNameValid = (value: unknown) => {
+  if (typeof value !== "string" || value.length === 0 || value.length > 214)
+    return false;
+  const components = value.startsWith("@")
+    ? value.slice(1).split("/")
+    : [value];
+  if (value.startsWith("@") && components.length !== 2) return false;
+  if (!value.startsWith("@") && !/^[a-z0-9]/.test(value)) return false;
+  if (
+    components.some(
+      (component) =>
+        !/^[a-z0-9._-]+$/.test(component) ||
+        component === "." ||
+        component === "..",
+    )
+  )
+    return false;
+  const packageName = components.at(-1);
+  return packageName !== "node_modules" && packageName !== "favicon.ico";
+};
+
 export const assertConsumerPublishableManifest = ({
   manifest,
   directory,
@@ -125,6 +146,13 @@ export const assertConsumerPublishableManifest = ({
   )
     throw new Error(
       `public consumer package requires a semver-valid version: ${directory}`,
+    );
+  if (
+    manifest["private"] !== true &&
+    !consumerPackageNameValid(manifest["name"])
+  )
+    throw new Error(
+      `public consumer package requires a valid npm name: ${directory}`,
     );
   for (const field of consumerBundledDependencyFields)
     if (Object.hasOwn(manifest, field))
@@ -300,6 +328,16 @@ export const discoverConsumerManifests = (files: Record<string, string>) => {
     } else if (path.posix.basename(file) === "package.json")
       manifestSources.set(path.posix.dirname(file), content);
   }
+  const assertWorkspaceOwner = (directory: string) => {
+    if (pnpmSources.has(directory) && !manifestSources.has(directory))
+      throw new Error(
+        `consumer pnpm workspace requires an adjacent tracked package.json: ${path.posix.join(directory, "pnpm-workspace.yaml")}`,
+      );
+  };
+  const candidates = new Set([
+    ...manifestSources.keys(),
+    ...pnpmSources.keys(),
+  ]);
   const manifestAt = (directory: string) => {
     const cached = manifests.get(directory);
     if (cached) return cached;
@@ -341,9 +379,10 @@ export const discoverConsumerManifests = (files: Record<string, string>) => {
   for (;;) {
     const before = roots.size;
     for (const directory of roots) {
+      assertWorkspaceOwner(directory);
       const manifest = manifestAt(directory);
       const patterns = patternsAt(directory, manifest);
-      for (const candidate of manifestSources.keys()) {
+      for (const candidate of candidates) {
         const relative = path.posix.relative(directory, candidate);
         if (relative === "" || relative.startsWith("../")) continue;
         const positives = patterns.filter(
@@ -363,6 +402,10 @@ export const discoverConsumerManifests = (files: Record<string, string>) => {
   }
   const discovered = new Map<string, Record<string, unknown>>();
   for (const directory of roots) {
+    for (let owner = directory; ; owner = path.posix.dirname(owner)) {
+      assertWorkspaceOwner(owner);
+      if (owner === ".") break;
+    }
     const manifest = manifestAt(directory);
     if (manifest) discovered.set(directory, manifest);
   }

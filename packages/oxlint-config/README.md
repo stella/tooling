@@ -381,7 +381,7 @@ The reusable consumer job declares its exact scope in `stll-toolchain.json`:
 The reusable consumer job must be stand-alone and unconditional (no `needs`, `if`, or `strategy`), so a job condition
 cannot skip its scheduled execution.
 The declared workflow requires a nonempty `on.schedule` with validated five-field cron (field bounds, lists, ranges, and positive steps);
-Day of week is 0–6 (SUN–SAT), matching the [GitHub Actions schedule contract](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule); numeric 7 is unsupported. The combined schedules must cover every weekday with unrestricted month and date fields, so weekly or seasonal schedules cannot satisfy the daily contract. Public packages require a semver-valid version. `bundleDependencies` and `bundledDependencies` are unsupported because artifact staging does not install a bundled dependency tree; remove these fields before declaring consumer checks.
+Day of week is 0–6 (SUN–SAT), matching the [GitHub Actions schedule contract](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule); numeric 7 is unsupported. The combined schedules must cover every weekday with unrestricted month and date fields, so weekly or seasonal schedules cannot satisfy the daily contract. Public packages require a semver-valid version. Published workspace packages under a `vendor` directory are unsupported; the contract CLI reports them rather than omitting them. `bundleDependencies` and `bundledDependencies` are unsupported because artifact staging does not install a bundled dependency tree; remove these fields before declaring consumer checks.
 `workflow_dispatch` may also be enabled. That job calls the shared
 `package-consumer-compat.yml` workflow at its approved immutable policy pin, with
 `packages` as the same JSON array and `consumer-node` equal to the consumer policy
@@ -400,9 +400,11 @@ npm and pnpm. The repository builds once with its development toolchain first.
 Workspace protocols are resolved by the package manager before `npm pack` creates
 the final artifact; both consumers install those artifacts. Fixture installs disable scripts, reject reserved runtime/manager bins, then run an explicit rebuild under the pinned consumer runtime before typecheck, build and smoke. Catalog entries that resolve to a local workspace
 package are unsupported: use `workspace:` for that dependency. Registry catalog
-dependencies remain supported. The runner verifies
+dependencies remain supported. pnpm workspace owners require an adjacent tracked
+`package.json`; manifestless owners are unsupported. Public package names must be
+canonical lowercase, URL-safe npm names (at most 214 characters), with no traversal components. The runner verifies
 the official Node archive checksum and exact runtime/package-manager versions,
-uses the oldest published React satisfying the package peer range, typechecks with
+uses the oldest published React satisfying the package peer range and, when ReactDOM is required, its compatible renderer peer range, typechecks with
 the consumer TypeScript, and runs each fixture's build and usage smoke.
 
 The fixture directory contains `consumer-compat.json`:

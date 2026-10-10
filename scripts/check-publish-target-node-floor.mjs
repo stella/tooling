@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
   mkdtempSync,
+  mkdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -78,6 +79,34 @@ try {
   });
   console.log(
     "Built publish-contract CLI resolved TypeScript config and relative import on Node 20.19.0",
+  );
+  const manifest = JSON.parse(
+    readFileSync(path.join(fixture, "package.json"), "utf8"),
+  );
+  manifest.workspaces = ["vendor/*"];
+  writeFileSync(path.join(fixture, "package.json"), JSON.stringify(manifest));
+  mkdirSync(path.join(fixture, "vendor/library"), { recursive: true });
+  writeFileSync(
+    path.join(fixture, "vendor/library/package.json"),
+    JSON.stringify({
+      name: "vendor-contract-fixture",
+      version: "1.0.0",
+      types: "index.d.ts",
+    }),
+  );
+  writeFileSync(
+    path.join(fixture, "vendor/library/index.d.ts"),
+    "export {};\n",
+  );
+  execFileSync("git", ["add", "package.json", "vendor"], { cwd: fixture });
+  const vendor = spawnSync(process.execPath, [cli], {
+    cwd: fixture,
+    encoding: "utf8",
+  });
+  assert.equal(vendor.status, 1);
+  assert.match(
+    vendor.stderr,
+    /Published workspace packages under vendor directories are not supported by publish-contract: vendor\/library\/package.json/,
   );
 } finally {
   rmSync(fixture, { recursive: true, force: true });

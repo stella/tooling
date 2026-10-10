@@ -13,7 +13,6 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { satisfies } from "semver";
 import { stringify } from "yaml";
 
 import {
@@ -34,11 +33,11 @@ import {
   consumerRelativePath,
   discoverConsumerManifests,
   discoverConsumerPackages,
-  oldestPublishedConsumerVersion,
   parseConsumerFixtures,
   type ConsumerFixture,
   type ConsumerPackage,
 } from "./consumer-compat-config";
+import { selectConsumerReactVersions } from "./consumer-react";
 import { parseToolchainPolicy } from "./toolchain-schema";
 
 type CommandOptions = { cwd: string; env?: NodeJS.ProcessEnv };
@@ -697,30 +696,24 @@ const runFixture = async ({
     const peers = published["peerDependencies"];
     if (!consumerRecord(peers) || typeof peers["react"] !== "string")
       throw new Error(`React fixture requires a React peer: ${pkg.name}`);
-    const react = oldestPublishedConsumerVersion(
-      Object.keys(await registryMetadata("react")),
-      peers["react"],
+    const needsDom = typeof peers["react-dom"] === "string" || needsReactDom;
+    const bindings = selectConsumerReactVersions({
+      reactRange: peers["react"],
+      reactVersions: await registryMetadata("react"),
+      dom: needsDom
+        ? {
+            range:
+              typeof peers["react-dom"] === "string"
+                ? peers["react-dom"]
+                : undefined,
+            versions: await registryMetadata("react-dom"),
+          }
+        : undefined,
+    });
+    Object.assign(reactBindings, bindings);
+    process.stdout.write(
+      `${pkg.name}: ${manager} React ${bindings.react}${bindings["react-dom"] === undefined ? "" : ` / ReactDOM ${bindings["react-dom"]}`}\n`,
     );
-    reactBindings["react"] = react;
-    if (typeof peers["react-dom"] === "string" || needsReactDom) {
-      const dom = await registryMetadata("react-dom");
-      const compatible = Object.entries(dom)
-        .filter(([, value]) => {
-          if (
-            !consumerRecord(value) ||
-            !consumerRecord(value["peerDependencies"])
-          )
-            return false;
-          const range = value["peerDependencies"]["react"];
-          return typeof range === "string" && satisfies(react, range);
-        })
-        .map(([version]) => version);
-      reactBindings["react-dom"] = oldestPublishedConsumerVersion(
-        compatible,
-        typeof peers["react-dom"] === "string" ? peers["react-dom"] : "*",
-      );
-    }
-    process.stdout.write(`${pkg.name}: ${manager} React ${react}\n`);
   }
   const closureArtifacts = new Map<string, string>();
   for (const name of closure.keys()) {

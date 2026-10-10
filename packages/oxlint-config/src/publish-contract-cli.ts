@@ -38,7 +38,7 @@ const main = async () => {
       if (
         file
           .split("/")
-          .some((part) => part === "node_modules" || part === "vendor") ||
+          .some((part) => part === "node_modules" || part === ".git") ||
         !["package.json", "pnpm-workspace.yaml"].includes(
           path.posix.basename(file),
         )
@@ -61,6 +61,10 @@ const main = async () => {
     )) {
       const file = path.posix.join(relative, "package.json");
       if (manifest["private"] === true) continue;
+      if (relative.split("/").includes("vendor"))
+        throw new Error(
+          `Published workspace packages under vendor directories are not supported by publish-contract: ${file}; move the package to a supported workspace directory`,
+        );
       if (typeof manifest["name"] !== "string" || manifest["name"] === "")
         throw new Error(`${file}: published package needs a name`);
       checked++;
