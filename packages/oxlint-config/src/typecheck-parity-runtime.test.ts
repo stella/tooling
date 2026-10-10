@@ -566,3 +566,75 @@ test.skipIf(process.env["CI"] !== "true")(
   },
   50_000,
 );
+
+test.skipIf(process.env["CI"] !== "true")(
+  "real parity skips inadmissible JavaScript inputs and checks admitted inputs",
+  async () => {
+    const repo = process.cwd();
+    const policy: unknown = JSON.parse(
+      await readFile(
+        resolve(repo, "packages/oxlint-config/toolchain.json"),
+        "utf8",
+      ),
+    );
+    const compiler = await resolveCompiler(repo, policy);
+    const project = await realpath(
+      await mkdtemp(join(tmpdir(), "parity-input-kinds-")),
+    );
+    const logs: string[] = [];
+    const errors: string[] = [];
+    const logger = spyOn(console, "log").mockImplementation(
+      (...args: unknown[]) => {
+        logs.push(args.map(String).join(" "));
+      },
+    );
+    const errorLogger = spyOn(console, "error").mockImplementation(
+      (...args: unknown[]) => {
+        errors.push(args.map(String).join(" "));
+      },
+    );
+    try {
+      await mkdir(join(project, "node_modules"));
+      await symlink(
+        resolve(compiler, "../.."),
+        join(project, "node_modules/typescript"),
+        "dir",
+      );
+      await writeFile(
+        join(project, "package.json"),
+        JSON.stringify({ devDependencies: { typescript: "7.0.2" } }),
+      );
+      await writeFile(join(project, "input.ts"), "export const value = 1;");
+      for (const allowJs of [undefined, false, true]) {
+        logs.length = 0;
+        errors.length = 0;
+        await writeFile(
+          join(project, "tsconfig.json"),
+          JSON.stringify({
+            compilerOptions: {
+              target: "ESNext",
+              module: "ESNext",
+              moduleResolution: "Bundler",
+              strict: true,
+              types: [],
+              ...(allowJs === undefined ? {} : { allowJs }),
+              ...(allowJs === true ? { checkJs: true } : {}),
+            },
+            files: ["input.ts"],
+          }),
+        );
+        expect(await runTypecheckParity({ repo: project, policy })).toBe(true);
+        const row = logs.find((line) => line.startsWith("checked-javascript"));
+        if (row === undefined)
+          throw new Error("Missing JavaScript fixture row");
+        expect(row.endsWith(allowJs === true ? "PASS" : "INACTIVE")).toBe(true);
+        expect(errors).toEqual([]);
+      }
+    } finally {
+      logger.mockRestore();
+      errorLogger.mockRestore();
+      await rm(project, { recursive: true, force: true });
+    }
+  },
+  120_000,
+);

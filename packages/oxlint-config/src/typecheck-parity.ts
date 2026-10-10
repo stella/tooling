@@ -692,6 +692,33 @@ export const fixtureCompilerOptions = (args: FixtureCompilerOptionsArgs) => {
   return options;
 };
 
+type FixtureInputOptions = {
+  files: readonly string[];
+  compilerOptions: Record<string, unknown>;
+};
+export const fixtureInputs = ({
+  files,
+  compilerOptions,
+}: FixtureInputOptions) => {
+  const inputs = files.filter((file) => /\.(?:[cm]?[jt]sx?|json)$/.test(file));
+  for (const input of inputs) {
+    if (/\.[cm]?jsx?$/.test(input) && compilerOptions["allowJs"] !== true)
+      return {
+        status: "inapplicable",
+        reason: `${input} requires allowJs`,
+      } as const;
+    if (
+      input.endsWith(".json") &&
+      compilerOptions["resolveJsonModule"] !== true
+    )
+      return {
+        status: "inapplicable",
+        reason: `${input} requires resolveJsonModule`,
+      } as const;
+  }
+  return { status: "applicable", files: inputs } as const;
+};
+
 export const fixturePackageContext = (configPath: string) => {
   for (let folder = dirname(configPath); ; folder = dirname(folder)) {
     try {
@@ -1074,6 +1101,10 @@ export const runTypecheckParity = async ({
       let tscRss = 0;
       let bunRss = 0;
       const groupFolder = join(scratch, `config-${index + 1}`);
+      const compilerOptions = fixtureCompilerOptions({
+        compilerOptions: group.compilerOptions,
+        configPath: group.path,
+      });
       await mkdir(groupFolder);
       await writeFile(
         join(groupFolder, "package.json"),
@@ -1082,18 +1113,23 @@ export const runTypecheckParity = async ({
         ),
       );
       for (const fixture of fixtures) {
+        const inputs = fixtureInputs({
+          files: Object.keys(fixture.files),
+          compilerOptions,
+        });
+        if (inputs.status === "inapplicable") {
+          console.log(
+            `${fixture.name} (inactive under this config: ${inputs.reason}) | | | INACTIVE`,
+          );
+          continue;
+        }
         const folder = join(groupFolder, fixture.name);
         await mkdir(folder);
         await writeFile(
           join(folder, "tsconfig.json"),
           JSON.stringify({
-            compilerOptions: fixtureCompilerOptions({
-              compilerOptions: group.compilerOptions,
-              configPath: group.path,
-            }),
-            files: Object.keys(fixture.files).filter((name) =>
-              /\.[cm]?[jt]sx?$/.test(name),
-            ),
+            compilerOptions,
+            files: inputs.files,
             include: [],
             exclude: [],
           }),

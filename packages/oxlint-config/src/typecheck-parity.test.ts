@@ -20,6 +20,7 @@ import {
   diagnosticSet,
   fixtureParity,
   fixtureCompilerOptions,
+  fixtureInputs,
   fixtureRunPassed,
   groupCompilerConfigs,
   diagnosticParity,
@@ -29,6 +30,34 @@ import {
 } from "./typecheck-parity";
 
 const repo = resolve("/consumer-repo");
+
+test("fixture inputs reject inadmissible source kinds before compiler execution", () => {
+  for (const files of [
+    ["input.js"],
+    ["input.jsx"],
+    ["input.mjs"],
+    ["input.cjs"],
+    ["input.json"],
+  ]) {
+    for (const enabled of [undefined, false, true]) {
+      const option = files[0]?.endsWith(".json")
+        ? "resolveJsonModule"
+        : "allowJs";
+      const compilerOptions =
+        enabled === undefined ? {} : { [option]: enabled };
+      const result = fixtureInputs({ files, compilerOptions });
+      expect(result.status).toBe(
+        enabled === true ? "applicable" : "inapplicable",
+      );
+    }
+  }
+  expect(
+    fixtureInputs({
+      files: ["input.ts", "input.tsx", "package.json"],
+      compilerOptions: { resolveJsonModule: true },
+    }).status,
+  ).toBe("applicable");
+});
 
 const rejectedError = async (promise: Promise<unknown>) => {
   try {
