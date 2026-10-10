@@ -370,6 +370,8 @@ The reusable consumer job declares its exact scope in `stll-toolchain.json`:
 }
 ```
 
+The reusable consumer job must be unconditional (no `if` condition), so a job condition
+cannot skip its scheduled execution.
 The declared workflow requires a nonempty `on.schedule` with five-field POSIX cron;
 `workflow_dispatch` may also be enabled. That job calls the shared
 `package-consumer-compat.yml` workflow at its approved immutable policy pin, with

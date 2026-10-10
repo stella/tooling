@@ -133,11 +133,15 @@ export const checkConsumerChecks = ({
           add(`${workflow}:${jobName} requires a consumerChecks declaration`);
           continue;
         }
-        exercised.add(declaration);
         if (!nightlySchedule(source["on"]))
           throw new Error(
             `${workflow} consumer checks require a nonempty valid on.schedule`,
           );
+        if ("if" in job)
+          throw new Error(
+            `${workflow}:${jobName} consumer checks require an unconditional reusable job without if`,
+          );
+        exercised.add(declaration);
         const approved = Object.entries(policy.actions).find(
           ([name]) => name.toLowerCase() === consumerCheckWorkflow,
         )?.[1];

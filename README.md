@@ -461,6 +461,8 @@ The reusable consumer job declares its exact scope in `stll-toolchain.json`:
 ```
 
 The declared workflow must include a nonempty schedule; manual dispatch is optional.
+The reusable consumer job must be unconditional (no `if` condition), so a job condition
+cannot skip its scheduled execution.
 That job calls `package-consumer-compat.yml` at the approved shared policy SHA with
 `packages` as the same JSON array and `consumer-node` equal to the consumer policy
 pin. Every named package must be tracked, published, and support that Node version.

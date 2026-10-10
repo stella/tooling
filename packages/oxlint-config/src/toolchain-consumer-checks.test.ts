@@ -259,3 +259,32 @@ test("semantic aliases and merges cannot conceal consumer input conflicts", () =
     }),
   ).not.toEqual([]);
 });
+
+test("scheduled consumer jobs cannot be gated by conditions", () => {
+  for (const condition of [
+    "github.event_name == 'workflow_dispatch'",
+    "${{ github.event_name == 'push' }}",
+    false,
+    true,
+    "always()",
+  ]) {
+    const diagnostics = check({
+      ...files,
+      [workflow]: JSON.stringify({
+        on: triggers,
+        jobs: { consumer: { ...job, if: condition } },
+      }),
+    });
+    expect(
+      diagnostics.some(({ message }) =>
+        message.includes("unconditional reusable job"),
+      ),
+    ).toBe(true);
+    expect(
+      diagnostics.some(({ message }) =>
+        message.includes("no matching reusable invocation"),
+      ),
+    ).toBe(true);
+  }
+  expect(check()).toEqual([]);
+});

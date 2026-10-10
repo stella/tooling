@@ -55,7 +55,7 @@ test("consumer check declarations remain mandatory despite runtime and action op
   };
   const approved = policy.actions[consumerCheckWorkflow];
   const uses = `${consumerCheckWorkflow}@${approved?.sha ?? "1234567890abcdef1234567890abcdef12345678"}`;
-  const invocation = `jobs:\n  consumer:\n    uses: ${uses} # ${approved?.version ?? "v1"}\n    with:\n      consumer-node: '${policy.consumerNode}'\n      packages: '["packages/library"]'\n`;
+  const invocation = `on:\n  schedule:\n    - cron: "0 3 * * *"\njobs:\n  consumer:\n    uses: ${uses} # ${approved?.version ?? "v1"}\n    with:\n      consumer-node: '${policy.consumerNode}'\n      packages: '["packages/library"]'\n`;
   const configuration = {
     consumerChecks: [declaration],
     optOuts: [
