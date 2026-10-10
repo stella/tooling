@@ -257,7 +257,7 @@ test.skipIf(process.env["CI"] !== "true")(
 );
 
 test.skipIf(process.env["CI"] !== "true")(
-  "consumer solution checks each effective config and rejects lost strict-group diagnostics",
+  "consumer solution normalizes composite/declaration-only options and rejects lost strict-group diagnostics",
   async () => {
     const repo = process.cwd();
     const policy: unknown = JSON.parse(
@@ -313,7 +313,13 @@ test.skipIf(process.env["CI"] !== "true")(
               module: "ESNext",
               moduleResolution: "Bundler",
               strict: leaf === "strict",
+              strictNullChecks: leaf === "strict",
               noUncheckedIndexedAccess: leaf === "strict",
+              // Composite implies declaration; the loose leaf uses explicit declaration-only output.
+              declarationDir: "./declarations",
+              ...(leaf === "loose"
+                ? { declaration: true, emitDeclarationOnly: true }
+                : {}),
             },
             files: ["input.ts"],
           }),
@@ -371,7 +377,7 @@ test.skipIf(process.env["CI"] !== "true")(
       const wrapper = join(project, "bun-wrapper");
       await writeFile(
         wrapper,
-        `#!${process.execPath}\nconst {spawnSync}=require('node:child_process');\nconst {readFileSync}=require('node:fs');\nconst {join}=require('node:path');\nconst args=process.argv.slice(2);\nconst projectArg=args.find(arg=>arg.startsWith('--project='));\nconst folder=projectArg?.slice('--project='.length);\nif(folder&&folder.includes('unchecked-index')){\n const config=JSON.parse(readFileSync(join(folder,'tsconfig.json'),'utf8'));\n const parents=Array.isArray(config.extends)?config.extends:[config.extends];\n if(parents.some(parent=>typeof parent==='string'&&parent.includes('/strict/tsconfig.json')))process.exit(0);\n}\nconst result=spawnSync(${JSON.stringify(process.execPath)},args,{stdio:'inherit'});\nif(result.error)throw result.error;\nprocess.exit(result.status??1);\n`,
+        `#!${process.execPath}\nconst {spawnSync}=require('node:child_process');\nconst {readFileSync}=require('node:fs');\nconst {join}=require('node:path');\nconst args=process.argv.slice(2);\nconst projectArg=args.find(arg=>arg.startsWith('--project='));\nconst folder=projectArg?.slice('--project='.length);\nif(folder&&folder.includes('unchecked-index')){\n const config=JSON.parse(readFileSync(join(folder,'tsconfig.json'),'utf8'));\n const options=config.compilerOptions;\n if(options.strictNullChecks===true&&options.noUncheckedIndexedAccess===true)process.exit(0);\n}\nconst result=spawnSync(${JSON.stringify(process.execPath)},args,{stdio:'inherit'});\nif(result.error)throw result.error;\nprocess.exit(result.status??1);\n`,
       );
       await chmod(wrapper, 0o755);
       logs.length = 0;

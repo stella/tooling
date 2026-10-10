@@ -1,10 +1,18 @@
 import { spawnSync } from "node:child_process";
 import { realpathSync, statSync } from "node:fs";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  rm,
+  writeFile,
+  symlink,
+} from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { resolve, join, relative, dirname, basename } from "node:path";
 import { performance } from "node:perf_hooks";
+import { stripVTControlCharacters } from "node:util";
 
 export const fixtures = [
   {
@@ -334,7 +342,7 @@ export const fixtureRunPassed = (
   results.some(({ active }) => active) && results.every(({ passed }) => passed);
 
 export const diagnosticSet = (output: string, repo: string) => {
-  const clean = output.replaceAll(/\u001b\[[0-9;]*m/g, "");
+  const clean = stripVTControlCharacters(output);
   const diagnostics = new Set<string>();
   for (const line of clean.split("\n")) {
     if (line.startsWith("<error ")) {
@@ -594,14 +602,110 @@ const canonicalOptions = (value: unknown): string => {
   return JSON.stringify(value);
 };
 
+// Emit and build settings do not belong in diagnostic-only fixture projects.
+const EMIT_ONLY_OPTIONS = new Set([
+  "composite",
+  "declaration",
+  "declarationDir",
+  "declarationMap",
+  "emitDeclarationOnly",
+  "outDir",
+  "outFile",
+  "rootDir",
+  "sourceMap",
+  "inlineSourceMap",
+  "inlineSources",
+  "incremental",
+  "tsBuildInfoFile",
+  "noEmitOnError",
+  "importHelpers",
+  "noEmitHelpers",
+  "emitBOM",
+  "mapRoot",
+  "sourceRoot",
+  "newLine",
+  "preserveConstEnums",
+  "removeComments",
+  "stripInternal",
+  "downlevelIteration",
+  "isolatedDeclarations",
+  "noEmit",
+]);
+
+type FixtureCompilerOptionsArgs = {
+  compilerOptions: unknown;
+  configPath: string;
+};
+export const fixtureCompilerOptions = ({
+  compilerOptions,
+  configPath,
+}: FixtureCompilerOptionsArgs) => {
+  if (
+    typeof compilerOptions !== "object" ||
+    compilerOptions === null ||
+    Array.isArray(compilerOptions)
+  )
+    throw new Error(`Invalid compiler options: ${configPath}`);
+  const options: Record<string, unknown> = Object.fromEntries(
+    Object.entries(compilerOptions).filter(
+      ([name]) => !EMIT_ONLY_OPTIONS.has(name),
+    ),
+  );
+  const directory = dirname(configPath);
+  let resolutionDirectory = directory;
+  const absolutePaths = (value: unknown) => {
+    if (
+      !Array.isArray(value) ||
+      !value.every((entry: unknown) => typeof entry === "string")
+    )
+      throw new Error(`Invalid compiler path option: ${configPath}`);
+    return value.map((entry) => resolve(resolutionDirectory, entry));
+  };
+  for (const name of ["rootDirs", "typeRoots"])
+    if (name in options) options[name] = absolutePaths(options[name]);
+  if ("baseUrl" in options) {
+    const baseUrl = options["baseUrl"];
+    if (typeof baseUrl !== "string")
+      throw new Error(`Invalid baseUrl: ${configPath}`);
+    resolutionDirectory = resolve(directory, baseUrl);
+    options["baseUrl"] = resolutionDirectory;
+  }
+  if ("paths" in options) {
+    const paths = options["paths"];
+    if (typeof paths !== "object" || paths === null || Array.isArray(paths))
+      throw new Error(`Invalid paths: ${configPath}`);
+    options["paths"] = Object.fromEntries(
+      Object.entries(paths).map(([key, value]) => [key, absolutePaths(value)]),
+    );
+  }
+  if (!("typeRoots" in options)) {
+    const roots = [];
+    for (let folder = directory; ; folder = dirname(folder)) {
+      roots.push(join(folder, "node_modules/@types"));
+      if (dirname(folder) === folder) break;
+    }
+    options["typeRoots"] = roots;
+  }
+  options["noEmit"] = true;
+  return options;
+};
+
 type CompilerConfig = { path: string; compilerOptions: unknown };
 export const groupCompilerConfigs = (configs: CompilerConfig[]) => {
-  const groups = new Map<string, { path: string; projects: string[] }>();
+  const groups = new Map<
+    string,
+    { path: string; projects: string[]; compilerOptions: unknown }
+  >();
   for (const config of configs) {
     const key = canonicalOptions(config.compilerOptions);
     const existing = groups.get(key);
     if (existing) existing.projects.push(config.path);
-    else groups.set(key, { path: config.path, projects: [config.path] });
+    else
+      groups.set(key, {
+        path: config.path,
+        projects: [config.path],
+        compilerOptions: config.compilerOptions,
+      });
   }
   return [...groups.values()];
 };
@@ -764,6 +868,11 @@ export const runTypecheckParity = async ({
   const scratch = await mkdtemp(join(tmpdir(), "typecheck-parity-"));
   const groupResults = [];
   try {
+    await symlink(
+      join(repo, "node_modules"),
+      join(scratch, "node_modules"),
+      "dir",
+    );
     for (const [index, group] of groups.entries()) {
       console.log(
         `Config group ${index + 1}: ${relative(repo, group.path)} (${group.projects.length} projects)`,
@@ -781,16 +890,10 @@ export const runTypecheckParity = async ({
         await writeFile(
           join(folder, "tsconfig.json"),
           JSON.stringify({
-            extends: group.path,
-            compilerOptions: {
-              types: [],
-              composite: false,
-              incremental: true,
-              noEmit: true,
-              rootDir: ".",
-              outDir: "./output",
-              tsBuildInfoFile: "./output/fixture.tsbuildinfo",
-            },
+            compilerOptions: fixtureCompilerOptions({
+              compilerOptions: group.compilerOptions,
+              configPath: group.path,
+            }),
             files: [],
             include: ["*.ts", "*.js", "*.cts"],
             exclude: [],

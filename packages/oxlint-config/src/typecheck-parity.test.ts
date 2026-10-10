@@ -19,6 +19,7 @@ import {
   diagnosticCodes,
   diagnosticSet,
   fixtureParity,
+  fixtureCompilerOptions,
   fixtureRunPassed,
   groupCompilerConfigs,
   diagnosticParity,
@@ -54,10 +55,80 @@ test("compiler config grouping ignores property order but preserves option diffe
     },
   ] as const;
   expect(groupCompilerConfigs([...entries])).toEqual([
-    { path: entries[0].path, projects: [entries[0].path, entries[1].path] },
-    { path: entries[2].path, projects: [entries[2].path] },
-    { path: entries[3].path, projects: [entries[3].path] },
+    {
+      compilerOptions: entries[0].compilerOptions,
+      path: entries[0].path,
+      projects: [entries[0].path, entries[1].path],
+    },
+    {
+      compilerOptions: entries[2].compilerOptions,
+      path: entries[2].path,
+      projects: [entries[2].path],
+    },
+    {
+      compilerOptions: entries[3].compilerOptions,
+      path: entries[3].path,
+      projects: [entries[3].path],
+    },
   ]);
+});
+
+test("fixture compiler options drop emit constraints while preserving checking and resolution", () => {
+  const retained = {
+    strictNullChecks: true,
+    noUncheckedIndexedAccess: true,
+    isolatedModules: true,
+    verbatimModuleSyntax: true,
+    rewriteRelativeImportExtensions: true,
+    types: ["custom"],
+    futureCheckingOption: true,
+  };
+  const emitted = {
+    composite: true,
+    declaration: true,
+    declarationDir: "./declarations",
+    declarationMap: true,
+    emitDeclarationOnly: true,
+    outDir: "./output",
+    outFile: "./bundle.js",
+    rootDir: "./src",
+    sourceMap: true,
+    inlineSourceMap: true,
+    inlineSources: true,
+    incremental: true,
+    tsBuildInfoFile: "./build.tsbuildinfo",
+    noEmitOnError: true,
+    importHelpers: true,
+    noEmitHelpers: true,
+    emitBOM: true,
+    mapRoot: "./maps",
+    sourceRoot: "./src",
+    newLine: "crlf",
+    preserveConstEnums: true,
+    removeComments: true,
+    stripInternal: true,
+    downlevelIteration: true,
+    isolatedDeclarations: true,
+    noEmit: false,
+  };
+  expect(
+    fixtureCompilerOptions({
+      configPath: "/repo/leaf/tsconfig.json",
+      compilerOptions: {
+        ...retained,
+        ...emitted,
+        paths: { "@/*": ["./src/*"] },
+        rootDirs: ["./src"],
+        typeRoots: ["./types"],
+      },
+    }),
+  ).toEqual({
+    ...retained,
+    noEmit: true,
+    paths: { "@/*": ["/repo/leaf/src/*"] },
+    rootDirs: ["/repo/leaf/src"],
+    typeRoots: ["/repo/leaf/types"],
+  });
 });
 
 const compilerPolicy = {

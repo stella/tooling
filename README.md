@@ -75,7 +75,9 @@ with a clear error until that script is renamed. Standalone `bun --check`
 checks the current project but does not forward these checker options.
 Repositories with project references use build mode on both sides. Referenced
 configs are discovered recursively and grouped by effective compiler options.
-Each group runs the seeded set under a representative leaf config and must
+Each group copies its representative config's effective options, removes emit-only
+and build settings, and sets `noEmit` for the seeded projects. Type-checking options
+and consumer type/module resolution are preserved. Each group must
 activate at least one seeded class. The installed compiler and Bun runtime must match their selected toolchain policy versions.
 Consumer build-info files are restored after the TypeScript baseline; tagged agent diagnostics
 are normalized into the same comparison set.
