@@ -1,3 +1,4 @@
+import { cloudSetupPath } from "./cloud-setup";
 import {
   isComposeDefinitionPath,
   isKubernetesDefinitionPath,
@@ -63,6 +64,7 @@ export const isDockerDefinitionPath = (file: string) => {
 
 /** Lockfiles establish ecosystem presence without reading their dependency graphs. */
 export const toolchainInputKind = (file: string) => {
+  if (file === cloudSetupPath) return "config";
   if (githubAutomationFileKind(file) !== undefined) return "config";
   if (excludedInputPath(file)) return undefined;
   if (

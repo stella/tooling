@@ -25,9 +25,7 @@
   "typescript6Compatibility": {
     "version": "6.0.3",
     "packageAlias": "typescript-compat",
-    "apiConsumers": [
-      "TypeScript compiler API"
-    ],
+    "apiConsumers": ["TypeScript compiler API"],
     "peerBlockers": [
       "@astrojs/check",
       "@typescript-eslint/utils",
@@ -37,6 +35,30 @@
   "@stll/oxlint-plugin": "0.2.2",
   "lefthook": "2.1.16",
   "node": "26.x",
+  "postgres": "18",
+  "valkey": "9.1.1",
+  "valkeyArtifacts": {
+    "amd64": {
+      "server": {
+        "url": "https://download.valkey.io/packaging/valkey-9.1/deb/ubuntu2404/amd64/valkey-server_9.1.1-1.noble_amd64.deb",
+        "sha256": "16ca970c38e4e2418af1afe747670705e0b5ed3db0eab2ee520b8353b6f726bb"
+      },
+      "tools": {
+        "url": "https://download.valkey.io/packaging/valkey-9.1/deb/ubuntu2404/amd64/valkey-tools_9.1.1-1.noble_amd64.deb",
+        "sha256": "720ca11310e7e6597235b62d0d64ea021b9c94c1bb3e3d449855f6e108736f1c"
+      }
+    },
+    "arm64": {
+      "server": {
+        "url": "https://download.valkey.io/packaging/valkey-9.1/deb/ubuntu2404/arm64/valkey-server_9.1.1-1.noble_arm64.deb",
+        "sha256": "9fc0bd40755b4fde1409e4b4a2a3f0559a1ee74a064756049221a7fc1396840a"
+      },
+      "tools": {
+        "url": "https://download.valkey.io/packaging/valkey-9.1/deb/ubuntu2404/arm64/valkey-tools_9.1.1-1.noble_arm64.deb",
+        "sha256": "e82b58bd17adc215dcc1d079a0f761e57a0f7427171af252a0c636e776131d8a"
+      }
+    }
+  },
   "python": "3.13",
   "rust": "1.96.0",
   "actions": {
@@ -93,13 +115,8 @@
     },
     "groups": {
       "dependencies": {
-        "patterns": [
-          "*"
-        ],
-        "updateTypes": [
-          "minor",
-          "patch"
-        ]
+        "patterns": ["*"],
+        "updateTypes": ["minor", "patch"]
       }
     }
   },

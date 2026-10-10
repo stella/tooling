@@ -11,8 +11,66 @@ export const packagePinKeys = [
   "lefthook",
 ] as const;
 
+export const valkeyArchitectures = ["amd64", "arm64"] as const;
+export const valkeyArtifactPackages = {
+  server: "valkey-server",
+  tools: "valkey-tools",
+} as const;
+
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+const artifactRecord = (value: unknown, keys: readonly string[]) => {
+  if (
+    !record(value) ||
+    Object.keys(value).some((key) => !keys.includes(key)) ||
+    keys.some((key) => !Object.hasOwn(value, key))
+  )
+    throw new Error(
+      "valkeyArtifacts requires complete, closed artifact objects",
+    );
+  return value;
+};
+
+const parseValkeyArtifacts = (input: unknown, version: string) => {
+  const architectures = artifactRecord(input, valkeyArchitectures);
+  const line = version.split(".").slice(0, 2).join(".");
+  const parseArchitecture = (
+    architecture: (typeof valkeyArchitectures)[number],
+  ) => {
+    const packages = artifactRecord(
+      architectures[architecture],
+      Object.keys(valkeyArtifactPackages),
+    );
+    const parseArtifact = (kind: keyof typeof valkeyArtifactPackages) => {
+      const artifact = artifactRecord(packages[kind], ["url", "sha256"]);
+      const url = artifact["url"];
+      const sha256 = artifact["sha256"];
+      const expected = `https://download.valkey.io/packaging/valkey-${line}/deb/ubuntu2404/${architecture}/${valkeyArtifactPackages[kind]}_${version}-1.noble_${architecture}.deb`;
+      if (typeof url !== "string" || url !== expected)
+        throw new Error(
+          "valkeyArtifacts URL must select the exact official versioned Ubuntu artifact",
+        );
+      if (typeof sha256 !== "string" || !/^[a-f0-9]{64}$/.test(sha256))
+        throw new Error("valkeyArtifacts requires a lowercase SHA256 pin");
+      return { url, sha256 };
+    };
+    return {
+      server: parseArtifact("server"),
+      tools: parseArtifact("tools"),
+    } satisfies Record<
+      keyof typeof valkeyArtifactPackages,
+      ReturnType<typeof parseArtifact>
+    >;
+  };
+  return {
+    amd64: parseArchitecture("amd64"),
+    arm64: parseArchitecture("arm64"),
+  } satisfies Record<
+    (typeof valkeyArchitectures)[number],
+    ReturnType<typeof parseArchitecture>
+  >;
+};
 
 /** Reject unsupported or incomplete installed policies before inspecting a consumer. */
 export const parseToolchainPolicy = (input: unknown) => {
@@ -30,6 +88,8 @@ export const parseToolchainPolicy = (input: unknown) => {
   const typescript = string(input, "typescript");
   const node = string(input, "node");
   const python = string(input, "python");
+  const postgres = string(input, "postgres");
+  const valkey = string(input, "valkey");
   const rust = string(input, "rust");
   const rustCompilerDevelopment = string(input, "rustCompilerDevelopment");
   for (const [name, value] of Object.entries({
@@ -39,6 +99,14 @@ export const parseToolchainPolicy = (input: unknown) => {
   }))
     if (valid(value) !== value)
       throw new Error(`toolchain.json ${name} must be an exact release`);
+  if (!/^[1-9]\d*$/.test(postgres) || !Number.isSafeInteger(Number(postgres)))
+    throw new Error("PostgreSQL must be a canonical positive major");
+  if (valid(valkey) !== valkey || !/^\d+\.\d+\.\d+$/.test(valkey))
+    throw new Error("Valkey must be an exact stable release");
+  const valkeyArtifacts = parseValkeyArtifacts(
+    input["valkeyArtifacts"],
+    valkey,
+  );
   if (!nodePolicyValid(node))
     throw new Error("Node must be a canonical major N.x series");
   if (!/^\d+\.\d+(?:\.\d+)?$/.test(python))
@@ -155,6 +223,9 @@ export const parseToolchainPolicy = (input: unknown) => {
     bun,
     typescript,
     node,
+    postgres,
+    valkey,
+    valkeyArtifacts,
     python,
     rust,
     rustCompilerDevelopment,

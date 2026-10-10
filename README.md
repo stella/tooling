@@ -105,8 +105,8 @@ foreign repositories, and traversal paths cannot supply mapped runtime files.
 
 The named rules are `bun-pins`, `package-pins`, `typescript-layout`,
 `node-engine`, `node-version`, `python-version`, `rust-version`,
-`runtime-manager`, `runtime-docker`, `runtime-workflow`, `action-pins`, and
-`dependabot-policy`. An exception requires a tracked root
+`runtime-manager`, `runtime-docker`, `runtime-workflow`, `action-pins`,
+`dependabot-policy`, and `cloud-setup-drift`. An exception requires a tracked root
 `stll-toolchain.json` listing the rule and its reason:
 
 ```json
@@ -115,7 +115,8 @@ The named rules are `bun-pins`, `package-pins`, `typescript-layout`,
 }
 ```
 
-`node-engine` is mandatory: an opt-out cannot bypass the shared Node support range.
+`node-engine` and `cloud-setup-drift` are mandatory: opt-outs cannot bypass the
+shared Node support range or generated cloud setup requirements.
 
 Unknown rules, empty reasons, duplicate rules, and malformed configurations
 fail. Opt-outs apply repository-wide to the named rule, so keep them narrow.
@@ -350,3 +351,20 @@ versions and changelogs, then `.github/workflows/publish.yml` builds the
 tarballs and delegates the hardened npm and GitHub release transaction to the
 versioned `stella/.github` contract. Package tags use the immutable
 `<name>@<version>` form.
+
+## Shared cloud setup
+
+Declare `cloud` in tracked root `stll-toolchain.json`, then run
+`bunx --no-install stll-cloud-setup` to generate `.agents/cloud-setup.sh`.
+The declaration requires `services` (any subset of `postgres` and `valkey`,
+including `[]`), `install` exactly `bun install --frozen-lockfile`, and a
+canonical repository-relative `envFile`, such as `.env.cloud`. A tracked root
+`.node-version` must select an exact stable patch within the shared Node series.
+The mandatory `cloud-setup-drift` rule compares the committed script with the
+same generator and rejects missing, changed, or undeclared scripts.
+
+The script has explicit `install` and `start` commands. It targets Ubuntu 24.04
+with root access or passwordless sudo; these are capability requirements,
+not assumptions about every cloud image. See the
+[package guide](packages/oxlint-config/README.md#shared-cloud-setup) for lifecycle
+wiring, service isolation, environment-file ownership, and host documentation.

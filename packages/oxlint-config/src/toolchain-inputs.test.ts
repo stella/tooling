@@ -214,3 +214,14 @@ test("pnpm workspace inputs use the producer's YAML filename", () => {
   for (const prefix of ["vendor", "node_modules", "nested/vendor"])
     expect(toolchainInputKind(`${prefix}/pnpm-workspace.yaml`)).toBeUndefined();
 });
+
+test("cloud script discovery reads only the canonical root script", () => {
+  expect(toolchainInputKind(".agents/cloud-setup.sh")).toBe("config");
+  for (const file of [
+    "cloud-setup.sh",
+    "tools/.agents/cloud-setup.sh",
+    ".agents/cloud-setup.sh.backup",
+    "node_modules/.agents/cloud-setup.sh",
+  ])
+    expect(toolchainInputKind(file)).toBeUndefined();
+});
