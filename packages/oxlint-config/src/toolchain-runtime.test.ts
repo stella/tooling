@@ -51,6 +51,143 @@ const check = (
   });
 };
 const workflow = (step: string) => `jobs:\n  test:\n    steps:\n${step}`;
+
+test("engine floor exceptions apply to setup steps rather than job-level uses", () => {
+  const file = ".github/workflows/ci.yml";
+  const floor = {
+    package: "packages/library",
+    workflow: file,
+    job: "node-floor",
+    range: ">=20.10.0",
+    major: 20,
+  };
+  for (const kind of ["step", "job"] as const) {
+    const exercised: string[] = [];
+    const declaration = `uses: actions/setup-node@${sha} # v5\n${kind === "step" ? "        " : "    "}with: {node-version: 20.10.0}`;
+    const source =
+      kind === "step"
+        ? `jobs:\n  node-floor:\n    steps:\n      - ${declaration}`
+        : `jobs:\n  node-floor:\n    ${declaration}`;
+    const diagnostics = checkRuntimeFile({
+      file,
+      text: source,
+      policy,
+      trackedFiles: new Set(Object.keys(files)),
+      readFile: (target) => files[target],
+      engineFloors: [floor],
+      onEngineFloor: (entry) => exercised.push(entry.job),
+    });
+    if (kind === "step") {
+      expect(diagnostics).toEqual([]);
+      expect(exercised).toEqual([floor.job]);
+    } else {
+      expect(diagnostics.some(({ rule }) => rule === "runtime-workflow")).toBe(
+        true,
+      );
+      expect(exercised).toEqual([]);
+    }
+  }
+});
+
+test("version-file diagnostics identify checkout provenance separately from missing tracked files", () => {
+  const selectors = [
+    {
+      tool: "node",
+      action: "actions/setup-node",
+      version: "v5",
+      target: ".node-version",
+      rule: "runtime-workflow",
+    },
+    {
+      tool: "python",
+      action: "actions/setup-python",
+      version: "v6",
+      target: ".python-version",
+      rule: "runtime-workflow",
+    },
+    {
+      tool: "bun",
+      action: "oven-sh/setup-bun",
+      version: "v2",
+      target: "package.json",
+      rule: "bun-pins",
+    },
+  ] as const;
+  for (const { tool, action, version, target, rule } of selectors) {
+    const setup = `      - uses: ${action}@${sha} # ${version}\n        with: {${tool}-version-file: source/${target}}`;
+    for (const checkoutRef of ["v5", "b".repeat(40)]) {
+      const diagnostics = checkRuntimeFile({
+        file: ".github/workflows/ci.yml",
+        text: workflow(
+          `      - uses: actions/checkout@${checkoutRef} # v5\n        with: {path: source}\n${setup}`,
+        ),
+        policy,
+        trackedFiles: new Set(Object.keys(files)),
+        readFile: () => {
+          throw new Error(
+            "Untrusted checkout must not read tracked selector contents",
+          );
+        },
+      });
+      const selected = diagnostics.filter((entry) => entry.rule === rule);
+      expect(selected).toHaveLength(1);
+      expect(selected.at(0)?.line).toBe(4);
+      expect(selected.at(0)?.message).toBe(
+        `setup-${tool} version-file selector cannot use this checkout: actions/checkout must use the approved action SHA`,
+      );
+      expect(diagnostics.some((entry) => entry.rule === "action-pins")).toBe(
+        true,
+      );
+    }
+    for (const [checkout, cause] of [
+      [
+        `      - uses: actions/checkout@${sha} # v5\n        if: false\n        with: {path: source}`,
+        "checkout must be unconditional",
+      ],
+      [
+        `      - uses: actions/checkout@${sha} # v5\n        with: {path: source, repository: foreign/repository}`,
+        "trusted repository source snapshot",
+      ],
+      [
+        `      - uses: actions/checkout@${sha} # v5\n        with: {path: '\${{ inputs.path }}'}`,
+        "checkout destinations must be static",
+      ],
+      [
+        `      - uses: actions/checkout@${sha} # v5\n        with: {path: source}\n      - uses: actions/checkout@${sha} # v5\n        with: {path: source}`,
+        "exactly one writer",
+      ],
+    ] as const) {
+      const selected = check(
+        ".github/workflows/ci.yml",
+        workflow(`${checkout}\n${setup}`),
+      ).filter((entry) => entry.rule === rule);
+      expect(selected).toHaveLength(1);
+      expect(selected.at(0)?.message).toContain(cause);
+      expect(selected.at(0)?.message).not.toContain("must reference a tracked");
+    }
+    const missing = check(
+      ".github/workflows/ci.yml",
+      workflow(
+        `      - uses: actions/checkout@${sha} # v5\n        with: {path: source}\n${setup.replace(`source/${target}`, `source/missing/${target}`)}`,
+      ),
+    ).filter((entry) => entry.rule === rule);
+    expect(missing).toHaveLength(1);
+    expect(missing.at(0)?.message).toContain(
+      `setup-${tool} must reference a tracked`,
+    );
+    const directMissing = checkRuntimeFile({
+      file: ".github/workflows/ci.yml",
+      text: workflow(setup.replace(`source/${target}`, target)),
+      policy,
+      trackedFiles: new Set(),
+      readFile: () => undefined,
+    }).filter((entry) => entry.rule === rule);
+    expect(directMissing).toHaveLength(1);
+    expect(directMissing.at(0)?.message).toContain(
+      `setup-${tool} must reference a tracked`,
+    );
+  }
+});
 const runtimeImageVersions = {
   node: policy.node,
   python: policy.python,

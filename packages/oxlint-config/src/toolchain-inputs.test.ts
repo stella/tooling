@@ -12,12 +12,18 @@ import {
   isDockerDefinitionPath,
   pythonDependencyManifestKind,
   isPythonDependencyManifest,
+  javascriptDependencyLockfiles,
   toolchainInputKind,
 } from "./toolchain-inputs";
 import { parseToolchainPolicy } from "./toolchain-schema";
 
 test("both input readers exclude dependency trees for every accepted input kind", () => {
-  const inputs = ["package.json", "bun.lock", "uv.lock", "pyproject.toml"];
+  const inputs = [
+    "package.json",
+    ...javascriptDependencyLockfiles,
+    "uv.lock",
+    "pyproject.toml",
+  ];
   for (const file of inputs) {
     expect(toolchainInputKind(file)).toBeDefined();
     for (const prefix of [
@@ -35,6 +41,15 @@ test("both input readers exclude dependency trees for every accepted input kind"
   expect(githubAutomationFileKind("")).toBeUndefined();
   expect(toolchainInputKind("vendor-example/package.json")).toBe("config");
   expect(githubAutomationFileKind("vendor-example/action.yml")).toBe("action");
+});
+
+test("JavaScript installation lockfiles are tracked as presence without reading dependency graphs", () => {
+  for (const file of javascriptDependencyLockfiles) {
+    expect(toolchainInputKind(file)).toBe("presence");
+    expect(toolchainInputKind(`project/${file}`)).toBe("presence");
+  }
+  for (const file of ["unrelated.lock", "pnpm-lock.yml", "package-lock.txt"])
+    expect(toolchainInputKind(file)).not.toBe("presence");
 });
 
 test("tracked executable action metadata remains discoverable under dependency-named directories", () => {
@@ -185,8 +200,21 @@ test("pnpm workspace inputs use the producer's YAML filename", () => {
       expect(
         containerDocumentImages({ packages: ["packages/*"] }, file),
       ).toBeUndefined();
+      const files: Record<string, string> = {
+        [file]: 'packages: ["packages/*"]',
+        [member]: JSON.stringify({ name: "workspace-member", private: true }),
+      };
+      if (extension === "yaml") {
+        files[`${prefix}package.json`] = JSON.stringify({
+          name: "workspace-root",
+          private: true,
+        });
+        files[`${prefix}bun.lock`] = "";
+      } else {
+        files[`${prefix}packages/app/bun.lock`] = "";
+      }
       const generated = generateDependabotConfig({
-        files: { [file]: 'packages: ["packages/*"]', [member]: "{}" },
+        files,
         policy,
       });
       expect(parseDocument(generated).getIn(["updates", 0, "directory"])).toBe(

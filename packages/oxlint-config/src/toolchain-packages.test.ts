@@ -909,6 +909,397 @@ describe("shared package pins", () => {
 });
 
 describe("TypeScript install layouts", () => {
+  test("exact member compatibility entries may span dependency, development and peer sections", () => {
+    const sections = ["dependencies", "devDependencies", "peerDependencies"];
+    const split = {
+      "@typescript/native": "npm:typescript@7.0.2",
+      typescript: "6.0.3",
+    };
+    for (const first of sections)
+      for (const second of sections) {
+        const member = {
+          [first]: { typescript: "6.0.3" },
+          [second]: { typescript: "6.0.3" },
+        };
+        const files = {
+          "package.json": json({
+            workspaces: ["packages/*"],
+            devDependencies: split,
+          }),
+          "packages/api/package.json": json(member),
+        };
+        expect(check(files)).toEqual([]);
+        for (const mutation of [
+          { ...member, optionalDependencies: { typescript: "6.0.3" } },
+          { ...member, [second]: { typescript: "6.0.2" } },
+          {
+            ...member,
+            peerDependencies: { "@typescript/native": "npm:typescript@7.0.2" },
+          },
+        ])
+          expect(
+            check({
+              ...files,
+              "packages/api/package.json": json(mutation),
+            }).some(
+              ({ rule, path: file }) =>
+                rule === "typescript-layout" &&
+                file === "packages/api/package.json",
+            ),
+          ).toBe(true);
+      }
+    expect(
+      check({
+        "package.json": json({
+          workspaces: ["packages/*"],
+          devDependencies: split,
+        }),
+        "packages/api/package.json": json(
+          Object.fromEntries(
+            sections.map((section) => [section, { typescript: "6.0.3" }]),
+          ),
+        ),
+      }),
+    ).toEqual([]);
+  });
+  test("peer ranges declare compiler support without installing a toolchain", () => {
+    for (const range of [">=6.0.3 <8", "^7", "7", "*", "6.0.3 || 7.0.2"])
+      expect(
+        manifest({
+          name: "@example/typescript-config",
+          peerDependencies: { typescript: range },
+        }),
+      ).toEqual([]);
+    for (const range of [
+      "^6",
+      ">=8",
+      "<7.0.2",
+      ">7.0.2",
+      "latest",
+      "npm:typescript@^7",
+      7,
+    ])
+      expect(
+        manifest({ peerDependencies: { typescript: range } }).some(
+          ({ rule }) => rule === "typescript-layout",
+        ),
+      ).toBe(true);
+    for (const range of ["^7", ">=7 <8", "*"])
+      expect(
+        manifest({ peerDependencies: { "@typescript/native": range } }),
+      ).toEqual([]);
+    expect(
+      manifest({ peerDependencies: { "@typescript/native": "^6" } }),
+    ).not.toEqual([]);
+    // An exact peer version remains a dependency contract, not a support range.
+    for (const version of ["6.0.3", "7.0.2"])
+      expect(
+        manifest({ peerDependencies: { typescript: version } }),
+      ).not.toEqual([]);
+  });
+  test("selected split peer support ranges include both compiler and compatibility releases", () => {
+    const split = {
+      "@typescript/native": "npm:typescript@7.0.2",
+      typescript: "6.0.3",
+    };
+    for (const range of [
+      ">=6.0.3 <8",
+      "6.0.3 || 7.0.2",
+      "*",
+      "^7",
+      ">=6.0.4 <8",
+      "^6",
+    ])
+      for (const context of ["local", "workspace"]) {
+        const member = {
+          peerDependencies: { typescript: range },
+          ...(context === "local" ? { devDependencies: split } : {}),
+        };
+        const diagnostics = check(
+          context === "local"
+            ? { "package.json": json(member) }
+            : {
+                "package.json": json({
+                  workspaces: ["packages/*"],
+                  devDependencies: split,
+                }),
+                "packages/api/package.json": json(member),
+              },
+        );
+        if ([">=6.0.3 <8", "6.0.3 || 7.0.2", "*"].includes(range))
+          expect(diagnostics).toEqual([]);
+        else
+          expect(diagnostics).toMatchObject([
+            {
+              rule: "typescript-layout",
+              message: expect.stringContaining("peer support range"),
+            },
+          ]);
+      }
+    expect(
+      manifest({
+        devDependencies: { typescript: "7.0.2" },
+        peerDependencies: { typescript: "^7" },
+      }),
+    ).toEqual([]);
+    expect(
+      check({
+        "package.json": json({
+          workspaces: ["packages/*"],
+          devDependencies: { "@typescript/native": "npm:typescript@7.0.2" },
+        }),
+        "packages/api/package.json": json({
+          peerDependencies: { typescript: ">=6.0.3 <8" },
+        }),
+      }),
+    ).toMatchObject([{ rule: "typescript-layout", path: "package.json" }]);
+  });
+  test("workspace runtime and peer compiler APIs use the repository split devtoolchain", () => {
+    const root = {
+      private: true,
+      workspaces: ["packages/*"],
+      devDependencies: {
+        "@typescript/native": "npm:typescript@7.0.2",
+        typescript: "6.0.3",
+      },
+    };
+    for (const section of ["dependencies", "peerDependencies"])
+      for (const privatePackage of [true, false]) {
+        const member = {
+          name: "@example/compiler-api",
+          version: "1.0.0",
+          private: privatePackage,
+          [section]: { typescript: "6.0.3" },
+        };
+        expect(
+          check({
+            "package.json": json(root),
+            "packages/rules/package.json": json(member),
+          }),
+        ).toEqual([]);
+        for (const version of [
+          "6.0.2",
+          "^6.0.3",
+          "npm:typescript@6.0.3",
+          "8.0.0",
+        ])
+          expect(
+            check({
+              "package.json": json(root),
+              "packages/rules/package.json": json({
+                ...member,
+                [section]: { typescript: version },
+              }),
+            }).some(
+              ({ rule, path: file }) =>
+                rule === "typescript-layout" &&
+                file === "packages/rules/package.json",
+            ),
+          ).toBe(true);
+      }
+    for (const member of [
+      { optionalDependencies: { typescript: "6.0.3" } },
+      {
+        dependencies: { typescript: "6.0.3" },
+        devDependencies: { "@typescript/native": "npm:typescript@7.0.2" },
+        peerDependencies: { typescript: "7.0.2" },
+      },
+      {
+        dependencies: { typescript: "6.0.3" },
+        peerDependencies: { typescript: "^6.0.3" },
+      },
+      { peerDependencies: { typescript: "7.0.2" } },
+      {
+        peerDependencies: {
+          "@typescript/native": "npm:typescript@7.0.2",
+          typescript: "6.0.3",
+        },
+      },
+    ])
+      expect(
+        check({
+          "package.json": json(root),
+          "packages/rules/package.json": json(member),
+        }).some(
+          ({ rule, path: file }) =>
+            rule === "typescript-layout" &&
+            file === "packages/rules/package.json",
+        ),
+      ).toBe(true);
+    expect(
+      check({
+        "package.json": json(root),
+        "packages/rules/package.json": json({
+          dependencies: { typescript: "6.0.3" },
+          peerDependencies: { typescript: "6.0.3" },
+        }),
+      }),
+    ).toEqual([]);
+  });
+  test("workspace devDependencies complete one unambiguous repository toolchain", () => {
+    for (const workspaces of [["packages/*"], { packages: ["packages/*"] }]) {
+      const files = {
+        "package.json": json({
+          workspaces,
+          devDependencies: { "@typescript/native": "npm:typescript@7.0.2" },
+        }),
+        "packages/toolchain/package.json": json({
+          devDependencies: { typescript: "6.0.3" },
+        }),
+        "packages/api/package.json": json({
+          dependencies: { typescript: "6.0.3" },
+        }),
+      };
+      expect(check(files)).toEqual([]);
+      expect(
+        check({
+          ...files,
+          "packages/toolchain/package.json": json({
+            devDependencies: {
+              typescript: "6.0.3",
+              "typescript-compat": "npm:typescript@6.0.3",
+            },
+          }),
+        }),
+      ).toEqual([]);
+      for (const mutation of [
+        { "packages/toolchain/package.json": json({}) },
+        {
+          "packages/toolchain/package.json": json({
+            dependencies: { typescript: "6.0.3" },
+          }),
+        },
+        {
+          "packages/toolchain/package.json": json({
+            devDependencies: { typescript: "7.0.2" },
+          }),
+        },
+        {
+          "packages/other/package.json": json({
+            devDependencies: { typescript: "7.0.2" },
+          }),
+        },
+      ])
+        expect(
+          check({ ...files, ...mutation }).some(
+            ({ rule, path: file }) =>
+              rule === "typescript-layout" &&
+              file === "packages/api/package.json",
+          ),
+        ).toBe(true);
+    }
+    expect(
+      check({
+        "package.json": json({}),
+        "pnpm-workspace.yaml": stringify({
+          packages: ["packages/*"],
+          catalog: {
+            typescript: "6.0.3",
+            "@typescript/native": "npm:typescript@7.0.2",
+          },
+        }),
+        "packages/compiler/package.json": json({
+          devDependencies: { "@typescript/native": "catalog:" },
+        }),
+        "packages/compat/package.json": json({
+          devDependencies: { typescript: "catalog:" },
+        }),
+        "packages/api/package.json": json({
+          peerDependencies: { typescript: "catalog:" },
+        }),
+      }),
+    ).toEqual([]);
+  });
+  test("inherited layouts retain compiler command enforcement and exclude nonmember devtools", () => {
+    const native = "npm:typescript@7.0.2";
+    const root = {
+      workspaces: ["packages/*", "!packages/excluded"],
+      devDependencies: { "@typescript/native": native },
+    };
+    for (const command of [
+      "node ./node_modules/@typescript/native/bin/tsc --noEmit",
+      "tsc --noEmit",
+    ]) {
+      const diagnostics = check({
+        "package.json": json(root),
+        "packages/api/package.json": json({
+          devDependencies: { typescript: "6.0.3" },
+          scripts: { typecheck: command },
+        }),
+      });
+      if (command.startsWith("node ")) expect(diagnostics).toEqual([]);
+      else
+        expect(diagnostics).toMatchObject([
+          { rule: "typescript-layout", path: "packages/api/package.json" },
+        ]);
+    }
+    for (const memberPath of [
+      "packages/excluded/package.json",
+      "standalone/package.json",
+      "packages/nested/apps/compat/package.json",
+    ])
+      expect(
+        check({
+          "package.json": json(root),
+          "packages/nested/package.json": json({ workspaces: ["apps/*"] }),
+          [memberPath]: json({ devDependencies: { typescript: "6.0.3" } }),
+          "packages/api/package.json": json({
+            dependencies: { typescript: "6.0.3" },
+          }),
+        }).some(
+          ({ rule, path: file }) =>
+            rule === "typescript-layout" &&
+            file === "packages/api/package.json",
+        ),
+      ).toBe(true);
+  });
+  test("runtime compatibility cannot borrow an excluded, standalone or nested toolchain", () => {
+    const api = json({ dependencies: { typescript: "6.0.3" } });
+    const split = {
+      "@typescript/native": "npm:typescript@7.0.2",
+      typescript: "6.0.3",
+    };
+    const files = {
+      "package.json": json({
+        workspaces: ["packages/**", "!packages/excluded"],
+        devDependencies: split,
+      }),
+      "packages/included/package.json": api,
+      "packages/excluded/package.json": api,
+      "standalone/package.json": api,
+      "packages/nested/package.json": json({ workspaces: ["apps/*"] }),
+      "packages/nested/apps/api/package.json": api,
+    };
+    const diagnostics = check(files);
+    expect(diagnostics.map(({ path: file }) => file).sort()).toEqual([
+      "packages/excluded/package.json",
+      "packages/nested/apps/api/package.json",
+      "standalone/package.json",
+    ]);
+    expect(manifest({ dependencies: { typescript: "6.0.3" } })).not.toEqual([]);
+    expect(
+      check({
+        "package.json": json({
+          workspaces: ["packages/*"],
+          dependencies: split,
+        }),
+        "packages/api/package.json": api,
+      }),
+    ).toMatchObject([
+      { rule: "typescript-layout", path: "packages/api/package.json" },
+    ]);
+    expect(
+      check({
+        "package.json": json({
+          workspaces: ["packages/*"],
+          devDependencies: { typescript: "7.0.2" },
+        }),
+        "packages/api/package.json": api,
+      }),
+    ).toMatchObject([
+      { rule: "typescript-layout", path: "packages/api/package.json" },
+    ]);
+  });
   test("split compiler scripts select the declared current compiler", () => {
     const dependencies = {
       "@typescript/native": "npm:typescript@7.0.2",

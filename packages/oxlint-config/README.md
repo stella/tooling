@@ -95,6 +95,30 @@ The series policy accepts that patch without weakening release validation.
 GitHub JavaScript action host runtimes (`runs.using`) are platform-managed
 and do not select the project toolchain Node version.
 
+A published package can test the minimum Node major in its `engines.node`
+support range in one declared workflow job. Add a scoped `engineFloors` entry
+to tracked root `stll-toolchain.json`:
+
+```json
+{
+  "engineFloors": [
+    {
+      "package": "packages/library",
+      "workflow": ".github/workflows/ci.yml",
+      "job": "node-floor"
+    }
+  ]
+}
+```
+
+That job may use a literal exact stable patch in setup-node's `node-version`
+whose major matches the range's minimum major and whose release satisfies
+the range (for example, `20.10.0` for `>=20.10.0`). The approved action SHA, version comment and input validation
+also apply. Other jobs and runtime files follow the shared Node series.
+Missing packages or jobs, private packages, absent setup-node selectors and
+floor mismatches fail configuration validation. `optOuts` is optional when
+only `engineFloors` is declared.
+
 Run the installed checker from the repository root in CI:
 
 ```sh
@@ -119,6 +143,19 @@ rule and a nonempty reason:
   "optOuts": [{ "rule": "bun-pins", "reason": "This repository uses npm." }]
 }
 ```
+
+Workspace TypeScript toolchains combine the root and declared members' devDependencies.
+An included member may declare the exact TypeScript 6 compatibility API across
+dependencies, devDependencies, and peerDependencies when that shared install uses
+the complete split layout. Ambiguous or partial layouts do not grant this allowance.
+Peer ranges declare support: they must include the policy compiler release and the
+compatibility release when the selected layout uses it. Ranges do not contribute
+to the installed compiler inventory.
+
+JavaScript update roots come from the repository root, declared workspace membership,
+and directories with their own `bun.lock`, `package-lock.json`, `yarn.lock`, or
+`pnpm-lock.yaml`. Other package manifests do not create update roots; directory names
+have no special meaning. Workspace members share their owner's update entry.
 
 `node-engine` and `cloud-setup-drift` are mandatory: opt-outs cannot bypass the
 shared Node support range or generated cloud setup requirements.

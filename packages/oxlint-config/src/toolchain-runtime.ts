@@ -15,6 +15,10 @@ import {
   isComposeDefinitionPath,
   isKubernetesDefinitionPath,
 } from "./toolchain-container-inputs";
+import {
+  engineFloorSelectorMatches,
+  type ResolvedEngineFloor,
+} from "./toolchain-engine-floors";
 import { canonicalDockerRuntime } from "./toolchain-images";
 import {
   githubAutomationFileKind,
@@ -70,6 +74,10 @@ type CheckRuntimeFileOptions = {
   readFile: (file: string) => string | undefined;
   repository?: string | undefined;
   onDelegated?: ((report: RuntimeDelegation) => void) | undefined;
+  engineFloors?: readonly ResolvedEngineFloor[] | undefined;
+  onEngineFloor?:
+    | ((floor: ResolvedEngineFloor, status: "matched" | "mismatch") => void)
+    | undefined;
 };
 
 const record = (value: unknown): value is Record<string, unknown> =>
@@ -209,6 +217,8 @@ export const checkRuntimeFile = ({
   readFile,
   repository,
   onDelegated,
+  engineFloors = [],
+  onEngineFloor,
 }: CheckRuntimeFileOptions): RuntimeDiagnostic[] => {
   const diagnostics: RuntimeDiagnostic[] = [];
   const name = path.posix.basename(file);
@@ -792,7 +802,8 @@ export const checkRuntimeFile = ({
     | { mode: "files"; paths: ReadonlySet<string> }
     | { mode: "invalid" };
   type CheckoutBinding = { path: string; sparse: SparseCheckout } & (
-    | { source: "tracked" | "untrusted" }
+    | { source: "tracked" }
+    | { source: "untrusted"; reason: string; line: number }
     | { source: "delegated"; ref: string }
   );
   let checkoutBindings: CheckoutBinding[] = [];
@@ -833,27 +844,44 @@ export const checkRuntimeFile = ({
               selector === entry.path ||
               selector.startsWith(`${entry.path}/`),
           );
-    let target: string | undefined;
+    if (selector === undefined) {
+      add({
+        rule,
+        line,
+        message: `setup-${tool} must reference a tracked ${allowed.join(" or ")}`,
+      });
+      return;
+    }
     if (
-      !(
-        selector === undefined ||
-        unknownCheckoutDestination ||
-        binding?.source === "untrusted" ||
-        [...checkoutDestinations].some(
-          ([prefix, count]) =>
-            count > 1 &&
-            (prefix === "." ||
-              selector === prefix ||
-              selector.startsWith(`${prefix}/`)),
-        )
+      unknownCheckoutDestination ||
+      [...checkoutDestinations].some(
+        ([prefix, count]) =>
+          count > 1 &&
+          (prefix === "." ||
+            selector === prefix ||
+            selector.startsWith(`${prefix}/`)),
       )
-    )
-      target =
-        binding === undefined || binding.path === "."
-          ? selector
-          : path.posix.relative(binding.path, selector);
+    ) {
+      add({
+        rule,
+        line,
+        message: `setup-${tool} version-file selector has untrusted checkout provenance: checkout destinations must be static and have exactly one writer`,
+      });
+      return;
+    }
+    if (binding?.source === "untrusted") {
+      add({
+        rule,
+        line: binding.line,
+        message: `setup-${tool} version-file selector cannot use this checkout: ${binding.reason}`,
+      });
+      return;
+    }
+    const target =
+      binding === undefined || binding.path === "."
+        ? selector
+        : path.posix.relative(binding.path, selector);
     if (
-      target === undefined ||
       !allowed.includes(path.posix.basename(target)) ||
       (binding?.source !== "delegated" && !trackedFiles.has(target))
     ) {
@@ -876,7 +904,7 @@ export const checkRuntimeFile = ({
       });
       return;
     }
-    if (binding?.source === "delegated" && selector !== undefined) {
+    if (binding?.source === "delegated") {
       onDelegated?.({
         path: file,
         line,
@@ -1090,6 +1118,7 @@ export const checkRuntimeFile = ({
       return { mode: "invalid" };
     return { mode: "files", paths: new Set(paths) };
   };
+  let currentEngineFloor: ResolvedEngineFloor | undefined;
   const checkAction = (node: unknown) => {
     node = resolveNode(node);
     if (!isMap(node)) return;
@@ -1247,6 +1276,8 @@ export const checkRuntimeFile = ({
         checkoutBindings.push({
           path: ".",
           source: "untrusted",
+          reason: "checkout destination must be a static repository path",
+          line,
           sparse: { mode: "invalid" },
         });
       } else {
@@ -1264,15 +1295,36 @@ export const checkRuntimeFile = ({
             source: "delegated",
             ref: refValue,
           });
-        else
+        else if (trustedWriter && (workflowSource || currentSource))
           checkoutBindings.push({
             path: destination,
             sparse: sparseCheckoutOf(node),
-            source:
-              trustedWriter && (workflowSource || currentSource)
-                ? "tracked"
-                : "untrusted",
+            source: "tracked",
           });
+        else {
+          let reason =
+            "checkout does not select a trusted repository source snapshot";
+          if (ref !== approved?.sha)
+            reason = "actions/checkout must use the approved action SHA";
+          else if (
+            sourceMap({ node, key: "if" }) !== undefined ||
+            sourceMap({ node, key: "continue-on-error" }) !== undefined
+          )
+            reason =
+              "checkout must be unconditional and omit continue-on-error";
+          else if (
+            checkoutDestinations.get(destination) !== 1 ||
+            unknownCheckoutDestination
+          )
+            reason = "checkout destination must have exactly one static writer";
+          checkoutBindings.push({
+            path: destination,
+            sparse: sparseCheckoutOf(node),
+            source: "untrusted",
+            reason,
+            line,
+          });
+        }
       }
     }
     let tool: RuntimeDelegation["tool"];
@@ -1290,6 +1342,24 @@ export const checkRuntimeFile = ({
         return;
     }
     const literal = getInput(node, `${tool}-version`);
+    if (tool === "node" && currentEngineFloor !== undefined) {
+      const reference = getInput(node, "node-version-file");
+      if (
+        reference === undefined &&
+        isScalar(literal) &&
+        engineFloorSelectorMatches(literal.value, currentEngineFloor)
+      ) {
+        onEngineFloor?.(currentEngineFloor, "matched");
+        return;
+      }
+      onEngineFloor?.(currentEngineFloor, "mismatch");
+      add({
+        rule: "runtime-workflow",
+        line: nodeLine(literal ?? reference ?? uses),
+        message: `engine floor job must select an exact Node patch satisfying ${currentEngineFloor.range} with minimum major ${currentEngineFloor.major}`,
+      });
+      return;
+    }
     if (literal !== undefined)
       add({
         rule: tool === "bun" ? "bun-pins" : "runtime-workflow",
@@ -1313,7 +1383,8 @@ export const checkRuntimeFile = ({
       label: "container image",
     });
   };
-  const checkSteps = (node: unknown) => {
+  const checkSteps = (node: unknown, floor?: ResolvedEngineFloor) => {
+    currentEngineFloor = undefined;
     checkoutBindings = [];
     checkoutDestinations = new Map();
     unknownCheckoutDestination = false;
@@ -1338,7 +1409,12 @@ export const checkRuntimeFile = ({
         (checkoutDestinations.get(destination) ?? 0) + 1,
       );
     }
-    for (const step of node.items) checkAction(step);
+    currentEngineFloor = floor;
+    try {
+      for (const step of node.items) checkAction(step);
+    } finally {
+      currentEngineFloor = undefined;
+    }
   };
   try {
     // Resolve aliases first with an expansion bound before visiting executable fields.
@@ -1350,6 +1426,7 @@ export const checkRuntimeFile = ({
           checkoutBindings = [];
           checkoutDestinations = new Map();
           unknownCheckoutDestination = false;
+          currentEngineFloor = undefined;
           const job = getNode(jobs, key);
           checkAction(job);
           checkContainer(getNode(job, "container"));
@@ -1357,7 +1434,10 @@ export const checkRuntimeFile = ({
           if (isMap(services))
             for (const service of keysOf(services))
               checkContainer(getNode(services, service));
-          checkSteps(getNode(job, "steps"));
+          checkSteps(
+            getNode(job, "steps"),
+            engineFloors.find((entry) => entry.job === key),
+          );
         }
     } else {
       const runs = getNode(document.contents, "runs");
