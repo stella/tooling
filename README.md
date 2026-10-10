@@ -471,7 +471,8 @@ minimum-supported-major contract.
 --fixture-path tests/consumer` tests final tarballs in isolated projects with both
 npm and pnpm. The repository builds once with its development toolchain first.
 Workspace protocols are resolved by the package manager before `npm pack` creates
-the final artifact; both consumers install those artifacts. The runner verifies
+the final artifact; both consumers install those artifacts. Workspace alias
+specifiers are unsupported: use the package name as the dependency key. The runner verifies
 the official Node archive checksum and exact runtime/package-manager versions,
 uses the oldest published React satisfying the package peer range, typechecks with
 the consumer TypeScript, and runs each fixture's build and usage smoke.

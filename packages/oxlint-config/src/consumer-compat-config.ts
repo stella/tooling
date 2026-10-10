@@ -343,6 +343,10 @@ export const consumerPackageClosure = (
         const local = packages.get(name);
         if (typeof specifier !== "string")
           throw new Error(`invalid package dependency: ${pkg.name} -> ${name}`);
+        if (/^workspace:(?:@[^/@]+\/)?[^/@]+@/.test(specifier))
+          throw new Error(
+            `workspace alias specifiers are not supported by consumer-compat: ${name} -> ${specifier}; use the package name as the dependency key`,
+          );
         if (/^(?:file:|link:)/.test(specifier))
           throw new Error(
             `published local dependencies must use workspace protocol: ${pkg.name} -> ${name}`,

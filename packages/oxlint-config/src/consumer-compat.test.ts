@@ -337,6 +337,24 @@ describe("consumer compatibility declarations", () => {
     ).toThrow("unresolved workspace dependency");
   });
 
+  test("workspace aliases fail with a package-name migration instruction", () => {
+    const core = {
+      name: "@example/core",
+      directory: "packages/core",
+      manifest: { version: "1.0.0" },
+    };
+    const pkg = {
+      name: "library",
+      directory: ".",
+      manifest: { dependencies: { alias: "workspace:@example/core@*" } },
+    };
+    expect(() =>
+      consumerPackageClosure(pkg, new Map([[core.name, core]])),
+    ).toThrow(
+      "workspace alias specifiers are not supported by consumer-compat: alias -> workspace:@example/core@*; use the package name as the dependency key",
+    );
+  });
+
   test("selects the oldest actual published version across the entire peer range", () => {
     const versions = ["19.0.0", "18.0.0", "17.0.2", "18.0.0-rc.0", "17.0.1"];
     expect(oldestPublishedConsumerVersion(versions, ">=17.0.0 <20")).toBe(
