@@ -354,24 +354,25 @@ export const fixtureParity = (options: FixtureParityOptions) => {
       resolve(options.repo ?? process.cwd(), file),
     ),
   );
-  const seededCodes = diagnosticSet(
-    baseline.output,
-    options.repo ?? process.cwd(),
-  ).flatMap((diagnostic) => {
-    const match = /^(.*):[0-9]+:([0-9]+)$/.exec(diagnostic);
-    const file = match?.at(1);
-    const code = match?.at(2);
-    return file !== undefined &&
-      code !== undefined &&
-      seedFiles.has(resolve(options.repo ?? process.cwd(), file))
-      ? [Number(code)]
-      : [];
-  });
+  const seededCodes = new Set(
+    diagnosticSet(baseline.output, options.repo ?? process.cwd()).flatMap(
+      (diagnostic) => {
+        const diagnosticMatch = /^(.*):[0-9]+:([0-9]+)$/.exec(diagnostic);
+        const file = diagnosticMatch?.at(1);
+        const code = diagnosticMatch?.at(2);
+        return file !== undefined &&
+          code !== undefined &&
+          seedFiles.has(resolve(options.repo ?? process.cwd(), file))
+          ? [Number(code)]
+          : [];
+      },
+    ),
+  );
   const active =
     expected.length > 0 &&
     (match === "any"
-      ? expected.some((code) => seededCodes.includes(code))
-      : expected.every((code) => seededCodes.includes(code)));
+      ? expected.some((code) => seededCodes.has(code))
+      : expected.every((code) => seededCodes.has(code)));
   const validExits =
     baseline.status !== null &&
     candidate.status !== null &&
