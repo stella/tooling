@@ -139,6 +139,12 @@ export const parseChangedJson = (text: string): unknown => {
   return JSON.parse(result);
 };
 
+export const changedYarnSelectors = (location: string) =>
+  location
+    .replace(/"/g, "")
+    .split(/,\s*/)
+    .map((selector) => selector.trim());
+
 export type ChangedLockSourceProof =
   | { type: "registry" }
   | { type: "immutable"; identity: string }
@@ -489,7 +495,7 @@ export const parseChangedLock = ({
       throw new Error("Unsupported Yarn lockfile shape");
     for (const [location, metadata] of Object.entries(parsed)) {
       if (location === "__metadata") continue;
-      const selectors = location.replace(/"/g, "").split(/,\s*/);
+      const selectors = changedYarnSelectors(location);
       const descriptors = selectors
         .map(packageDescriptor)
         .filter((item) => item !== undefined);
@@ -535,7 +541,7 @@ export const parseChangedLock = ({
           name,
           version: metadata["version"],
           dependency,
-          location,
+          location: selectors.join(", "),
           raw: { selectors, metadata },
         });
       }

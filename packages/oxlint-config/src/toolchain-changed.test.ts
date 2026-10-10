@@ -318,6 +318,49 @@ test("canonical Node runtime selectors cannot float without a setup action", asy
   }
 });
 
+test("committed quoted Yarn Classic compiler selectors bind unchanged and changed artifacts", async () => {
+  const { repo, write, commit } = fixture();
+  write("package.json", {
+    private: true,
+    packageManager: "yarn@1.22.22",
+    devDependencies: { "@types/bun": ">=1.1.0 <2", typescript: ">=7 <8" },
+  });
+  const lock = (variant: string) => {
+    const version = variant === "version" ? "1.1.1" : "1.1.0";
+    const digest = Buffer.alloc(
+      64,
+      variant === "source" ? "changed" : "same",
+    ).toString("base64");
+    const artifact = variant === "source" ? "changed" : "original";
+    return `# yarn lockfile v1\n\n"@types/bun@>=1.1.0 <2":\n  version "${version}"\n  resolved "https://example.test/bun-${artifact}.tgz"\n  integrity sha512-${digest}\n\n"typescript@>=7 <8":\n  version "7.0.2"\n  resolved "https://example.test/typescript.tgz"\n  integrity sha512-${digest}\n`;
+  };
+  write("yarn.lock", lock("original"));
+  const since = commit();
+  for (const variant of ["original", "source", "version"]) {
+    const changed = variant !== "original";
+    if (changed) {
+      write("yarn.lock", lock(variant));
+      commit();
+    }
+    expect(await detectToolchainChanges({ repo, since })).toMatchObject({
+      status: "compared",
+      changed,
+      tools: changed ? ["typescript"] : [],
+    });
+    let invocations = 0;
+    await runSelectedTypecheckParity({
+      repo,
+      since,
+      run: async () => {
+        invocations++;
+        return true;
+      },
+      output: () => {},
+    });
+    expect(invocations).toBe(changed ? 1 : 0);
+  }
+});
+
 for (const location of ["catalog", "catalogs", "workspaces", "pnpm"])
   test(`compiler catalog alias in ${location} retains patch bytes and canonical resolution`, async () => {
     const { repo, write, commit } = fixture();

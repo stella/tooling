@@ -7,6 +7,7 @@ import { parseAllDocuments, parseDocument } from "yaml";
 
 import {
   changedPackageTool,
+  changedYarnSelectors,
   changedCompilerPatches,
   changedRecord,
   parseChangedJson,
@@ -693,16 +694,18 @@ const boundResolution = ({
         ? [source[dependency]]
         : [];
     });
+    const declaredSelectors = new Set(
+      declarations.flatMap((specifier) =>
+        [
+          `${dependency}@${specifier}`,
+          `${dependency}@npm:${specifier}`,
+        ].flatMap(changedYarnSelectors),
+      ),
+    );
     const matched = candidates.filter((item) =>
-      item.location
-        .split(/,\s*/)
-        .some((selector) =>
-          declarations.some(
-            (specifier) =>
-              selector === `${dependency}@${specifier}` ||
-              selector === `${dependency}@npm:${specifier}`,
-          ),
-        ),
+      changedYarnSelectors(item.location).some((selector) =>
+        declaredSelectors.has(selector),
+      ),
     );
     if (matched.length > 0) return matched;
     throw new Error(
