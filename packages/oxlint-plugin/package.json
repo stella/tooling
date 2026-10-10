@@ -98,7 +98,7 @@
   },
   "scripts": {
     "build": "tsdown",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "bun check",
     "format": "oxfmt ."
   },
   "devDependencies": {

@@ -236,7 +236,8 @@ This repository publishes Stella shared TypeScript and oxlint configuration pack
 
 - `bun install`
 - `bun run lint`
-- `bun run typecheck`
+- `bun run typecheck` (Bun 1.4.3 `bun check`)
+- `bun run check:typecheck-parity` (seeded diagnostic comparison with TypeScript)
 - `bun test`
 - `bun run build`
 - `bun run publint`

@@ -71,6 +71,9 @@ jobs:
       - name: Registry version check
         run: bun run check:registry-versions
 
+      - name: Typecheck diagnostic parity
+        run: bun run check:typecheck-parity
+
       - name: Typecheck
         run: bun run typecheck
 

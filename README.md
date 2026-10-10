@@ -47,18 +47,21 @@ oxlint-tsgolint 0.x line.
 
 `toolchain.json` defines two supported TypeScript install layouts:
 
-- `direct` installs TypeScript 7 as `typescript` and runs the normal `tsc`
-  binary. Prefer this when every framework and compiler-API consumer supports
+- `direct` installs TypeScript 7 as `typescript` for compiler-API consumers
+  and declaration generation. Prefer this when every framework supports
   TypeScript 7.
 - `split-compatibility` keeps TypeScript 6 as `typescript` for incompatible
   compiler-API consumers, then installs TypeScript 7 as `@typescript/native`
-  and invokes that binary for typechecking.
+  for tools that explicitly require that compiler.
 
 TypeScript 6 is compatibility-only. Use the split layout only for a command
 that loads one of the peer blockers listed in `toolchain.json`, or for code
 that imports the TypeScript compiler API. Remove the compatibility install when
 the blocker accepts TypeScript 7. The shared config's peer range accepts both
-layouts; the compiler and typecheck command in each layout remain TypeScript 7.
+layouts. Both layouts use `bun check` with Bun 1.4.3 for typechecking; retain
+TypeScript wherever a tool needs its compiler API or declaration generation.
+`bun run check:typecheck-parity` compares seeded diagnostic classes against
+`tsc --noEmit` and fails if Bun loses coverage.
 
 Use the library TypeScript preset:
 
@@ -165,7 +168,7 @@ Recommended scripts:
 ```json
 {
   "scripts": {
-    "typecheck": "tsc --noEmit",
+    "typecheck": "bun check",
     "lint": "bun --bun oxlint -c oxlint.config.ts --report-unused-disable-directives-severity=error --deny-warnings --type-aware .",
     "lint:fix": "bun --bun oxlint -c oxlint.config.ts --type-aware --fix ."
   }
