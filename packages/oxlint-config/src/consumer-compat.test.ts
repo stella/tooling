@@ -19,6 +19,7 @@ import { parse, stringify } from "yaml";
 import policy from "../toolchain.json";
 import {
   consumerCommandEnvironment,
+  assertConsumerPackedNodeSupport,
   resolveInstalledManagerBin,
   consumerReservedToolBins,
   assertConsumerFixtureFiles,
@@ -506,6 +507,90 @@ describe("consumer compatibility declarations", () => {
       expect(fetchSpy).not.toHaveBeenCalled();
     } finally {
       fetchSpy.mockRestore();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+  test("source engines outside consumer Node fail before provisioning", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "consumer-engines-"));
+    const fetchSpy = spyOn(globalThis, "fetch").mockRejectedValue(
+      new Error("unexpected provisioning"),
+    );
+    try {
+      await mkdir(path.join(root, "fixtures/node"), { recursive: true });
+      await writeFile(
+        path.join(root, "fixtures/consumer-compat.json"),
+        JSON.stringify({
+          packages: [
+            {
+              package: ".",
+              fixture: "node",
+              kind: "node",
+              build: ["node", "build.cjs"],
+              smoke: ["node", "smoke.cjs"],
+            },
+          ],
+        }),
+      );
+      await writeFile(
+        path.join(root, "fixtures/node/package.json"),
+        JSON.stringify({ private: true }),
+      );
+      execFileSync("git", ["init", "-q"], { cwd: root });
+      for (const engines of [{ node: ">=24" }, { node: "invalid" }, null]) {
+        await writeFile(
+          path.join(root, "package.json"),
+          JSON.stringify({
+            name: "node-support-fixture",
+            version: "1.0.0",
+            engines,
+          }),
+        );
+        execFileSync("git", ["add", "."], { cwd: root });
+        await assert.rejects(
+          runConsumerCompat({
+            root,
+            packages: ["."],
+            consumerNode: policy.consumerNode,
+            fixturePath: "fixtures",
+            policy,
+          }),
+          /engines.node must support consumer Node/,
+        );
+      }
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+  test("packed manifests independently enforce consumer Node support", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "consumer-packed-engines-"));
+    try {
+      await mkdir(path.join(root, "package"));
+      for (const range of [undefined, ">=22", ">=24"]) {
+        await writeFile(
+          path.join(root, "package/package.json"),
+          JSON.stringify({
+            name: "packed-fixture",
+            version: "1.0.0",
+            engines: range === undefined ? undefined : { node: range },
+          }),
+        );
+        const archive = path.join(root, "fixture.tgz");
+        execFileSync("tar", ["-czf", archive, "package"], { cwd: root });
+        const run = assertConsumerPackedNodeSupport({
+          artifacts: new Map([["packed-fixture", archive]]),
+          node: policy.consumerNode,
+          directory: root,
+        });
+        if (range === ">=24")
+          await assert.rejects(
+            run,
+            /packed packed-fixture engines.node must support consumer Node/,
+          );
+        else await run;
+      }
+    } finally {
       await rm(root, { recursive: true, force: true });
     }
   });

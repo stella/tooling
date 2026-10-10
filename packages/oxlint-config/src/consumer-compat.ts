@@ -39,6 +39,7 @@ import {
   type ConsumerPackage,
 } from "./consumer-compat-config";
 import { assertConsumerInstalledToolBins } from "./consumer-installed-bins";
+import { assertConsumerNodeSupport } from "./consumer-node-support";
 import { selectConsumerReactVersions } from "./consumer-react";
 import {
   resolveConsumerReleasePack,
@@ -888,6 +889,28 @@ const runFixture = async ({
   );
 };
 
+type AssertConsumerPackedNodeSupportOptions = {
+  artifacts: Map<string, string>;
+  node: string;
+  directory: string;
+};
+export const assertConsumerPackedNodeSupport = async ({
+  artifacts,
+  node,
+  directory,
+}: AssertConsumerPackedNodeSupportOptions) => {
+  for (const [name, artifact] of artifacts) {
+    const manifest: unknown = JSON.parse(
+      await execute("tar", ["-xOf", artifact, "package/package.json"], {
+        cwd: directory,
+      }),
+    );
+    if (!consumerRecord(manifest))
+      throw new Error(`invalid packed package manifest: ${name}`);
+    assertConsumerNodeSupport({ manifest, node, label: `packed ${name}` });
+  }
+};
+
 export type ConsumerCompatOptions = {
   root: string;
   packages: string[];
@@ -959,7 +982,14 @@ export const runConsumerCompat = async ({
       bin: "",
     });
     const closure = consumerPackageClosure({ selected: pkg, packages, files });
-    for (const [name, member] of closure) all.set(name, member);
+    for (const [name, member] of closure) {
+      assertConsumerNodeSupport({
+        manifest: member.manifest,
+        node: policy.consumerNode,
+        label: path.posix.join(member.directory, "package.json"),
+      });
+      all.set(name, member);
+    }
     selections.push({ pkg, fixture, closure });
   }
   resolveConsumerReleasePack(files);
@@ -973,6 +1003,11 @@ export const runConsumerCompat = async ({
       tools,
       packages: all,
       workspacePackages: packages,
+    });
+    await assertConsumerPackedNodeSupport({
+      artifacts,
+      node: policy.consumerNode,
+      directory: scratch,
     });
     for (const selection of selections)
       for (const manager of ["npm", "pnpm"] as const)

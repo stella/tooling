@@ -9,7 +9,7 @@ import {
   parseConsumerFixtures,
   discoverConsumerPackages,
 } from "./consumer-compat-config";
-import { consumerNodeSupportMatches } from "./consumer-node-support";
+import { assertConsumerNodeSupport } from "./consumer-node-support";
 import { githubAutomationFileKind } from "./toolchain-inputs";
 
 export const consumerRunnerVersion = packageMetadata.version;
@@ -390,22 +390,17 @@ export const checkConsumerChecks = ({
             throw new Error(
               `consumerChecks requires a named published package: ${manifestPath}`,
             );
-          consumerPackageClosure({
+          const closure = consumerPackageClosure({
             selected: selectedPackage,
             packages: workspacePackages,
             files,
           });
-          const engines = manifest["engines"];
-          if (
-            (engines !== undefined && !record(engines)) ||
-            !consumerNodeSupportMatches({
-              range: record(engines) ? engines["node"] : undefined,
+          for (const member of closure.values())
+            assertConsumerNodeSupport({
+              manifest: member.manifest,
               node: policy.consumerNode,
-            })
-          )
-            throw new Error(
-              `${manifestPath} engines.node must support consumer Node ${policy.consumerNode}`,
-            );
+              label: path.posix.join(member.directory, "package.json"),
+            });
         }
       }
     } catch (error) {
