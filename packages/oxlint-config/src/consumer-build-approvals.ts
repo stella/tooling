@@ -36,10 +36,10 @@ export const consumerBuildApprovals = async ({
       const dependencies = consumerRecord(importer)
         ? importer[field]
         : undefined;
-      const source = manager === "npm" ? packages : dependencies;
+      const dependencyTable = manager === "npm" ? packages : dependencies;
       const installedKey = manager === "npm" ? `node_modules/${key}` : key;
-      const dependency = consumerRecord(source)
-        ? source[installedKey]
+      const dependency = consumerRecord(dependencyTable)
+        ? dependencyTable[installedKey]
         : undefined;
       if (!consumerRecord(dependency)) {
         if (field === "optionalDependencies") continue;
