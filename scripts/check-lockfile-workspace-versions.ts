@@ -55,8 +55,8 @@ for (const workspaceDir of workspaceDirs) {
     () => null,
   );
   if (pkg === null) continue;
-  const name = pkg.name;
-  const version = pkg.version;
+  const name = pkg["name"];
+  const version = pkg["version"];
   if (typeof name !== "string" || typeof version !== "string") continue;
 
   expectedVersions.set(workspaceDir, version);

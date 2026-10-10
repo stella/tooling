@@ -69,7 +69,13 @@ fail the check. The
 command fails on diagnostic differences or lost seeded coverage and reports wall
 time and peak RSS for TypeScript and Bun. It requires Bun and `/usr/bin/time`
 on Linux or macOS, and runs with Node or Bun. Tooling invokes the same bin through
-`bun run check:typecheck-parity`.
+`bun run check:typecheck-parity`. The bin uses the documented
+[`bun --check`](https://bun.sh/docs/runtime/check#if-package-json-has-a-check-script)
+form, so consumer `check` scripts cannot shadow typechecking. Shared typecheck
+scripts should also use `bun --check` if the repo defines a `check` script.
+Repositories with project references use build mode on both sides. The installed
+compiler must match its selected toolchain layout version; tagged agent diagnostics
+are normalized into the same comparison set.
 
 Use the library TypeScript preset:
 

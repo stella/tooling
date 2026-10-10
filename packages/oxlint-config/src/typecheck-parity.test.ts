@@ -20,8 +20,16 @@ const repo = resolve("/consumer-repo");
 
 const compilerPolicy = {
   typescriptInstallLayouts: [
-    { type: "direct", compilerPackage: "typescript" },
-    { type: "split-compatibility", compilerPackage: "@typescript/native" },
+    {
+      type: "direct",
+      compilerPackage: "typescript",
+      compilerSpecifier: "7.0.2",
+    },
+    {
+      type: "split-compatibility",
+      compilerPackage: "@typescript/native",
+      compilerSpecifier: "npm:typescript@7.0.2",
+    },
   ],
 };
 
@@ -33,7 +41,7 @@ const compilerFixture = async (run: (root: string) => Promise<void>) => {
       await mkdir(join(directory, "bin"), { recursive: true });
       await writeFile(
         join(directory, "package.json"),
-        JSON.stringify({ name, bin: { tsc: "bin/tsc.js" } }),
+        JSON.stringify({ name, version: "7.0.2", bin: { tsc: "bin/tsc.js" } }),
       );
       await writeFile(join(directory, "bin/tsc.js"), "process.exit(0);");
     }
@@ -73,9 +81,27 @@ test("compiler resolution prefers the split compiler to its compatibility depend
 test("compiler resolution rejects undeclared installed compilers", async () => {
   await compilerFixture(async (root) => {
     await writeFile(join(root, "package.json"), JSON.stringify({}));
-    await expect(resolveCompiler(root, compilerPolicy)).rejects.toThrow(
+    expect(resolveCompiler(root, compilerPolicy)).rejects.toThrow(
       "Repository must declare a compiler",
     );
+  });
+});
+
+test("compiler resolution rejects installed version skew", async () => {
+  await compilerFixture(async (root) => {
+    await writeFile(
+      join(root, "package.json"),
+      JSON.stringify({ devDependencies: { typescript: "7.0.2" } }),
+    );
+    await writeFile(
+      join(root, "node_modules/typescript/package.json"),
+      JSON.stringify({
+        name: "typescript",
+        version: "6.0.3",
+        bin: { tsc: "bin/tsc.js" },
+      }),
+    );
+    expect(resolveCompiler(root, compilerPolicy)).rejects.toThrow();
   });
 });
 
@@ -87,9 +113,9 @@ test("compiler resolution rejects a selected package without a tsc bin", async (
     );
     await writeFile(
       join(root, "node_modules/typescript/package.json"),
-      JSON.stringify({ name: "typescript", bin: {} }),
+      JSON.stringify({ name: "typescript", version: "7.0.2", bin: {} }),
     );
-    await expect(resolveCompiler(root, compilerPolicy)).rejects.toThrow(
+    expect(resolveCompiler(root, compilerPolicy)).rejects.toThrow(
       "must expose a tsc binary",
     );
   });
@@ -126,6 +152,15 @@ test("diagnostic sets canonicalize TypeScript and Bun locations and ignore summa
       repo,
     ),
   ).toEqual(["src/input.ts:4:2322"]);
+});
+
+test("tagged agent diagnostics retain primary location independent of attribute order", () => {
+  expect(
+    diagnosticSet(
+      '<error file="src/index.ts" line="3" column="25" code="TS2322">\nwrong type\n<source>const x = 1;</source><related file="src/user.ts" line="2" column="3">related</related></error>\n<error code="TS7006" column="1" line="9" file="src/other.ts">implicit any</error>',
+      repo,
+    ),
+  ).toEqual(["src/index.ts:3:2322", "src/other.ts:9:7006"]);
 });
 
 test("diagnostic sets preserve file, line and code independently", () => {

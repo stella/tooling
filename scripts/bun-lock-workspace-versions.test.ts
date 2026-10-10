@@ -117,8 +117,11 @@ describe("bun.lock workspace self-version synchronization", () => {
       /package-files: \|\n(?<packageFiles>(?: {8}packages\/[^\n]+\n)+)/u,
     );
 
-    expect(packageBlock?.groups?.packageFiles).toBeDefined();
-    const packageFiles = packageBlock?.groups?.packageFiles
+    const packageFilesBlock = packageBlock?.groups?.["packageFiles"];
+    expect(packageFilesBlock).toBeDefined();
+    if (packageFilesBlock === undefined)
+      throw new Error("Missing publishable package block");
+    const packageFiles = packageFilesBlock
       .trim()
       .split("\n")
       .map((line) => line.trim())

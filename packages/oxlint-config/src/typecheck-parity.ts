@@ -256,7 +256,7 @@ export const diagnosticCodes = (text: string) =>
 
 type DiagnosticCheckResult = { status: number | null; output: string };
 type DiagnosticParityOptions = {
-  expected: number[];
+  expected: readonly number[];
   match: "all" | "any";
   baseline: DiagnosticCheckResult;
   candidate: DiagnosticCheckResult;
@@ -336,6 +336,27 @@ export const diagnosticSet = (output: string, repo: string) => {
   const clean = output.replaceAll(/\u001b\[[0-9;]*m/g, "");
   const diagnostics = new Set<string>();
   for (const line of clean.split("\n")) {
+    if (line.startsWith("<error ")) {
+      const attributes = new Map(
+        [...line.matchAll(/(\w+)="([^"]*)"/g)].map((match) => [
+          match.at(1),
+          match.at(2),
+        ]),
+      );
+      const file = attributes.get("file");
+      const row = attributes.get("line");
+      const code = attributes.get("code");
+      if (
+        file !== undefined &&
+        row !== undefined &&
+        code !== undefined &&
+        /^TS\d+$/.test(code)
+      )
+        diagnostics.add(
+          `${relative(repo, resolve(repo, file)).replaceAll("\\", "/")}:${row}:${code.slice(2)}`,
+        );
+      continue;
+    }
     const match =
       /^(.*?)\((\d+),\d+\):\s*(?:error|warning) TS(\d+)/.exec(line) ??
       /^(.*?):(\d+):\d+:\s*(?:error|warning) (?:TS)?(\d+)/.exec(line);
@@ -426,12 +447,35 @@ export const resolveCompiler = async (repo: string, policy: unknown) => {
       typeof installed.bin.tsc !== "string"
     )
       throw new Error(`${layout.compilerPackage} must expose a tsc binary`);
+    if (
+      !("compilerSpecifier" in layout) ||
+      typeof layout.compilerSpecifier !== "string"
+    )
+      throw new Error(
+        "TypeScript install layout must define compilerSpecifier",
+      );
+    const expectedVersion = layout.compilerSpecifier.replace(
+      /^npm:typescript@/,
+      "",
+    );
+    if (!("version" in installed) || installed.version !== expectedVersion)
+      throw new Error(
+        `${layout.compilerPackage} must install TypeScript ${expectedVersion}`,
+      );
     return resolve(packagePath, "..", installed.bin.tsc);
   }
   throw new Error(
     "Repository must declare a compiler from typescriptInstallLayouts",
   );
 };
+
+export const bunCheckArgs = (project?: string, build = false) => [
+  "--check",
+  "--no-pretty",
+  "--all",
+  ...(build ? ["--build"] : []),
+  ...(project === undefined ? [] : ["--project", project]),
+];
 
 type TimedCommandOptions = { command: string; args: string[]; repo: string };
 const timedCommand = ({ command, args, repo }: TimedCommandOptions) => {
@@ -459,14 +503,35 @@ const timedCommand = ({ command, args, repo }: TimedCommandOptions) => {
 export const runTypecheckParity = async (repo: string, policy: unknown) => {
   const compiler = await resolveCompiler(repo, policy);
   const bun = process.versions.bun ? process.execPath : "bun";
+  const configuration = spawnSync(
+    process.execPath,
+    [compiler, "--showConfig"],
+    { cwd: repo, encoding: "utf8" },
+  );
+  if (configuration.error) throw configuration.error;
+  if (configuration.status !== 0)
+    throw new Error(configuration.stdout + configuration.stderr);
+  const config: unknown = JSON.parse(configuration.stdout);
+  const build =
+    typeof config === "object" &&
+    config !== null &&
+    "references" in config &&
+    Array.isArray(config.references) &&
+    config.references.length > 0;
   const baseline = timedCommand({
     command: process.execPath,
-    args: [compiler, "--noEmit", "--pretty", "false"],
+    args: [
+      compiler,
+      ...(build ? ["--build", "--force"] : []),
+      "--noEmit",
+      "--pretty",
+      "false",
+    ],
     repo,
   });
   const candidate = timedCommand({
     command: bun,
-    args: ["check", "--no-pretty", "--all"],
+    args: bunCheckArgs(undefined, build),
     repo,
   });
   const repository = compareDiagnosticSets(
@@ -526,7 +591,7 @@ export const runTypecheckParity = async (repo: string, policy: unknown) => {
       });
       const checked = timedCommand({
         command: bun,
-        args: ["check", "--threads=1", "--no-pretty", "--all", "-p", folder],
+        args: [...bunCheckArgs(folder), "--threads=1"],
         repo,
       });
       const result = fixtureParity({
