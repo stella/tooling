@@ -21,16 +21,19 @@ export type SharedToolchainDiagnostic = {
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+const array = (value: unknown): value is readonly unknown[] =>
+  Array.isArray(value);
+
 /** Opt-outs are repository-owned, tracked decisions; malformed decisions fail closed. */
 export const parseToolchainOptOuts = (input: unknown) => {
   if (
     !record(input) ||
     Object.keys(input).some((key) => key !== "optOuts") ||
-    !Array.isArray(input["optOuts"])
+    !array(input["optOuts"])
   )
     throw new Error('stll-toolchain.json must contain only an "optOuts" array');
   const disabled = new Set<string>();
-  for (const entry: unknown of input["optOuts"]) {
+  for (const entry of input["optOuts"]) {
     if (
       !record(entry) ||
       Object.keys(entry).some((key) => key !== "rule" && key !== "reason") ||
