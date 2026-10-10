@@ -631,8 +631,8 @@ test("ancestor checkout cleaning invalidates earlier descendant provenance in or
       undefined,
       "true",
       "'true'",
-      "'\${{ inputs.clean }}'",
-      "'\${{ false }}'",
+      "'${{ inputs.clean }}'",
+      "'${{ false }}'",
     ]) {
       const result = check(source(nested + root(clean)), [bunDecision]);
       expect(result.matched).toEqual([]);
