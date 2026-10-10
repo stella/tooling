@@ -13,7 +13,11 @@ import { fileURLToPath } from "node:url";
 import { parseDocument } from "yaml";
 
 import { detectToolchainChanges } from "./toolchain-changed";
-import { parseChangedJson, parseChangedLock } from "./toolchain-changed-locks";
+import {
+  changedRecord,
+  parseChangedJson,
+  parseChangedLock,
+} from "./toolchain-changed-locks";
 import { parseParityArguments } from "./typecheck-parity-args";
 import { runSelectedTypecheckParity } from "./typecheck-parity-selection";
 
@@ -576,12 +580,29 @@ test("CI event-base wiring invokes parity for a committed compiler bump", async 
       "utf8",
     ),
   );
-  const baseExpression = workflow.getIn([
-    "jobs",
-    "checks",
-    "env",
-    "TOOLCHAIN_BASE",
-  ]);
+  const document: unknown = workflow.toJS({ maxAliasCount: 100 });
+  if (!changedRecord(document) || !changedRecord(document["jobs"]))
+    throw new Error("missing workflow jobs");
+  const parityJobs = Object.values(document["jobs"]).filter(
+    (job) =>
+      changedRecord(job) &&
+      Array.isArray(job["steps"]) &&
+      job["steps"].some(
+        (step: unknown) =>
+          changedRecord(step) &&
+          typeof step["run"] === "string" &&
+          step["run"].includes("check:typecheck-parity"),
+      ),
+  );
+  const job = parityJobs.at(0);
+  if (parityJobs.length !== 1 || !changedRecord(job))
+    throw new Error(
+      "expected exactly one workflow job running typecheck parity",
+    );
+  const environment = job["env"];
+  if (!changedRecord(environment))
+    throw new Error("missing parity job environment");
+  const baseExpression = environment["TOOLCHAIN_BASE"];
   expect(typeof baseExpression).toBe("string");
   if (typeof baseExpression !== "string") throw new Error("missing event base");
   for (const source of [
@@ -591,30 +612,31 @@ test("CI event-base wiring invokes parity for a committed compiler bump", async 
     "unavailable-toolchain-base",
   ])
     expect(baseExpression).toContain(source);
-  expect(
-    workflow.getIn(["jobs", "checks", "steps", 0, "with", "fetch-depth"]),
-  ).toBe(0);
-  const steps: unknown = workflow.getIn(["jobs", "checks", "steps"]);
-  if (
-    typeof steps !== "object" ||
-    steps === null ||
-    !("items" in steps) ||
-    !Array.isArray(steps.items)
-  )
-    throw new Error("missing workflow steps");
+  const steps = job["steps"];
+  if (!Array.isArray(steps)) throw new Error("missing workflow steps");
   let parityCommand = "";
   let detectorCommand = "";
-  for (let i = 0; i < steps.items.length; i += 1) {
-    const name = workflow.getIn(["jobs", "checks", "steps", i, "name"]);
-    const run = workflow.getIn(["jobs", "checks", "steps", i, "run"]);
+  let checkoutDepth: unknown;
+  for (const step of steps) {
+    if (!changedRecord(step)) throw new Error("invalid workflow step");
+    if (
+      typeof step["uses"] === "string" &&
+      step["uses"].startsWith("actions/checkout@") &&
+      changedRecord(step["with"]) &&
+      step["with"]["repository"] === undefined &&
+      step["with"]["path"] === undefined
+    )
+      checkoutDepth = step["with"]["fetch-depth"];
+    const run = step["run"];
     if (typeof run !== "string") continue;
-    if (name === "Typecheck diagnostic parity") parityCommand = run;
-    if (name === "Shared toolchain check")
+    if (run.includes("check:typecheck-parity")) parityCommand = run;
+    if (run.includes("toolchain-changed-cli"))
       detectorCommand =
         run
           .split("\n")
           .find((line) => line.includes("toolchain-changed-cli")) ?? "";
   }
+  expect(checkoutDepth).toBe(0);
   expect(parityCommand).not.toBe("");
   expect(detectorCommand).toContain('--since "$TOOLCHAIN_BASE"');
   const { repo, write, commit } = fixture();

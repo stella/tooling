@@ -260,7 +260,13 @@ const lockSourceProof = (raw: unknown): ChangedLockSourceProof => {
   } else if (changedRecord(raw)) {
     if (changedRecord(raw["metadata"])) {
       metadata(raw["metadata"]);
-      source(raw["descriptor"]);
+      const descriptor = raw["descriptor"];
+      // Legacy pnpm registry keys start with /; source metadata remains authoritative.
+      source(
+        typeof descriptor === "string"
+          ? descriptor.replace(/^\//, "")
+          : descriptor,
+      );
     } else metadata(raw);
   }
   // Directory protocols are not archive bytes; unrelated hashes cannot prove them.
