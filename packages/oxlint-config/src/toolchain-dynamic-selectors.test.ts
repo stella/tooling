@@ -517,3 +517,31 @@ test("reusable workflows do not assign caller SHAs to literal repository default
     expect(matched).toEqual([]);
   }
 });
+
+test("dynamic sparse acknowledgement retains inspected manifest validation", () => {
+  for (const ref of [undefined, "${{ github.sha }}"]) {
+    const source = `on: push\njobs:\n  example:\n    steps:\n      - uses: ${action("actions/checkout")}\n        with:\n${ref === undefined ? "" : `          ref: '${ref}'\n`}          sparse-checkout: '\${{ inputs.sparse }}'\n      - id: setup\n        uses: ${action("oven-sh/setup-bun")}\n        with: {bun-version-file: package.json}\n`;
+    for (const manifest of [
+      JSON.stringify({ packageManager: "bun@0.1.0" }),
+      JSON.stringify({}),
+      "invalid JSON",
+      undefined,
+    ]) {
+      const reads: string[] = [];
+      const diagnostics = checkRuntimeFile({
+        file,
+        text: source,
+        policy,
+        trackedFiles: new Set(["package.json"]),
+        readFile: (target) => {
+          reads.push(target);
+          return manifest;
+        },
+        dynamicSelectors: parseDynamicSelectors([bunDecision]),
+      });
+      expect(reads).toEqual(["package.json"]);
+      expect(diagnostics).toMatchObject([{ rule: "bun-pins" }]);
+    }
+    expect(check(source, [bunDecision]).diagnostics).toEqual([]);
+  }
+});

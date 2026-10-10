@@ -75,7 +75,8 @@ adjoining an expression. Every applicable checkout sparse configuration is
 validated before a declaration can acknowledge an unresolved selector. Mixed literal/expression sparse
 configurations retain their literal paths: those paths must explicitly include a
 static selected manifest. A declaration acknowledges only expression additions;
-known manifest pins continue to be validated.
+For every static manifest selector from the inspected source, the manifest pin
+is validated after sparse acknowledgement, including fully dynamic sparse inputs.
 Other nonempty, nonconstant GitHub expression refs on same-repository checkouts
 (including `${{ job.workflow_repository }}`) delegate a safe static version-file selector
 to that checkout. The CLI reports delegation on stdout without validating the

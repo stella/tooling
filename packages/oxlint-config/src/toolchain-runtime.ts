@@ -1009,7 +1009,6 @@ export const checkRuntimeFile = ({
         });
         return;
       }
-      if (binding.sparse.mode === "dynamic") return;
     }
     if (binding?.source === "delegated") {
       onDelegated?.({
