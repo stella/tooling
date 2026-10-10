@@ -514,9 +514,14 @@ export const checkRuntimeFile = ({
       ? text.slice(0, offset).split("\n").length
       : 1;
   };
-  type CheckoutBinding =
-    | { path: string; source: "tracked" | "untrusted" }
-    | { path: string; source: "delegated"; ref: string };
+  type SparseCheckout =
+    | { mode: "all" }
+    | { mode: "files"; paths: ReadonlySet<string> }
+    | { mode: "invalid" };
+  type CheckoutBinding = { path: string; sparse: SparseCheckout } & (
+    | { source: "tracked" | "untrusted" }
+    | { source: "delegated"; ref: string }
+  );
   let checkoutBindings: CheckoutBinding[] = [];
   let checkoutDestinations = new Map<string, number>();
   let unknownCheckoutDestination = false;
@@ -579,6 +584,18 @@ export const checkRuntimeFile = ({
         rule,
         line,
         message: `setup-${tool} must reference a tracked ${allowed.join(" or ")}`,
+      });
+      return;
+    }
+    if (
+      binding !== undefined &&
+      (binding.sparse.mode === "invalid" ||
+        (binding.sparse.mode === "files" && !binding.sparse.paths.has(target)))
+    ) {
+      add({
+        rule,
+        line,
+        message: `checkout sparse-checkout must explicitly list ${target} without dynamic, glob, or negation patterns`,
       });
       return;
     }
@@ -725,6 +742,48 @@ export const checkRuntimeFile = ({
         ? destination.value
         : undefined;
   };
+  const sparseCheckoutOf = (node: unknown): SparseCheckout => {
+    const options = getNode(node, "with");
+    const sparseKeys = [...keysOf(options)].filter((key) =>
+      key.toLowerCase().startsWith("sparse-checkout"),
+    );
+    if (sparseKeys.length === 0) return { mode: "all" };
+    if (
+      sparseKeys.some(
+        (key) =>
+          key !== "sparse-checkout" && key !== "sparse-checkout-cone-mode",
+      )
+    )
+      return { mode: "invalid" };
+    const value = getNode(options, "sparse-checkout");
+    const cone = getNode(options, "sparse-checkout-cone-mode");
+    if (
+      !isScalar(value) ||
+      typeof value.value !== "string" ||
+      (cone !== undefined &&
+        (!isScalar(cone) ||
+          (cone.value !== true &&
+            cone.value !== false &&
+            cone.value !== "true" &&
+            cone.value !== "false")))
+    )
+      return { mode: "invalid" };
+    const paths = value.value
+      .split(/\r?\n/)
+      .map((entry) => entry.trim())
+      .filter((entry) => entry !== "");
+    if (
+      paths.length === 0 ||
+      paths.some(
+        (entry) =>
+          !staticRepositoryPath(entry) ||
+          entry.startsWith("!") ||
+          /[*?\[\]]/.test(entry),
+      )
+    )
+      return { mode: "invalid" };
+    return { mode: "files", paths: new Set(paths) };
+  };
   const checkAction = (node: unknown) => {
     node = resolveNode(node);
     if (!isMap(node)) return;
@@ -850,7 +909,11 @@ export const checkRuntimeFile = ({
 
       if (!staticRepositoryPath(prefix)) {
         // Unknown checkout destinations may shadow any tracked selector.
-        checkoutBindings.push({ path: ".", source: "untrusted" });
+        checkoutBindings.push({
+          path: ".",
+          source: "untrusted",
+          sparse: { mode: "invalid" },
+        });
       } else {
         const destination = normalizeCheckoutPath(prefix);
         const trustedWriter =
@@ -862,12 +925,14 @@ export const checkRuntimeFile = ({
         if (trustedWriter && delegatedSource && typeof refValue === "string")
           checkoutBindings.push({
             path: destination,
+            sparse: sparseCheckoutOf(node),
             source: "delegated",
             ref: refValue,
           });
         else
           checkoutBindings.push({
             path: destination,
+            sparse: sparseCheckoutOf(node),
             source:
               trustedWriter && (workflowSource || currentSource)
                 ? "tracked"

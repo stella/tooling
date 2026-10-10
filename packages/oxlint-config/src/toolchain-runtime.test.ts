@@ -1282,3 +1282,111 @@ test("dynamic self-repository refs delegate safe selectors without reading curre
     }
   }
 });
+
+test("sparse checkouts must explicitly include each selected repository file", () => {
+  for (const [tool, action, version, target] of [
+    ["bun", "oven-sh/setup-bun", "v2", "package.json"],
+    ["node", "actions/setup-node", "v5", ".node-version"],
+    ["python", "actions/setup-python", "v6", ".python-version"],
+  ]) {
+    for (const mode of ["tracked", "delegated"]) {
+      const source =
+        mode === "tracked"
+          ? "repository: '${{ job.workflow_repository }}', ref: '${{ job.workflow_sha }}', "
+          : "ref: '${{ inputs.ref }}', ";
+      const checkout = `      - uses: actions/checkout@${sha} # v5\n        with: {${source}path: source`;
+      const setup = `      - uses: ${action}@${sha} # ${version}\n        with: {${tool}-version-file: source/${target}}`;
+      for (const sparse of [
+        "",
+        `, sparse-checkout: '${target}'`,
+        `, sparse-checkout: '${target}', sparse-checkout-cone-mode: true`,
+        `, sparse-checkout: '${target}', sparse-checkout-cone-mode: false`,
+        `, sparse-checkout: '${target}', sparse-checkout-cone-mode: 'false'`,
+      ]) {
+        const reports: unknown[] = [];
+        const reads: string[] = [];
+        expect(
+          checkRuntimeFile({
+            file: ".github/workflows/ci.yml",
+            text: workflow(`${checkout}${sparse}}\n${setup}`),
+            policy,
+            trackedFiles: new Set(Object.keys(files)),
+            readFile: (file) => {
+              reads.push(file);
+              return files[file];
+            },
+            onDelegated: (report) => reports.push(report),
+          }),
+        ).toEqual([]);
+        expect(reports).toHaveLength(mode === "delegated" ? 1 : 0);
+        expect(reads).toHaveLength(mode === "delegated" ? 0 : 1);
+      }
+      for (const sparse of [
+        ", sparse-checkout: README.md",
+        ", Sparse-Checkout: README.md",
+        ", SPARSE-CHECKOUT: README.md",
+        `, sparse-checkout: '${target}', Sparse-Checkout-Cone-Mode: false`,
+        ", sparse-checkout: source",
+        `, sparse-checkout: 'source/${target}'`,
+        ", sparse-checkout: ''",
+        ", sparse-checkout: false",
+        `, sparse-checkout: ['${target}']`,
+        ", sparse-checkout: '${{ inputs.files }}'",
+        ", sparse-checkout: '*'",
+        `, sparse-checkout: "${target}\\n!${target}"`,
+        ", sparse-checkout-cone-mode: false",
+        `, sparse-checkout: '${target}', sparse-checkout-cone-mode: '\${{ inputs.cone }}'`,
+        `, sparse-checkout: '${target}', sparse-checkout-cone-mode: null`,
+        `, sparse-checkout: '${target}', sparse-checkout-unknown: true`,
+      ]) {
+        const reports: unknown[] = [];
+        expect(
+          checkRuntimeFile({
+            file: ".github/workflows/ci.yml",
+            text: workflow(`${checkout}${sparse}}\n${setup}`),
+            policy,
+            trackedFiles: new Set(Object.keys(files)),
+            readFile: () => {
+              throw new Error("Sparse validation must precede source reads");
+            },
+            onDelegated: (report) => reports.push(report),
+          }).some(({ message }) =>
+            message.includes(`sparse-checkout must explicitly list ${target}`),
+          ),
+        ).toBe(true);
+        expect(reports).toEqual([]);
+      }
+      const alias = `defaults: &checkout\n  ${source.replaceAll(", ", "\n  ")}path: source\n  sparse-checkout: |\n    README.md\n    ${target}\n  sparse-checkout-cone-mode: false\n`;
+      const reports: unknown[] = [];
+      expect(
+        checkRuntimeFile({
+          file: ".github/workflows/ci.yml",
+          text: `${alias}${workflow(`      - uses: actions/checkout@${sha} # v5\n        with: {<<: *checkout}\n${setup}`)}`,
+          policy,
+          trackedFiles: new Set(Object.keys(files)),
+          readFile: (file) => files[file],
+          onDelegated: (report) => reports.push(report),
+        }),
+      ).toEqual([]);
+      expect(reports).toHaveLength(mode === "delegated" ? 1 : 0);
+      const badAliasReports: unknown[] = [];
+      expect(
+        checkRuntimeFile({
+          file: ".github/workflows/ci.yml",
+          text: `${alias.replace("sparse-checkout:", "Sparse-Checkout:")}${workflow(`      - uses: actions/checkout@${sha} # v5\n        with: {<<: *checkout}\n${setup}`)}`,
+          policy,
+          trackedFiles: new Set(Object.keys(files)),
+          readFile: () => {
+            throw new Error(
+              "Invalid sparse casing must fail before source reads",
+            );
+          },
+          onDelegated: (report) => badAliasReports.push(report),
+        }).some(({ message }) =>
+          message.includes(`sparse-checkout must explicitly list ${target}`),
+        ),
+      ).toBe(true);
+      expect(badAliasReports).toEqual([]);
+    }
+  }
+});

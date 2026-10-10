@@ -75,6 +75,11 @@ or a same-repository checkout with no `ref`. For no-ref checkouts, omit
 The checkout must omit both `if` and `continue-on-error`, and its normalized
 path must be unique among every checkout in that job, including later steps.
 Unknown checkout destinations prevent mapped selectors from proving provenance.
+Sparse checkouts must explicitly list the selected repository-relative file,
+without the checkout prefix, in `sparse-checkout`. This applies in either cone
+mode and to delegated sources. Dynamic, empty, glob, negation, or unsupported
+sparse configurations fail; a cone-mode input alone is insufficient. Directory
+entries cannot substitute for the selected file.
 Other nonempty, nonconstant GitHub expression refs on same-repository checkouts
 (including `${{ job.workflow_repository }}`) delegate a safe static version-file selector
 to that checkout. The CLI reports delegation on stdout without validating the
