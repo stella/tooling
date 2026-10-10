@@ -81,6 +81,7 @@ and consumer type/module resolution are preserved. Each group must
 activate at least one seeded class. The installed compiler and Bun runtime must match their selected toolchain policy versions.
 Both compilers check the same temporary project graph. TypeScript declarations
 and build metadata stay in that temporary tree; consumer files remain untouched.
+The parity bin does not validate the consumer project graph; the repository's own typecheck does.
 Build errors normalize TypeScript's emitted-with-diagnostics exit `2` to Bun's
 diagnostic exit `1`; the report retains both raw exit codes. Other exit statuses
 compare exactly. Comparisons retain source diagnostic locations, normalize bundled standard-library
