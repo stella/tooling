@@ -893,29 +893,37 @@ test("prefixed runtime selectors map only preceding immutable same-repository ch
       `      - uses: ${action}@${sha} # ${version}\n        with: {${tool}-version-file: '${prefix}${target}'}`;
     const rule = tool === "bun" ? "bun-pins" : "runtime-workflow";
     for (const repo of [
+      "",
       "stella/example",
       "STELLA/EXAMPLE",
       "${{ github.repository }}",
+      "${{ job.workflow_repository }}",
     ]) {
-      const pinned = checkout(
-        `repository: '${repo}', ref: '${sha}', path: source`,
-      );
-      expect(checkSource(workflow(`${pinned}\n${setup("source/")}`))).toEqual(
-        [],
-      );
-      expect(
-        checkSource(workflow(`${setup("source/")}\n${pinned}`)).some(
-          (entry) => entry.rule === rule,
-        ),
-      ).toBe(true);
-      expect(
-        checkSource(
-          `jobs:\n  first:\n    steps:\n${pinned}\n  second:\n    steps:\n${setup("source/")}`,
-        ).some((entry) => entry.rule === rule),
-      ).toBe(true);
+      for (const revision of [sha, "${{ job.workflow_sha }}"]) {
+        const pinned = checkout(
+          `${repo === "" ? "" : `repository: '${repo}', `}ref: '${revision}', path: source`,
+        );
+        expect(checkSource(workflow(`${pinned}\n${setup("source/")}`))).toEqual(
+          [],
+        );
+        expect(
+          checkSource(workflow(`${setup("source/")}\n${pinned}`)).some(
+            (entry) => entry.rule === rule,
+          ),
+        ).toBe(true);
+        expect(
+          checkSource(
+            `jobs:\n  first:\n    steps:\n${pinned}\n  second:\n    steps:\n${setup("source/")}`,
+          ).some((entry) => entry.rule === rule),
+        ).toBe(true);
+      }
     }
     for (const options of [
       "repository: other/repository, ref: '" + sha + "', path: source",
+      "repository: other/repository, ref: '${{ job.workflow_sha }}', path: source",
+      "repository: '${{ job.workflow_repository }}', ref: main, path: source",
+      "repository: '${{ job.workflow_repository }}', ref: v1, path: source",
+      "repository: '${{ job.workflow_repository }}', ref: '${{ github.sha }}', path: source",
       "repository: stella/example, ref: main, path: source",
       "repository: stella/example, ref: v1, path: source",
       "repository: stella/example, path: source",
@@ -932,6 +940,19 @@ test("prefixed runtime selectors map only preceding immutable same-repository ch
         }).some((entry) => entry.rule === rule),
       ).toBe(true);
     }
+    const reusable = checkout(
+      "repository: '${{ job.workflow_repository }}', ref: '${{ job.workflow_sha }}', path: source",
+    );
+    expect(
+      checkSource(workflow(`${reusable}\n${setup("source/")}`), {
+        [target]: "invalid",
+      }).some((entry) => entry.rule === rule),
+    ).toBe(true);
+    expect(
+      checkSource(workflow(`${reusable}\n${setup("source/missing/")}`)).some(
+        (entry) => entry.rule === rule,
+      ),
+    ).toBe(true);
     const pinned = checkout(
       `repository: stella/example, ref: '${sha}', path: source`,
     );

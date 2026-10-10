@@ -56,6 +56,12 @@ with:
 ```
 
 The action itself must use the policy's approved SHA and version comment.
+A prefixed version-file selector can use a preceding same-repository checkout
+in its job: the repository may be omitted, named literally, or specified by
+`${{ github.repository }}` or `${{ job.workflow_repository }}`; the ref must be
+a full commit SHA or `${{ job.workflow_sha }}`. The guard maps the selector to
+its tracked source file. Foreign repositories, branches, tags, `${{ github.sha }}`,
+and traversal paths fail.
 Direct `bun-version` inputs are forbidden. The manifest referenced by
 `bun-version-file` must declare the shared `packageManager` value.
 
