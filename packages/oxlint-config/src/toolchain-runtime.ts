@@ -834,7 +834,8 @@ export const checkRuntimeFile = ({
   type SparseCheckout =
     | { mode: "all" }
     | { mode: "files"; paths: ReadonlySet<string> }
-    | { mode: "invalid" };
+    | { mode: "invalid" }
+    | { mode: "dynamic" };
   type CheckoutBinding = {
     path: string;
     sparse: SparseCheckout;
@@ -962,11 +963,12 @@ export const checkRuntimeFile = ({
     if (
       binding !== undefined &&
       (binding.sparse.mode === "invalid" ||
+        binding.sparse.mode === "dynamic" ||
         (binding.sparse.mode === "files" && !binding.sparse.paths.has(target)))
     ) {
       if (
         tool === "bun" &&
-        binding.dynamicSource &&
+        binding.sparse.mode === "dynamic" &&
         !unreviewableCheckoutSource &&
         authorizeDynamic("bun-source", line)
       )
@@ -1176,9 +1178,10 @@ export const checkRuntimeFile = ({
             cone.value !== "false")))
     )
       return { mode: "invalid" };
+    if (dynamic(value.value)) return { mode: "dynamic" };
     const paths = value.value
       .split(/\r?\n/)
-      .map((entry) => entry.trim())
+      .map((entry) => entry.trim().replace(/^\//, ""))
       .filter((entry) => entry !== "");
     if (
       paths.length === 0 ||
@@ -1333,13 +1336,24 @@ export const checkRuntimeFile = ({
         checkoutRef.value === "${{ job.workflow_sha }}";
       const refValue = isScalar(checkoutRef) ? checkoutRef.value : undefined;
       const currentRef = dynamicRefBody(refValue);
+      const triggers = getNode(document.contents, "on");
+      const events = isMap(triggers)
+        ? [...keysOf(triggers)]
+        : isSeq(triggers)
+          ? triggers.items.map((event) =>
+              isScalar(event) ? event.value : undefined,
+            )
+          : isScalar(triggers)
+            ? [triggers.value]
+            : [];
+      const branchRefIsCurrent =
+        events.length > 0 &&
+        events.every((event) => event === "push" || event === "merge_group");
       const currentSource =
         self &&
         (checkoutRef === undefined ||
-          (currentRef !== undefined &&
-            /^(?:github\.sha|github\.event\.pull_request\.head\.sha(?:\s*\|\|\s*github\.sha)?)$/.test(
-              currentRef,
-            )));
+          currentRef === "github.sha" ||
+          (currentRef === "github.ref" && branchRefIsCurrent));
 
       const dynamicRef = dynamicRefBody(refValue);
       const delegatedSource =
@@ -1479,7 +1493,7 @@ export const checkRuntimeFile = ({
   };
   const checkSteps = (
     node: unknown,
-    prefix: string,
+    locationPrefix: string,
     floor?: ResolvedEngineFloor,
   ) => {
     currentEngineFloor = undefined;
@@ -1514,7 +1528,7 @@ export const checkRuntimeFile = ({
         const id = getNode(step, "id");
         currentLocation =
           isScalar(id) && typeof id.value === "string"
-            ? `${prefix}.steps.${id.value}`
+            ? `${locationPrefix}.steps.${id.value}`
             : undefined;
         checkAction(step);
       }

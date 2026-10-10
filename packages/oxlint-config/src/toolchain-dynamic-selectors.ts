@@ -1,6 +1,16 @@
+const locatorValidators = {
+  image:
+    /^(?:jobs\.[\w-]+\.(?:container|services\.[\w-]+)|services\.[\w.-]+\.image)$/,
+  "bun-source": /^(?:jobs\.[\w-]+|runs)\.steps\.[\w-]+$/,
+} as const;
+
+type SelectorKind = keyof typeof locatorValidators;
+const knownKind = (value: unknown): value is SelectorKind =>
+  typeof value === "string" && Object.hasOwn(locatorValidators, value);
+
 export type DynamicSelector = {
   path: string;
-  kind: "image" | "bun-source";
+  kind: SelectorKind;
   reason: string;
 } & ({ at: string; line?: never } | { line: number; at?: never });
 
@@ -33,8 +43,7 @@ export const parseDynamicSelectors = (input: unknown): DynamicSelector[] => {
         "each dynamic selector requires an exact repository path, known kind and nonempty reason",
       );
     const kind = entry["kind"];
-    if (kind !== "image" && kind !== "bun-source")
-      throw new Error("unknown dynamic selector kind");
+    if (!knownKind(kind)) throw new Error("unknown dynamic selector kind");
     let selector: DynamicSelector;
     if (
       Object.hasOwn(entry, "line") &&
@@ -52,11 +61,7 @@ export const parseDynamicSelectors = (input: unknown): DynamicSelector[] => {
     } else if (
       !Object.hasOwn(entry, "line") &&
       typeof entry["at"] === "string" &&
-      (kind === "image"
-        ? /^(?:jobs\.[\w-]+\.(?:container|services\.[\w-]+)|services\.[\w.-]+\.image)$/.test(
-            entry["at"],
-          )
-        : /^(?:jobs\.[\w-]+|runs)\.steps\.[\w-]+$/.test(entry["at"]))
+      locatorValidators[kind].test(entry["at"])
     ) {
       selector = {
         path: entry["path"],

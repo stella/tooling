@@ -63,12 +63,7 @@ test("dynamic image decisions apply to one job and never to literal pins", () =>
 });
 
 test("current source checkout refs support local actions; foreign refs do not", () => {
-  for (const ref of [
-    undefined,
-    "${{ github.sha }}",
-    "${{ github.event.pull_request.head.sha }}",
-    "${{ github.event.pull_request.head.sha || github.sha }}",
-  ]) {
+  for (const ref of [undefined, "${{ github.sha }}"]) {
     const source = `jobs:\n  example:\n    steps:\n      - uses: ${action("actions/checkout")}\n${ref === undefined ? "" : `        with: {ref: '${ref}'}\n`}      - uses: ./.github/actions/example\n`;
     expect(check(source).diagnostics, ref).toEqual([]);
     const foreign = `jobs:\n  example:\n    steps:\n      - uses: ${action("actions/checkout")}\n        with: {repository: example/foreign${ref === undefined ? "" : `, ref: '${ref}'`}}\n      - uses: ./.github/actions/example\n`;
@@ -221,4 +216,75 @@ test("Docker line decisions cover unresolved FROM values only", () => {
   const literal = checkDocker("ARG IMAGE=oven/bun:0.1.0\nFROM $IMAGE\n");
   expect(literal.matched).toEqual([]);
   expect(literal.diagnostics).toMatchObject([{ rule: "bun-pins" }]);
+});
+
+test("event-specific source refs never classify a PR head as inspected source", () => {
+  for (const event of [
+    "push",
+    "merge_group",
+    "pull_request",
+    "pull_request_target",
+    "workflow_run",
+  ]) {
+    const source = (ref: string) =>
+      `on: ${event}\njobs:\n  example:\n    steps:\n      - uses: ${action("actions/checkout")}\n        with: {ref: '${ref}'}\n      - uses: ./.github/actions/example\n`;
+    expect(check(source("\${{ github.sha }}")).diagnostics).toEqual([]);
+    expect(check(source("\${{ github.ref }}")).diagnostics.length === 0).toBe(
+      event === "push" || event === "merge_group",
+    );
+    for (const ref of [
+      "${{ github.event.pull_request.head.sha }}",
+      "${{ github.event.pull_request.head.ref }}",
+      "${{ github.event.pull_request.head.sha || github.sha }}",
+    ])
+      expect(
+        check(source(ref)).diagnostics.some(
+          ({ rule }) => rule === "action-pins",
+        ),
+      ).toBe(true);
+  }
+});
+
+test("dynamic refs retain static sparse requirements and root-anchored manifest paths", () => {
+  const source = (sparse: string) =>
+    `on: push\njobs:\n  example:\n    steps:\n      - uses: ${action("actions/checkout")}\n        with: {path: snapshot, ref: '\${{ inputs.ref }}', sparse-checkout: '${sparse}', sparse-checkout-cone-mode: false}\n      - id: setup\n        uses: ${action("oven-sh/setup-bun")}\n        with: {bun-version-file: snapshot/package.json}\n`;
+  for (const sparse of ["src", "!package.json", "*.json"])
+    expect(check(source(sparse), [bunDecision]).matched).toEqual([]);
+  expect(check(source("/package.json")).diagnostics).toEqual([]);
+  expect(check(source("${{ inputs.sparse }}"), [bunDecision])).toEqual({
+    diagnostics: [],
+    matched: [bunDecision],
+  });
+});
+
+test("PR-head manifest selectors delegate without reading the inspected manifest", () => {
+  for (const event of [
+    "pull_request",
+    "pull_request_target",
+    "push",
+    "merge_group",
+  ])
+    for (const ref of [
+      "${{ github.event.pull_request.head.sha }}",
+      "${{ github.event.pull_request.head.ref }}",
+      "${{ github.event.pull_request.head.sha || github.sha }}",
+    ]) {
+      const reports: unknown[] = [];
+      const diagnostics = checkRuntimeFile({
+        file,
+        text: `on: ${event}\njobs:\n  example:\n    steps:\n      - uses: ${action("actions/checkout")}\n        with: {ref: '${ref}'}\n      - uses: ${action("oven-sh/setup-bun")}\n        with: {bun-version-file: package.json}\n`,
+        policy,
+        trackedFiles: new Set(["package.json"]),
+        readFile: () => {
+          throw new Error(
+            "Delegated manifests must not read the inspected source",
+          );
+        },
+        onDelegated: (report) => reports.push(report),
+      });
+      expect(diagnostics).toEqual([]);
+      expect(reports).toMatchObject([
+        { tool: "bun", selector: "package.json", ref },
+      ]);
+    }
 });

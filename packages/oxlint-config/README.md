@@ -64,16 +64,21 @@ The checkout must omit both `if` and `continue-on-error`, and its normalized
 path must be unique among every checkout in that job, including later steps.
 Unknown checkout destinations prevent mapped selectors from proving provenance.
 Sparse checkouts must explicitly list the selected repository-relative file,
-without the checkout prefix, in `sparse-checkout`. This applies in either cone
-mode and to delegated sources. Dynamic, empty, glob, negation, or unsupported
-sparse configurations fail; a cone-mode input alone is insufficient. Directory
-entries cannot substitute for the selected file.
+without the checkout prefix, in `sparse-checkout`; a root-anchored entry such as
+`/package.json` is accepted. This applies in either cone mode and to delegated
+sources. Empty, glob, negation, or unsupported sparse configurations fail; a
+cone-mode input alone is insufficient. Directory entries cannot substitute for
+the selected file. A scoped Bun-source declaration can acknowledge a dynamic
+sparse expression, but cannot waive a literal omission or invalid pattern.
 Other nonempty, nonconstant GitHub expression refs on same-repository checkouts
 (including `${{ job.workflow_repository }}`) delegate a safe static version-file selector
 to that checkout. The CLI reports delegation on stdout without validating the
-current source's version file. Current-source checkouts also accept `${{ github.sha }}`, `${{ github.event.pull_request.head.sha }}`
-and the PR-head-or-`github.sha` fallback on the same repository. Local actions
-use these current-source bindings. Literal refs, foreign repositories and
+current source's version file. Current-source checkouts also accept
+`${{ github.sha }}` on the same repository. `${{ github.ref }}` is current-source
+only when every declared workflow event is `push` or `merge_group`. PR-head
+SHA/ref expressions and their fallbacks are delegated: they cannot establish
+local-action provenance or validate the inspected source's manifest. Local
+actions require current-source bindings. Literal refs, foreign repositories and
 unpaired `${{ job.workflow_sha }}` remain rejected.
 For snapshot-bound sources, the guard maps the selector to its tracked source
 file. Literal commit SHAs,
