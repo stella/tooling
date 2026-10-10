@@ -1,0 +1,564 @@
+/// <reference types="bun-types" />
+
+import { expect, test } from "bun:test";
+
+import { checkRuntimeFile, runtimeRules } from "./toolchain-runtime";
+
+const sha = "a".repeat(40);
+const policy = {
+  bun: "1.4.3",
+  node: "22.20.0",
+  python: "3.13.7",
+  rust: "1.90.0",
+  rustCompilerDevelopment: "nightly-2026-04-16",
+  packages: { oxlint: "1.87.0", oxfmt: "0.72.0", lefthook: "1.13.0" },
+  actions: {
+    "actions/checkout": { sha, version: "v5" },
+    "actions/setup-node": { sha, version: "v5" },
+    "actions/setup-python": { sha, version: "v6" },
+    "oven-sh/setup-bun": { sha, version: "v2" },
+  },
+};
+const files: Record<string, string> = {
+  "package.json": JSON.stringify({ packageManager: `bun@${policy.bun}` }),
+  ".node-version": policy.node,
+  ".nvmrc": policy.node,
+  ".python-version": policy.python,
+};
+const check = (
+  file: string,
+  text: string,
+  overrides: Record<string, string> = {},
+  selectedPython = policy.python,
+) => {
+  const entries = { ...files, ...overrides };
+  return checkRuntimeFile({
+    file,
+    text,
+    policy: { ...policy, python: selectedPython },
+    trackedFiles: new Set(Object.keys(entries)),
+    readFile: (name) => entries[name],
+  });
+};
+const workflow = (step: string) => `jobs:\n  test:\n    steps:\n${step}`;
+const cases = [
+  { rule: "bun-pins", file: ".bun-version", pass: policy.bun, fail: "1.4.0" },
+  {
+    rule: "bun-pins",
+    file: ".github/workflows/ci.yml",
+    pass: workflow(
+      `      - uses: oven-sh/setup-bun@${sha} # v2\n        with: {bun-version-file: package.json}`,
+    ),
+    fail: workflow(`      - uses: oven-sh/setup-bun@${sha} # v2`),
+  },
+  { rule: "node-version", file: ".nvmrc", pass: "22.20.0", fail: "22" },
+  {
+    rule: "python-version",
+    file: "pyproject.toml",
+    pass: '[project]\nrequires-python = "==3.13.7"',
+    fail: '[project]\nrequires-python = ">=3.14"',
+  },
+  {
+    rule: "rust-version",
+    file: "rust-toolchain.toml",
+    pass: '[toolchain]\nchannel = "1.90.0"',
+    fail: '[toolchain]\nchannel = "stable"',
+  },
+  {
+    rule: "runtime-manager",
+    file: "mise.toml",
+    pass: '[tools]\nnode = "22.20.0"\noxlint = "1.87.0"',
+    fail: '[tools]\nnode = "22.20.0"\noxlint = "latest"',
+  },
+  {
+    rule: "runtime-docker",
+    file: "Dockerfile",
+    pass: "FROM --platform=linux/arm64 node:22.20.0-alpine",
+    fail: "FROM --platform=linux/arm64 node:22-alpine",
+  },
+  {
+    rule: "runtime-workflow",
+    file: ".github/workflows/ci.yml",
+    pass: workflow(
+      `      - uses: actions/setup-node@${sha} # v5\n        with: { node-version-file: .node-version }`,
+    ),
+    fail: workflow(
+      `      - uses: actions/setup-node@${sha} # v5\n        with: { node-version: '22.20.0' }`,
+    ),
+  },
+  {
+    rule: "action-pins",
+    file: ".github/actions/install/action.yml",
+    pass: `runs:\n  using: composite\n  steps:\n    - uses: 'actions/checkout@${sha}' # v5`,
+    fail: "runs:\n  using: composite\n  steps:\n    - uses: 'actions/checkout@v5' # v5",
+  },
+] satisfies {
+  rule: (typeof runtimeRules)[number];
+  file: string;
+  pass: string;
+  fail: string;
+}[];
+
+test("fixture coverage equals the declared runtime rules", () => {
+  expect(new Set(cases.map(({ rule }) => rule))).toEqual(new Set(runtimeRules));
+});
+for (const fixture of cases) {
+  test(`${fixture.rule} accepts its shared pin and rejects a mutation`, () => {
+    expect(check(fixture.file, fixture.pass)).toEqual([]);
+    const diagnostics = check(fixture.file, fixture.fail);
+    expect(diagnostics.some(({ rule }) => rule === fixture.rule)).toBe(true);
+    for (const diagnostic of diagnostics) {
+      expect(diagnostic.path).toBe(fixture.file);
+      expect(diagnostic.line).toBeGreaterThan(0);
+    }
+  });
+}
+
+test("all supported runtime file forms reject floating pins", () => {
+  for (const [file, pass, fail] of [
+    [".node-version", policy.node, "lts/*"],
+    [".python-version", policy.python, "3.13"],
+    ["rust-toolchain", policy.rust, "nightly"],
+    ["uv.toml", `python = '${policy.python}'`, "python = '3.13'"],
+    [
+      "pyproject.toml",
+      `[tool.uv]\npython = '${policy.python}'`,
+      "[tool.uv]\npython = '3.13'",
+    ],
+    [
+      ".tool-versions",
+      `nodejs ${policy.node}\npython ${policy.python}\nrust ${policy.rust}\nbun ${policy.bun}\nlefthook 1.13.0`,
+      "nodejs 22\npython 3.13\nrust stable\nbun latest\nlefthook latest",
+    ],
+    [
+      "Containerfile",
+      `FROM python:${policy.python}-slim`,
+      "FROM python:3.13-slim",
+    ],
+  ]) {
+    if (file === undefined || pass === undefined || fail === undefined)
+      throw new Error("incomplete fixture");
+    expect(check(file, pass)).toEqual([]);
+    expect(check(file, fail).length).toBeGreaterThan(0);
+  }
+});
+
+test("setup runtime files must be tracked and contain the shared exact pin", () => {
+  const content = workflow(
+    `      - uses: actions/setup-python@${sha} # v6\n        with: {python-version-file: .python-version}`,
+  );
+  expect(check(".github/workflows/ci.yml", content)).toEqual([]);
+  expect(
+    check(".github/workflows/ci.yml", content, {
+      ".python-version": "3.12.0",
+    }).some(({ rule }) => rule === "runtime-workflow"),
+  ).toBe(true);
+  for (const reference of [
+    "../.python-version",
+    "untracked/.python-version",
+    "${{ inputs.file }}",
+    "/.python-version",
+  ])
+    expect(
+      check(
+        ".github/workflows/ci.yml",
+        content.replace(".python-version", reference),
+      ).length,
+    ).toBeGreaterThan(0);
+});
+
+test("mise inline tools and npm backends share the same exact pins", () => {
+  expect(
+    check(
+      "mise.toml",
+      '[tools]\n"npm:oxlint" = {version = "1.87.0"}\n"core:node" = "22.20.0"',
+    ),
+  ).toEqual([]);
+  expect(
+    check(
+      "mise.toml",
+      '[tools]\n"npm:oxlint" = {version = "latest"}\n"core:node" = "22"',
+    ).filter(({ rule }) => rule === "runtime-manager"),
+  ).toHaveLength(2);
+});
+
+test("requires-python ranges include the shared Python release", () => {
+  for (const requirement of [
+    ">=3.12,<3.14",
+    "~=3.13",
+    "==3.13.*",
+    ">=3.13,!=3.12.*",
+    "<=3.13.0",
+    "==3.13.0",
+  ])
+    expect(
+      check(
+        "pyproject.toml",
+        `[project]\nrequires-python = '${requirement}'`,
+        {},
+        "3.13",
+      ),
+    ).toEqual([]);
+  for (const requirement of [
+    ">=3.14",
+    "<3.13",
+    "!=3.13.*",
+    "~=3.13.1",
+    "==3.12.*",
+    "~=3",
+    ">=3.12.*",
+    "garbage",
+    "",
+    ">=3.13,",
+    ">3.13.0",
+  ])
+    expect(
+      check(
+        "pyproject.toml",
+        `[project]\nrequires-python = '${requirement}'`,
+        {},
+        "3.13",
+      ).some(({ rule }) => rule === "python-version"),
+    ).toBe(true);
+});
+
+test("minor Python policy preserves explicit patch selectors within its release series", () => {
+  expect(check(".python-version", "3.13", {}, "3.13")).toEqual([]);
+  expect(check(".python-version", "3.13.7", {}, "3.13")).toEqual([]);
+  expect(check("Containerfile", "FROM python:3.13.7-slim", {}, "3.13")).toEqual(
+    [],
+  );
+  for (const version of ["3.12.7", "3", "3.13rc1", "3.13.7.post1"])
+    expect(
+      check(".python-version", version, {}, "3.13").length,
+    ).toBeGreaterThan(0);
+  expect(check(".python-version", "3.13.8").length).toBeGreaterThan(0);
+});
+
+test("quoted and flow action pins still require the matching SHA and version comment", () => {
+  const file = ".github/workflows/ci.yml";
+  expect(
+    check(file, workflow(`      - {uses: "actions/checkout@${sha}"} # v5`)),
+  ).toEqual([]);
+  for (const step of [
+    `      - {uses: "actions/checkout@${sha}"} # v4`,
+    `      - {uses: "actions/checkout@${"b".repeat(40)}"} # v5`,
+    `      - {uses: "actions/checkout@${sha}"}`,
+    "      - uses: external/action@main # v1",
+    "      - uses: external/action",
+  ])
+    expect(
+      check(file, workflow(step)).some(({ rule }) => rule === "action-pins"),
+    ).toBe(true);
+  expect(check(file, workflow(`      - uses: external/action@${sha}`))).toEqual(
+    [],
+  );
+  expect(
+    check(file, workflow(`      - uses: external/action@${sha} # v1`)),
+  ).toEqual([]);
+  expect(
+    check(
+      file,
+      workflow("      - uses: ./local/action\n      - uses: docker://alpine:3"),
+    ),
+  ).toEqual([]);
+});
+
+test("resolved aliases and merge keys cannot hide runtime declarations", () => {
+  const file = ".github/workflows/ci.yml";
+  const content = `step: &setup\n  uses: actions/setup-node@${sha} # v5\n  with: {node-version-file: .node-version}\njobs:\n  test:\n    steps:\n      - <<: *setup\n        with: {node-version: '22'}\n`;
+  expect(
+    check(file, content).some(({ rule }) => rule === "runtime-workflow"),
+  ).toBe(true);
+  expect(
+    check(
+      file,
+      `step: &action {uses: actions/checkout@v5}\njobs: {test: {steps: [*action]}}`,
+    ).some(({ rule }) => rule === "action-pins"),
+  ).toBe(true);
+  expect(
+    check(
+      file,
+      `job-definitions: &jobs\n  test:\n    steps:\n      - uses: actions/checkout@v1\njobs:\n  <<: *jobs\n`,
+    ).some(({ rule }) => rule === "action-pins"),
+  ).toBe(true);
+  expect(
+    check(
+      file,
+      `step: &base {uses: actions/checkout@${sha}} # v5\njobs:\n  test:\n    steps:\n      - <<: *base\n`,
+    ),
+  ).toEqual([]);
+});
+
+test("one matching action occurrence cannot supply another occurrence's comment", () => {
+  expect(
+    check(
+      ".github/workflows/ci.yml",
+      workflow(
+        `      - uses: actions/checkout@${sha}\n      - uses: actions/checkout@${sha} # v5`,
+      ),
+    ).some(({ rule }) => rule === "action-pins"),
+  ).toBe(true);
+});
+
+test("invalid selected config is diagnosed; unrelated files are ignored", () => {
+  expect(
+    check("mise.toml", "[tools\nnode = '22'").some(
+      ({ rule }) => rule === "runtime-manager",
+    ),
+  ).toBe(true);
+  expect(
+    check(".github/workflows/ci.yml", "jobs: [").some(
+      ({ rule }) => rule === "runtime-workflow",
+    ),
+  ).toBe(true);
+  expect(
+    check("README.md", "FROM node:latest\nuses: actions/checkout@v5"),
+  ).toEqual([]);
+});
+
+test("action policy follows GitHub repository case normalization", () => {
+  expect(
+    check(
+      ".github/workflows/ci.yml",
+      workflow(`      - uses: Actions/Checkout@${sha} # v5`),
+    ),
+  ).toEqual([]);
+  expect(
+    check(
+      ".github/workflows/ci.yml",
+      workflow(`      - uses: Actions/Checkout@${"b".repeat(40)}`),
+    ).some(({ rule }) => rule === "action-pins"),
+  ).toBe(true);
+  expect(
+    check(
+      ".github/workflows/ci.yml",
+      workflow(
+        `      - uses: Actions/Setup-Node@${sha} # v5\n        with: {node-version: 22}`,
+      ),
+    ).some(({ rule }) => rule === "runtime-workflow"),
+  ).toBe(true);
+});
+
+test("only executable action declarations are checked", () => {
+  const file = ".github/workflows/ci.yml";
+  expect(
+    check(
+      file,
+      `env: {uses: 'actions/checkout@${sha}'}\njobs:\n  test:\n    steps:\n      - run: |\n          uses: actions/checkout@v1\n          node-version: 22\n      - uses: actions/checkout@${sha} # v5\n`,
+    ),
+  ).toEqual([]);
+  expect(
+    check(
+      file,
+      `jobs:\n  test:\n    uses: external/repository/.github/workflows/ci.yml@main`,
+    ),
+  ).toHaveLength(1);
+  expect(
+    check(
+      ".github/actions/js/action.yml",
+      "inputs: {uses: {default: example}}\nruns: {using: node24, main: index.js}",
+    ),
+  ).toEqual([]);
+});
+
+test("Docker image arguments resolve defaults without treating stage arguments as global", () => {
+  expect(
+    check(
+      "Dockerfile",
+      `ARG VERSION=${policy.node}\nARG IMAGE=node:$VERSION\nFROM \\\n  --platform=linux/arm64 \\\n  $IMAGE AS base\nFROM base AS final\n`,
+    ),
+  ).toEqual([]);
+  const invalid = check(
+    "Dockerfile",
+    `ARG IMAGE=node:latest\nFROM alpine:3 AS first\nARG IMAGE=node:${policy.node}\nFROM $IMAGE`,
+  );
+  expect(
+    invalid.some(({ rule, line }) => rule === "runtime-docker" && line === 4),
+  ).toBe(true);
+  expect(
+    check("Dockerfile", "ARG BASE\nFROM $BASE").some(({ message }) =>
+      message.includes("cannot determine"),
+    ),
+  ).toBe(true);
+  for (const prefix of [
+    "library/",
+    "docker.io/",
+    "index.docker.io/library/",
+    "registry-1.docker.io/library/",
+  ])
+    expect(
+      check("Dockerfile", `FROM ${prefix}node:latest`).some(
+        ({ rule }) => rule === "runtime-docker",
+      ),
+    ).toBe(true);
+});
+
+test("Docker heredocs contain text rather than image declarations", () => {
+  expect(
+    check(
+      "Dockerfile",
+      `FROM node:${policy.node}\nRUN <<EOF\nFROM python:latest\nEOF\nCOPY <<-EOF /example\n\tFROM node:latest\n\tEOF\n`,
+    ),
+  ).toEqual([]);
+});
+
+test("Docker escape directives preserve multiline FROM checks", () => {
+  expect(
+    check("Dockerfile", "# escape=`\nFROM `\n node:latest").some(
+      ({ rule, line }) => rule === "runtime-docker" && line === 2,
+    ),
+  ).toBe(true);
+});
+
+test("semantic Bun setup requires a tracked packageManager source and rejects literals", () => {
+  const file = ".github/workflows/ci.yml";
+  const step = `      - uses: Oven-Sh/Setup-Bun@${sha} # v2\n        with: {bun-version-file: package.json}`;
+  expect(check(file, workflow(step))).toEqual([]);
+  expect(
+    check(file, workflow(step), {
+      "package.json": JSON.stringify({ packageManager: "bun@1.4.0" }),
+    }).some(({ rule }) => rule === "bun-pins"),
+  ).toBe(true);
+  for (const reference of [
+    "untracked/package.json",
+    "../package.json",
+    "${{ inputs.file }}",
+    ".node-version",
+    "/package.json",
+  ])
+    expect(
+      check(file, workflow(step.replace("package.json", reference))).some(
+        ({ rule }) => rule === "bun-pins",
+      ),
+    ).toBe(true);
+  expect(
+    check(
+      file,
+      workflow(
+        step.replace("bun-version-file: package.json", "bun-version: 1.4.3"),
+      ),
+    ).some(({ rule }) => rule === "bun-pins"),
+  ).toBe(true);
+  expect(
+    check(file, workflow(step), { "package.json": "[]" }).some(
+      ({ rule }) => rule === "bun-pins",
+    ),
+  ).toBe(true);
+  expect(
+    check(file, workflow(step), { "package.json": "{" }).some(
+      ({ rule }) => rule === "bun-pins",
+    ),
+  ).toBe(true);
+  expect(
+    check(file, workflow(step.replace("package.json", "./package.json"))),
+  ).toEqual([]);
+  expect(
+    check(file, workflow(step), { "package.json": "{}" }).some(
+      ({ rule }) => rule === "bun-pins",
+    ),
+  ).toBe(true);
+  expect(
+    check(
+      file,
+      `env: {bun-version: '1.4.0'}\njobs:\n  test:\n    steps:\n      - run: |\n          bun-version: 1.4.0\n      - uses: oven-sh/setup-bun@${sha} # v2\n        with: {bun-version-file: package.json}`,
+    ),
+  ).toEqual([]);
+  expect(
+    check(
+      file,
+      `input: &pin {bun-version: '1.4.0'}\njobs:\n  test:\n    steps:\n      - uses: oven-sh/setup-bun@${sha} # v2\n        with: *pin`,
+    ).some(({ rule }) => rule === "bun-pins"),
+  ).toBe(true);
+});
+
+test("all semantic Bun manager forms retain the shared exact pin", () => {
+  for (const pass of [
+    `[tools]\nbun = '${policy.bun}'`,
+    `[tools]\nbun = { version = '${policy.bun}', os = ['linux'] }`,
+    `tools.bun = '${policy.bun}'`,
+    `[tools.bun]\nversion = '${policy.bun}'`,
+    `tools = { bun = '${policy.bun}' }`,
+    `tools = { bun = {version = '${policy.bun}'} }`,
+  ]) {
+    expect(check("mise.toml", pass)).toEqual([]);
+    expect(
+      check("mise.toml", pass.replace(policy.bun, "latest")).some(
+        ({ rule }) => rule === "runtime-manager",
+      ),
+    ).toBe(true);
+  }
+  expect(check(".tool-versions", `bun ${policy.bun}\n`)).toEqual([]);
+  expect(
+    check(".tool-versions", "bun latest\n").some(
+      ({ rule }) => rule === "runtime-manager",
+    ),
+  ).toBe(true);
+});
+
+test("Bun Docker declarations use the same semantic instruction parser", () => {
+  expect(
+    check(
+      "Dockerfile",
+      `ARG IMAGE=oven/bun:${policy.bun}-alpine\nFROM $IMAGE\nRUN <<EOF\nFROM oven/bun:latest\nEOF\n`,
+    ),
+  ).toEqual([]);
+  const diagnostics = check(
+    "Dockerfile",
+    "ARG IMAGE=oven/bun:latest\nFROM \\\n $IMAGE\n",
+  );
+  expect(
+    diagnostics.some(({ rule, line }) => rule === "bun-pins" && line === 2),
+  ).toBe(true);
+  for (const content of [
+    "FROM oven/bun",
+    "FROM docker.io/oven/bun:latest",
+    "FROM oven/bun@sha256:example",
+  ])
+    expect(
+      check("Dockerfile", content).some(({ rule }) => rule === "bun-pins"),
+    ).toBe(true);
+});
+
+test("Rust TOML uses the same channel rule under either supported filename", () => {
+  for (const file of ["rust-toolchain", "rust-toolchain.toml"]) {
+    expect(
+      check(
+        file,
+        `# selected release\n[toolchain]\nchannel = '${policy.rust}'`,
+      ),
+    ).toEqual([]);
+    expect(
+      check(file, "[toolchain]\nchannel = 'stable'").some(
+        ({ rule }) => rule === "rust-version",
+      ),
+    ).toBe(true);
+  }
+});
+
+test("Rust compiler development selects its explicit pin only with rustc-dev", () => {
+  for (const file of ["rust-toolchain", "rust-toolchain.toml"]) {
+    const declaration = `[toolchain]\nchannel = '${policy.rustCompilerDevelopment}'\ncomponents = ['rustc-dev', 'rust-src']`;
+    expect(check(file, declaration)).toEqual([]);
+    for (const mutation of [
+      declaration.replace(policy.rustCompilerDevelopment, "nightly-2026-04-15"),
+      declaration.replace("'rustc-dev', ", ""),
+      declaration.replace(policy.rustCompilerDevelopment, policy.rust),
+    ])
+      expect(
+        check(file, mutation).some(({ rule }) => rule === "rust-version"),
+      ).toBe(true);
+  }
+  expect(
+    check("rust-toolchain", policy.rustCompilerDevelopment).some(
+      ({ rule }) => rule === "rust-version",
+    ),
+  ).toBe(true);
+  expect(check("mise.toml", `[tools]\nrust = '${policy.rust}'`)).toEqual([]);
+  expect(
+    check(
+      "mise.toml",
+      `[tools]\nrust = '${policy.rustCompilerDevelopment}'`,
+    ).some(({ rule }) => rule === "runtime-manager"),
+  ).toBe(true);
+});

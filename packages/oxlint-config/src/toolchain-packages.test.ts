@@ -1,0 +1,391 @@
+/// <reference types="bun-types" />
+
+import { describe, expect, test } from "bun:test";
+
+import { checkPackageFiles, packageRules } from "./toolchain-packages";
+
+const policy = {
+  bun: "1.4.3",
+  packages: {
+    oxlint: "1.87.0",
+    lefthook: "2.0.0",
+    "@stll/oxlint-plugin": "0.7.0",
+  },
+  node: "22.12.0",
+  typescriptInstallLayouts: [
+    {
+      type: "direct",
+      compilerPackage: "typescript",
+      compilerSpecifier: "7.0.2",
+    },
+    {
+      type: "split-compatibility",
+      compilerPackage: "@typescript/native",
+      compilerSpecifier: "npm:typescript@7.0.2",
+      compatibilityPackage: "typescript",
+      compatibilitySpecifier: "6.0.3",
+    },
+  ],
+  typescript6Compatibility: {
+    version: "6.0.3",
+    packageAlias: "typescript-compat",
+  },
+} as const;
+const json = (value: unknown) => JSON.stringify(value, null, 2);
+const check = (files: Record<string, string>) =>
+  checkPackageFiles({ files, policy });
+const manifest = (value: unknown) => check({ "package.json": json(value) });
+
+describe("shared package pins", () => {
+  test("packageManager must name the exact shared Bun version", () => {
+    expect(manifest({ packageManager: `bun@${policy.bun}` })).toEqual([]);
+    for (const value of [
+      "bun@1.4.1",
+      "bun@^1.4.3",
+      "npm@10.0.0",
+      "pnpm@10.0.0",
+      "bun@1.4.3+sha512.value",
+      null,
+      143,
+    ])
+      expect(manifest({ packageManager: value })).toMatchObject([
+        { rule: "bun-pins", line: 2 },
+      ]);
+  });
+  test("bun-types resolves recursive catalogs through the nearest workspace", () => {
+    const files = {
+      "package.json": json({
+        workspaces: {
+          packages: ["packages/*"],
+          catalog: { "bun-types": "1.4.1" },
+        },
+      }),
+      "packages/nested/package.json": json({
+        workspaces: {
+          packages: ["apps/*"],
+          catalog: { "bun-types": "catalog:types" },
+          catalogs: { types: { "bun-types": policy.bun } },
+        },
+      }),
+      "packages/nested/apps/app/package.json": json({
+        devDependencies: { "bun-types": "catalog:" },
+      }),
+    };
+    const diagnostics = check(files);
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]).toMatchObject({
+      path: "package.json",
+      rule: "bun-pins",
+    });
+    expect(
+      check({
+        ...files,
+        "packages/nested/package.json": json({
+          workspaces: {
+            packages: ["apps/*"],
+            catalog: { "bun-types": "catalog:" },
+          },
+        }),
+      }).some(({ path }) => path === "packages/nested/apps/app/package.json"),
+    ).toBe(true);
+  });
+  test("repeated bun-types declarations report each divergent line", () => {
+    const diagnostics = manifest({
+      dependencies: { "bun-types": "1.4.1" },
+      devDependencies: { "bun-types": "1.4.1" },
+      catalog: { "bun-types": "1.4.2" },
+    });
+    expect(diagnostics.map(({ line }) => line)).toEqual([3, 6, 9]);
+    expect(diagnostics.every(({ rule }) => rule === "bun-pins")).toBe(true);
+  });
+  for (const section of [
+    "dependencies",
+    "devDependencies",
+    "optionalDependencies",
+    "catalog",
+  ]) {
+    for (const [name, version] of Object.entries({
+      ...policy.packages,
+      "bun-types": policy.bun,
+    })) {
+      test(`${section} ${name} accepts only the shared pin`, () => {
+        expect(manifest({ [section]: { [name]: version } })).toEqual([]);
+        for (const mutated of [
+          `^${version}`,
+          `~${version}`,
+          "latest",
+          "workspace:*",
+          "1.0.0",
+        ]) {
+          const result = manifest({ [section]: { [name]: mutated } });
+          expect(result).toHaveLength(1);
+          expect(result[0]).toMatchObject({
+            rule: name === "bun-types" ? "bun-pins" : "package-pins",
+            path: "package.json",
+            line: 3,
+          });
+        }
+      });
+    }
+  }
+  test("all catalog containers enforce pins independently of consumers", () => {
+    for (const wrap of [
+      (entry: unknown) => ({ catalogs: { tools: entry } }),
+      (entry: unknown) => ({ workspaces: { catalog: entry } }),
+      (entry: unknown) => ({ workspaces: { catalogs: { tools: entry } } }),
+    ]) {
+      expect(manifest(wrap({ oxlint: "1.87.0" }))).toEqual([]);
+      expect(manifest(wrap({ oxlint: "^1.87.0" }))).toHaveLength(1);
+    }
+  });
+  test("workspace pins require a matching repository package and version", () => {
+    const consumer = json({
+      workspaces: ["packages/*"],
+      devDependencies: { "@stll/oxlint-plugin": "workspace:*" },
+    });
+    const files = {
+      "package.json": consumer,
+      "packages/plugin/package.json": json({
+        name: "@stll/oxlint-plugin",
+        version: "0.7.0",
+      }),
+    };
+    expect(check(files)).toEqual([]);
+    for (const version of ["0.6.0", "^0.7.0", undefined]) {
+      expect(
+        check({
+          ...files,
+          "packages/plugin/package.json": json({
+            name: "@stll/oxlint-plugin",
+            version,
+          }),
+        }),
+      ).toHaveLength(1);
+    }
+  });
+  test("workspace references cannot resolve undeclared, excluded or ambiguous packages", () => {
+    const packageManifest = json({
+      name: "@stll/oxlint-plugin",
+      version: "0.7.0",
+    });
+    for (const workspaces of [
+      undefined,
+      ["apps/*"],
+      ["packages/*", "!packages/plugin"],
+      { packages: ["apps/*"] },
+    ]) {
+      expect(
+        check({
+          "package.json": json({
+            workspaces,
+            devDependencies: { "@stll/oxlint-plugin": "workspace:*" },
+          }),
+          "packages/plugin/package.json": packageManifest,
+        }),
+      ).toHaveLength(1);
+    }
+    for (const version of ["0.7.0", "0.6.0"]) {
+      expect(
+        check({
+          "package.json": json({
+            workspaces: ["packages/*"],
+            devDependencies: { "@stll/oxlint-plugin": "workspace:*" },
+          }),
+          "packages/plugin/package.json": packageManifest,
+          "packages/duplicate/package.json": json({
+            name: "@stll/oxlint-plugin",
+            version,
+          }),
+        }),
+      ).toHaveLength(1);
+    }
+    expect(
+      check({
+        "package.json": json({ workspaces: { packages: ["packages/**"] } }),
+        "packages/plugin/package.json": packageManifest,
+        "packages/app/nested/package.json": json({
+          devDependencies: { "@stll/oxlint-plugin": "workspace:*" },
+        }),
+      }),
+    ).toEqual([]);
+  });
+  test("catalog links resolve default, named and chained catalogs", () => {
+    for (const workspaces of [false, true]) {
+      const catalogs = {
+        catalog: { oxlint: "catalog:tools" },
+        catalogs: { tools: { oxlint: "1.87.0" } },
+      };
+      const root = workspaces ? { workspaces: catalogs } : catalogs;
+      const files = {
+        "package.json": json(root),
+        "packages/app/package.json": json({
+          devDependencies: { oxlint: "catalog:" },
+        }),
+      };
+      expect(check(files)).toEqual([]);
+      expect(
+        check({
+          ...files,
+          "package.json": json(
+            workspaces
+              ? {
+                  workspaces: {
+                    ...catalogs,
+                    catalogs: { tools: { oxlint: "1.86.0" } },
+                  },
+                }
+              : { ...catalogs, catalogs: { tools: { oxlint: "1.86.0" } } },
+          ),
+        }),
+      ).not.toEqual([]);
+    }
+  });
+  test("missing catalog entries, cycles and nearest workspace shadowing fail", () => {
+    for (const catalogs of [
+      {},
+      { catalog: {} },
+      { catalog: { oxlint: "catalog:" } },
+      {
+        catalog: { oxlint: "catalog:tools" },
+        catalogs: { tools: { oxlint: "catalog:" } },
+      },
+    ]) {
+      expect(
+        check({
+          "package.json": json(catalogs),
+          "app/package.json": json({ devDependencies: { oxlint: "catalog:" } }),
+        }),
+      ).not.toEqual([]);
+    }
+    const files = {
+      "package.json": json({ catalog: { oxlint: "1.87.0" } }),
+      "nested/package.json": json({
+        workspaces: { packages: ["app"], catalog: { oxlint: "1.86.0" } },
+      }),
+      "nested/app/package.json": json({
+        devDependencies: { oxlint: "catalog:" },
+      }),
+    };
+    expect(
+      check(files).some(({ path }) => path === "nested/app/package.json"),
+    ).toBe(true);
+    expect(
+      check({ ...files, "nested/package.json": json({ workspaces: ["app"] }) }),
+    ).not.toEqual([]);
+  });
+  test("unowned dependencies and absent tools do not fail", () => {
+    expect(
+      manifest({ dependencies: { other: "^1", typescriptish: "^6" } }),
+    ).toEqual([]);
+    expect(check({ "README.md": "typescript 6" })).toEqual([]);
+  });
+  test("invalid manifest cannot silently skip checks", () => {
+    for (const text of ["{", "[]", "null", "42"])
+      expect(check({ "package.json": text })).toHaveLength(1);
+  });
+});
+
+describe("TypeScript install layouts", () => {
+  test("all declared layouts pass and every required pin mutation fails", () => {
+    for (const layout of policy.typescriptInstallLayouts) {
+      const dependencies =
+        layout.type === "direct"
+          ? { [layout.compilerPackage]: layout.compilerSpecifier }
+          : {
+              [layout.compilerPackage]: layout.compilerSpecifier,
+              [layout.compatibilityPackage]: layout.compatibilitySpecifier,
+            };
+      expect(manifest({ devDependencies: dependencies })).toEqual([]);
+      for (const name of Object.keys(dependencies)) {
+        expect(
+          manifest({
+            devDependencies: { ...dependencies, [name]: "^6.0.3" },
+          }).some(({ rule }) => rule === "typescript-layout"),
+        ).toBe(true);
+      }
+    }
+  });
+  test("split compatibility requires both packages and rejects mixed layouts", () => {
+    for (const dependencies of [
+      { typescript: "6.0.3" },
+      { "@typescript/native": "npm:typescript@7.0.2" },
+      { "@typescript/native": "npm:typescript@7.0.2", typescript: "7.0.2" },
+    ])
+      expect(manifest({ dependencies })).not.toEqual([]);
+  });
+  test("compatibility alias is exact and may accompany either layout", () => {
+    expect(
+      manifest({
+        devDependencies: {
+          typescript: "7.0.2",
+          "typescript-compat": "npm:typescript@6.0.3",
+        },
+      }),
+    ).toEqual([]);
+    for (const value of ["6.0.3", "npm:typescript@^6.0.3", "npm:other@6.0.3"])
+      expect(
+        manifest({ dependencies: { "typescript-compat": value } }),
+      ).toHaveLength(1);
+  });
+  test("catalogs resolve the entire split layout", () => {
+    const catalogs = {
+      typescript: "6.0.3",
+      "@typescript/native": "npm:typescript@7.0.2",
+    };
+    const files = {
+      "package.json": json({ workspaces: { catalog: catalogs } }),
+      "app/package.json": json({
+        devDependencies: {
+          typescript: "catalog:",
+          "@typescript/native": "catalog:",
+        },
+      }),
+    };
+    expect(check(files)).toEqual([]);
+    expect(
+      check({
+        ...files,
+        "app/package.json": json({
+          devDependencies: { typescript: "catalog:" },
+        }),
+      }),
+    ).not.toEqual([]);
+  });
+});
+
+test("node engine support ranges must include the shared runtime", () => {
+  for (const value of [
+    policy.node,
+    ">=22.12.0",
+    "^22.12.0",
+    "22",
+    "^20.19.0 || >=22.12.0",
+    "*",
+  ])
+    expect(manifest({ engines: { node: value } })).toEqual([]);
+  expect(manifest({ engines: { bun: ">=1" } })).toEqual([]);
+  for (const value of [
+    ">=22.13.0",
+    "^20.19.0",
+    "20",
+    "20.19.0",
+    "invalid",
+    null,
+    22,
+  ])
+    expect(manifest({ engines: { node: value } })).toMatchObject([
+      { rule: "node-engine", line: 3 },
+    ]);
+});
+
+test("every exported rule has a failing hermetic fixture", () => {
+  const detected = new Set(
+    [
+      ...manifest({ dependencies: { oxlint: "wrong" } }),
+      ...manifest({ packageManager: "bun@wrong" }),
+      ...manifest({ dependencies: { typescript: "wrong" } }),
+      ...manifest({ engines: { node: "wrong" } }),
+    ].map(({ rule }) => rule),
+  );
+  expect([...detected].sort()).toEqual([...packageRules].sort());
+});
