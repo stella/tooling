@@ -140,7 +140,7 @@ test("the actual wrapped hook preserves its receiver and arguments while guardin
     outputDirectories: [directory],
   });
   await guarded.call(receiver, {}, bundle);
-  expect(Object.keys(snapshotDeclarationDirectory(directory))).toEqual([
+  expect(Object.keys(snapshotDeclarationDirectory(directory)).sort()).toEqual([
     "index.d.ts",
     "index.js",
   ]);
@@ -187,20 +187,17 @@ test("wrapped bundle mutations and dynamic hook return values fail", async () =>
     expect(returned.message).toContain("dynamic build change");
 });
 
-test("source map class data remains byte-bound without invoking its methods", () => {
-  class SourceMap {
-    version = 3;
-    mappings = "AAAA";
-    sources = ["input.ts"];
-    names: string[] = [];
-    toString() {
-      throw new Error("source map method must not run");
-    }
-  }
-  const map = new SourceMap();
-  const bundle = {
-    "index.js": { type: "chunk", fileName: "index.js", code: "original", map },
+test("bundle snapshots read emitted bytes and ignore output metadata getters", () => {
+  const chunk = {
+    type: "chunk",
+    fileName: "index.js",
+    code: "original",
+    get modules() {
+      throw new Error("output metadata getter must not run");
+    },
   };
+  const map = { type: "asset", fileName: "index.js.map", source: "AAAA" };
+  const bundle = { "index.js": chunk, "index.js.map": map };
   const before = snapshotDeclarationBundle(bundle);
   expect(() =>
     assertDeclarationOnlyOutput({
@@ -208,11 +205,11 @@ test("source map class data remains byte-bound without invoking its methods", ()
       after: snapshotDeclarationBundle(bundle),
     }),
   ).not.toThrow();
-  map.mappings = "BBBB";
+  map.source = "BBBB";
   expect(() =>
     assertDeclarationOnlyOutput({
       before,
       after: snapshotDeclarationBundle(bundle),
     }),
-  ).toThrow("index.js");
+  ).toThrow("index.js.map");
 });

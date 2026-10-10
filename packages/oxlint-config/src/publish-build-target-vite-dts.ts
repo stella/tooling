@@ -147,54 +147,6 @@ export const snapshotDeclarationDirectory = (
   return Object.freeze(result);
 };
 
-const snapshotValue = (value: unknown): unknown => {
-  if (value instanceof Uint8Array)
-    return ["bytes", Buffer.from(value).toString("base64")];
-  if (Array.isArray(value)) return value.map(snapshotValue);
-  if (
-    record(value) &&
-    ![Object.prototype, null].includes(Object.getPrototypeOf(value))
-  ) {
-    const fields = [
-      "version",
-      "sources",
-      "names",
-      "mappings",
-      "sourcesContent",
-      "file",
-      "sourceRoot",
-    ];
-    const entries = fields.flatMap((key) => {
-      const descriptor = Object.getOwnPropertyDescriptor(value, key);
-      if (descriptor === undefined) return [];
-      if (!("value" in descriptor))
-        throw new Error("Unsupported source map accessor");
-      return [[key, descriptor.value]];
-    });
-    if (
-      Object.getOwnPropertyDescriptor(value, "version")?.value !== 3 ||
-      !Object.hasOwn(value, "mappings")
-    )
-      throw new Error("Unsupported declaration bundle metadata prototype");
-    for (const key of Reflect.ownKeys(value))
-      if (typeof key !== "string" || !fields.includes(key))
-        throw new Error("Unsupported source map metadata");
-    return entries.map(([key, entry]) => [key, snapshotValue(entry)]);
-  }
-  if (record(value))
-    return staticEntries(value)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, entry]) => [key, snapshotValue(entry)]);
-  if (value === undefined) return ["undefined"];
-  if (
-    value === null ||
-    typeof value === "string" ||
-    typeof value === "boolean" ||
-    (typeof value === "number" && Number.isFinite(value))
-  )
-    return value;
-  throw new Error("Unsupported declaration bundle metadata");
-};
 export const snapshotDeclarationBundle = (
   bundle: unknown,
 ): DeclarationOutputSnapshot => {
@@ -209,8 +161,12 @@ export const snapshotDeclarationBundle = (
       throw new Error("Invalid declaration bundle entry");
     if (declarationPath(file) && entry["type"] !== "asset")
       throw new Error("Declarations must be emitted as assets");
+    const type = entry["type"];
+    const bytes = type === "chunk" ? entry["code"] : entry["source"];
+    if (typeof bytes !== "string" && !(bytes instanceof Uint8Array))
+      throw new Error("Declaration bundle output must contain text or bytes");
     Object.defineProperty(result, file, {
-      value: hash(JSON.stringify(snapshotValue(entry))),
+      value: `${type}:${hash(bytes)}`,
       enumerable: true,
     });
   }
