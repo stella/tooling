@@ -155,7 +155,7 @@ export const renderCloudServiceStart = ({
         return valkeyStart.replaceAll("@VALKEY@", valkey);
       default: {
         const exhaustive: never = service;
-        throw new Error(`Unsupported cloud service: ${exhaustive}`);
+        throw new Error(`Unsupported cloud service: ${String(exhaustive)}`);
       }
     }
   });

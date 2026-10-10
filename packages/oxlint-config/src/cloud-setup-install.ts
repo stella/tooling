@@ -156,7 +156,7 @@ export const renderCloudServiceInstall = ({
       }
       default: {
         const exhaustive: never = service;
-        throw new Error(`Unsupported service: ${exhaustive}`);
+        throw new Error(`Unsupported service: ${String(exhaustive)}`);
       }
     }
   });

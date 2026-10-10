@@ -224,6 +224,42 @@ const main = async () => {
       { stdout: "pipe", stderr: "ignore" },
     );
     let identity: SpawnedIdentity = { status: "pending" };
+    const cleanupChild = async (identity: SpawnedIdentity) => {
+      switch (identity.status) {
+        case "verified": {
+          const removeStale = String.raw`
+set -euo pipefail
+if [[ -d "/proc/$CHILD_PID" && "$(stat -c '%u' "/proc/$CHILD_PID")" == "$CHILD_UID" && "$(readlink -f "/proc/$CHILD_PID/exe")" == "$CHILD_EXE" && "$(awk '{ print $22 }' "/proc/$CHILD_PID/stat")" == "$CHILD_STARTED" ]]; then
+  kill -TERM -- "$CHILD_PID"
+fi
+for file in "$STATE/postgres/postmaster.pid" "$STATE/valkey/valkey.pid"; do
+  if [[ -f "$file" && ! -L "$file" && "$(head -n 1 "$file")" == "$CHILD_PID" ]]; then rm -- "$file"; fi
+done
+`;
+          await root(
+            [
+              "env",
+              `STATE=${state}`,
+              `CHILD_PID=${identity.pid}`,
+              `CHILD_UID=${identity.uid}`,
+              `CHILD_EXE=${identity.executable}`,
+              `CHILD_STARTED=${identity.started}`,
+              "bash",
+              "-c",
+              removeStale,
+            ],
+            "Remove only spawned child and injected identifiers",
+          );
+          break;
+        }
+        case "pending":
+          break;
+        default: {
+          const exhaustive: never = identity;
+          throw new Error(`Unexpected child state: ${String(exhaustive)}`);
+        }
+      }
+    };
     try {
       const reader = monitor.stdout.getReader();
       const decoder = new TextDecoder();
@@ -352,40 +388,7 @@ exit 1
       );
     } finally {
       try {
-        switch (identity.status) {
-          case "verified": {
-            const removeStale = String.raw`
-set -euo pipefail
-if [[ -d "/proc/$CHILD_PID" && "$(stat -c '%u' "/proc/$CHILD_PID")" == "$CHILD_UID" && "$(readlink -f "/proc/$CHILD_PID/exe")" == "$CHILD_EXE" && "$(awk '{ print $22 }' "/proc/$CHILD_PID/stat")" == "$CHILD_STARTED" ]]; then
-  kill -TERM -- "$CHILD_PID"
-fi
-for file in "$STATE/postgres/postmaster.pid" "$STATE/valkey/valkey.pid"; do
-  if [[ -f "$file" && ! -L "$file" && "$(head -n 1 "$file")" == "$CHILD_PID" ]]; then rm -- "$file"; fi
-done
-`;
-            await root(
-              [
-                "env",
-                `STATE=${state}`,
-                `CHILD_PID=${identity.pid}`,
-                `CHILD_UID=${identity.uid}`,
-                `CHILD_EXE=${identity.executable}`,
-                `CHILD_STARTED=${identity.started}`,
-                "bash",
-                "-c",
-                removeStale,
-              ],
-              "Remove only spawned child and injected identifiers",
-            );
-            break;
-          }
-          case "pending":
-            break;
-          default: {
-            const exhaustive: never = identity;
-            throw new Error(`Unexpected child state: ${exhaustive}`);
-          }
-        }
+        await cleanupChild(identity);
       } finally {
         // This retained monitor belongs to this fixture; never signal a cached PID.
         if (monitor.exitCode === null) monitor.kill();
@@ -555,12 +558,26 @@ if (fs.statSync(path.join(vite, "consumer-cache")).uid !== uid) process.exit(1);
   };
   try {
     await mkdir(dirname(envPath), { recursive: true });
+    await mkdir(join(fixture, "local-package"), { recursive: true });
+    await writeFile(
+      join(fixture, "local-package/package.json"),
+      JSON.stringify({
+        name: "cloud-local-dependency",
+        version: "1.0.0",
+        main: "index.js",
+      }),
+    );
+    await writeFile(
+      join(fixture, "local-package/index.js"),
+      "module.exports = 1;\n",
+    );
     await writeFile(
       join(fixture, "package.json"),
       JSON.stringify({
         name: "cloud-integration",
         private: true,
         packageManager: `bun@${policy.bun}`,
+        dependencies: { "cloud-local-dependency": "file:./local-package" },
       }),
     );
     await writeFile(join(fixture, ".node-version"), `${nodeVersion}\n`);
@@ -580,25 +597,7 @@ if (fs.statSync(path.join(vite, "consumer-cache")).uid !== uid) process.exit(1);
       args: [process.execPath, "install", "--lockfile-only"],
       cwd: fixture,
     });
-    try {
-      await readFile(join(fixture, "bun.lock"));
-    } catch (error) {
-      if (
-        !(error instanceof Error) ||
-        !("code" in error) ||
-        error.code !== "ENOENT"
-      )
-        throw error;
-      // Bun may omit an empty lock; preserve an explicit frozen fixture contract.
-      await writeFile(
-        join(fixture, "bun.lock"),
-        JSON.stringify({
-          lockfileVersion: 1,
-          workspaces: { "": { name: "cloud-integration" } },
-          packages: {},
-        }),
-      );
-    }
+    await readFile(join(fixture, "bun.lock"));
     await command({
       label: "Fixture repository initialization",
       args: ["git", "init", "--quiet"],
@@ -609,6 +608,7 @@ if (fs.statSync(path.join(vite, "consumer-cache")).uid !== uid) process.exit(1);
       args: [
         "git",
         "add",
+        "local-package",
         "package.json",
         "bun.lock",
         ".node-version",
