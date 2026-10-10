@@ -8,6 +8,13 @@ const excludedInputPath = (file: string) =>
   file === "" ||
   file.split("/").some((part) => part === "node_modules" || part === "vendor");
 
+export const javascriptDependencyLockfiles = [
+  "bun.lock",
+  "package-lock.json",
+  "yarn.lock",
+  "pnpm-lock.yaml",
+] as const;
+
 /** Match project, environment, local, and fragment filenames recognized by mise. */
 export const isMiseConfigPath = (file: string) =>
   !excludedInputPath(file) &&
@@ -69,7 +76,10 @@ export const toolchainInputKind = (file: string) => {
   if (excludedInputPath(file)) return undefined;
   if (
     pythonDependencyManifestKind(file) === "pipfile-lock" ||
-    /(?:^|\/)(?:bun\.lock|uv\.lock)$/.test(file)
+    javascriptDependencyLockfiles.some(
+      (name) => file.split("/").at(-1) === name,
+    ) ||
+    /(?:^|\/)uv\.lock$/.test(file)
   )
     return "presence";
   if (

@@ -12,12 +12,18 @@ import {
   isDockerDefinitionPath,
   pythonDependencyManifestKind,
   isPythonDependencyManifest,
+  javascriptDependencyLockfiles,
   toolchainInputKind,
 } from "./toolchain-inputs";
 import { parseToolchainPolicy } from "./toolchain-schema";
 
 test("both input readers exclude dependency trees for every accepted input kind", () => {
-  const inputs = ["package.json", "bun.lock", "uv.lock", "pyproject.toml"];
+  const inputs = [
+    "package.json",
+    ...javascriptDependencyLockfiles,
+    "uv.lock",
+    "pyproject.toml",
+  ];
   for (const file of inputs) {
     expect(toolchainInputKind(file)).toBeDefined();
     for (const prefix of [
@@ -35,6 +41,15 @@ test("both input readers exclude dependency trees for every accepted input kind"
   expect(githubAutomationFileKind("")).toBeUndefined();
   expect(toolchainInputKind("vendor-example/package.json")).toBe("config");
   expect(githubAutomationFileKind("vendor-example/action.yml")).toBe("action");
+});
+
+test("JavaScript installation lockfiles are tracked as presence without reading dependency graphs", () => {
+  for (const file of javascriptDependencyLockfiles) {
+    expect(toolchainInputKind(file)).toBe("presence");
+    expect(toolchainInputKind(`project/${file}`)).toBe("presence");
+  }
+  for (const file of ["unrelated.lock", "pnpm-lock.yml", "package-lock.txt"])
+    expect(toolchainInputKind(file)).toBeUndefined();
 });
 
 test("tracked executable action metadata remains discoverable under dependency-named directories", () => {

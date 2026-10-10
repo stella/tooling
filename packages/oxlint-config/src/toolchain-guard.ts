@@ -5,6 +5,11 @@ import path from "node:path";
 import { cloudSetupPath, generateCloudSetup } from "./cloud-setup";
 import { parseCloudSetup } from "./cloud-setup-schema";
 import { checkDependabot, dependabotRules } from "./toolchain-dependabot";
+import {
+  parseEngineFloors,
+  resolveEngineFloor,
+  type ResolvedEngineFloor,
+} from "./toolchain-engine-floors";
 import { toolchainInputKind } from "./toolchain-inputs";
 import { checkPackageFiles, packageRules } from "./toolchain-packages";
 import {
@@ -40,14 +45,18 @@ const array = (value: unknown): value is readonly unknown[] =>
 export const parseToolchainConfiguration = (input: unknown) => {
   if (
     !record(input) ||
-    Object.keys(input).some((key) => key !== "optOuts" && key !== "cloud") ||
-    !array(input["optOuts"])
+    Object.keys(input).some(
+      (key) => key !== "optOuts" && key !== "cloud" && key !== "engineFloors",
+    ) ||
+    (input["optOuts"] !== undefined && !array(input["optOuts"]))
   )
     throw new Error(
-      'stll-toolchain.json requires an "optOuts" array and allows only optional "cloud"',
+      "stll-toolchain.json accepts only optOuts, cloud and engineFloors declarations",
     );
   const disabled = new Set<string>();
-  for (const entry of input["optOuts"]) {
+  const optOuts = input["optOuts"] ?? [];
+  if (!array(optOuts)) throw new Error("optOuts must be an array");
+  for (const entry of optOuts) {
     if (
       !record(entry) ||
       Object.keys(entry).some((key) => key !== "rule" && key !== "reason") ||
@@ -70,7 +79,11 @@ export const parseToolchainConfiguration = (input: unknown) => {
       );
     disabled.add(entry["rule"]);
   }
-  return { disabled, cloud: parseCloudSetup(input["cloud"]) };
+  return {
+    disabled,
+    cloud: parseCloudSetup(input["cloud"]),
+    engineFloors: parseEngineFloors(input["engineFloors"]),
+  };
 };
 
 /** Read one tracked configuration snapshot for guards and policy generation. */
@@ -144,6 +157,7 @@ export const checkToolchain = ({
 
   let disabled = new Set<string>();
   let cloud: ReturnType<typeof parseCloudSetup>;
+  const engineFloors: ResolvedEngineFloor[] = [];
   if (files["stll-toolchain.json"] !== undefined) {
     try {
       const configuration = parseToolchainConfiguration(
@@ -151,6 +165,8 @@ export const checkToolchain = ({
       );
       disabled = configuration.disabled;
       cloud = configuration.cloud;
+      for (const entry of configuration.engineFloors)
+        engineFloors.push(resolveEngineFloor(entry, files));
     } catch (error) {
       diagnostics.push({
         rule: "configuration",
@@ -198,6 +214,9 @@ export const checkToolchain = ({
       });
     }
   }
+  const exercisedFloors = new Set<ResolvedEngineFloor>();
+  const mismatchedFloors = new Set<ResolvedEngineFloor>();
+
   diagnostics.push(...checkPackageFiles({ files, policy }));
   for (const [file, text] of Object.entries(files))
     diagnostics.push(
@@ -211,9 +230,22 @@ export const checkToolchain = ({
         trackedFiles,
         repository,
         onDelegated,
+        engineFloors: engineFloors.filter((entry) => entry.workflow === file),
+        onEngineFloor: (entry, status) => {
+          if (status === "mismatch") mismatchedFloors.add(entry);
+          else exercisedFloors.add(entry);
+        },
         readFile: (target) => files[target],
       }),
     );
+  for (const entry of engineFloors)
+    if (!exercisedFloors.has(entry) || mismatchedFloors.has(entry))
+      diagnostics.push({
+        rule: "configuration",
+        path: "stll-toolchain.json",
+        line: 1,
+        message: `engine floor ${entry.workflow}:${entry.job} requires a setup-node exact patch satisfying ${entry.package} engines.node minimum major ${entry.major}`,
+      });
   diagnostics.push(...checkDependabot({ files, policy: policy.dependabot }));
   return diagnostics.filter((diagnostic) => !disabled.has(diagnostic.rule));
 };

@@ -4,6 +4,7 @@ import { satisfies, valid, validRange } from "semver";
 import { isNode, LineCounter, parseDocument } from "yaml";
 
 import { nodeSupportRangeMatches } from "./toolchain-node";
+import { workspaceContains } from "./toolchain-workspaces";
 
 export const packageRules = [
   "bun-pins",
@@ -457,36 +458,6 @@ export const checkPackageFiles = ({
       directory = path.posix.dirname(directory);
     }
   };
-  const workspaceContains = ({
-    directory,
-    file,
-    patterns,
-    rootMembership,
-  }: {
-    directory: string;
-    file: string;
-    patterns: unknown;
-    rootMembership: "implicit" | "patterns";
-  }) => {
-    const relative = path.posix.relative(directory, path.posix.dirname(file));
-    if (relative === "" && rootMembership === "implicit") return true;
-    if (relative === ".." || relative.startsWith("../")) return false;
-    if (!Array.isArray(patterns)) return false;
-    const normalize = (pattern: string) => path.posix.normalize(pattern);
-    const selected = patterns.filter(
-      (value: unknown): value is string => typeof value === "string",
-    );
-    return (
-      picomatch(
-        selected.filter((pattern) => !pattern.startsWith("!")).map(normalize),
-      )(relative) &&
-      !picomatch(
-        selected
-          .filter((pattern) => pattern.startsWith("!"))
-          .map((pattern) => normalize(pattern.slice(1))),
-      )(relative)
-    );
-  };
   const resolve = (file: string, name: string, value: unknown): unknown => {
     const visited = new Set<string>();
     while (typeof value === "string" && value.startsWith("catalog:")) {
@@ -574,6 +545,91 @@ export const checkPackageFiles = ({
     policy.typescript6Compatibility.packageAlias,
     new Set([`npm:typescript@${policy.typescript6Compatibility.version}`]),
   );
+  const layoutFor = (specifiers: Map<string, Set<unknown>>) =>
+    policy.typescriptInstallLayouts.find((layout) => {
+      const compiler = specifiers.get(layout.compilerPackage);
+      if (compiler?.size !== 1 || !compiler.has(layout.compilerSpecifier))
+        return false;
+      if (layout.type === "split-compatibility") {
+        const compatibility = specifiers.get(layout.compatibilityPackage);
+        return (
+          compatibility?.size === 1 &&
+          compatibility.has(layout.compatibilitySpecifier)
+        );
+      }
+      return policy.typescriptInstallLayouts.every(
+        (other) =>
+          other.compilerPackage === layout.compilerPackage ||
+          !specifiers.has(other.compilerPackage),
+      );
+    });
+  const toolchainEntries = (file: string, json: Record<string, unknown>) => {
+    const entries: { section: string; name: string; value: unknown }[] = [];
+    for (const section of [
+      "dependencies",
+      "devDependencies",
+      "optionalDependencies",
+      "peerDependencies",
+    ]) {
+      const dependencies = json[section];
+      if (!record(dependencies)) continue;
+      for (const [name, value] of Object.entries(dependencies)) {
+        if (!tsSpecifiers.has(name)) continue;
+        entries.push({ section, name, value: resolve(file, name, value) });
+      }
+    }
+    return entries;
+  };
+  const specifierMap = (entries: { name: string; value: unknown }[]) => {
+    const specifiers = new Map<string, Set<unknown>>();
+    for (const { name, value } of entries) {
+      const values = specifiers.get(name) ?? new Set<unknown>();
+      values.add(value);
+      specifiers.set(name, values);
+    }
+    return specifiers;
+  };
+  const workspaceLayouts = new Map<
+    string,
+    { layout: Layout | undefined; directory: string }
+  >();
+  const workspaceLayoutFor = (file: string) => {
+    const owner = workspaceOwnerFor(file);
+    if (
+      owner === undefined ||
+      !workspaceContains({ ...owner, file, rootMembership: "implicit" })
+    )
+      return undefined;
+    const key = `${owner.source}:${owner.directory}`;
+    const cached = workspaceLayouts.get(key);
+    if (cached !== undefined) return cached;
+    const entries: { name: string; value: unknown }[] = [];
+    for (const [candidate, member] of manifests) {
+      if (path.posix.basename(candidate) !== "package.json") continue;
+      const memberOwner = workspaceOwnerFor(candidate);
+      if (
+        memberOwner?.directory !== owner.directory ||
+        memberOwner.source !== owner.source ||
+        !workspaceContains({
+          ...owner,
+          file: candidate,
+          rootMembership: "implicit",
+        })
+      )
+        continue;
+      entries.push(
+        ...toolchainEntries(candidate, member).filter(
+          ({ section }) => section === "devDependencies",
+        ),
+      );
+    }
+    const result = {
+      layout: layoutFor(specifierMap(entries)),
+      directory: owner.directory,
+    };
+    workspaceLayouts.set(key, result);
+    return result;
+  };
   for (const [file, json] of manifests) {
     const manager = json["packageManager"];
     if (manager !== undefined && manager !== `bun@${policy.bun}`)
@@ -584,16 +640,13 @@ export const checkPackageFiles = ({
         value: manager,
         message: `packageManager Bun version must be ${policy.bun}, found ${JSON.stringify(manager)}`,
       });
-    const dependencies: Record<string, unknown> = {};
     const checkEntries = (
       entries: unknown,
-      installed: boolean,
       location?: { key: string; value: unknown },
     ) => {
       if (!record(entries)) return;
       for (const [name, raw] of Object.entries(entries)) {
         const value = resolve(file, name, raw);
-        if (installed) dependencies[name] = value;
         const tsAllowed = tsSpecifiers.get(name);
         if (tsAllowed !== undefined) {
           if (typeof value !== "string" || !tsAllowed.has(value))
@@ -631,12 +684,16 @@ export const checkPackageFiles = ({
       "devDependencies",
       "optionalDependencies",
     ])
-      checkEntries(json[key], true);
+      checkEntries(json[key]);
+    if (record(json["peerDependencies"]))
+      for (const [name, value] of Object.entries(json["peerDependencies"])) {
+        if (tsSpecifiers.has(name)) checkEntries({ [name]: value });
+      }
     for (const source of catalogSources(json)) {
-      checkEntries(source["catalog"], false);
+      checkEntries(source["catalog"]);
       if (!record(source["catalogs"])) continue;
       for (const catalog of Object.values(source["catalogs"]))
-        checkEntries(catalog, false);
+        checkEntries(catalog);
     }
     const ownedNames = new Set([...pins.keys(), ...tsSpecifiers.keys()]);
     const resolutionDependencies: Record<string, unknown> = {};
@@ -736,10 +793,13 @@ export const checkPackageFiles = ({
             value = resolutionDependencies[reference];
           }
           const resolved = resolve(file, name, value);
-          checkEntries({ [name]: value }, false, {
-            key: selector,
-            value: replacement,
-          });
+          checkEntries(
+            { [name]: value },
+            {
+              key: selector,
+              value: replacement,
+            },
+          );
           if (
             tsSpecifiers.has(name) &&
             [...(affectedSpecifiers.get(name) ?? [])].some((specifier) => {
@@ -769,24 +829,56 @@ export const checkPackageFiles = ({
     checkResolutionMap(json["overrides"]);
     checkResolutionMap(json["resolutions"]);
     if (record(json["pnpm"])) checkResolutionMap(json["pnpm"]["overrides"]);
-    const usesCompiler = policy.typescriptInstallLayouts.some(
-      (layout) => dependencies[layout.compilerPackage] !== undefined,
+    const localEntries = toolchainEntries(file, json);
+    const usesCompiler = policy.typescriptInstallLayouts.some((layout) =>
+      localEntries.some(({ name }) => name === layout.compilerPackage),
     );
     if (usesCompiler) {
-      const selectedLayout = policy.typescriptInstallLayouts.find((layout) => {
-        if (dependencies[layout.compilerPackage] !== layout.compilerSpecifier)
-          return false;
-        if (layout.type === "split-compatibility")
-          return (
-            dependencies[layout.compatibilityPackage] ===
-            layout.compatibilitySpecifier
+      let selectedLayout = layoutFor(specifierMap(localEntries));
+      if (
+        layoutFor(
+          specifierMap(
+            localEntries.filter(
+              ({ section }) => section !== "peerDependencies",
+            ),
+          ),
+        ) === undefined
+      )
+        selectedLayout = undefined;
+      if (selectedLayout === undefined) {
+        const workspace = workspaceLayoutFor(file);
+        const layout = workspace?.layout;
+        if (workspace !== undefined && layout !== undefined) {
+          const expected = new Map([
+            [layout.compilerPackage, layout.compilerSpecifier],
+          ]);
+          if (layout.type === "split-compatibility")
+            expected.set(
+              layout.compatibilityPackage,
+              layout.compatibilitySpecifier,
+            );
+          expected.set(
+            policy.typescript6Compatibility.packageAlias,
+            `npm:typescript@${policy.typescript6Compatibility.version}`,
           );
-        return policy.typescriptInstallLayouts.every(
-          (other) =>
-            other.compilerPackage === layout.compilerPackage ||
-            dependencies[other.compilerPackage] === undefined,
-        );
-      });
+          const developmentOnly = localEntries.every(
+            ({ section, name, value }) =>
+              section === "devDependencies" && expected.get(name) === value,
+          );
+          const runtimeCompatibilityOnly =
+            layout.type === "split-compatibility" &&
+            path.posix.dirname(file) !== workspace.directory &&
+            localEntries.every(
+              ({ section, name, value }) =>
+                (section === "dependencies" ||
+                  section === "peerDependencies") &&
+                name === layout.compatibilityPackage &&
+                value === layout.compatibilitySpecifier,
+            );
+          if (developmentOnly || runtimeCompatibilityOnly)
+            selectedLayout = layout;
+        }
+      }
       if (selectedLayout === undefined)
         add({
           file,

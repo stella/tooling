@@ -21,7 +21,9 @@ import {
   isDockerDefinitionPath,
   pythonDependencyManifestKind,
   isPythonDependencyManifest,
+  javascriptDependencyLockfiles,
 } from "./toolchain-inputs";
+import { workspaceContains } from "./toolchain-workspaces";
 
 export const dependabotRules = ["dependabot-policy"] as const;
 
@@ -91,7 +93,7 @@ const workspaceTable = (
   }
 };
 
-/** Workspace members share their update root; independent manifests keep their own. */
+/** Installable workspace members share their update root; own-lock projects stay discoverable. */
 const workspaceRoots = (
   files: Record<string, string>,
   ecosystem: keyof typeof workspaceManifests,
@@ -103,33 +105,41 @@ const workspaceRoots = (
         path.posix.basename(file) === "pnpm-workspace.yaml"),
   );
   const workspaces = new Map<string, string[]>();
+  const npmWorkspaceErrors = new Map<string, Error>();
   for (const file of manifests) {
     if (ecosystem === "npm") {
       const directory = path.posix.dirname(file);
       const workspaceFile = path.posix.join(directory, "pnpm-workspace.yaml");
       const text = files[workspaceFile];
       if (text !== undefined) {
-        const document = parseDocument(text);
-        if (document.errors.length > 0)
-          throw new Error(`${workspaceFile}:1: invalid pnpm workspace YAML`);
-        const parsed: unknown = document.toJS({ maxAliasCount: 100 });
-        if (!record(parsed))
-          throw new Error(
-            `${workspaceFile}:1: pnpm workspace must contain an object`,
+        try {
+          const document = parseDocument(text);
+          if (document.errors.length > 0)
+            throw new Error(`${workspaceFile}:1: invalid pnpm workspace YAML`);
+          const parsed: unknown = document.toJS({ maxAliasCount: 100 });
+          if (!record(parsed))
+            throw new Error(
+              `${workspaceFile}:1: pnpm workspace must contain an object`,
+            );
+          const patterns = parsed["packages"] ?? [];
+          if (!strings(patterns))
+            throw new Error(
+              `${workspaceFile}:1: pnpm packages must be a string array`,
+            );
+          workspaces.set(
+            directory,
+            patterns.map((pattern) =>
+              pattern.startsWith("!")
+                ? `!${path.posix.normalize(pattern.slice(1))}`
+                : path.posix.normalize(pattern),
+            ),
           );
-        const patterns = parsed["packages"] ?? [];
-        if (!strings(patterns))
-          throw new Error(
-            `${workspaceFile}:1: pnpm packages must be a string array`,
+        } catch (error) {
+          npmWorkspaceErrors.set(
+            directory,
+            error instanceof Error ? error : new Error(String(error)),
           );
-        workspaces.set(
-          directory,
-          patterns.map((pattern) =>
-            pattern.startsWith("!")
-              ? `!${path.posix.normalize(pattern.slice(1))}`
-              : path.posix.normalize(pattern),
-          ),
-        );
+        }
         continue;
       }
     }
@@ -165,6 +175,54 @@ const workspaceRoots = (
     }
   }
   const implicitCargoMembers = new Map<string, Set<string>>();
+  const declaredMember = (
+    root: string,
+    patterns: string[],
+    directory: string,
+  ) => {
+    const relative = path.posix.relative(root, directory);
+    if (relative === "" || relative === ".." || relative.startsWith("../"))
+      return false;
+    return workspaceContains({
+      directory: root,
+      file: path.posix.join(directory, "package.json"),
+      patterns,
+      rootMembership: "patterns",
+    });
+  };
+  const installable = new Set(["."]);
+  if (ecosystem === "npm") {
+    for (const file of manifests) {
+      const directory = path.posix.dirname(file);
+      if (
+        javascriptDependencyLockfiles.some(
+          (name) => files[path.posix.join(directory, name)] !== undefined,
+        )
+      )
+        installable.add(directory);
+    }
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const [root, patterns] of workspaces) {
+        if (!installable.has(root)) continue;
+        for (const file of manifests) {
+          const directory = path.posix.dirname(file);
+          if (
+            installable.has(directory) ||
+            !declaredMember(root, patterns, directory)
+          )
+            continue;
+          installable.add(directory);
+          changed = true;
+        }
+      }
+    }
+  }
+  if (ecosystem === "npm") {
+    for (const [directory, error] of npmWorkspaceErrors)
+      if (installable.has(directory)) throw error;
+  }
   if (ecosystem === "cargo") {
     for (const [root, patterns] of workspaces) {
       const includes = patterns.filter((pattern) => !pattern.startsWith("!"));
@@ -249,16 +307,25 @@ const workspaceRoots = (
     }
   }
   return manifests
+    .filter(
+      (file) =>
+        ecosystem !== "npm" || installable.has(path.posix.dirname(file)),
+    )
     .filter((file) => {
       const directory = path.posix.dirname(file);
       return ![...workspaces].some(([root, patterns]) => {
+        if (ecosystem === "npm" && !installable.has(root)) return false;
         const relative = path.posix.relative(root, directory);
         if (relative === "" || relative.startsWith("../")) return false;
         const includes = patterns.filter((pattern) => !pattern.startsWith("!"));
         const excludes = patterns.filter((pattern) => pattern.startsWith("!"));
         return (
           (implicitCargoMembers.get(root)?.has(directory) === true ||
-            includes.some((pattern) => picomatch.isMatch(relative, pattern))) &&
+            (ecosystem === "npm"
+              ? declaredMember(root, patterns, directory)
+              : includes.some((pattern) =>
+                  picomatch.isMatch(relative, pattern),
+                ))) &&
           !excludes.some((pattern) =>
             picomatch.isMatch(relative, pattern.slice(1)),
           )

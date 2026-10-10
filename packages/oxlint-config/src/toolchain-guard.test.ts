@@ -200,6 +200,11 @@ test("untracked and invalid opt-outs cannot conceal a failing runtime", () => {
     fixture({ ...failing, "stll-toolchain.json": "{}" }).map(
       (entry) => entry.rule,
     ),
+  ).toEqual(["node-version"]);
+  expect(
+    fixture({ ...failing, "stll-toolchain.json": '{"optOuts":true}' }).map(
+      (entry) => entry.rule,
+    ),
   ).toEqual(["configuration", "node-version"]);
 });
 
@@ -390,6 +395,7 @@ test("repository configuration accepts an explicit cloud declaration without cha
     cloud,
   });
   expect(configured.cloud).toEqual(cloud);
+  expect(parseToolchainConfiguration({ cloud }).cloud).toEqual(cloud);
   expect([...configured.disabled]).toEqual(["bun-pins"]);
   expect(parseToolchainConfiguration({ optOuts: [] }).cloud).toBeUndefined();
   expect(
@@ -414,7 +420,6 @@ test("unknown root keys and malformed cloud declarations fail through the tracke
     { optOuts: [], cloud: { ...cloud, install: "bun install" } },
     { optOuts: [], cloud: { ...cloud, environment: "test" } },
     { optOuts: [], cloud: { ...cloud, envFile: "../.env" } },
-    { cloud },
   ]) {
     expect(() => parseToolchainConfiguration(input)).toThrow();
     expect(
@@ -492,4 +497,200 @@ test("cloud generation requires an exact tracked root Node patch within the shar
       { ".node-version": "26.10.0" },
     ).some(({ rule }) => rule === "cloud-setup-drift"),
   ).toBe(true);
+});
+
+test("published engine floors permit only an exact selector in the declared workflow job", () => {
+  const setup = policy.actions["actions/setup-node"];
+  if (setup === undefined) throw new Error("Missing setup-node action policy");
+  const declaration = {
+    package: "packages/library",
+    workflow: ".github/workflows/ci.yml",
+    job: "node-floor",
+  };
+  const floorStep = `      - uses: actions/setup-node@${setup.sha} # ${setup.version}\n        with: {node-version: 20.10.0}`;
+  const ordinaryStep = `      - uses: actions/setup-node@${setup.sha} # ${setup.version}\n        with: {node-version-file: .node-version}`;
+  const workflow = `jobs:\n  node-floor:\n    steps:\n${floorStep}\n  ordinary:\n    steps:\n${ordinaryStep}\n`;
+  const config = {
+    optOuts: [
+      { rule: "dependabot-policy", reason: "Published engine floor fixture" },
+    ],
+    engineFloors: [declaration],
+  };
+  const base = {
+    "package.json": JSON.stringify({
+      private: true,
+      workspaces: ["packages/*"],
+    }),
+    "packages/library/package.json": JSON.stringify({
+      name: "@example/library",
+      version: "1.0.0",
+      engines: { node: ">=20.10.0" },
+    }),
+    ".node-version": policy.node,
+    ".github/workflows/ci.yml": workflow,
+    "stll-toolchain.json": JSON.stringify(config),
+  };
+  expect(fixture(base)).toEqual([]);
+  const disabledWorkflow = JSON.stringify({
+    ...config,
+    optOuts: [
+      ...config.optOuts,
+      { rule: "runtime-workflow", reason: "Scoped floor validation fixture" },
+    ],
+  });
+  expect(fixture({ ...base, "stll-toolchain.json": disabledWorkflow })).toEqual(
+    [],
+  );
+  const mismatchStep = floorStep.replace("20.10.0", "22.10.0");
+  for (const steps of [
+    [floorStep, mismatchStep],
+    [mismatchStep, floorStep],
+  ]) {
+    const diagnostics = fixture({
+      ...base,
+      "stll-toolchain.json": disabledWorkflow,
+      ".github/workflows/ci.yml": workflow.replace(floorStep, steps.join("\n")),
+    });
+    expect(diagnostics.map(({ rule }) => rule)).toEqual(["configuration"]);
+    expect(diagnostics.at(0)?.message).toContain(
+      `${declaration.workflow}:${declaration.job}`,
+    );
+  }
+  expect(
+    fixture({
+      ...base,
+      "package.json": JSON.stringify({
+        name: "@example/root-library",
+        version: "1.0.0",
+        engines: { node: ">=20.10.0" },
+        workspaces: ["packages/*"],
+      }),
+      "stll-toolchain.json": JSON.stringify({
+        ...config,
+        engineFloors: [{ ...declaration, package: "." }],
+      }),
+    }),
+  ).toEqual([]);
+  for (const selector of [
+    "22.10.0",
+    "20.9.9",
+    "20",
+    "20.x",
+    "^20.10.0",
+    "20.10.0-rc.1",
+  ]) {
+    const diagnostics = fixture({
+      ...base,
+      ".github/workflows/ci.yml": workflow.replace(
+        "node-version: 20.10.0",
+        `node-version: '${selector}'`,
+      ),
+    });
+    expect(
+      diagnostics.some(
+        ({ rule }) => rule === "configuration" || rule === "runtime-workflow",
+      ),
+    ).toBe(true);
+  }
+  const undeclared = fixture({
+    ...base,
+    ".github/workflows/ci.yml": workflow.replace(ordinaryStep, floorStep),
+  });
+  expect(
+    undeclared.some(
+      ({ rule, path: file }) =>
+        rule === "runtime-workflow" && file === declaration.workflow,
+    ),
+  ).toBe(true);
+  expect(undeclared.some(({ rule }) => rule === "configuration")).toBe(false);
+  const floatingAction = fixture({
+    ...base,
+    ".github/workflows/ci.yml": workflow.replace(
+      `actions/setup-node@${setup.sha}`,
+      "actions/setup-node@main",
+    ),
+  });
+  expect(floatingAction.some(({ rule }) => rule === "action-pins")).toBe(true);
+  const wrongGlobal = fixture({ ...base, ".node-version": "20.10.0" });
+  expect(wrongGlobal.some(({ rule }) => rule === "node-version")).toBe(true);
+  for (const entry of [
+    { ...declaration, package: "packages/missing" },
+    { ...declaration, workflow: ".github/workflows/missing.yml" },
+    { ...declaration, job: "missing" },
+  ]) {
+    expect(
+      fixture({
+        ...base,
+        "stll-toolchain.json": JSON.stringify({
+          ...config,
+          engineFloors: [entry],
+        }),
+      }).some(({ rule }) => rule === "configuration"),
+    ).toBe(true);
+  }
+  const noSetup = fixture({
+    ...base,
+    ".github/workflows/ci.yml": workflow.replace(
+      floorStep,
+      "      - run: echo floor",
+    ),
+  });
+  expect(noSetup.some(({ rule }) => rule === "configuration")).toBe(true);
+  for (const job of [
+    `uses: actions/setup-node@${setup.sha} # ${setup.version}\n    with: {node-version: 20.10.0}`,
+    `uses: example/workflows/.github/workflows/node.yml@${"a".repeat(40)}\n    steps:\n${floorStep}`,
+    "steps: null",
+  ]) {
+    const diagnostics = fixture({
+      ...base,
+      ".github/workflows/ci.yml": `jobs:\n  node-floor:\n    ${job}\n`,
+    });
+    expect(diagnostics.some(({ rule }) => rule === "configuration")).toBe(true);
+  }
+  for (const manifest of [
+    {
+      name: "@example/library",
+      version: "1.0.0",
+      private: true,
+      engines: { node: ">=20.10.0" },
+    },
+    { name: "@example/library", version: "1.0.0" },
+    {
+      name: "@example/library",
+      version: "1.0.0",
+      engines: { node: "invalid" },
+    },
+  ]) {
+    expect(
+      fixture({
+        ...base,
+        "packages/library/package.json": JSON.stringify(manifest),
+      }).some(({ rule }) => rule === "configuration"),
+    ).toBe(true);
+  }
+});
+
+test("engine floor configuration is closed, scoped and independent of optional opt-outs", () => {
+  const entry = {
+    package: "packages/library",
+    workflow: ".github/workflows/ci.yml",
+    job: "node-floor",
+  };
+  const configured = parseToolchainConfiguration({ engineFloors: [entry] });
+  expect(configured.disabled.size).toBe(0);
+  expect(configured.engineFloors).toEqual([entry]);
+  for (const engineFloors of [
+    null,
+    true,
+    "floor",
+    [null],
+    [{ ...entry, reason: "extra" }],
+    [{ ...entry, job: "" }],
+    [{ ...entry, package: "../library" }],
+    [{ ...entry, package: "/packages/library" }],
+    [{ ...entry, package: "C:/packages/library" }],
+    [{ ...entry, workflow: "README.md" }],
+    [entry, entry],
+  ])
+    expect(() => parseToolchainConfiguration({ engineFloors })).toThrow();
 });

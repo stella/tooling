@@ -12,6 +12,7 @@ import {
   canonicalDockerRuntime,
   ownedDockerImageAliases,
 } from "./toolchain-images";
+import { javascriptDependencyLockfiles } from "./toolchain-inputs";
 
 type Policy = Parameters<typeof checkDependabot>[0]["policy"];
 const policy = {
@@ -103,6 +104,7 @@ describe("Dependabot policy", () => {
     const files = {
       "package.json": "{}",
       "bun/package.json": '{"packageManager":"bun@1.4.3"}',
+      "bun/bun.lock": "",
       "python/requirements.txt": "requests",
       "uv/pyproject.toml": '[project]\nname="project"',
       "uv/uv.lock": "",
@@ -173,7 +175,9 @@ describe("Dependabot policy", () => {
       "pnpm-workspace.yaml": 'packages: ["packages/*", "!packages/excluded"]',
       "packages/member/package.json": "{}",
       "packages/excluded/package.json": "{}",
+      "packages/excluded/package-lock.json": "",
       "standalone/package.json": "{}",
+      "standalone/package-lock.json": "",
     };
     const good = config([
       update(),
@@ -367,7 +371,7 @@ describe("Dependabot policy", () => {
   });
 
   test("directory normalization preserves valid coverage without hiding traversal", () => {
-    const files = { "app/package.json": "{}" };
+    const files = { "app/package.json": "{}", "app/package-lock.json": "" };
     for (const directory of ["/app/", "/./app", "//app///", "/app"]) {
       expect(check(config([update("npm", directory)]), files)).toEqual([]);
       const list = {
@@ -430,7 +434,9 @@ describe("Dependabot policy", () => {
     const files = {
       "package.json": "{}",
       "packages/a/package.json": "{}",
+      "packages/a/package-lock.json": "",
       "packages/b/package.json": "{}",
+      "packages/b/package-lock.json": "",
       "pyproject.toml": "[project]\nname='example'",
     };
     const base = [
@@ -479,6 +485,7 @@ describe("Dependabot policy", () => {
       "package.json": JSON.stringify({ workspaces: ["packages/*"] }),
       "packages/member/package.json": "{}",
       "standalone/package.json": "{}",
+      "standalone/package-lock.json": "",
       ".github/workflows/ci.yml": "jobs: {}",
       "scripts/requirements.txt": "requests",
       "images/Dockerfile.production": "FROM node:24.14.0",
@@ -526,8 +533,11 @@ describe("Dependabot policy", () => {
       "locked/package.json": "{}",
       "locked/bun.lock": "{}",
       "npm/package.json": JSON.stringify({ packageManager: "npm@11.6.0" }),
+      "npm/package-lock.json": "",
       "pnpm/package.json": JSON.stringify({ packageManager: "pnpm@10.0.0" }),
+      "pnpm/package-lock.json": "",
       "yarn/package.json": JSON.stringify({ packageManager: "yarn@4.0.0" }),
+      "yarn/package-lock.json": "",
     };
     const good = config([
       update("bun"),
@@ -600,9 +610,13 @@ describe("Dependabot policy", () => {
       "pnpm-workspace.yaml":
         'packages:\n  - ./packages//*\n  - "!./packages/excluded"',
       "packages/member/package.json": "{}",
+      "packages/member/package-lock.json": "",
       "packages/excluded/package.json": "{}",
+      "packages/excluded/package-lock.json": "",
       "independent/package.json": "{}",
+      "independent/package-lock.json": "",
       "ignored/member/package.json": "{}",
+      "ignored/member/package-lock.json": "",
     };
     const good = config([
       update("npm"),
@@ -647,6 +661,7 @@ describe("Dependabot policy", () => {
         workspaces: ["packages/*"],
       }),
       "packages/member/package.json": "{}",
+      "packages/member/package-lock.json": "",
     };
     for (const { file, text } of [
       { file: "pnpm-workspace.yml", text: 'packages: ["packages/*"]' },
@@ -1051,6 +1066,59 @@ describe("Dependabot policy", () => {
     }
   });
 
+  test("installable JavaScript roots derive from workspace membership and own locks, never directory names", () => {
+    const files: Record<string, string> = {
+      "package.json": JSON.stringify({
+        workspaces: ["packages/*", "!packages/excluded"],
+      }),
+      "packages/member/package.json": "{}",
+      "packages/member/examples/sample/package.json": "{}",
+      "packages/excluded/package.json": "{}",
+      "fixtures/input/package.json": "{}",
+      "arbitrary/input/package.json": "{}",
+      "fixtures/workspace/package.json": JSON.stringify({
+        workspaces: ["children/*"],
+      }),
+      "fixtures/workspace/children/input/package.json": "{}",
+      "fixtures/pnpm/pnpm-workspace.yaml": "[",
+    };
+    const required = [update()];
+    const baseline = generateDependabotConfig({ files, policy });
+    expect(check(config(required), files)).toEqual([]);
+    expect(parseDocument(baseline).getIn(["updates", 0, "directory"])).toBe(
+      "/",
+    );
+    expect(parseDocument(baseline).getIn(["updates", 1])).toBeUndefined();
+    for (const lockfile of javascriptDependencyLockfiles) {
+      const directory = `fixtures/installed-${lockfile.split(".").at(0)}`;
+      const ecosystem = lockfile === "bun.lock" ? "bun" : "npm";
+      files[`${directory}/package.json`] = "{}";
+      files[`${directory}/${lockfile}`] = "";
+      required.push(update(ecosystem, `/${directory}`));
+      expect(check(config(required), files)).toEqual([]);
+      expect(
+        check(config([update()]), files).some(({ message }) =>
+          message.includes(`covering /${directory}`),
+        ),
+      ).toBe(true);
+      const generated = generateDependabotConfig({ files, policy });
+      expect(check(generated, files)).toEqual([]);
+      expect(generated).toContain(`/${directory}`);
+      expect(generated).not.toContain("/arbitrary/input");
+      expect(generated).not.toContain("/fixtures/workspace");
+      expect(generated).not.toContain("/packages/excluded");
+    }
+    expect(check(generateDependabotConfig({ files, policy }), files)).toEqual(
+      [],
+    );
+    expect(() =>
+      generateDependabotConfig({
+        files: { ...files, "fixtures/pnpm/pnpm-lock.yaml": "" },
+        policy,
+      }),
+    ).toThrow("invalid pnpm workspace YAML");
+  });
+
   test("collapses npm workspaces while preserving standalone and excluded packages", () => {
     const files = {
       "package.json": JSON.stringify({
@@ -1058,7 +1126,9 @@ describe("Dependabot policy", () => {
       }),
       "packages/member/package.json": "{}",
       "packages/excluded/package.json": "{}",
+      "packages/excluded/package-lock.json": "",
       "independent/package.json": "{}",
+      "independent/package-lock.json": "",
     };
     const entries = [
       update(),
@@ -1081,7 +1151,12 @@ describe("Dependabot policy", () => {
   });
 
   test("supports directories lists and wildcard coverage without treating root as recursive", () => {
-    const files = { "a/package.json": "{}", "b/package.json": "{}" };
+    const files = {
+      "a/package.json": "{}",
+      "a/package-lock.json": "",
+      "b/package.json": "{}",
+      "b/yarn.lock": "",
+    };
     const entry = { ...update(), directory: undefined };
     expect(
       check(config([{ ...entry, directories: ["/a", "/b"] }]), files),
