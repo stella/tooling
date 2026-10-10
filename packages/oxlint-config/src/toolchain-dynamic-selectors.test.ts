@@ -220,5 +220,5 @@ test("Docker line decisions cover unresolved FROM values only", () => {
   });
   const literal = checkDocker("ARG IMAGE=oven/bun:0.1.0\nFROM $IMAGE\n");
   expect(literal.matched).toEqual([]);
-  expect(literal.diagnostics).toMatchObject([{ rule: "runtime-docker" }]);
+  expect(literal.diagnostics).toMatchObject([{ rule: "bun-pins" }]);
 });
