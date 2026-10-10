@@ -60,8 +60,14 @@ that imports the TypeScript compiler API. Remove the compatibility install when
 the blocker accepts TypeScript 7. The shared config's peer range accepts both
 layouts. Both layouts use `bun check` with Bun 1.4.3 for typechecking; retain
 TypeScript wherever a tool needs its compiler API or declaration generation.
-`bun run check:typecheck-parity` compares seeded diagnostic classes against
-`tsc --noEmit` and fails if Bun loses coverage.
+`stll-typecheck-parity` runs from a consumer repository root. It uses that repo's
+TypeScript compiler (including the declared split layout), compares repository
+diagnostics by file, line, and code, then checks 31 shipped fixture classes under
+the consumer tsconfig flags. Disabled flags are identified in the table. The
+command fails on diagnostic differences or lost seeded coverage and reports wall
+time and peak RSS for TypeScript and Bun. It requires Bun and `/usr/bin/time`
+on Linux or macOS, and runs with Node or Bun. Tooling invokes the same bin through
+`bun run check:typecheck-parity`.
 
 Use the library TypeScript preset:
 

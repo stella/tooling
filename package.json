@@ -24,7 +24,7 @@
     "sync-ai": "bash .ai/shared/scripts/sync-ai-skills.sh .",
     "sync-ai:check": "bash .ai/shared/scripts/sync-ai-skills.sh --check .",
     "check:toolchain": "bun packages/oxlint-config/dist/toolchain-check-cli.mjs",
-    "check:typecheck-parity": "bun scripts/check-typecheck-parity.ts"
+    "check:typecheck-parity": "bun packages/oxlint-config/dist/typecheck-parity-cli.mjs"
   },
   "devDependencies": {
     "@changesets/changelog-github": "1.0.0",
