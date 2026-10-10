@@ -18,6 +18,8 @@ import { stringify } from "yaml";
 
 import {
   consumerPackageClosure,
+  consumerStagingPaths,
+  consumerPackRootManifest,
   assertConsumerFixtureManifest,
   bindConsumerManifest,
   consumerDependencyConfigFiles,
@@ -303,8 +305,14 @@ const packConsumerArtifacts = async ({
   const staging = path.join(scratch, "pack-workspace");
   await mkdir(staging);
   const stagedDirectories = new Map<string, string>();
-  for (const [index, pkg] of [...workspacePackages.values()].entries()) {
-    const relative = `packages/package-${index}`;
+  const stagingPaths = consumerStagingPaths(workspacePackages);
+  // Copy the root first so its published files and package identity remain intact.
+  const ordered = [...workspacePackages.values()].sort(
+    (left, right) => left.directory.length - right.directory.length,
+  );
+  for (const pkg of ordered) {
+    const relative = stagingPaths.get(pkg.name);
+    if (!relative) throw new Error(`missing staging path: ${pkg.name}`);
     const destination = path.join(staging, relative);
     await copyWithoutDependencies(
       await containedDirectory(root, pkg.directory),
@@ -314,7 +322,7 @@ const packConsumerArtifacts = async ({
   }
   await writeFile(
     path.join(staging, "package.json"),
-    JSON.stringify({ private: true }),
+    JSON.stringify(consumerPackRootManifest(workspacePackages)),
   );
   await writeFile(
     path.join(staging, "pnpm-workspace.yaml"),
@@ -325,63 +333,35 @@ const packConsumerArtifacts = async ({
     const final = path.join(scratch, `artifact-${index}`);
     await mkdir(packed);
     await mkdir(final);
-    const workspaceProtocol =
-      pkg.directory !== "." ||
+    const directory = stagedDirectories.get(pkg.name);
+    if (!directory)
+      throw new Error(`missing pack workspace member: ${pkg.name}`);
+    await execute(
+      process.execPath,
       [
-        "dependencies",
-        "optionalDependencies",
-        "peerDependencies",
-        "devDependencies",
-      ].some((field) => {
-        const entries = pkg.manifest[field];
-        return (
-          consumerRecord(entries) &&
-          Object.values(entries).some(
-            (specifier) =>
-              typeof specifier === "string" &&
-              specifier.startsWith("workspace:"),
-          )
-        );
-      });
-    if (workspaceProtocol) {
-      const directory = stagedDirectories.get(pkg.name);
-      if (!directory)
-        throw new Error(`missing pack workspace member: ${pkg.name}`);
-      await execute(
-        process.execPath,
-        [
-          tools.pnpm,
-          "--config.ignore-scripts=true",
-          "--config.package-manager-strict=false",
-          "--config.manage-package-manager-versions=false",
-          "pack",
-          "--pack-destination",
-          packed,
-        ],
-        { cwd: directory },
-      );
-      const archive = await packFilename(packed);
-      const extracted = path.join(packed, "published");
-      await mkdir(extracted);
-      await execute(
-        "tar",
-        ["-xzf", archive, "-C", extracted, "--no-same-owner"],
-        { cwd: packed },
-      );
-      await execute(
-        process.execPath,
-        [tools.npm, "pack", "--ignore-scripts", "--pack-destination", final],
-        { cwd: path.join(extracted, "package") },
-      );
-    } else {
-      const directory = stagedDirectories.get(pkg.name);
-      if (!directory) throw new Error(`missing pack member: ${pkg.name}`);
-      await execute(
-        process.execPath,
-        [tools.npm, "pack", "--ignore-scripts", "--pack-destination", final],
-        { cwd: directory },
-      );
-    }
+        tools.pnpm,
+        "--config.ignore-scripts=true",
+        "--config.package-manager-strict=false",
+        "--config.manage-package-manager-versions=false",
+        "pack",
+        "--pack-destination",
+        packed,
+      ],
+      { cwd: directory },
+    );
+    const archive = await packFilename(packed);
+    const extracted = path.join(packed, "published");
+    await mkdir(extracted);
+    await execute(
+      "tar",
+      ["-xzf", archive, "-C", extracted, "--no-same-owner"],
+      { cwd: packed },
+    );
+    await execute(
+      process.execPath,
+      [tools.npm, "pack", "--ignore-scripts", "--pack-destination", final],
+      { cwd: path.join(extracted, "package") },
+    );
     const artifact = await packFilename(final);
     artifacts.set(pkg.name, artifact);
   }
@@ -403,23 +383,33 @@ export const consumerCommandEnvironment = ({
   tools,
   directory,
   home,
+  environment = process.env,
 }: {
   tools: Pick<ConsumerTools, "bin">;
   directory: string;
   home: string;
+  environment?: NodeJS.ProcessEnv;
 }) => {
-  const env = { ...process.env };
+  const env = Object.fromEntries(
+    Object.entries(environment).filter(
+      ([key]) =>
+        !/^(?:npm_config_|pnpm_|yarn_)/i.test(key) &&
+        key !== "NODE_PATH" &&
+        key !== "NODE_OPTIONS",
+    ),
+  );
   Object.assign(env, {
-    PATH: `${tools.bin}${path.delimiter}${path.join(directory, "node_modules/.bin")}${path.delimiter}${process.env["PATH"] ?? ""}`,
+    PATH: `${tools.bin}${path.delimiter}${path.join(directory, "node_modules/.bin")}${path.delimiter}${environment["PATH"] ?? ""}`,
     HOME: home,
     npm_config_cache: path.join(home, "npm-cache"),
     npm_config_userconfig: path.join(home, "npmrc"),
     npm_config_registry: "https://registry.npmjs.org/",
     CI: "true",
     NODE_ENV: "development",
+    XDG_CONFIG_HOME: path.join(home, "config"),
+    XDG_CACHE_HOME: path.join(home, "cache"),
+    XDG_DATA_HOME: path.join(home, "data"),
   });
-  delete env["NODE_PATH"];
-  delete env["NODE_OPTIONS"];
   return env;
 };
 

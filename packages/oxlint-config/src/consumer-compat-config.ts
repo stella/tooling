@@ -84,6 +84,25 @@ export type ConsumerPackage = {
   manifest: Record<string, unknown>;
 };
 
+export const consumerStagingPaths = (
+  packages: Map<string, ConsumerPackage>,
+) => {
+  const paths = new Map<string, string>();
+  for (const [name, pkg] of packages)
+    paths.set(
+      name,
+      consumerRelativePath(pkg.directory, "workspace package directory"),
+    );
+  return paths;
+};
+
+export const consumerPackRootManifest = (
+  packages: Map<string, ConsumerPackage>,
+) => {
+  const root = [...packages.values()].find((pkg) => pkg.directory === ".");
+  return root?.manifest ?? { private: true };
+};
+
 export const consumerDependencyConfigFiles = [
   ".npmrc",
   ".pnpmfile.cjs",
@@ -186,7 +205,7 @@ const workspacePatterns = (manifest: Record<string, unknown>) => {
   return patterns.map((entry: string) => entry);
 };
 
-export const discoverConsumerPackages = (files: Record<string, string>) => {
+export const discoverConsumerManifests = (files: Record<string, string>) => {
   const manifests = new Map<string, Record<string, unknown>>();
   const manifestSources = new Map<string, string>();
   const pnpmSources = new Map<string, string>();
@@ -258,10 +277,17 @@ export const discoverConsumerPackages = (files: Record<string, string>) => {
     }
     if (before === roots.size) break;
   }
-  const packages = new Map<string, ConsumerPackage>();
+  const discovered = new Map<string, Record<string, unknown>>();
   for (const directory of roots) {
     const manifest = manifestAt(directory);
-    if (!manifest) continue;
+    if (manifest) discovered.set(directory, manifest);
+  }
+  return discovered;
+};
+
+export const discoverConsumerPackages = (files: Record<string, string>) => {
+  const packages = new Map<string, ConsumerPackage>();
+  for (const [directory, manifest] of discoverConsumerManifests(files)) {
     const name = manifest["name"];
     if (typeof name !== "string" || name === "") continue;
     if (packages.has(name))

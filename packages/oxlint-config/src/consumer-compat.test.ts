@@ -13,6 +13,8 @@ import {
 import { parseConsumerCompatArguments } from "./consumer-compat-arguments";
 import {
   consumerPackageClosure,
+  consumerStagingPaths,
+  consumerPackRootManifest,
   bindConsumerManifest,
   discoverConsumerPackages,
   oldestPublishedConsumerVersion,
@@ -21,6 +23,44 @@ import {
 } from "./consumer-compat-config";
 
 describe("consumer compatibility declarations", () => {
+  test("pack staging preserves relative workspace references and public root identity", () => {
+    const root = {
+      directory: ".",
+      name: "public-root",
+      manifest: {
+        name: "public-root",
+        version: "1.0.0",
+        main: "dist/index.js",
+      },
+    };
+    const library = {
+      directory: "packages/library",
+      name: "@example/library",
+      manifest: { dependencies: { "@example/core": "workspace:../core" } },
+    };
+    const core = {
+      directory: "packages/core",
+      name: "@example/core",
+      manifest: { version: "1.0.0" },
+    };
+    const packages = new Map(
+      [root, library, core].map((pkg) => [pkg.name, pkg]),
+    );
+    const paths = consumerStagingPaths(packages);
+    expect(paths.get(root.name)).toBe(".");
+    const libraryPath = paths.get(library.name);
+    if (!libraryPath) throw new Error("missing staged library");
+    expect(path.posix.join(libraryPath, "../core")).toBe(paths.get(core.name));
+    expect(consumerPackRootManifest(packages)).toEqual(root.manifest);
+    expect(
+      consumerPackRootManifest(
+        new Map([
+          [library.name, library],
+          [core.name, core],
+        ]),
+      ),
+    ).toEqual({ private: true });
+  });
   test("fixture source directories are allowed but dependency-manager config is rejected", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "consumer-fixture-"));
     try {
@@ -312,6 +352,17 @@ describe("isolated consumer runtime", () => {
       tools: { bin: "/isolated/node/bin:/isolated/managers/bin" },
       directory: "/isolated/fixture",
       home: "/isolated/home",
+      environment: {
+        PATH: "/dev/bin",
+        NODE_PATH: "/repository/modules",
+        NODE_OPTIONS: "--no-warnings",
+        npm_config_offline: "true",
+        NPM_CONFIG_PREFIX: "/shared/prefix",
+        PNPM_HOME: "/shared/pnpm",
+        YARN_CACHE_FOLDER: "/shared/yarn",
+        XDG_CONFIG_HOME: "/shared/config",
+        KEEP: "value",
+      },
     });
     expect(env["PATH"]?.split(":").slice(0, 3)).toEqual([
       "/isolated/node/bin",
@@ -323,5 +374,11 @@ describe("isolated consumer runtime", () => {
     expect(env["HOME"]).toBe("/isolated/home");
     expect(env["npm_config_userconfig"]).toBe("/isolated/home/npmrc");
     expect(env["npm_config_registry"]).toBe("https://registry.npmjs.org/");
+    expect(env["npm_config_offline"]).toBeUndefined();
+    expect(env["NPM_CONFIG_PREFIX"]).toBeUndefined();
+    expect(env["PNPM_HOME"]).toBeUndefined();
+    expect(env["YARN_CACHE_FOLDER"]).toBeUndefined();
+    expect(env["XDG_CONFIG_HOME"]).toBe("/isolated/home/config");
+    expect(env["KEEP"]).toBe("value");
   });
 });
