@@ -676,14 +676,6 @@ const resolvedCompilerOptions = ({
       Object.entries(paths).map(([key, value]) => [key, absolutePaths(value)]),
     );
   }
-  if (!("typeRoots" in options)) {
-    const roots = [];
-    for (let folder = directory; ; folder = dirname(folder)) {
-      roots.push(join(folder, "node_modules/@types"));
-      if (dirname(folder) === folder) break;
-    }
-    options["typeRoots"] = roots;
-  }
   return options;
 };
 
@@ -764,11 +756,14 @@ export const groupCompilerConfigs = (configs: CompilerConfig[]) => {
     }
   >();
   for (const config of configs) {
+    const compilerOptions = fixtureCompilerOptions({
+      compilerOptions: config.compilerOptions,
+      configPath: config.path,
+    });
     const key = canonicalOptions({
-      compilerOptions: fixtureCompilerOptions({
-        compilerOptions: config.compilerOptions,
-        configPath: config.path,
-      }),
+      compilerOptions,
+      resolutionContext:
+        "typeRoots" in compilerOptions ? null : dirname(config.path),
       packageContext: config.packageContext ?? {},
     });
     const existing = groups.get(key);
@@ -911,7 +906,9 @@ export const sourceDiagnosticSet = ({
   configPaths,
 }: SourceDiagnosticSetOptions) => {
   const configs = new Set(configPaths.map((path) => resolve(path)));
+  const invalid = new Set(configurationDiagnostics(output, repo));
   return diagnosticSet(output, repo).filter((diagnostic) => {
+    if (invalid.has(diagnostic)) return false;
     if (diagnostic.startsWith("<config>:")) return true;
     const file = /^(.*):[0-9]+:[0-9]+$/.exec(diagnostic)?.at(1);
     if (file === undefined) return false;
@@ -921,6 +918,24 @@ export const sourceDiagnosticSet = ({
     );
   });
 };
+
+type DiagnosticExitStatusOptions = {
+  status: number | null;
+  output: string;
+  repo: string;
+};
+export const diagnosticExitStatus = ({
+  status,
+  output,
+  repo,
+}: DiagnosticExitStatusOptions) =>
+  status === 2 &&
+  configurationDiagnostics(output, repo).length === 0 &&
+  diagnosticSet(output, repo).some(
+    (diagnostic) => !diagnostic.startsWith("<config>:"),
+  )
+    ? 1
+    : status;
 
 type CompareRepositoryArgs = {
   repo: string;
@@ -1110,17 +1125,15 @@ export const compareRepository = async ({
         configPaths: graph.projects.map(({ path }) => path),
       });
     const baselineDiagnostics = sourceDiagnostics(baselineRaw.output);
-    // TypeScript reports emitted-with-diagnostics as 2; Bun's checker reports diagnostics as 1.
+    // TypeScript can report source diagnostics as 2 even for declaration-only noEmit inputs.
     const baseline = {
       ...baselineRaw,
       rawStatus: baselineRaw.status,
-      status:
-        graph.build &&
-        baselineRaw.status === 2 &&
-        baselineDiagnostics.length > 0 &&
-        configurationDiagnostics(baselineRaw.output, repo).length === 0
-          ? 1
-          : baselineRaw.status,
+      status: diagnosticExitStatus({
+        status: baselineRaw.status,
+        output: baselineRaw.output,
+        repo,
+      }),
       diagnostics: baselineDiagnostics,
     };
     const repository = repositoryDiagnosticComparison({
@@ -1248,7 +1261,14 @@ export const runTypecheckParity = async ({
           expected: fixture.codes,
           match: fixture.anyCode ? "any" : "all",
           repo: folder,
-          baseline: tsc,
+          baseline: {
+            ...tsc,
+            status: diagnosticExitStatus({
+              status: tsc.status,
+              output: tsc.output,
+              repo: folder,
+            }),
+          },
           candidate: checked,
         });
         results.push(result);

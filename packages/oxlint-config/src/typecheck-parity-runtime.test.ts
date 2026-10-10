@@ -625,7 +625,14 @@ test.skipIf(process.env["CI"] !== "true")(
             files: ["input.ts"],
           }),
         );
-        expect(await runTypecheckParity({ repo: project, policy })).toBe(true);
+        const passed = await runTypecheckParity({ repo: project, policy });
+        if (!passed)
+          throw new Error(
+            [...errors, ...logs.filter((line) => line.includes("FAIL"))].join(
+              "\n",
+            ),
+          );
+        expect(passed).toBe(true);
         const row = logs.find((line) => line.startsWith("checked-javascript"));
         if (row === undefined)
           throw new Error("Missing JavaScript fixture row");

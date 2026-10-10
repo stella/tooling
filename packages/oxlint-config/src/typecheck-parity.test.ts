@@ -28,9 +28,34 @@ import {
   resolveCompiler,
   sourceDiagnosticSet,
   repositoryDiagnosticComparison,
+  diagnosticExitStatus,
 } from "./typecheck-parity";
 
 const repo = resolve("/consumer-repo");
+
+test("temporary options preserve implicit package type resolution", () => {
+  const options = fixtureCompilerOptions({
+    configPath: join(repo, "workspace/tsconfig.json"),
+    compilerOptions: { types: ["bun-types", "workspace-types"] },
+  });
+  expect("typeRoots" in options).toBe(false);
+  expect(options["types"]).toEqual(["bun-types", "workspace-types"]);
+});
+
+test("diagnostic exit normalization preserves configuration and unknown failures", () => {
+  const source = "input.d.ts(1,1): error TS2304: Missing name.";
+  expect(diagnosticExitStatus({ status: 2, output: source, repo })).toBe(1);
+  for (const status of [null, 0, 1, 3])
+    expect(diagnosticExitStatus({ status, output: source, repo })).toBe(status);
+  expect(diagnosticExitStatus({ status: 2, output: "", repo })).toBe(2);
+  expect(
+    diagnosticExitStatus({
+      status: 2,
+      output: source + "\nerror TS2688: Missing types.",
+      repo,
+    }),
+  ).toBe(2);
+});
 
 test("repository parity rejects config diagnostics before source filtering in either direction", () => {
   const source = "src/input.ts(1,1): error TS2322: Type mismatch.";
