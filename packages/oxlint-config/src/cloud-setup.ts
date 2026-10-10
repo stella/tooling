@@ -44,6 +44,9 @@ OUTPUT_UID="$(printenv SUDO_UID || id -u)"
 [[ "$OUTPUT_UID" =~ ^[0-9]+$ ]] || fail 'Invalid invoking user'
 OUTPUT_GID="$(getent passwd "$OUTPUT_UID" | cut -d: -f4)"
 [[ "$OUTPUT_GID" =~ ^[0-9]+$ ]] || fail 'Invoking user is unavailable'
+OUTPUT_USER="$(getent passwd "$OUTPUT_UID" | cut -d: -f1)"
+OUTPUT_HOME="$(getent passwd "$OUTPUT_UID" | cut -d: -f6)"
+[[ -n "$OUTPUT_USER" && "$OUTPUT_HOME" == /* && -d "$OUTPUT_HOME" ]] || fail 'Invoking user requires an existing home directory'
 root() { "$@"; }
 service_run() { runuser -u stll-cloud -- "$@" 9>&-; }
 BUN_VERSION='@BUN@'
@@ -51,7 +54,7 @@ NODE_VERSION='@NODE@'
 NODE_DIR="/opt/stll-cloud/node/$NODE_VERSION"
 BUN_DIR="/opt/stll-cloud/bun/$BUN_VERSION"
 export PATH="$NODE_DIR/bin:$BUN_DIR:/usr/local/bin:/usr/bin:/bin"
-export BUN_INSTALL_CACHE_DIR=/var/cache/stll-cloud/bun
+BUN_CACHE="/var/cache/stll-cloud/bun/$OUTPUT_UID"
 ENV_FILE=@ENV_FILE@
 ENV_MARKER='@ENV_MARKER@'
 [[ -f "$REPO_ROOT/.node-version" && ! -L "$REPO_ROOT/.node-version" ]] || fail 'A regular root .node-version is required'
@@ -98,9 +101,25 @@ install_runtimes() {
   ln -sfnT -- "$NODE_DIR/bin/npm" /usr/local/bin/npm
   ln -sfnT -- "$NODE_DIR/bin/npx" /usr/local/bin/npx
   ln -sfnT -- "$BUN_DIR/bun" /usr/local/bin/bun
-  install -d -m 700 "$BUN_INSTALL_CACHE_DIR"
   rm -rf -- "$scratch"
   trap - RETURN
+}
+
+dependency_install() {
+  local directory
+  for directory in /var/cache/stll-cloud /var/cache/stll-cloud/bun; do
+    [[ ! -L "$directory" ]] || fail 'Dependency cache parent must not be a symlink'
+    if [[ -e "$directory" ]]; then
+      [[ -d "$directory" && "$(stat -c '%u' "$directory")" == 0 ]] || fail 'Dependency cache parent must be root-owned'
+    fi
+    install -d -m 755 -o root -g root "$directory"
+  done
+  [[ ! -L "$BUN_CACHE" ]] || fail 'Dependency cache must not be a symlink'
+  if [[ -e "$BUN_CACHE" ]]; then
+    [[ -d "$BUN_CACHE" && "$(stat -c '%u' "$BUN_CACHE")" == "$OUTPUT_UID" ]] || fail 'Dependency cache ownership differs from the invoking user'
+  fi
+  install -d -m 700 -o "$OUTPUT_UID" -g "$OUTPUT_GID" "$BUN_CACHE"
+  runuser -u "$OUTPUT_USER" -- env HOME="$OUTPUT_HOME" BUN_INSTALL_CACHE_DIR="$BUN_CACHE" PATH="$PATH" "$BUN_DIR/bun" install --frozen-lockfile
 }
 
 @SERVICE_INSTALL@
@@ -136,7 +155,7 @@ write_environment() {
 if [[ "$MODE" == install ]]; then
   install_runtimes
   install_services
-  bun install --frozen-lockfile
+  dependency_install
   exit 0
 fi
 runtime_ready

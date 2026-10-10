@@ -33,3 +33,19 @@ test("owned engine cleanup remains syntactically valid Bash", () => {
   expect(result.exitCode).toBe(0);
   expect(result.stderr.toString()).toBe("");
 });
+
+test("nonroot dependency and Vite ownership verifier parses without executing writes", () => {
+  const source = readFileSync(
+    path.join(import.meta.dirname, "cloud-setup-integration.ts"),
+    "utf8",
+  );
+  const verifier = source.match(/const verifyWrite = `([\s\S]*?)`;/)?.at(1);
+  expect(verifier).toBeDefined();
+  if (verifier === undefined)
+    throw new Error("Nonroot ownership verifier is absent");
+  const result = Bun.spawnSync(["node", "--check"], {
+    stdin: Buffer.from(verifier),
+  });
+  expect(result.exitCode).toBe(0);
+  expect(result.stderr.toString()).toBe("");
+});

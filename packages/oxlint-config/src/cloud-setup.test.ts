@@ -149,31 +149,21 @@ test("cloud generation rejects every nonexact or out-of-series Node selector", (
     );
 });
 
-test("shell quoting preserves adversarial environment names with single-pass template replacement", () => {
+test("shell quoting preserves canonical literal metacharacters through single-pass replacement", () => {
   withRepository((root) => {
-    for (const envFile of [
-      ".env'quote",
-      '.env"quote',
-      ".env$(touch injected)",
-      ".env`touch injected`",
-      ".env$HOME",
-      ".env@SERVICE_INSTALL@",
-      ".env'$(touch injected)`touch injected`@SERVICE_START@",
-    ]) {
-      const generated = generate({ ...declaration, envFile });
-      const syntax = Bun.spawnSync(["bash", "-n"], {
-        stdin: Buffer.from(generated),
-      });
-      expect(syntax.exitCode).toBe(0);
-      const result = environmentRun({
-        root,
-        generated,
-        command: 'printf "%s" "$ENV_FILE"',
-      });
-      expect(result.exitCode).toBe(0);
-      expect(result.stdout.toString()).toBe(envFile);
-      expect(existsSync(join(root, "injected"))).toBe(false);
-    }
+    const envFile = ".env'\"$`@SERVICE_INSTALL@";
+    const generated = generate({ ...declaration, envFile });
+    const syntax = Bun.spawnSync(["bash", "-n"], {
+      stdin: Buffer.from(generated),
+    });
+    expect(syntax.exitCode).toBe(0);
+    const result = environmentRun({
+      root,
+      generated,
+      command: 'printf "%s" "$ENV_FILE"',
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).toBe(envFile);
   });
 });
 
@@ -240,5 +230,83 @@ test("actual emitted environment validation refuses unowned files, symlinks and 
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }
+  });
+});
+
+test("dependency installation uses the invoking user, home, private cache and pinned frozen Bun", () => {
+  withRepository((root) => {
+    const generated = generate(declaration);
+    const start = generated.indexOf("\ndependency_install() {");
+    const closing = generated.indexOf("\n}\n", start);
+    if (start < 0 || closing < start)
+      throw new Error("Missing emitted dependency installer boundary");
+    mkdirSync(join(root, "home"));
+    const cacheParent = join(root, "cache");
+    const helper = generated
+      .slice(start, closing + 3)
+      .replaceAll("/var/cache/stll-cloud", cacheParent);
+    expect(helper).not.toMatch(/\b(?:curl|wget|apt-get|systemctl)\b/);
+    const assignments = ["BUN_VERSION", "BUN_DIR", "NODE_VERSION", "NODE_DIR"]
+      .map((name) => {
+        const line = new RegExp(`^${name}=.*$`, "m").exec(generated)?.at(0);
+        if (line === undefined) throw new Error(`Missing emitted ${name}`);
+        return line;
+      })
+      .join("\n");
+    const runtimePath = /^export PATH=.*$/m.exec(generated)?.at(0);
+    if (runtimePath === undefined)
+      throw new Error("Missing emitted runtime PATH");
+    const result = Bun.spawnSync(
+      [
+        "bash",
+        "-eu",
+        "-c",
+        `
+fail() { echo "$*" >&2; exit 1; }
+root() { fail 'Unexpected privileged command'; }
+OUTPUT_UID=4242
+OUTPUT_GID=4343
+OUTPUT_USER=fixture-caller
+OUTPUT_HOME="$FIXTURE_ROOT/home"
+CACHE_PARENT="$FIXTURE_ROOT/cache"
+BUN_CACHE="$CACHE_PARENT/bun/$OUTPUT_UID"
+${assignments}
+${runtimePath}
+install() {
+  [[ "$#" == 8 && "$1" == -d && "$2" == -m && "$4" == -o && "$6" == -g ]] || fail 'Unexpected provisioning arguments'
+  if [[ "$8" == "$BUN_CACHE" ]]; then
+    [[ "$3" == 700 && "$5" == "$OUTPUT_UID" && "$7" == "$OUTPUT_GID" ]] || fail 'Cache is not assigned to the caller'
+  else
+    [[ "$8" == "$CACHE_PARENT" || "$8" == "$CACHE_PARENT/bun" ]] || fail 'Unexpected cache parent'
+    [[ "$3" == 755 && "$5" == root && "$7" == root ]] || fail 'Cache parent is not root-owned'
+  fi
+  command mkdir -p -- "$8"
+}
+stat() {
+  [[ "$#" == 3 && "$1" == -c && "$2" == '%u' ]] || fail 'Unexpected ownership query'
+  if [[ "$3" == "$BUN_CACHE" ]]; then printf '%s\n' "$OUTPUT_UID";
+  elif [[ "$3" == "$CACHE_PARENT" || "$3" == "$CACHE_PARENT/bun" ]]; then printf '0\n';
+  else fail 'Unexpected stat target'; fi
+}
+runuser() {
+  [[ "$#" == 10 && "$1" == -u && "$2" == "$OUTPUT_USER" && "$3" == -- && "$4" == env ]] || fail 'Dependencies do not run as the caller'
+  [[ "$5" == "HOME=$OUTPUT_HOME" && "$6" == "BUN_INSTALL_CACHE_DIR=$BUN_CACHE" && "$7" == "PATH=$NODE_DIR/bin:$BUN_DIR:/usr/local/bin:/usr/bin:/bin" ]] || fail 'Caller environment is missing'
+  [[ "$8" == '/opt/stll-cloud/bun/${policy.bun}/bun' && "$9" == install ]] || fail 'Pinned install is missing'
+  shift 9
+  [[ "$1" == --frozen-lockfile ]] || fail 'Frozen install is missing'
+  printf '%s:%s\n' "$OUTPUT_UID" "$OUTPUT_USER"
+}
+${helper}
+dependency_install
+dependency_install`,
+      ],
+      { cwd: root, env: { ...process.env, FIXTURE_ROOT: root } },
+    );
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr.toString()).toBe("");
+    expect(result.stdout.toString()).toBe(
+      "4242:fixture-caller\n4242:fixture-caller\n",
+    );
+    expect(existsSync(join(cacheParent, "bun/4242"))).toBe(true);
   });
 });

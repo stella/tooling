@@ -72,7 +72,7 @@ test("package installation restores policy bytes and mode across success and fai
         expect(result.stderr.toString()).toBe("");
         expect(result.exitCode).toBe(exitCode);
         expect(readFileSync(join(directory, "apt.calls"), "utf8")).toBe(
-          "install -y --no-install-recommends --allow-downgrades fixture-package",
+          "install -y --no-install-recommends fixture-package",
         );
         expect(existsSync(file)).toBe(existing);
         if (existing) {

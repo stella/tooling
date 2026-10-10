@@ -39,7 +39,7 @@ apt_install() (
   policy_state=installed
   printf '%s\n' '#!/bin/sh' 'exit 101' > /usr/sbin/policy-rc.d
   chmod 755 /usr/sbin/policy-rc.d
-  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --allow-downgrades "$@"
+  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$@"
 )
 
 `;

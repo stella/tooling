@@ -196,6 +196,11 @@ with root access or passwordless sudo and fails when required capabilities
 or pinned installations are unavailable. `install` provisions runtimes,
 dependencies, and declared services; `start` restores local services after
 cached environments lose running processes. Services bind only to localhost.
+System provisioning runs as root; frozen dependencies run as the invoking user
+with that user's home and a private, user-owned Bun cache. Package installation
+does not permit automatic downgrades.
+If a newer Valkey package is already installed, provisioning fails rather than
+downgrading it; use an environment compatible with the pinned release.
 The environment file contains `NODE_ENV=test` and declared local connection
 URLs, carries a generated ownership marker, and refuses an unowned file or
 symlink. Configure the repository's test runner to load that file; migration

@@ -152,6 +152,166 @@ const main = async () => {
       ],
     });
   };
+  const nonrootInstall = async () => {
+    const username = `stll-cloud-ci-${process.pid}`;
+    const home = `/home/${username}`;
+    const consumer = join(fixture, "nonroot-consumer");
+    const userScript = join(consumer, ".agents/cloud-setup.sh");
+    const sudoers = `/etc/sudoers.d/${username}`;
+    let userState: "absent" | "created" = "absent";
+    try {
+      await root(["test", "!", "-e", home], "Isolated consumer home");
+      await root(["test", "!", "-e", sudoers], "Isolated sudo rule");
+      await root(
+        [
+          "useradd",
+          "--create-home",
+          "--user-group",
+          "--shell",
+          "/bin/bash",
+          username,
+        ],
+        "Create nonroot consumer",
+      );
+      userState = "created";
+      await root(["chmod", "711", fixture], "Consumer fixture traversal");
+      await mkdir(join(consumer, "local-package"), { recursive: true });
+      await mkdir(join(consumer, "apps/api"), { recursive: true });
+      await writeFile(
+        join(consumer, "local-package/package.json"),
+        JSON.stringify({
+          name: "cloud-local-dependency",
+          version: "1.0.0",
+          main: "index.js",
+        }),
+      );
+      await writeFile(
+        join(consumer, "local-package/index.js"),
+        "module.exports = 1;\n",
+      );
+      await writeFile(
+        join(consumer, "package.json"),
+        JSON.stringify({
+          name: "cloud-nonroot-integration",
+          private: true,
+          packageManager: `bun@${policy.bun}`,
+          dependencies: { "cloud-local-dependency": "file:./local-package" },
+        }),
+      );
+      await writeFile(join(consumer, ".node-version"), `${nodeVersion}\n`);
+      await writeFile(
+        join(consumer, "stll-toolchain.json"),
+        JSON.stringify({
+          optOuts: [],
+          cloud: {
+            services: [],
+            install: "bun install --frozen-lockfile",
+            envFile: "apps/api/.env.test",
+          },
+        }),
+      );
+      await command({
+        label: "Local dependency lockfile",
+        args: [process.execPath, "install", "--lockfile-only"],
+        cwd: consumer,
+      });
+      await command({
+        label: "Nonroot fixture initialization",
+        args: ["git", "init", "--quiet"],
+        cwd: consumer,
+      });
+      await command({
+        label: "Nonroot tracked declaration",
+        args: [
+          "git",
+          "add",
+          "package.json",
+          "bun.lock",
+          ".node-version",
+          "stll-toolchain.json",
+        ],
+        cwd: consumer,
+      });
+      await command({
+        label: "Nonroot setup generation",
+        args: [
+          process.execPath,
+          join(source, "packages/oxlint-config/src/cloud-setup-cli.ts"),
+        ],
+        cwd: consumer,
+      });
+      const rule = join(fixture, "nonroot-sudo-rule");
+      // Authorize only this generated install command, never unrestricted sudo.
+      await writeFile(
+        rule,
+        `${username} ALL=(root) NOPASSWD: /usr/bin/true, /usr/bin/bash ${userScript} install\n`,
+      );
+      await root(
+        ["install", "-m", "440", "-o", "root", "-g", "root", rule, sudoers],
+        "Scoped installer authorization",
+      );
+      await root(["visudo", "-cf", sudoers], "Validate scoped sudo rule");
+      await root(
+        ["chown", "-R", `${username}:${username}`, consumer],
+        "Nonroot repository ownership",
+      );
+      await root(
+        [
+          "runuser",
+          "-u",
+          username,
+          "--",
+          "env",
+          `HOME=${home}`,
+          "bash",
+          userScript,
+          "install",
+        ],
+        "Nonroot generated install through sudo",
+      );
+      const verifyWrite = `
+const fs = require("node:fs");
+const path = require("node:path");
+const uid = process.getuid();
+for (const file of ["node_modules", "node_modules/cloud-local-dependency/package.json"])
+  if (fs.statSync(path.join(process.env.CONSUMER, file)).uid !== uid) process.exit(1);
+const vite = path.join(process.env.CONSUMER, "node_modules/.vite");
+fs.mkdirSync(vite, { recursive: true });
+fs.writeFileSync(path.join(vite, "consumer-cache"), "ready");
+if (fs.statSync(path.join(vite, "consumer-cache")).uid !== uid) process.exit(1);
+`;
+      await root(
+        [
+          "runuser",
+          "-u",
+          username,
+          "--",
+          "env",
+          `HOME=${home}`,
+          `CONSUMER=${consumer}`,
+          `/opt/stll-cloud/node/${nodeVersion}/bin/node`,
+          "-e",
+          verifyWrite,
+        ],
+        "Nonroot dependency ownership and Vite write",
+      );
+    } finally {
+      if (userState === "created") {
+        await root(
+          ["rm", "-f", "--", sudoers],
+          "Remove scoped installer authorization",
+        );
+        await root(
+          ["rm", "-rf", "--", consumer],
+          "Remove isolated consumer fixture",
+        );
+        await root(
+          ["userdel", "--remove", username],
+          "Remove isolated consumer user",
+        );
+      }
+    }
+  };
   try {
     await mkdir(dirname(envPath), { recursive: true });
     await writeFile(
@@ -245,6 +405,7 @@ const main = async () => {
       })) === `v${nodeVersion}`,
       "Installed Node pin differs",
     );
+    await nonrootInstall();
     await start();
     const environment = await readEnvironment();
     const lines = environment.split("\n");
