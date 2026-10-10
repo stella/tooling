@@ -228,8 +228,8 @@ test("event-specific source refs never classify a PR head as inspected source", 
   ]) {
     const source = (ref: string) =>
       `on: ${event}\njobs:\n  example:\n    steps:\n      - uses: ${action("actions/checkout")}\n        with: {ref: '${ref}'}\n      - uses: ./.github/actions/example\n`;
-    expect(check(source("\${{ github.sha }}")).diagnostics).toEqual([]);
-    expect(check(source("\${{ github.ref }}")).diagnostics.length === 0).toBe(
+    expect(check(source("${{ github.sha }}")).diagnostics).toEqual([]);
+    expect(check(source("${{ github.ref }}")).diagnostics.length === 0).toBe(
       event === "push" || event === "merge_group",
     );
     for (const ref of [
@@ -297,7 +297,7 @@ test("reusable workflow caller checkouts cannot authorize inspected local action
   ])
     for (const binding of [
       undefined,
-      "repository: '\${{ github.repository }}', ref: '\${{ github.sha }}'",
+      "repository: '${{ github.repository }}', ref: '${{ github.sha }}'",
     ]) {
       const source = `on: ${trigger}\njobs:\n  example:\n    steps:\n      - uses: ${action("actions/checkout")}\n${binding === undefined ? "" : `        with: {${binding}}\n`}      - uses: ./.github/actions/example\n`;
       expect(
@@ -308,8 +308,8 @@ test("reusable workflow caller checkouts cannot authorize inspected local action
           ? `      - uses: ./.github/actions/example`
           : `        with: {${binding}}`,
         binding === undefined
-          ? "        with: {repository: '\${{ job.workflow_repository }}', ref: '\${{ job.workflow_sha }}'}\n      - uses: ./.github/actions/example"
-          : "        with: {repository: '\${{ job.workflow_repository }}', ref: '\${{ job.workflow_sha }}'}",
+          ? "        with: {repository: '${{ job.workflow_repository }}', ref: '${{ job.workflow_sha }}'}\n      - uses: ./.github/actions/example"
+          : "        with: {repository: '${{ job.workflow_repository }}', ref: '${{ job.workflow_sha }}'}",
       );
       expect(check(owned).diagnostics).toEqual([]);
     }
