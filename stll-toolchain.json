@@ -1,0 +1,9 @@
+{
+  "engineFloors": [
+    {
+      "package": "packages/oxlint-config",
+      "workflow": ".github/workflows/ci.yml",
+      "job": "engine-floor"
+    }
+  ]
+}

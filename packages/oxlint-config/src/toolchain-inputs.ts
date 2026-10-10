@@ -89,7 +89,7 @@ export const toolchainInputKind = (file: string) => {
     isDockerDefinitionPath(file) ||
     isComposeDefinitionPath(file) ||
     isKubernetesDefinitionPath(file) ||
-    /(?:^|\/)(?:package\.json|pnpm-workspace\.yaml|stll-toolchain\.json|\.bun-version|\.node-version|\.nvmrc|\.python-version|rust-toolchain(?:\.toml)?|\.tool-versions|\.?mise\.toml|uv\.toml|\.uv\.toml|\.github\/dependabot\.ya?ml|Cargo\.toml)$/.test(
+    /(?:^|\/)(?:package\.json|consumer-compat\.json|pnpm-workspace\.yaml|stll-toolchain\.json|\.bun-version|\.node-version|\.nvmrc|\.python-version|rust-toolchain(?:\.toml)?|\.tool-versions|\.?mise\.toml|uv\.toml|\.uv\.toml|\.github\/dependabot\.ya?ml|Cargo\.toml)$/.test(
       file,
     )
   )

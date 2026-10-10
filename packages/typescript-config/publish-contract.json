@@ -1,0 +1,18 @@
+{
+  "engines": {},
+  "peerDependencies": {
+    "typescript": ">=6.0.3 <8"
+  },
+  "target": {
+    "type": "types-only"
+  },
+  "entryPoints": {
+    "type": "commonjs",
+    "exports": {
+      "./base.json": "./base.json",
+      "./library.json": "./library.json",
+      "./node.json": "./node.json",
+      "./bun.json": "./bun.json"
+    }
+  }
+}

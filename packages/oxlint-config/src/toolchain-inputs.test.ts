@@ -20,6 +20,7 @@ import { parseToolchainPolicy } from "./toolchain-schema";
 test("both input readers exclude dependency trees for every accepted input kind", () => {
   const inputs = [
     "package.json",
+    "consumer-compat.json",
     ...javascriptDependencyLockfiles,
     "uv.lock",
     "pyproject.toml",

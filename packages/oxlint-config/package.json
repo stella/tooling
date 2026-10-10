@@ -10,6 +10,8 @@
   },
   "bin": {
     "stll-cloud-setup": "./dist/cloud-setup-cli.mjs",
+    "stll-consumer-compat": "./dist/consumer-compat-cli.mjs",
+    "stll-publish-contract": "./dist/publish-contract-cli.mjs",
     "stll-toolchain-check": "./dist/toolchain-check-cli.mjs",
     "stll-typecheck-parity": "./dist/typecheck-parity-cli.mjs"
   },
@@ -55,7 +57,18 @@
       },
       "default": "./dist/no-raw-colors.mjs"
     },
-    "./toolchain.json": "./toolchain.json"
+    "./toolchain.json": "./toolchain.json",
+    "./build-target": {
+      "import": {
+        "types": "./dist/publish-build-target-nuxt-helper.d.mts",
+        "default": "./dist/publish-build-target-nuxt-helper.mjs"
+      },
+      "require": {
+        "types": "./dist/publish-build-target-nuxt-helper.d.cts",
+        "default": "./dist/publish-build-target-nuxt-helper.cjs"
+      },
+      "default": "./dist/publish-build-target-nuxt-helper.mjs"
+    }
   },
   "publishConfig": {
     "access": "public"
@@ -70,6 +83,7 @@
     "picomatch": "4.0.5",
     "semver": "7.8.5",
     "smol-toml": "1.9.0",
+    "tsx": "4.23.13",
     "yaml": "2.9.0"
   },
   "devDependencies": {

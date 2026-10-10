@@ -101,6 +101,10 @@
     "actions/download-artifact": {
       "sha": "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
       "version": "v8.0.1"
+    },
+    "stella/.github/.github/workflows/package-consumer-compat.yml": {
+      "sha": "042f4554090fd805c92e950ff3a0fd0ddd2eefbc",
+      "version": "v1"
     }
   },
   "dependabot": {
@@ -120,5 +124,9 @@
       }
     }
   },
-  "rustCompilerDevelopment": "nightly-2026-04-16"
+  "rustCompilerDevelopment": "nightly-2026-04-16",
+  "consumerNode": "22.23.3",
+  "consumerNpm": "12.2.0",
+  "consumerPnpm": "12.9.1",
+  "consumerTypescript": "6.0.3"
 }

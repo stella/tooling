@@ -1,0 +1,99 @@
+{
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "peerDependencies": {
+    "@oxlint/plugins": ">=1.75.0 <2",
+    "oxlint": ">=1.75.0 <2"
+  },
+  "target": {
+    "type": "javascript",
+    "targets": [
+      "node20.19.0"
+    ]
+  },
+  "entryPoints": {
+    "type": "module",
+    "exports": {
+      ".": {
+        "import": {
+          "types": "./dist/index.d.mts",
+          "default": "./dist/index.mjs"
+        },
+        "require": {
+          "types": "./dist/index.d.cts",
+          "default": "./dist/index.cjs"
+        },
+        "default": "./dist/index.mjs"
+      },
+      "./no-any-casts": {
+        "import": {
+          "types": "./dist/no-any-casts.d.mts",
+          "default": "./dist/no-any-casts.mjs"
+        },
+        "require": {
+          "types": "./dist/no-any-casts.d.cts",
+          "default": "./dist/no-any-casts.cjs"
+        },
+        "default": "./dist/no-any-casts.mjs"
+      },
+      "./no-dangerous-type-assertions": {
+        "import": {
+          "types": "./dist/no-dangerous-type-assertions.d.mts",
+          "default": "./dist/no-dangerous-type-assertions.mjs"
+        },
+        "require": {
+          "types": "./dist/no-dangerous-type-assertions.d.cts",
+          "default": "./dist/no-dangerous-type-assertions.cjs"
+        },
+        "default": "./dist/no-dangerous-type-assertions.mjs"
+      },
+      "./no-partial-record-satisfies": {
+        "import": {
+          "types": "./dist/no-partial-record-satisfies.d.mts",
+          "default": "./dist/no-partial-record-satisfies.mjs"
+        },
+        "require": {
+          "types": "./dist/no-partial-record-satisfies.d.cts",
+          "default": "./dist/no-partial-record-satisfies.cjs"
+        },
+        "default": "./dist/no-partial-record-satisfies.mjs"
+      },
+      "./no-unsafe-inner-html": {
+        "import": {
+          "types": "./dist/no-unsafe-inner-html.d.mts",
+          "default": "./dist/no-unsafe-inner-html.mjs"
+        },
+        "require": {
+          "types": "./dist/no-unsafe-inner-html.d.cts",
+          "default": "./dist/no-unsafe-inner-html.cjs"
+        },
+        "default": "./dist/no-unsafe-inner-html.mjs"
+      },
+      "./no-raw-route-query-client": {
+        "import": {
+          "types": "./dist/no-raw-route-query-client.d.mts",
+          "default": "./dist/no-raw-route-query-client.mjs"
+        },
+        "require": {
+          "types": "./dist/no-raw-route-query-client.d.cts",
+          "default": "./dist/no-raw-route-query-client.cjs"
+        },
+        "default": "./dist/no-raw-route-query-client.mjs"
+      },
+      "./require-loader-prefetch": {
+        "import": {
+          "types": "./dist/require-loader-prefetch.d.mts",
+          "default": "./dist/require-loader-prefetch.mjs"
+        },
+        "require": {
+          "types": "./dist/require-loader-prefetch.d.cts",
+          "default": "./dist/require-loader-prefetch.cjs"
+        },
+        "default": "./dist/require-loader-prefetch.mjs"
+      }
+    },
+    "main": "dist/index.mjs",
+    "types": "dist/index.d.mts"
+  }
+}

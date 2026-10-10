@@ -4,6 +4,10 @@ import path from "node:path";
 
 import { cloudSetupPath, generateCloudSetup } from "./cloud-setup";
 import { parseCloudSetup } from "./cloud-setup-schema";
+import {
+  checkConsumerChecks,
+  parseConsumerChecks,
+} from "./toolchain-consumer-checks";
 import { checkDependabot, dependabotRules } from "./toolchain-dependabot";
 import {
   parseDynamicSelectors,
@@ -54,12 +58,13 @@ export const parseToolchainConfiguration = (input: unknown) => {
         key !== "optOuts" &&
         key !== "cloud" &&
         key !== "engineFloors" &&
-        key !== "dynamicSelectors",
+        key !== "dynamicSelectors" &&
+        key !== "consumerChecks",
     ) ||
     (input["optOuts"] !== undefined && !array(input["optOuts"]))
   )
     throw new Error(
-      "stll-toolchain.json accepts only optOuts, cloud, engineFloors and dynamicSelectors declarations",
+      "stll-toolchain.json accepts only optOuts, cloud, engineFloors, dynamicSelectors and consumerChecks declarations",
     );
   const disabled = new Set<string>();
   const optOuts = input["optOuts"] ?? [];
@@ -92,6 +97,7 @@ export const parseToolchainConfiguration = (input: unknown) => {
     cloud: parseCloudSetup(input["cloud"]),
     engineFloors: parseEngineFloors(input["engineFloors"]),
     dynamicSelectors: parseDynamicSelectors(input["dynamicSelectors"]),
+    consumerChecks: parseConsumerChecks(input["consumerChecks"]),
   };
 };
 
@@ -164,17 +170,14 @@ export const checkToolchain = ({
     // Repositories without a GitHub origin can still use github.repository.
   }
 
-  let disabled = new Set<string>();
-  let cloud: ReturnType<typeof parseCloudSetup>;
+  let configuration = parseToolchainConfiguration({});
   const engineFloors: ResolvedEngineFloor[] = [];
   let dynamicSelectors: DynamicSelector[] = [];
   if (files["stll-toolchain.json"] !== undefined) {
     try {
-      const configuration = parseToolchainConfiguration(
+      configuration = parseToolchainConfiguration(
         JSON.parse(files["stll-toolchain.json"]),
       );
-      disabled = configuration.disabled;
-      cloud = configuration.cloud;
       dynamicSelectors = configuration.dynamicSelectors;
       for (const entry of configuration.engineFloors)
         engineFloors.push(resolveEngineFloor(entry, files));
@@ -187,6 +190,7 @@ export const checkToolchain = ({
       });
     }
   }
+  const cloud = configuration.cloud;
   const script = files[cloudSetupPath];
   if (cloud === undefined && trackedFiles.has(cloudSetupPath))
     diagnostics.push({
@@ -229,6 +233,13 @@ export const checkToolchain = ({
   const mismatchedFloors = new Set<ResolvedEngineFloor>();
 
   const selectorMatches = new Map<DynamicSelector, number>();
+  diagnostics.push(
+    ...checkConsumerChecks({
+      declarations: configuration.consumerChecks,
+      files,
+      policy,
+    }),
+  );
   diagnostics.push(...checkPackageFiles({ files, policy }));
   for (const [file, text] of Object.entries(files))
     diagnostics.push(
@@ -272,5 +283,7 @@ export const checkToolchain = ({
         message: `dynamic selector ${entry.path}:${entry.at ?? entry.line} must match exactly one unresolved ${entry.kind} selector`,
       });
   diagnostics.push(...checkDependabot({ files, policy: policy.dependabot }));
-  return diagnostics.filter((diagnostic) => !disabled.has(diagnostic.rule));
+  return diagnostics.filter(
+    (diagnostic) => !configuration.disabled.has(diagnostic.rule),
+  );
 };

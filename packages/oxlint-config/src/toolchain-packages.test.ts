@@ -1300,6 +1300,31 @@ describe("TypeScript install layouts", () => {
       { rule: "typescript-layout", path: "packages/api/package.json" },
     ]);
   });
+  test("active shell continuations cannot hide a direct compiler, while single-quoted data remains literal", () => {
+    const dependencies = {
+      "@typescript/native": "npm:typescript@7.0.2",
+      typescript: "6.0.3",
+    };
+    const continuation = "\\\n";
+    for (const command of [
+      `ts${continuation}c --noEmit`,
+      `"ts${continuation}c" --noEmit`,
+    ])
+      expect(
+        manifest({ dependencies, scripts: { typecheck: command } }),
+      ).toMatchObject([
+        {
+          rule: "typescript-layout",
+          message: expect.stringContaining("typecheck compiler invocation"),
+        },
+      ]);
+    expect(
+      manifest({
+        dependencies,
+        scripts: { typecheck: `printf '%s' 'ts${continuation}c'` },
+      }),
+    ).toEqual([]);
+  });
   test("split compiler scripts select the declared current compiler", () => {
     const dependencies = {
       "@typescript/native": "npm:typescript@7.0.2",

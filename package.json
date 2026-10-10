@@ -24,7 +24,8 @@
     "sync-ai": "bash .ai/shared/scripts/sync-ai-skills.sh .",
     "sync-ai:check": "bash .ai/shared/scripts/sync-ai-skills.sh --check .",
     "check:toolchain": "bun packages/oxlint-config/dist/toolchain-check-cli.mjs",
-    "check:typecheck-parity": "bun packages/oxlint-config/dist/typecheck-parity-cli.mjs"
+    "check:typecheck-parity": "bun packages/oxlint-config/dist/typecheck-parity-cli.mjs",
+    "check:publish-contract": "node packages/oxlint-config/dist/publish-contract-cli.mjs"
   },
   "devDependencies": {
     "@changesets/changelog-github": "1.0.0",
@@ -35,6 +36,7 @@
     "oxfmt": "0.72.0",
     "oxlint": "1.87.0",
     "oxlint-tsgolint": "7.0.2003",
+    "pnpm": "12.9.1",
     "publint": "0.3.21",
     "tsdown": "0.22.9",
     "typescript": "7.0.2"
