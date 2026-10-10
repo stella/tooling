@@ -1059,6 +1059,18 @@ test("every shared Docker definition suffix enforces base image pins", () => {
   }
 });
 
+test("Docker tokens in source and documentation filenames do not select runtime parsers", () => {
+  for (const file of [
+    "scripts/generate-dockerfile.ts",
+    "docs/dockerfile.md",
+    "scripts/generate-containerfile.ts",
+    "docs/containerfile.md",
+    "Dockerfile.ts",
+    "Containerfile.mdx",
+  ])
+    expect(check(file, "FROM node:latest")).toEqual([]);
+});
+
 test("workflow containers and services share Docker runtime pin validation", () => {
   for (const [image, version] of Object.entries(runtimeImageVersions)) {
     const rule = image === "oven/bun" ? "bun-pins" : "runtime-docker";

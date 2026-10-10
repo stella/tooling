@@ -122,6 +122,8 @@ test("all Docker definition suffixes remain in the shared reader and runtime cla
     "Containerfile",
     "Containerfile.production",
     "app.Dockerfile",
+    "app.api.Dockerfile",
+    "Dockerfile.prod.build",
     "dockerfile.dev",
     "app.CONTAINERFILE.dev",
   ]) {
@@ -130,6 +132,40 @@ test("all Docker definition suffixes remain in the shared reader and runtime cla
     for (const prefix of ["vendor", "node_modules"]) {
       expect(isDockerDefinitionPath(`${prefix}/${name}`)).toBe(false);
       expect(toolchainInputKind(`${prefix}/${name}`)).toBeUndefined();
+    }
+  }
+});
+
+test("Docker source and documentation names do not create runtime or update inputs", () => {
+  const policy = parseToolchainPolicy(toolchain).dependabot;
+  for (const name of [
+    "generate-dockerfile.ts",
+    "dockerfile.md",
+    "generate-containerfile.ts",
+    "containerfile.md",
+    "Dockerfile.ts",
+    "Containerfile.mdx",
+    "Dockerfile.cpp",
+    "containerfile.rb",
+    "Containerfile.css",
+    "Dockerfile..prod",
+    "app..Dockerfile",
+    "dockerfiles",
+    "mydockerfile",
+    "containerfilename",
+  ]) {
+    for (const prefix of ["scripts", "docs", "dockerfile-notes"]) {
+      const file = `${prefix}/${name}`;
+      expect(isDockerDefinitionPath(file)).toBe(false);
+      expect(toolchainInputKind(file)).toBeUndefined();
+      expect(
+        parseDocument(
+          generateDependabotConfig({
+            files: { [file]: "FROM node:latest" },
+            policy,
+          }),
+        ).getIn(["updates", 0]),
+      ).toBeUndefined();
     }
   }
 });

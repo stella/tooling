@@ -80,7 +80,7 @@
     "typescript": "7.0.2"
   },
   "peerDependencies": {
-    "oxlint": ">=1.80.0 <2",
+    "oxlint": ">=1.87.0 <2",
     "oxlint-tsgolint": ">=7.0.2003 <8"
   },
   "engines": {

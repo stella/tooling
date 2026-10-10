@@ -50,7 +50,7 @@ describe("shared toolchain policy", () => {
     expect(oxlintPackage).toEqual(
       expect.objectContaining({
         peerDependencies: {
-          oxlint: ">=1.80.0 <2",
+          oxlint: ">=1.87.0 <2",
           "oxlint-tsgolint": ">=7.0.2003 <8",
         },
       }),

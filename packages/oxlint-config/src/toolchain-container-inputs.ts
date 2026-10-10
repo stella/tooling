@@ -3,7 +3,7 @@ const record = (value: unknown): value is Record<string, unknown> =>
 
 /** Filename class recognized by Dependabot's Docker Compose fetcher. */
 export const isComposeDefinitionPath = (file: string) =>
-  /(docker-)?compose(-[\w]+)?(?:\.[\w-]+)?\.ya?ml/i.test(
+  /^\.?(?:docker-)?compose(?:-[\w]+)?(?:\.[\w-]+)?\.ya?ml$/i.test(
     file.split("/").at(-1) ?? "",
   );
 

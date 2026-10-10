@@ -146,8 +146,8 @@ Install the shared TypeScript and oxlint packages:
 bun add -d @stll/typescript-config @stll/oxlint-config @stll/oxlint-plugin @oxlint/plugins oxlint oxlint-tsgolint typescript
 ```
 
-The shared defaults require TypeScript 7.0.2 or newer, oxlint 1.80.0 or
-newer, and oxlint-tsgolint 7.0.2001 or newer. Pin the current versions from
+The shared defaults require TypeScript 7.0.2 or newer, oxlint 1.87.0 or
+newer, and oxlint-tsgolint 7.0.2003 or newer. Pin the current versions from
 `@stll/oxlint-config/toolchain.json`; do not use the deprecated
 oxlint-tsgolint 0.x line.
 

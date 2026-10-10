@@ -48,6 +48,24 @@ test("Compose filenames and semantic services use the same discovered class", ()
   ).toBeUndefined();
 });
 
+test("Compose filename tokens must span the complete basename", () => {
+  for (const file of [
+    "decompose.yaml",
+    "mycompose.yml",
+    "compose.yaml.backup",
+    "scripts/generate-compose.yaml",
+    "docs/docker-compose.yml.md",
+  ]) {
+    expect(isComposeDefinitionPath(file)).toBe(false);
+    expect(
+      containerDocumentImages(
+        { services: { app: { image: "node:latest" } } },
+        file,
+      ),
+    ).toBeUndefined();
+  }
+});
+
 test("Kubernetes image enumeration requires resource and pod-spec shape", () => {
   const containers = {
     containers: [{ image: "node:26" }],

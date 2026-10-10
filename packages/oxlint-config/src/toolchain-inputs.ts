@@ -48,10 +48,18 @@ export const pythonDependencyManifestKind = (file: string) => {
 export const isPythonDependencyManifest = (file: string) =>
   pythonDependencyManifestKind(file) !== undefined;
 
-/** Docker and Containerfile suffix variants share runtime and update policy coverage. */
-export const isDockerDefinitionPath = (file: string) =>
-  !excludedInputPath(file) &&
-  /dockerfile|containerfile/i.test(file.split("/").at(-1) ?? "");
+/** Docker definition names use dot-delimited variants, excluding source and documentation. */
+export const isDockerDefinitionPath = (file: string) => {
+  if (excludedInputPath(file)) return false;
+  const name = file.split("/").at(-1) ?? "";
+  if (
+    /\.(?:[cm]?[jt]sx?|mdx?|rst|txt|html?|py|rs|go|java|sh|c|cc|cpp|cxx|h|hpp|cs|rb|php|swift|kt|css|scss)$/i.test(
+      name,
+    )
+  )
+    return false;
+  return /^(?:[^./]+\.)*(?:dockerfile|containerfile)(?:\.[^./]+)*$/i.test(name);
+};
 
 /** Lockfiles establish ecosystem presence without reading their dependency graphs. */
 export const toolchainInputKind = (file: string) => {

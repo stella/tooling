@@ -1245,7 +1245,7 @@ export const checkRuntimeFile = ({
           });
       }
     }
-    let tool: RuntimeDelegation["tool"] | undefined;
+    let tool: RuntimeDelegation["tool"];
     switch (action) {
       case "actions/setup-node":
         tool = "node";
@@ -1259,7 +1259,6 @@ export const checkRuntimeFile = ({
       default:
         return;
     }
-    if (tool === undefined) return;
     const options = getNode(node, "with");
     const literal = getNode(options, `${tool}-version`);
     if (literal !== undefined)

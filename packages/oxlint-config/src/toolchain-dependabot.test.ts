@@ -253,8 +253,8 @@ describe("Dependabot policy", () => {
             {
               ...entry,
               ignore: [
-                ...fixtureIgnores("npm").map((name) => ({
-                  "dependency-name": name,
+                ...fixtureIgnores("npm").map((ownedName) => ({
+                  "dependency-name": ownedName,
                 })),
                 { "dependency-name": name },
               ],
@@ -966,15 +966,14 @@ describe("Dependabot policy", () => {
   test("rejects restricted ignores and cooldown overrides", () => {
     const base = update();
     const ignores = [
-      fixtureIgnores("npm")
-        .map((name) => ({ "dependency-name": name }))
-        .map((entry) => ({ ...entry, versions: ["1.x"] })),
-      fixtureIgnores("npm")
-        .map((name) => ({ "dependency-name": name }))
-        .map((entry) => ({
-          ...entry,
-          "update-types": ["version-update:semver-major"],
-        })),
+      fixtureIgnores("npm").map((name) => ({
+        "dependency-name": name,
+        versions: ["1.x"],
+      })),
+      fixtureIgnores("npm").map((name) => ({
+        "dependency-name": name,
+        "update-types": ["version-update:semver-major"],
+      })),
     ];
     for (const ignore of ignores)
       expect(
