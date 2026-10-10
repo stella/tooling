@@ -969,6 +969,57 @@ export const repositoryDiagnosticComparison = ({
   };
 };
 
+type TemporaryProjectTreeOptions = {
+  scratch: string;
+  projects: readonly string[];
+};
+const temporaryProjectTree = async ({
+  scratch,
+  projects,
+}: TemporaryProjectTreeOptions) => {
+  const contexts = new Map<
+    string,
+    { path: string; folder: string; outputFolder: string }
+  >();
+  const linkedFolders = new Set<string>();
+  for (const project of projects) {
+    const path = join(scratch, "projects", relative(resolve("/"), project));
+    const folder = dirname(path);
+    await mkdir(folder, { recursive: true });
+    for (let original = dirname(project); ; original = dirname(original)) {
+      if (!linkedFolders.has(original)) {
+        linkedFolders.add(original);
+        const modules = join(original, "node_modules");
+        try {
+          if (statSync(modules).isDirectory()) {
+            const destination = join(
+              scratch,
+              "projects",
+              relative(resolve("/"), original),
+            );
+            await mkdir(destination, { recursive: true });
+            await symlink(modules, join(destination, "node_modules"), "dir");
+          }
+        } catch (error) {
+          if (
+            !(error instanceof Error) ||
+            !("code" in error) ||
+            error.code !== "ENOENT"
+          )
+            throw error;
+        }
+      }
+      if (dirname(original) === original) break;
+    }
+    contexts.set(project, {
+      path,
+      folder,
+      outputFolder: join(folder, `${basename(path)}.parity-output`),
+    });
+  }
+  return contexts;
+};
+
 export const compareRepository = async ({
   repo,
   compiler,
@@ -977,52 +1028,18 @@ export const compareRepository = async ({
 }: CompareRepositoryArgs) => {
   const scratch = await mkdtemp(join(tmpdir(), "parity-repository-"));
   try {
+    const contexts = await temporaryProjectTree({
+      scratch,
+      projects: graph.projects.map(({ path }) => path),
+    });
     const configPaths = new Map(
-      graph.projects.map((project) => [
-        project.path,
-        join(scratch, "projects", relative(resolve("/"), project.path)),
-      ]),
+      [...contexts].map(([original, context]) => [original, context.path]),
     );
-    const linkedFolders = new Set<string>();
     for (const project of graph.projects) {
-      const configPath = configPaths.get(project.path);
-      if (configPath === undefined)
+      const context = contexts.get(project.path);
+      if (context === undefined)
         throw new Error(`Missing temporary project: ${project.path}`);
-      const folder = dirname(configPath);
-      const outputFolder = join(
-        folder,
-        `${basename(configPath)}.parity-output`,
-      );
-      await mkdir(folder, { recursive: true });
-      for (
-        let original = dirname(project.path);
-        ;
-        original = dirname(original)
-      ) {
-        if (!linkedFolders.has(original)) {
-          linkedFolders.add(original);
-          const modules = join(original, "node_modules");
-          try {
-            if (statSync(modules).isDirectory()) {
-              const destination = join(
-                scratch,
-                "projects",
-                relative(resolve("/"), original),
-              );
-              await mkdir(destination, { recursive: true });
-              await symlink(modules, join(destination, "node_modules"), "dir");
-            }
-          } catch (error) {
-            if (
-              !(error instanceof Error) ||
-              !("code" in error) ||
-              error.code !== "ENOENT"
-            )
-              throw error;
-          }
-        }
-        if (dirname(original) === original) break;
-      }
+      const { path: configPath, outputFolder } = context;
       const options = resolvedCompilerOptions({
         configPath: project.path,
         compilerOptions: project.compilerOptions,
@@ -1168,11 +1185,6 @@ export const runTypecheckParity = async ({
   const scratch = await mkdtemp(join(tmpdir(), "typecheck-parity-"));
   const groupResults = [];
   try {
-    await symlink(
-      join(repo, "node_modules"),
-      join(scratch, "node_modules"),
-      "dir",
-    );
     for (const [index, group] of groups.entries()) {
       console.log(
         `Config group ${index + 1}: ${relative(repo, group.path)} (${group.projects.length} projects)`,
@@ -1182,12 +1194,18 @@ export const runTypecheckParity = async ({
       let bunWall = 0;
       let tscRss = 0;
       let bunRss = 0;
-      const groupFolder = join(scratch, `config-${index + 1}`);
+      const contexts = await temporaryProjectTree({
+        scratch: join(scratch, `config-${index + 1}`),
+        projects: [group.path],
+      });
+      const context = contexts.get(group.path);
+      if (context === undefined)
+        throw new Error(`Missing temporary fixture context: ${group.path}`);
+      const groupFolder = context.folder;
       const compilerOptions = fixtureCompilerOptions({
         compilerOptions: group.compilerOptions,
         configPath: group.path,
       });
-      await mkdir(groupFolder);
       await writeFile(
         join(groupFolder, "package.json"),
         JSON.stringify(

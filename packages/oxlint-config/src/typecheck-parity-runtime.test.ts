@@ -642,7 +642,7 @@ test.skipIf(process.env["CI"] !== "true")(
 );
 
 test.skipIf(process.env["CI"] !== "true")(
-  "temporary repository graph resolves root and workspace explicit type packages",
+  "shared temporary graphs resolve root and workspace types for repository and active fixtures",
   async () => {
     const repo = process.cwd();
     const policy: unknown = JSON.parse(
@@ -656,6 +656,10 @@ test.skipIf(process.env["CI"] !== "true")(
       await mkdtemp(join(tmpdir(), "parity-repository-types-")),
     );
     try {
+      await writeFile(
+        join(project, "package.json"),
+        JSON.stringify({ devDependencies: { typescript: "7.0.2" } }),
+      );
       await symlink(
         join(repo, "node_modules"),
         join(project, "node_modules"),
@@ -681,6 +685,7 @@ test.skipIf(process.env["CI"] !== "true")(
         JSON.stringify({
           compilerOptions: {
             composite: true,
+            strict: true,
             skipLibCheck: true,
             target: "ESNext",
             module: "ESNext",
@@ -712,6 +717,45 @@ test.skipIf(process.env["CI"] !== "true")(
         const expected = seeded ? ["workspace/input.ts:1:2322"] : [];
         expect(compared.baseline.diagnostics).toEqual(expected);
         expect(compared.candidate.diagnostics).toEqual(expected);
+      }
+      await writeFile(
+        join(leaf, "input.ts"),
+        "export const value: typeof Bun.version = workspaceValue;",
+      );
+      const logs: string[] = [];
+      const errors: string[] = [];
+      const logger = spyOn(console, "log").mockImplementation(
+        (...args: unknown[]) => {
+          logs.push(args.map(String).join(" "));
+        },
+      );
+      const errorLogger = spyOn(console, "error").mockImplementation(
+        (...args: unknown[]) => {
+          errors.push(args.map(String).join(" "));
+        },
+      );
+      try {
+        const passed = await runTypecheckParity({ repo: project, policy });
+        if (!passed)
+          throw new Error(
+            [...errors, ...logs.filter((line) => line.includes("FAIL"))].join(
+              "\n",
+            ),
+          );
+        expect(passed).toBe(true);
+        expect(errors).toEqual([]);
+        expect(
+          logs.some(
+            (line) =>
+              line.startsWith("type-mismatch |") && line.endsWith("PASS"),
+          ),
+        ).toBe(true);
+        expect(logs.some((line) => line.includes("configuration error"))).toBe(
+          false,
+        );
+      } finally {
+        logger.mockRestore();
+        errorLogger.mockRestore();
       }
     } finally {
       await rm(project, { recursive: true, force: true });
