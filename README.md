@@ -60,8 +60,34 @@ that imports the TypeScript compiler API. Remove the compatibility install when
 the blocker accepts TypeScript 7. The shared config's peer range accepts both
 layouts. Both layouts use `bun check` with Bun 1.4.3 for typechecking; retain
 TypeScript wherever a tool needs its compiler API or declaration generation.
-`bun run check:typecheck-parity` compares seeded diagnostic classes against
-`tsc --noEmit` and fails if Bun loses coverage.
+`stll-typecheck-parity` runs from a consumer repository root. It uses that repo's
+TypeScript compiler (including the declared split layout), compares repository
+diagnostics by file, line, and code, then checks 31 shipped fixture classes under
+the consumer tsconfig flags. TypeScript diagnostics determine each class's
+activation; inactive classes are identified in the table, and zero active classes
+fail the check. The command fails on diagnostic differences or lost seeded coverage and reports wall
+time and peak RSS for TypeScript and Bun. It requires Bun and `/usr/bin/time`
+on Linux or macOS, and runs with Node or Bun. Tooling invokes the same bin through
+`bun run check:typecheck-parity`. The bin invokes
+`bun check` with its dedicated project/build flags. Consumer repositories must
+not define a `check` script: it shadows Bun's checker, so the parity bin fails
+with a clear error until that script is renamed. Standalone `bun --check`
+checks the current project but does not forward these checker options.
+Repositories with project references use build mode on both sides. Referenced
+configs are discovered recursively and grouped by effective compiler options.
+Each group copies its representative config's effective options, removes emit-only
+and build settings, and sets `noEmit` for the seeded projects. Type-checking options
+and consumer type/module resolution are preserved. Each group must
+activate at least one seeded class. The installed compiler and Bun runtime must match their selected toolchain policy versions.
+Both compilers check the same temporary project graph. TypeScript declarations
+and build metadata stay in that temporary tree; consumer files remain untouched.
+The parity bin does not validate the consumer project graph; the repository's own typecheck does.
+Source errors normalize TypeScript's diagnostic exit `2` (including declaration-only inputs) to Bun's
+diagnostic exit `1`; the report retains both raw exit codes. Other exit statuses
+compare exactly. Comparisons retain source diagnostic locations, normalize bundled standard-library
+paths, and distinguish locationless messages. Fixtures preserve the consumer package
+module context and reject configuration errors. Tagged agent diagnostics are normalized
+into the same comparison set.
 
 Use the library TypeScript preset:
 

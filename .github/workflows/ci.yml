@@ -71,6 +71,9 @@ jobs:
       - name: Registry version check
         run: bun run check:registry-versions
 
+      - name: Build shared commands
+        run: bun run build
+
       - name: Typecheck diagnostic parity
         run: bun run check:typecheck-parity
 
@@ -94,6 +97,7 @@ jobs:
         run: |
           bun run check:toolchain
           node packages/oxlint-config/dist/toolchain-check-cli.mjs
+          node packages/oxlint-config/dist/typecheck-parity-cli.mjs
 
       - name: Publint
         run: bun run publint
