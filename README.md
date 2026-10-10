@@ -179,7 +179,14 @@ on Linux or macOS, and runs with Node or Bun. Tooling invokes the same bin throu
 not define a `check` script: it shadows Bun's checker, so the parity bin fails
 with a clear error until that script is renamed. Standalone `bun --check`
 checks the current project but does not forward these checker options.
-Repositories with project references use build mode on both sides. Referenced
+Without flags, the command checks the root `tsconfig.json` and uses build mode
+for project references. To check selected configs, repeat `--project`, for example
+`stll-typecheck-parity --project packages/api/tsconfig.json --project packages/web/tsconfig.json`.
+Selected configs run independently without discovering or building their references;
+reference metadata is retained for ordinary project checks. No root tsconfig is
+required in this mode, and the compiler always comes from the repository-root
+installation. Missing, unreadable, and zero-input selected configs fail the check.
+`--help` prints usage and exits successfully. In default mode, referenced
 configs are discovered recursively and grouped by effective compiler options.
 Each group copies its representative config's effective options, removes emit-only
 and build settings, and sets `noEmit` for the seeded projects. Type-checking options
@@ -226,6 +233,7 @@ Add the portable safety rules to an existing Oxlint config:
 
 ```ts
 import { defineConfig } from "oxlint";
+
 import {
   portableSafetyPluginSpecifiers,
   portableSafetyRules,
@@ -242,6 +250,7 @@ prevent cache misses and render-fetch waterfalls during navigation:
 
 ```ts
 import { defineConfig } from "oxlint";
+
 import {
   routeQueryPluginSpecifiers,
   routeQueryRules,
@@ -278,8 +287,9 @@ If a repo needs the `extends` style used by other oxlint config packages, keep
 repo-specific ignores in the root config:
 
 ```ts
-import stella from "@stll/oxlint-config";
 import { defineConfig } from "oxlint";
+
+import stella from "@stll/oxlint-config";
 
 export default defineConfig({
   extends: [stella],

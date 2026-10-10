@@ -2,14 +2,24 @@
 import { readFile } from "node:fs/promises";
 
 import { runTypecheckParity } from "./typecheck-parity";
+import { parityUsage, parseParityArguments } from "./typecheck-parity-args";
 
 const main = async () => {
-  if (process.argv.slice(2).length > 0)
-    throw new Error("Usage: stll-typecheck-parity (run from repository root)");
+  const args = parseParityArguments(process.argv.slice(2));
+  if (args.mode === "help") {
+    process.stdout.write(`${parityUsage}\n`);
+    return;
+  }
   const policy: unknown = JSON.parse(
     await readFile(new URL("../toolchain.json", import.meta.url), "utf8"),
   );
-  if (!(await runTypecheckParity({ repo: process.cwd(), policy })))
+  if (
+    !(await runTypecheckParity({
+      repo: process.cwd(),
+      policy,
+      ...(args.mode === "selected" ? { projects: args.projects } : {}),
+    }))
+  )
     process.exitCode = 1;
 };
 

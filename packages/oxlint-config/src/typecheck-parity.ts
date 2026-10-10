@@ -803,10 +803,15 @@ export const groupCompilerConfigs = (configs: CompilerConfig[]) => {
   return [...groups.values()];
 };
 
-type DiscoverConfigGroupsOptions = { repo: string; compiler: string };
+type DiscoverConfigGroupsOptions = {
+  repo: string;
+  compiler: string;
+  project?: string;
+};
 export const discoverConfigGroups = ({
   repo,
   compiler,
+  project,
 }: DiscoverConfigGroupsOptions) => {
   const configs: CompilerConfig[] = [];
   const visited = new Set<string>();
@@ -815,14 +820,16 @@ export const discoverConfigGroups = ({
     compilerOptions: unknown;
     files: string[];
     references: string[];
+    resolvedReferences: Record<string, unknown>[];
   }[] = [];
   let build = false;
-  const visit = (project: string) => {
+  const visit = (inputPath: string) => {
     const path = realpathSync(
-      statSync(project).isDirectory()
-        ? join(project, "tsconfig.json")
-        : project,
+      statSync(inputPath).isDirectory()
+        ? join(inputPath, "tsconfig.json")
+        : inputPath,
     );
+    readFileSync(path, "utf8");
     if (visited.has(path)) return;
     visited.add(path);
     const result = spawnSync(
@@ -839,7 +846,7 @@ export const discoverConfigGroups = ({
       "references" in config && Array.isArray(config.references)
         ? config.references
         : [];
-    build ||= references.length > 0;
+    build ||= project === undefined && references.length > 0;
     const compilerOptions =
       "compilerOptions" in config ? config.compilerOptions : {};
     if (
@@ -856,8 +863,20 @@ export const discoverConfigGroups = ({
         throw new Error(`Invalid project file: ${path}`);
       return resolve(dirname(path), file);
     });
+    if (
+      files.length === 0 &&
+      (project !== undefined || references.length === 0)
+    )
+      throw new Error(`Project resolves to zero input files: ${path}`);
     const referencePaths: string[] = [];
-    projects.push({ path, compilerOptions, files, references: referencePaths });
+    const resolvedReferences: Record<string, unknown>[] = [];
+    projects.push({
+      path,
+      compilerOptions,
+      files,
+      references: referencePaths,
+      resolvedReferences,
+    });
     if (files.length > 0 || references.length === 0)
       configs.push({
         path,
@@ -879,14 +898,41 @@ export const discoverConfigGroups = ({
           : referencedProject,
       );
       referencePaths.push(referencePath);
-      visit(referencePath);
+      resolvedReferences.push({ ...reference, path: referencePath });
+      if (project === undefined) visit(referencePath);
     }
   };
-  visit(join(repo, "tsconfig.json"));
+  const selected = resolve(repo, project ?? "tsconfig.json");
+  const root = realpathSync(
+    statSync(selected).isDirectory()
+      ? join(selected, "tsconfig.json")
+      : selected,
+  );
+  visit(root);
   const groups = groupCompilerConfigs(configs);
   if (groups.length === 0)
     throw new Error("No consumer compiler configurations to compare");
-  return { build, groups, projects };
+  return { build, groups, projects, root };
+};
+
+type DiscoverProjectGraphsOptions = {
+  repo: string;
+  compiler: string;
+  projects?: readonly string[] | undefined;
+};
+export const discoverProjectGraphs = ({
+  repo,
+  compiler,
+  projects,
+}: DiscoverProjectGraphsOptions) => {
+  if (projects === undefined) return [discoverConfigGroups({ repo, compiler })];
+  if (projects.length === 0) throw new Error("Select at least one project");
+  const graphs = new Map<string, ReturnType<typeof discoverConfigGroups>>();
+  for (const project of projects) {
+    const graph = discoverConfigGroups({ repo, compiler, project });
+    if (!graphs.has(graph.root)) graphs.set(graph.root, graph);
+  }
+  return [...graphs.values()];
 };
 
 type TimedCommandOptions = { command: string; args: string[]; repo: string };
@@ -1127,16 +1173,20 @@ export const compareRepository = async ({
           compilerOptions: options,
           files: project.files,
           include: [],
-          references: project.references.map((path) => {
-            const temporary = configPaths.get(path);
-            if (temporary === undefined)
-              throw new Error(`Missing referenced temporary project: ${path}`);
-            return { path: temporary };
-          }),
+          references: graph.build
+            ? project.references.map((path) => {
+                const temporary = configPaths.get(path);
+                if (temporary === undefined)
+                  throw new Error(
+                    `Missing referenced temporary project: ${path}`,
+                  );
+                return { path: temporary };
+              })
+            : project.resolvedReferences,
         }),
       );
     }
-    const root = configPaths.get(realpathSync(join(repo, "tsconfig.json")));
+    const root = configPaths.get(graph.root);
     if (root === undefined) throw new Error("Missing temporary root config");
     const baselineRaw = timedCommand({
       command: process.execPath,
@@ -1202,16 +1252,30 @@ type RunTypecheckParityOptions = {
   repo: string;
   policy: unknown;
   bun?: string;
+  projects?: readonly string[];
 };
 export const runTypecheckParity = async ({
   repo,
   policy,
   bun = process.versions.bun ? process.execPath : "bun",
+  projects,
 }: RunTypecheckParityOptions) => {
   await assertUnshadowedCheck(repo);
   assertBunVersion(bun, policy);
   const compiler = await resolveCompiler(repo, policy);
-  const graph = discoverConfigGroups({ repo, compiler });
+  const graphs = discoverProjectGraphs({ repo, compiler, projects });
+  const results = [];
+  for (const graph of graphs)
+    results.push(await runConfigParity({ repo, compiler, bun, graph }));
+  return results.every((passed) => passed);
+};
+
+const runConfigParity = async ({
+  repo,
+  compiler,
+  bun,
+  graph,
+}: CompareRepositoryArgs) => {
   const { groups } = graph;
   const { baseline, candidate, repository } = await compareRepository({
     repo,
