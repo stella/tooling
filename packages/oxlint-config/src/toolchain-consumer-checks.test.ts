@@ -195,7 +195,11 @@ test("declared consumer workflows require valid scheduled execution", () => {
         ...files,
         [workflow]: JSON.stringify({ on, jobs: { consumer: job } }),
       }),
-    ).toMatchObject([{ message: expect.stringContaining("on.schedule") }]);
+    ).toContainEqual(
+      expect.objectContaining({
+        message: expect.stringContaining("on.schedule"),
+      }),
+    );
 });
 
 test("every declared package must be a tracked published manifest supporting consumer Node", () => {

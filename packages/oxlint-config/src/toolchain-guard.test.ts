@@ -80,6 +80,12 @@ test("consumer check declarations remain mandatory despite runtime and action op
     "stll-toolchain.json": JSON.stringify(configuration),
   };
   expect(fixture(files)).toEqual([]);
+  const withoutSchedule = invocation.slice(invocation.indexOf("jobs:"));
+  expect(
+    fixture({ ...files, [workflow]: withoutSchedule }).some(({ message }) =>
+      message.includes("on.schedule"),
+    ),
+  ).toBe(true);
   for (const mutation of [
     { ...files, [workflow]: invocation.replace(policy.consumerNode, "26.0.0") },
     {
