@@ -304,6 +304,11 @@ const exactBun = (value: string) => {
     throw new Error("Bun runtime declaration is not an exact version");
   return exact;
 };
+const nonRegistryResolution = (specifier: string) =>
+  /^(?:link:|workspace:|file:|portal:|catalog:|git:|github:|gitlab:|bitbucket:|git\+|https?:|ssh:|git@)/i.test(
+    specifier,
+  );
+
 const packageTarget = ({
   name,
   specifier,
@@ -739,17 +744,24 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
     if (path.posix.basename(lockFile) !== "pnpm-lock.yaml") continue;
     for (const [directory, dependencies] of Object.entries(lock.importers))
       for (const [dependency, version] of Object.entries(dependencies)) {
+        // Importer versions are resolved descriptors, not npm alias specs.
+        // Local/non-registry dependencies must never be reinterpreted as aliases.
+        const namedTool = changedPackageTool(dependency);
+        const nonRegistry = nonRegistryResolution(version);
+        const registryName = nonRegistry
+          ? dependency
+          : version.startsWith("npm:")
+            ? packageTarget({ name: dependency, specifier: version })
+            : /^((?:@[^/@\s]+\/)?[^/@\s]+)@/.exec(version)?.[1];
         const tool =
-          changedPackageTool(
-            packageTarget({
-              name: dependency,
-              specifier: version.startsWith("npm:")
-                ? version
-                : `npm:${version}`,
-            }),
-          ) ??
-          changedPackageTool(dependency) ??
-          lock.resolutions.find((item) => item.dependency === dependency)?.tool;
+          (registryName === undefined
+            ? undefined
+            : changedPackageTool(registryName)) ??
+          namedTool ??
+          (nonRegistry
+            ? undefined
+            : lock.resolutions.find((item) => item.dependency === dependency)
+                ?.tool);
         if (tool !== undefined)
           tools[tool].add(
             `${lockFile}:importer:${directory}:${dependency}:${version}`,

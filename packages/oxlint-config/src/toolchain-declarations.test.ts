@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { stringify } from "yaml";
 
 import { detectToolchainChanges } from "./toolchain-changed";
 import { runSelectedTypecheckParity } from "./typecheck-parity-selection";
@@ -34,6 +35,7 @@ const compiler = (version: string) => ({
 
 type DeclarationMutation = {
   name: string;
+  base?: Record<string, unknown>;
   before: Record<string, unknown>;
   after: Record<string, unknown>;
 };
@@ -236,20 +238,22 @@ const withSnapshots = async (
   };
   try {
     git(["init", "-q"]);
-    write({
-      "package.json": {
-        private: true,
-        packageManager: "bun@1.4.3",
-        workspaces: ["packages/*", "!packages/excluded"],
-        devDependencies: { typescript: "7.0.2" },
+    write(
+      mutation.base ?? {
+        "package.json": {
+          private: true,
+          packageManager: "bun@1.4.3",
+          workspaces: ["packages/*", "!packages/excluded"],
+          devDependencies: { typescript: "7.0.2" },
+        },
+        "bun.lock": {
+          lockfileVersion: 1,
+          workspaces: { "": { devDependencies: { typescript: "7.0.2" } } },
+          packages: { typescript: ["typescript@7.0.2"] },
+        },
       },
-      "bun.lock": {
-        lockfileVersion: 1,
-        workspaces: { "": { devDependencies: { typescript: "7.0.2" } } },
-        packages: { typescript: ["typescript@7.0.2"] },
-      },
-      ...mutation.before,
-    });
+    );
+    write(mutation.before);
     const since = commit();
     write(mutation.after);
     commit();
@@ -323,6 +327,105 @@ test("unclassifiable changed runtime declarations run parity rather than skippin
           );
         },
       });
+      expect(invocations).toBe(1);
+    },
+  );
+});
+
+const unrelatedPnpmResolutions = {
+  "linked-library": "link:../library",
+  "workspace-library": "workspace:*",
+  "file-fixture": "file:../fixture",
+  "portal-library": "portal:../library",
+  "git-library":
+    "git://example.test/library.git#0123456789abcdef0123456789abcdef01234567",
+  "github-library":
+    "github:example/library#0123456789abcdef0123456789abcdef01234567",
+  "git-plus-library":
+    "git+https://example.test/library.git#0123456789abcdef0123456789abcdef01234567",
+  "archive-library": "https://example.test/library-1.0.0.tgz",
+  "catalog-library": "catalog:default",
+};
+const pnpmLock = (version: string) =>
+  stringify({
+    lockfileVersion: "9.0",
+    importers: {
+      ".": {
+        devDependencies: {
+          typescript: { specifier: ">=6 <8", version },
+          compiler: {
+            specifier: "npm:typescript@7.0.2",
+            version: "typescript@7.0.2",
+          },
+        },
+        dependencies: Object.fromEntries(
+          Object.entries(unrelatedPnpmResolutions).map(([name, resolution]) => [
+            name,
+            { specifier: resolution, version: resolution },
+          ]),
+        ),
+      },
+    },
+    packages: { "typescript@7.0.2": {}, "typescript@7.0.3": {} },
+    snapshots: { "typescript@7.0.2": {}, "typescript@7.0.3": {} },
+  });
+
+test("ordinary pnpm protocol resolutions preserve skip selection while compiler lock bumps run parity", async () => {
+  await withSnapshots(
+    {
+      name: "pnpm protocol resolutions",
+      base: {
+        "package.json": {
+          private: true,
+          packageManager: "pnpm@12.9.1",
+          devDependencies: {
+            typescript: ">=6 <8",
+            compiler: "npm:typescript@7.0.2",
+          },
+          dependencies: unrelatedPnpmResolutions,
+        },
+      },
+      before: { "pnpm-lock.yaml": pnpmLock("7.0.2") },
+      after: { "pnpm-lock.yaml": pnpmLock("7.0.3") },
+    },
+    async ({ repo, since }) => {
+      const unchanged = await detectToolchainChanges({ repo, since: "HEAD" });
+      expect(unchanged.status).toBe("compared");
+      expect(unchanged.changed).toBe(false);
+      expect(unchanged.tools).toEqual([]);
+      let invocations = 0;
+      const output: string[] = [];
+      expect(
+        await runSelectedTypecheckParity({
+          repo,
+          since: "HEAD",
+          run: async () => {
+            invocations++;
+            return true;
+          },
+          output: (message) => output.push(message),
+        }),
+      ).toBe(true);
+      expect(invocations).toBe(0);
+      expect(output).toHaveLength(1);
+      expect(output.at(0)).toContain("parity skipped:");
+      const changed = await detectToolchainChanges({ repo, since });
+      expect(changed.status).toBe("compared");
+      expect(changed.changed).toBe(true);
+      expect(changed.tools).toEqual(["typescript"]);
+      expect(
+        await runSelectedTypecheckParity({
+          repo,
+          since,
+          run: async () => {
+            invocations++;
+            return false;
+          },
+          output: () => {
+            throw new Error("resolved compiler changes must not skip parity");
+          },
+        }),
+      ).toBe(false);
       expect(invocations).toBe(1);
     },
   );
