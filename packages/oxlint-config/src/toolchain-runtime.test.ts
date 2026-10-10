@@ -893,7 +893,7 @@ test("prefixed runtime selectors map only preceding matching source snapshots", 
     ["actions/setup-node", "v5", "node", ".node-version"],
     ["actions/setup-python", "v6", "python", ".python-version"],
     ["oven-sh/setup-bun", "v2", "bun", "package.json"],
-  ]) {
+  ] as const) {
     const setup = (prefix: string) =>
       `      - uses: ${action}@${sha} # ${version}\n        with: {${tool}-version-file: '${prefix}${target}'}`;
     const rule = tool === "bun" ? "bun-pins" : "runtime-workflow";
@@ -1058,7 +1058,7 @@ test("mapped runtime provenance requires an unconditional unique checkout destin
       "runtime-workflow",
     ],
     ["bun", "oven-sh/setup-bun", "v2", "package.json", "bun-pins"],
-  ]) {
+  ] as const) {
     const trusted = `      - uses: actions/checkout@${sha} # v5\n        with: {repository: '\${{ job.workflow_repository }}', ref: '\${{ job.workflow_sha }}', path: source}`;
     const setup = `      - uses: ${action}@${sha} # ${version}\n        with: {${tool}-version-file: source/${target}}`;
     const fails = (steps: string, defaults = "") =>

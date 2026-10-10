@@ -343,7 +343,12 @@ export const checkPackageFiles = ({
       const { directory, workspace } = owner;
       if (
         path.posix.basename(file) === "package.json" &&
-        !pnpmContains({ directory, file, patterns: workspace["packages"] })
+        !workspaceContains({
+          directory,
+          file,
+          patterns: workspace["packages"],
+          rootMembership: "implicit",
+        })
       )
         return undefined;
       if (name === "" || name === "default")
@@ -379,17 +384,20 @@ export const checkPackageFiles = ({
       directory = path.posix.dirname(directory);
     }
   };
-  const pnpmContains = ({
+  const workspaceContains = ({
     directory,
     file,
     patterns,
+    rootMembership,
   }: {
     directory: string;
     file: string;
     patterns: unknown;
+    rootMembership: "implicit" | "patterns";
   }) => {
     const relative = path.posix.relative(directory, path.posix.dirname(file));
-    if (relative === "") return true;
+    if (relative === "" && rootMembership === "implicit") return true;
+    if (relative === ".." || relative.startsWith("../")) return false;
     if (!Array.isArray(patterns)) return false;
     const normalize = (pattern: string) => path.posix.normalize(pattern);
     const selected = patterns.filter(
@@ -416,7 +424,8 @@ export const checkPackageFiles = ({
     }
     return value;
   };
-  const workspaceMatches = ({
+  type WorkspaceResolution = "matched" | "nonmember" | "mismatch";
+  const workspaceResolution = ({
     file,
     name,
     pin,
@@ -424,65 +433,47 @@ export const checkPackageFiles = ({
     file: string;
     name: string;
     pin: string;
-  }) => {
-    const owner = pnpmWorkspaceFor(file);
-    if (owner !== undefined) {
-      const { directory, workspace } = owner;
-      if (!pnpmContains({ directory, file, patterns: workspace["packages"] }))
-        return false;
-      const candidates = [...manifests.entries()].filter(
-        ([candidate, json]) =>
-          path.posix.basename(candidate) === "package.json" &&
-          json["name"] === name &&
-          pnpmContains({
-            directory,
-            file: candidate,
-            patterns: workspace["packages"],
-          }),
-      );
-      return (
-        candidates.length === 1 &&
-        candidates.every(([, json]) => json["version"] === pin)
-      );
-    }
-    let directory = path.posix.dirname(file);
-    while (true) {
-      const root = manifests.get(path.posix.join(directory, "package.json"));
-      const workspaces = root?.["workspaces"];
-      if (workspaces !== undefined) {
-        const patterns = record(workspaces)
-          ? workspaces["packages"]
-          : workspaces;
-        if (!Array.isArray(patterns)) return false;
-        const workspacePatterns = patterns.filter(
-          (pattern: unknown): pattern is string => typeof pattern === "string",
-        );
-        const included = picomatch(
-          workspacePatterns.filter((pattern) => !pattern.startsWith("!")),
-        );
-        const excluded = picomatch(
-          workspacePatterns
-            .filter((pattern) => pattern.startsWith("!"))
-            .map((pattern) => pattern.slice(1)),
-        );
-        const candidates = [...manifests.entries()].filter(
-          ([candidate, json]) => {
-            if (json["name"] !== name) return false;
-            const relative = path.posix.relative(
-              directory,
-              path.posix.dirname(candidate),
-            );
-            return included(relative) && !excluded(relative);
-          },
-        );
-        return (
-          candidates.length === 1 &&
-          candidates.every(([, json]) => json["version"] === pin)
-        );
+  }): WorkspaceResolution => {
+    const pnpm = pnpmWorkspaceFor(file);
+    let directory = pnpm?.directory ?? path.posix.dirname(file);
+    let patterns: unknown = pnpm?.workspace["packages"];
+    if (pnpm === undefined) {
+      while (true) {
+        const root = manifests.get(path.posix.join(directory, "package.json"));
+        const workspaces = root?.["workspaces"];
+        if (workspaces !== undefined) {
+          patterns = record(workspaces) ? workspaces["packages"] : workspaces;
+          if (!Array.isArray(patterns)) return "mismatch";
+          break;
+        }
+        if (directory === ".") return "nonmember";
+        directory = path.posix.dirname(directory);
       }
-      if (directory === ".") return false;
-      directory = path.posix.dirname(directory);
     }
+    if (
+      !workspaceContains({
+        directory,
+        file,
+        patterns,
+        rootMembership: "implicit",
+      })
+    )
+      return "nonmember";
+    const candidates = [...manifests.entries()].filter(
+      ([candidate, json]) =>
+        path.posix.basename(candidate) === "package.json" &&
+        json["name"] === name &&
+        workspaceContains({
+          directory,
+          file: candidate,
+          patterns,
+          rootMembership: pnpm === undefined ? "patterns" : "implicit",
+        }),
+    );
+    return candidates.length === 1 &&
+      candidates.every(([, json]) => json["version"] === pin)
+      ? "matched"
+      : "mismatch";
   };
   const tsSpecifiers = new Map<string, Set<string>>();
   for (const layout of policy.typescriptInstallLayouts) {
@@ -530,17 +521,21 @@ export const checkPackageFiles = ({
         }
         const pin = pins.get(name);
         if (pin === undefined) continue;
-        if (
-          value === pin ||
-          (value === "workspace:*" && workspaceMatches({ file, name, pin }))
-        )
-          continue;
+        if (value === pin) continue;
+        const workspace =
+          value === "workspace:*"
+            ? workspaceResolution({ file, name, pin })
+            : undefined;
+        if (workspace === "matched") continue;
         add({
           file,
           rule: name === "bun-types" ? "bun-pins" : "package-pins",
           key: name,
           value: raw,
-          message: `${name} must be ${pin}, found ${String(value)}`,
+          message:
+            workspace === "nonmember"
+              ? `${name} workspace:* consumer is not a member of its nearest workspace`
+              : `${name} must be ${pin}, found ${String(value)}`,
         });
       }
     };

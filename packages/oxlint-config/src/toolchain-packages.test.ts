@@ -450,6 +450,159 @@ describe("shared package pins", () => {
       }),
     ).toEqual([]);
   });
+  test("workspace pins require consumer membership for every owned dependency section", () => {
+    const patterns = ["./packages/*", "!./packages/excluded"];
+    for (const workspaces of [patterns, { packages: patterns }]) {
+      for (const section of [
+        "dependencies",
+        "devDependencies",
+        "optionalDependencies",
+      ]) {
+        for (const [name, version] of Object.entries({
+          ...policy.packages,
+          "bun-types": policy.bun,
+        })) {
+          const base = {
+            "package.json": json({ workspaces }),
+            "packages/producer/package.json": json({ name, version }),
+          };
+          const consumer = json({ [section]: { [name]: "workspace:*" } });
+          for (const file of ["package.json", "packages/member/package.json"])
+            expect(
+              check({
+                ...base,
+                [file]:
+                  file === "package.json"
+                    ? json({ workspaces, [section]: { [name]: "workspace:*" } })
+                    : consumer,
+              }),
+            ).toEqual([]);
+          for (const file of [
+            "standalone/package.json",
+            "packages/excluded/package.json",
+          ])
+            expect(check({ ...base, [file]: consumer })).toMatchObject([
+              {
+                path: file,
+                rule: name === "bun-types" ? "bun-pins" : "package-pins",
+                message: `${name} workspace:* consumer is not a member of its nearest workspace`,
+              },
+            ]);
+        }
+      }
+    }
+  });
+  test("catalog workspace pins retain the consuming package membership check", () => {
+    for (const workspaces of [
+      ["packages/*", "!packages/excluded"],
+      { packages: ["packages/*", "!packages/excluded"] },
+    ]) {
+      for (const catalog of ["catalog:", "catalog:tools"]) {
+        const base = {
+          "package.json": json({
+            workspaces,
+            catalog: { "@stll/oxlint-plugin": "workspace:*" },
+            catalogs: { tools: { "@stll/oxlint-plugin": "workspace:*" } },
+          }),
+          "packages/plugin/package.json": json({
+            name: "@stll/oxlint-plugin",
+            version: "0.7.0",
+          }),
+        };
+        for (const [directory, member] of [
+          ["packages/app", true],
+          ["packages/excluded", false],
+          ["standalone", false],
+        ] as const) {
+          const file = `${directory}/package.json`;
+          const diagnostics = check({
+            ...base,
+            [file]: json({ dependencies: { "@stll/oxlint-plugin": catalog } }),
+          });
+          if (member) expect(diagnostics).toEqual([]);
+          else
+            expect(diagnostics).toMatchObject([
+              {
+                path: file,
+                message:
+                  "@stll/oxlint-plugin workspace:* consumer is not a member of its nearest workspace",
+              },
+            ]);
+        }
+      }
+    }
+  });
+  test("nearest workspace boundaries and package-manifest producers cannot be bypassed", () => {
+    expect(
+      check({
+        "package.json": json({
+          name: "@stll/oxlint-plugin",
+          version: "0.7.0",
+          workspaces: ["packages/*"],
+        }),
+        "packages/member/package.json": json({
+          dependencies: { "@stll/oxlint-plugin": "workspace:*" },
+        }),
+      }),
+    ).toMatchObject([
+      { message: "@stll/oxlint-plugin must be 0.7.0, found workspace:*" },
+    ]);
+    const base = {
+      "package.json": json({ workspaces: ["packages/**"] }),
+      "packages/plugin/package.json": json({
+        name: "@stll/oxlint-plugin",
+        version: "0.7.0",
+      }),
+      "packages/nested/package.json": json({
+        workspaces: { packages: ["apps/*", "!apps/excluded"] },
+      }),
+    };
+    const consumer = json({
+      dependencies: { "@stll/oxlint-plugin": "workspace:*" },
+    });
+    expect(
+      check({ ...base, "packages/nested/apps/member/package.json": consumer }),
+    ).toMatchObject([
+      {
+        message: "@stll/oxlint-plugin must be 0.7.0, found workspace:*",
+      },
+    ]);
+    expect(
+      check({
+        ...base,
+        "packages/nested/apps/excluded/package.json": consumer,
+      }),
+    ).toMatchObject([
+      {
+        message:
+          "@stll/oxlint-plugin workspace:* consumer is not a member of its nearest workspace",
+      },
+    ]);
+    expect(
+      check({
+        ...base,
+        "packages/nested/apps/plugin/package.json": json({
+          name: "@stll/oxlint-plugin",
+          version: "0.7.0",
+        }),
+        "packages/nested/apps/member/package.json": consumer,
+      }),
+    ).toEqual([]);
+    expect(
+      check({
+        "package.json": json({
+          workspaces: ["packages/*"],
+          dependencies: { "@stll/oxlint-plugin": "workspace:*" },
+        }),
+        "packages/impostor/pnpm-workspace.yaml": stringify({
+          name: "@stll/oxlint-plugin",
+          version: "0.7.0",
+        }),
+      }),
+    ).toMatchObject([
+      { message: "@stll/oxlint-plugin must be 0.7.0, found workspace:*" },
+    ]);
+  });
   test("catalog links resolve default, named and chained catalogs", () => {
     for (const workspaces of [false, true]) {
       const catalogs = {
