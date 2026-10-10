@@ -57,6 +57,61 @@ const runtimeImageVersions = {
   "oven/bun": policy.bun,
 };
 
+test("runtime image variants preserve stable pins across every image consumer", () => {
+  const families = [
+    {
+      image: "node",
+      version: "26.0.0",
+      variants: ["", "-alpine", "-alpine3.24", "-slim", "-bookworm-slim"],
+    },
+    {
+      image: "python",
+      version: "3.13",
+      variants: ["", "-alpine", "-alpine3.24", "-slim", "-bookworm-slim"],
+    },
+    {
+      image: "oven/bun",
+      version: policy.bun,
+      variants: ["", "-alpine", "-slim", "-debian"],
+    },
+  ];
+  const surfaces = (image: string) => [
+    { file: "Dockerfile", text: `FROM ${image}` },
+    {
+      file: ".github/workflows/ci.yml",
+      text: `jobs: {test: {container: '${image}', steps: []}}`,
+    },
+    { file: "compose.yaml", text: `services: {app: {image: '${image}'}}` },
+    {
+      file: "deploy/pod.yaml",
+      text: `apiVersion: v1\nkind: Pod\nspec: {containers: [{image: '${image}'}]}`,
+    },
+  ];
+  for (const { image, version, variants } of families)
+    for (const variant of variants) {
+      for (const { file, text } of surfaces(`${image}:${version}${variant}`))
+        expect(check(file, text, {}, "3.13")).toEqual([]);
+      for (const channel of [
+        "rc",
+        "rc.1",
+        "alpha",
+        "beta",
+        "canary",
+        "canary-like",
+        "dev",
+        "unknown",
+      ])
+        for (const { file, text } of surfaces(
+          `${image}:${version}-${channel}${variant}`,
+        ))
+          expect(
+            check(file, text, {}, "3.13").some(({ rule }) =>
+              ["runtime-docker", "bun-pins"].includes(rule),
+            ),
+          ).toBe(true);
+    }
+});
+
 test("Compose and Kubernetes declarations share semantic image validation", () => {
   const digest = `node:26.0.0@sha256:${"b".repeat(64)}`;
   for (const file of [

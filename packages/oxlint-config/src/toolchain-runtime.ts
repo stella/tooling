@@ -535,13 +535,12 @@ export const checkRuntimeFile = ({
       return;
     }
     const tag = runtime[2];
-    const version =
-      tool === "node"
-        ? tag?.replace(
-            /-(?:alpine(?:\d+(?:\.\d+)*)?|(?:bookworm|bullseye|trixie|buster)(?:-slim)?|slim)$/,
-            "",
-          )
-        : tag?.split("-").at(0);
+    const variantSuffix =
+      tool === "oven/bun"
+        ? /-(?:alpine|slim|debian)$/
+        : /-(?:alpine(?:\d+(?:\.\d+)*)?|(?:bookworm|bullseye|trixie|buster)(?:-slim)?|slim)$/;
+    // Strip only supported image variants; prerelease qualifiers remain invalid pins.
+    const version = tag?.replace(variantSuffix, "");
     let expected = policy.bun;
     if (tool === "node") expected = policy.node;
     else if (tool === "python") expected = policy.python;
