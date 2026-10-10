@@ -195,6 +195,62 @@ try {
       `${manager}: approved dependency install ran through the built-in rebuild\n`,
     );
   }
+  for (const manager of ["npm", "pnpm"] as const) {
+    const directory = path.join(scratch, `${manager}-alias`);
+    const home = path.join(directory, "home");
+    await mkdir(home, { recursive: true });
+    await writeFile(path.join(home, "npmrc"), "");
+    await writeFile(
+      path.join(directory, "package.json"),
+      JSON.stringify({
+        name: "consumer-alias-fixture",
+        version: "1.0.0",
+        private: true,
+        dependencies: { addon: "npm:esbuild@0.25.1" },
+      }),
+    );
+    if (manager === "pnpm")
+      await writeFile(
+        path.join(directory, "pnpm-workspace.yaml"),
+        "packages:\n  - .\n",
+      );
+    await writeFile(
+      path.join(directory, "smoke.cjs"),
+      `const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const {execFileSync} = require("node:child_process");
+const path = require("node:path");
+const binary = path.join(__dirname, "node_modules/addon/bin/esbuild");
+assert.equal(fs.readFileSync(binary).subarray(0,4).toString("hex"), "7f454c46", "alias install must replace the JS launcher with the generated executable");
+assert.equal(execFileSync(binary, ["--version"], {encoding:"utf8"}).trim(), "0.25.1");
+`,
+    );
+    await installConsumerFixtureDependencies({
+      manager,
+      tools,
+      directory,
+      home,
+      fixture: {
+        package: ".",
+        fixture: ".",
+        kind: "node",
+        build: ["node", "smoke.cjs"],
+        smoke: ["node", "smoke.cjs"],
+      },
+    });
+    const result = spawnSync(tools.node, ["smoke.cjs"], {
+      cwd: directory,
+      encoding: "utf8",
+    });
+    assert.equal(
+      result.status,
+      0,
+      `${manager} alias lifecycle smoke: ${result.stderr}`,
+    );
+    process.stdout.write(
+      `${manager}: direct npm alias install generated the smoke executable\n`,
+    );
+  }
   await assertConsumerReleasePackParity({ tools, scratch });
   await assertPinnedPnpmReleasePack({ tools, scratch });
 } finally {

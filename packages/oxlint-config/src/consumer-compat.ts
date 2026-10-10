@@ -727,17 +727,18 @@ export const installConsumerFixtureDependencies = async (
     );
     const lock: unknown =
       options.manager === "npm" ? JSON.parse(lockSource) : parse(lockSource);
-    const approvals = consumerBuildApprovals({
+    const { approvals, rebuildTargets } = await consumerBuildApprovals({
       manifest,
       lock,
       manager: options.manager,
+      directory: options.directory,
     });
     if (options.manager === "npm") {
       // Explicit identities also prevent older manager defaults from rebuilding
       // unapproved transitive packages or the root fixture lifecycle.
       const rebuild = commands.at(1);
       if (!rebuild) throw new Error("missing consumer rebuild command");
-      rebuild.push(...Object.keys(approvals));
+      rebuild.push(...rebuildTargets);
       if (Object.keys(approvals).length === 0) break;
       await writeFile(
         manifestFile,
