@@ -337,8 +337,9 @@ export const diagnosticSet = (output: string, repo: string) => {
   const diagnostics = new Set<string>();
   for (const line of clean.split("\n")) {
     if (line.startsWith("<error ")) {
+      const openingTag = line.slice(0, line.indexOf(">") + 1);
       const attributes = new Map(
-        [...line.matchAll(/(\w+)="([^"]*)"/g)].map((match) => [
+        [...openingTag.matchAll(/(\w+)="([^"]*)"/g)].map((match) => [
           match.at(1),
           match.at(2),
         ]),

@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { expect, test } from "bun:test";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -34,7 +34,9 @@ const compilerPolicy = {
 };
 
 const compilerFixture = async (run: (root: string) => Promise<void>) => {
-  const root = await mkdtemp(join(tmpdir(), "parity-compiler-test-"));
+  const root = await realpath(
+    await mkdtemp(join(tmpdir(), "parity-compiler-test-")),
+  );
   try {
     for (const name of ["typescript", "@typescript/native"]) {
       const directory = join(root, "node_modules", name);
