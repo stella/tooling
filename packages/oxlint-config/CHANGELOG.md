@@ -1,5 +1,11 @@
 # @stll/oxlint-config
 
+## 0.9.1
+
+### Patch Changes
+
+- [#60](https://github.com/stella/tooling/pull/60) [`db89712`](https://github.com/stella/tooling/commit/db89712781025262f784ecccd08dc29aed882bbc) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Preserve rejected outFile options in temporary parity configs so TypeScript configuration errors remain visible. Expand real compiler regressions for output and build-info path combinations.
+
 ## 0.9.0
 
 ### Minor Changes
