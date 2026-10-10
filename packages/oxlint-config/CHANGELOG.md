@@ -1,5 +1,12 @@
 # @stll/oxlint-config
 
+## 0.8.0
+
+### Minor Changes
+
+- [#54](https://github.com/stella/tooling/pull/54) [`674ff06`](https://github.com/stella/tooling/commit/674ff064a02a2620c86fd17b813ec9e2af4a456e) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Move the shared toolchain policy to oxlint-config, pin Bun 1.4.3, and add the
+  stll-toolchain-check command to detect divergent consumer pins.
+
 ## 0.7.0
 
 ### Minor Changes
