@@ -16,6 +16,10 @@ import {
   resolvedTsdownTarget,
   resolvePublishBuildTarget,
 } from "./publish-build-target";
+import {
+  checkPublishContract,
+  resolveManifestContract,
+} from "./publish-contract";
 
 test("resolved targets preserve every emitted configuration and final override", () => {
   expect(
@@ -170,7 +174,6 @@ test("the installed build resolver supplies engine defaults and real config muta
     }
     for (const config of [
       "{ entry: ['entry.js'], dts: false, target: [] }",
-      "{ entry: ['entry.js'], dts: false, target: 'es2022,node26' }",
       "[{ entry: ['entry.js'], dts: false, target: 'es2022' }, { entry: ['entry.js'], dts: false, target: [] }]",
       "{ entry: ['entry.js'], dts: false, inputOptions: { transform: { target: [''] } } }",
     ]) {
@@ -183,6 +186,23 @@ test("the installed build resolver supplies engine defaults and real config muta
         /JavaScript target/,
       );
     }
+    writeFileSync(
+      path.join(directory, "tsdown.config.mjs"),
+      "export default { entry: ['entry.js'], dts: false, target: 'es2022,node26' };\n",
+    );
+    const normalized = await resolvePublishBuildTarget(directory);
+    expect(normalized).toEqual({
+      type: "javascript",
+      targets: ["es2022", "node26"],
+    });
+    expect(
+      checkPublishContract({
+        manifest,
+        target: normalized,
+        contract: resolveManifestContract({ manifest, target: normalized }),
+        policy: { node: "22.12.0", typescript: "6.0.3" },
+      }),
+    ).toMatchObject([{ field: "target" }]);
     writeFileSync(
       path.join(directory, "tsdown.config.mjs"),
       "export default { entry: ['entry.js'], dts: false, target: 'node22' };\n",
