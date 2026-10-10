@@ -667,3 +667,39 @@ test("runtime family and digest rules retain scoped selector decisions", () => {
     matched: [],
   });
 });
+
+test("Docker FROM uses the shared runtime family classification before scoped declarations", () => {
+  const declaration = parseDynamicSelectors([
+    {
+      path: "Dockerfile",
+      line: 1,
+      kind: "image",
+      reason: "Build supplies the selected runtime image",
+    },
+  ]);
+  const docker = (image: string) => {
+    const matched: unknown[] = [];
+    const diagnostics = checkRuntimeFile({
+      file: "Dockerfile",
+      text: `FROM ${image}`,
+      policy,
+      trackedFiles: new Set(),
+      readFile: () => undefined,
+      dynamicSelectors: declaration,
+      onDynamicSelector: (entry) => matched.push(entry),
+    });
+    return { diagnostics, matched };
+  };
+  expect(docker("rust:${RUST_VERSION}-bookworm")).toEqual({
+    diagnostics: [],
+    matched: [],
+  });
+  expect(docker("oven/bun:${BUN_VERSION}")).toEqual({
+    diagnostics: [],
+    matched: declaration,
+  });
+  expect(docker(`oven/bun:0.1.0@sha256:${"a".repeat(64)}`)).toMatchObject({
+    diagnostics: [{ rule: "bun-pins" }],
+    matched: [],
+  });
+});

@@ -781,16 +781,6 @@ export const checkRuntimeFile = ({
       const previousStage = stages.has(image.toLowerCase());
       if (stage !== undefined) stages.add(stage);
       if (previousStage) return;
-      if (image.includes("$")) {
-        if (authorizeDynamic("image", line)) return;
-        add({
-          rule: "runtime-docker",
-          line,
-          message:
-            "cannot determine FROM runtime; declare an image ARG default or a scoped dynamicSelectors declaration",
-        });
-        return;
-      }
       checkRuntimeImage({ image, line, label: "FROM" });
     };
     lines.forEach((line, index) => {
