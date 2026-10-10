@@ -2,7 +2,10 @@
 import { expect, test } from "bun:test";
 
 import toolchain from "../toolchain.json";
-import { parseDynamicSelectors } from "./toolchain-dynamic-selectors";
+import {
+  parseDynamicSelectors,
+  type DynamicSelector,
+} from "./toolchain-dynamic-selectors";
 import { checkRuntimeFile } from "./toolchain-runtime";
 import { parseToolchainPolicy } from "./toolchain-schema";
 
@@ -31,13 +34,13 @@ const imageDecision = {
   at: "jobs.example.container",
   kind: "image",
   reason: "Image selected by the scoped producer",
-};
+} as const satisfies DynamicSelector;
 const bunDecision = {
   path: file,
   at: "jobs.example.steps.setup",
   kind: "bun-source",
   reason: "Manifest selected from the owned source snapshot",
-};
+} as const satisfies DynamicSelector;
 
 test("exact selector paths permit spaces without accepting control characters", () => {
   const path = ".github/workflows/release candidate.yml";
