@@ -1,5 +1,15 @@
 # @stll/oxlint-config
 
+## 0.12.0
+
+### Minor Changes
+
+- [#73](https://github.com/stella/tooling/pull/73) [`86b1db5`](https://github.com/stella/tooling/commit/86b1db538407233fc6ccb4b2b46007629e2ebd63) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Generate a shared cloud setup script from explicit repository declarations and pinned runtime/service policy. Add a CLI to write the script and a mandatory checker rule for missing, drifted, or undeclared scripts.
+
+### Patch Changes
+
+- [#74](https://github.com/stella/tooling/pull/74) [`b0b8e61`](https://github.com/stella/tooling/commit/b0b8e6147532e1015b07dc2e4521053a35231a87) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Validate workspace TypeScript compiler API dependencies against their repository install layout, derive JavaScript update roots from workspace and lockfile declarations, explain checkout selector provenance, and support scoped published-package Node engine-floor jobs.
+
 ## 0.11.0
 
 ### Minor Changes
