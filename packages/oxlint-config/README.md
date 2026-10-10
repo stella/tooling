@@ -120,7 +120,8 @@ rule and a nonempty reason:
 }
 ```
 
-`node-engine` is mandatory: an opt-out cannot bypass the shared Node support range.
+`node-engine` and `cloud-setup-drift` are mandatory: opt-outs cannot bypass the
+shared Node support range or generated cloud setup requirements.
 
 Opt-outs apply to the entire repository for that rule. Unknown or duplicate
 rules, empty reasons, and malformed configuration fail validation. See the
@@ -144,3 +145,70 @@ is unnecessary. Their original reference metadata is preserved without
 discovering or building referenced projects. Missing, unreadable, and zero-input
 selected configs fail the check. `--help` prints usage and exits successfully;
 unknown arguments fail.
+
+## Shared cloud setup
+
+Add an explicit declaration to tracked root `stll-toolchain.json`:
+
+```json
+{
+  "optOuts": [],
+  "cloud": {
+    "services": ["postgres", "valkey"],
+    "install": "bun install --frozen-lockfile",
+    "envFile": ".env.cloud"
+  }
+}
+```
+
+Services are optional within the declared list: use `[]` for runtimes and
+dependencies only. No `cloud` declaration means no cloud setup script.
+`envFile` must be a canonical repository-relative path; its existing parent
+must be safe at runtime. Track an exact stable Node patch in root
+`.node-version` within the shared Node series. Generate and commit the script:
+
+```sh
+bunx --no-install stll-cloud-setup
+```
+
+Generation uses the installed policy's Bun, Node, PostgreSQL, and Valkey pins.
+PostgreSQL uses the PGDG major-version packages; minor updates within the pinned
+major are accepted for the disposable database. Valkey uses official versioned
+binary DEBs for the declared release and architecture, verifies the policy's
+SHA256 pins, and installs those local files with apt. It does not resolve Valkey
+from a mutable package index.
+The command writes `.agents/cloud-setup.sh` with executable permissions and
+refuses symlink parents or destinations and hard-linked destinations. `stll-toolchain-check` rejects missing,
+drifted, or undeclared tracked scripts with mandatory `cloud-setup-drift`.
+Regenerate after changing the policy or declaration. `stll-cloud-setup --help`
+prints usage without reading repository configuration.
+
+| Host lifecycle                    | Command                               |
+| --------------------------------- | ------------------------------------- |
+| Codex install script              | `bash .agents/cloud-setup.sh install` |
+| Codex start script or start skill | `bash .agents/cloud-setup.sh start`   |
+| Claude setup script               | `bash .agents/cloud-setup.sh install` |
+| Claude SessionStart hook          | `bash .agents/cloud-setup.sh start`   |
+
+Both commands can be rerun. Missing or unknown subcommands print usage and
+exit 2; there is no implicit lifecycle mode. The script supports Ubuntu 24.04
+with root access or passwordless sudo and fails when required capabilities
+or pinned installations are unavailable. `install` provisions runtimes,
+dependencies, and declared services; `start` restores local services after
+cached environments lose running processes. Services bind only to localhost.
+The environment file contains `NODE_ENV=test` and declared local connection
+URLs, carries a generated ownership marker, and refuses an unowned file or
+symlink. Configure the repository's test runner to load that file; migration
+commands and repository adoption are separate configuration steps.
+
+The [current Codex environment contract](https://learn.chatgpt.com/docs/environments/cloud-environments)
+provides install and start phases; repository refresh retains prepared files
+without rerunning them. The [legacy Codex contract](https://learn.chatgpt.com/docs/environments/cloud-environment)
+is separate and must not be assumed to describe current environments.
+[Claude cloud environments](https://code.claude.com/docs/en/cloud-environments#environment-caching)
+cache files rather than processes and can skip setup; SessionStart restores
+services each session. Claude also documents
+[Bun proxy limitations](https://code.claude.com/docs/en/cloud-environments#limitations-in-cloud-sessions).
+The script's supported OS and privilege requirements are explicit checks.
+These host documents do not guarantee the shared pinned service versions;
+preinstalled inventories do not prove compatibility with the shared pins.

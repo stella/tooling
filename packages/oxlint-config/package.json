@@ -9,6 +9,7 @@
     "directory": "packages/oxlint-config"
   },
   "bin": {
+    "stll-cloud-setup": "./dist/cloud-setup-cli.mjs",
     "stll-toolchain-check": "./dist/toolchain-check-cli.mjs",
     "stll-typecheck-parity": "./dist/typecheck-parity-cli.mjs"
   },
