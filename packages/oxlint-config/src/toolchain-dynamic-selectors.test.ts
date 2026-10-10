@@ -489,3 +489,31 @@ test("mixed sparse states retain literal manifest requirements", () => {
     }
   }
 });
+
+test("reusable workflows do not assign caller SHAs to literal repository defaults", () => {
+  for (const repository of ["example/project", "Example/Project"]) {
+    const reports: unknown[] = [];
+    const matched: unknown[] = [];
+    const diagnostics = checkRuntimeFile({
+      file,
+      text: `on: workflow_call\njobs:\n  example:\n    steps:\n      - uses: ${action("actions/checkout")}\n        with: {repository: '${repository}'}\n      - id: setup\n        uses: ${action("oven-sh/setup-bun")}\n        with: {bun-version-file: package.json}\n      - uses: ./.github/actions/example\n`,
+      policy,
+      repository: "example/project",
+      trackedFiles: new Set(["package.json"]),
+      readFile: () => {
+        throw new Error(
+          "Literal default branches must not read the inspected manifest",
+        );
+      },
+      onDelegated: (report) => reports.push(report),
+      dynamicSelectors: parseDynamicSelectors([bunDecision]),
+      onDynamicSelector: (entry) => matched.push(entry),
+    });
+    expect(diagnostics).toMatchObject([
+      { rule: "bun-pins" },
+      { rule: "action-pins" },
+    ]);
+    expect(reports).toEqual([]);
+    expect(matched).toEqual([]);
+  }
+});

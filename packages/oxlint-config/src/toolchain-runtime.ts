@@ -1393,7 +1393,11 @@ export const checkRuntimeFile = ({
       })();
       const callerContext = events.includes("workflow_call");
       let refValue = isScalar(checkoutRef) ? checkoutRef.value : undefined;
-      if (callerContext && self && checkoutRef === undefined)
+      if (
+        callerContext &&
+        (repo === undefined || repo === "${{ github.repository }}") &&
+        checkoutRef === undefined
+      )
         refValue = "${{ github.sha }}";
       const currentRef = dynamicRefBody(refValue);
       const currentSource =

@@ -84,7 +84,9 @@ current source's version file. Current-source checkouts also accept
 workflows whose GitHub context belongs to the caller. Reusable workflows must
 use the exact workflow repository/SHA pair to authorize local actions. A default
 reusable-workflow checkout delegates the caller manifest just like an explicit
-caller repository/SHA binding. Mutable `${{ github.ref }}` bindings delegate
+caller repository/SHA binding. This default applies only when the repository is
+omitted or exactly `${{ github.repository }}`; a literal workflow-repository
+checkout without a ref does not identify the caller snapshot. Mutable `${{ github.ref }}` bindings delegate
 on every event; only the event SHA establishes the inspected snapshot. PR-head
 SHA/ref expressions and their fallbacks are delegated: they cannot establish
 local-action provenance or validate the inspected source's manifest. Local
