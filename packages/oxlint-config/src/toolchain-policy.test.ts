@@ -52,6 +52,10 @@ describe("shared toolchain policy", () => {
         peerDependencies: {
           oxlint: ">=1.87.0 <2",
           "oxlint-tsgolint": ">=7.0.2003 <8",
+          vite: "8.1.5",
+        },
+        peerDependenciesMeta: {
+          vite: { optional: true },
         },
       }),
     );
