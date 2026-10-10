@@ -321,123 +321,46 @@ Environments may cache filesystems without preserving service processes.
 Run `start` at every session start, including sessions that reuse installed files.
 The supported OS, privileges, and pinned runtime requirements are checked explicitly.
 
-## Published package contracts
 
-Run `stll-publish-contract` in PR CI. Every published root or declared workspace
-package commits `publish-contract.json`, recording engines, peer support ranges,
-resolved JavaScript targets, and entry points. `stll-publish-contract --write`
-records an explicit contract decision as a reviewable diff; it also validates
-consumer support and cannot accept development-only requirements.
+## Toolchain changes and typecheck probes
 
-The consumer policy pins Node 22.23.3, npm 12.2.0, pnpm 12.9.1, and TypeScript
-6.0.3 independently of the development toolchain. Published engines and TypeScript
-peers must support the consumer versions; ranges may include newer versions.
-Bun runtime/compiler requirements are rejected. JSON and declaration-only packages
-record `{"type":"types-only"}` explicitly.
+`stll-toolchain-changed --since <git-ref>` compares committed snapshots at the
+reference and `HEAD`. Fetch the reference and its history before running it.
+It prints one JSON object with `changed`, `tools`, and `status`; the detector
+exits successfully even when history is unreadable, reporting `changed: true`
+and `status: "unreadable"`. Use `changed` to force the full CI depth on both
+pull requests and merge-queue runs. An unreadable snapshot never skips checks.
 
-The static guard follows the packer declared in the tracked release workflow.
-With pnpm, it models `publishConfig` overrides for `exports`, `main`, `module`,
-`types`, `typings`, `bin`, and `typesVersions`. npm does not apply these overrides,
-so differing values fail; move the published entry into the source manifest.
-`access` and `registry` are allowed publication metadata. Other overrides,
-including `engines`, are rejected. Real npm and pnpm pack tests compare the
-modeled contract with each tarball manifest.
+The comparison includes Bun declarations, Node selectors and support ranges,
+resolved TypeScript compiler versions (including workspace and compatibility
+aliases), oxlint, oxlint-tsgolint, oxfmt, and shared tooling pins. Lockfile
+resolutions determine installed package versions; manifest ranges alone do not.
+Resolution locations and importer bindings are retained: swapping compiler
+versions between workspaces cannot look unchanged. Range-only edits with the
+same resolutions do not force parity. Unknown lock shapes and ambiguous
+resolutions report an unreadable snapshot. The supported lock formats are Bun
+text JSONC (schema 0/1), pnpm YAML (5.4/6/9), and npm package-lock/shrinkwrap
+(1/2/3); a binary-only Bun lock cannot be compared without executing Bun.
+Workflow/action and Docker definition edits conservatively force full CI.
+Unrelated application dependency changes do not force compiler parity.
 
-Build adapters use the installed configuration loaders and bind their behavior to
-tsdown 0.22.9, Vite 8.1.5, or @nuxt/module-builder 1.0.3 (unbuild 3.6.1 and
-mkdist 2.4.1). They record final transform targets, including separate Nuxt module
-and runtime entries. No syntax lowering records `esnext`.
-Only exact single build invocations (`tsdown`, `vite build`, or
-`nuxt-module-build build`) are supported. Shell composition, environment prefixes,
-launchers, directory changes, workspace filters, CLI overrides, and pre/post build
-lifecycle scripts fail.
-Vite accepts its version-bound default plugin pipeline and the default
-`@vitejs/plugin-vue` 6.0.8 factory; custom Vue compiler, template, script, and feature
-options are unsupported. Nuxt accepts the version-bound builder and owned target
-hook. Unapproved plugins, output transforms, and execution-order changes fail. The static guard validates the supported configuration, without parsing the
-emitted JavaScript syntax. Add a reviewed adapter when adopting another build tool.
+On pull requests, run the repository's ordinary Bun typecheck and the probe,
+then select parity using the same detector:
 
-Nuxt modules can set both emitted targets without replacing the builder's entries:
-
-```ts
-import { nuxtModuleTarget } from "@stll/oxlint-config/build-target";
-
-export default { hooks: { "build:before": nuxtModuleTarget("es2022") } };
+```sh
+stll-typecheck-probe --project packages/api/tsconfig.json --seed-dir packages/api/src -- bun run typecheck
+stll-typecheck-parity --changed-since origin/main --project packages/api/tsconfig.json
 ```
 
-The Nuxt adapter accepts this owned hook from the same package version as the CLI;
-it captures the normalized configuration before cleanup or output writes. The built
-publish-contract CLI is also checked against a TypeScript configuration and relative
-TypeScript import on the package's minimum supported Node release.
+The probe writes an exclusive temporary TypeScript file in the declared
+project, requires the command to fail with TS2322 attributed to that file, removes
+it, and requires the clean command to pass. Use `--seed-dir` to select a repository-relative directory inside the project;
+the default is the config directory. The config must include the seed directory;
+excluded seeds fail instead of producing a vacuous pass. Commands are argv,
+not shell expressions. Cleanup also runs on failure and handled termination.
+Repeat the probe for independently checked projects as needed.
 
-Packed-artifact checks run nightly, while the static contract check runs per PR.
-The reusable consumer job declares its exact scope in `stll-toolchain.json`:
-
-```json
-{
-  "consumerChecks": [
-    {
-      "workflow": ".github/workflows/consumer-compat.yml",
-      "job": "consumer",
-      "packages": ["packages/library"],
-      "toolingVersion": "<installed tooling version>",
-      "fixturePath": "tests/consumer"
-    }
-  ]
-}
-```
-
-The reusable consumer job must be stand-alone and unconditional (no `needs`, `if`, or `strategy`), so a job condition
-cannot skip its scheduled execution.
-The declared workflow requires a nonempty `on.schedule` with validated five-field cron (field bounds, lists, ranges, and positive steps);
-Day of week is 0–6 (SUN–SAT), matching the [GitHub Actions schedule contract](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule); numeric 7 is unsupported. The combined schedules must cover every weekday with unrestricted month and date fields, so weekly or seasonal schedules cannot satisfy the daily contract. Public packages require a semver-valid version. Published workspace packages under a `vendor` directory are unsupported; the contract CLI reports them rather than omitting them. `bundleDependencies` and `bundledDependencies` are unsupported because artifact staging does not install a bundled dependency tree; remove these fields before declaring consumer checks.
-`workflow_dispatch` may also be enabled. That job calls the shared
-`package-consumer-compat.yml` workflow at its approved immutable policy pin, with
-`packages` as the same JSON array and `consumer-node` equal to the consumer policy
-pin. Required `tooling-version` and `fixture-path` inputs equal the declared exact
-`toolingVersion` and repository-relative `fixturePath`; its `consumer-compat.json` must
-be tracked, parse with the runner’s fixture schema, and select exactly the declared package set. Replace `<installed tooling version>` with the exact installed
-`@stll/oxlint-config` release that provides the consumer runner; the guard binds the
-declaration to that package version. Every named package and its transitive workspace closure must be tracked,
-published, and have valid manifests. Each selected package must support that Node version.
-Unknown jobs, stale entries, undeclared consumer calls, and inconsistent inputs fail.
-This declaration applies to consumer checks; `engineFloors` retains its separate
-minimum-supported-major contract.
-
-`stll-consumer-compat --packages '["packages/library"]' --consumer-node 22.23.3
---fixture-path tests/consumer` tests final tarballs in isolated projects with both
-npm and pnpm. The repository builds once with its development toolchain first.
-The runner reads the exact packer version and pack flags from a single tracked
-release workflow and packs directly with that manager. Missing, ambiguous, or
-unsupported pack configuration fails. Both consumers install the same release
-artifacts; the runner does not rewrite workspace or catalog protocols through a
-different manager. Fixture installs disable scripts, reject reserved runtime/manager bins throughout nested lifecycle paths, then approve only directly declared dependencies at their resolved lock identities. npm rebuilds those identities; pnpm runs its built-in pending rebuild. Both use the pinned consumer runtime before typecheck, build and smoke. Undeclared transitive build scripts receive no approval. Catalog entries that resolve to a local workspace
-package are unsupported: use `workspace:` for that dependency. Registry catalog declarations are staged intact; the release packer must resolve
-publication protocols. pnpm workspace owners require an adjacent tracked
-`package.json`; manifestless owners are unsupported. Public package names must be
-canonical lowercase, URL-safe npm names (at most 214 characters), with no traversal components. The runner verifies
-the official Node archive checksum and exact runtime/package-manager versions,
-uses the oldest published React satisfying the package peer range and, when ReactDOM is required, its compatible renderer peer range, typechecks with
-the consumer TypeScript, and runs each fixture's build and usage smoke.
-
-The fixture directory contains `consumer-compat.json`:
-
-```json
-{
-  "packages": [
-    {
-      "package": "packages/library",
-      "fixture": "library",
-      "kind": "node",
-      "build": ["npm", "run", "build"],
-      "smoke": ["npm", "run", "smoke"]
-    }
-  ]
-}
-```
-
-Each fixture is a standalone project with its own source, package manifest, and
-TypeScript configuration. Use `react` for a React peer and a render smoke; use
-`node` for an import and representative call. Dependency bindings, runtime tools,
-and caches belong to the runner. A nightly failure must open or update one issue
-in the consuming repository and use its existing failure notification.
+Conditional parity runs when Bun or any resolved TypeScript compiler changes;
+otherwise it prints `parity skipped: toolchain unchanged since ...`. An unreadable
+reference fails parity. Nightly jobs omit `--changed-since` to run full parity.
+Node and lint-tool changes still force full CI through the shared detector.

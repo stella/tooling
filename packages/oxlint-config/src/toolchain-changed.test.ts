@@ -1,0 +1,387 @@
+import { afterEach, expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { detectToolchainChanges } from "./toolchain-changed";
+import { parseChangedJson, parseChangedLock } from "./toolchain-changed-locks";
+
+test("the repository's actual HEAD resolves without executing installed tooling", async () => {
+  const repo = fileURLToPath(new URL("../../../", import.meta.url));
+  const result = await detectToolchainChanges({ repo, since: "HEAD" });
+  expect(result.status).toBe("compared");
+  expect(result.changed).toBe(false);
+  expect(result.tools).toEqual([]);
+  if (result.status === "compared") {
+    expect(result.current.bun.length).toBe(1);
+    expect(result.current.typescript.length).toBeGreaterThan(0);
+  }
+});
+
+const directories: string[] = [];
+afterEach(() => {
+  for (const directory of directories.splice(0))
+    rmSync(directory, { recursive: true, force: true });
+});
+const fixture = () => {
+  const repo = mkdtempSync(path.join(tmpdir(), "toolchain-changed-"));
+  directories.push(repo);
+  const git = (args: string[]) =>
+    execFileSync("git", args, {
+      cwd: repo,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+  git(["init", "-q"]);
+  const write = (file: string, value: unknown) => {
+    mkdirSync(path.dirname(path.join(repo, file)), { recursive: true });
+    writeFileSync(
+      path.join(repo, file),
+      typeof value === "string" ? value : JSON.stringify(value),
+    );
+  };
+  const commit = () => {
+    git(["add", "."]);
+    git([
+      "-c",
+      "user.name=Fixture",
+      "-c",
+      "user.email=fixture@example.com",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-qm",
+      "fixture",
+    ]);
+    return git(["rev-parse", "HEAD"]);
+  };
+  return { repo, write, commit };
+};
+const bunLock = (swap: boolean) => ({
+  lockfileVersion: 1,
+  workspaces: {
+    "": { devDependencies: { typescript: ">=6" } },
+    "packages/a": { devDependencies: { typescript: ">=6" } },
+  },
+  packages: {
+    typescript: [`typescript@${swap ? "6.0.3" : "7.0.2"}`],
+    "a/typescript": [`typescript@${swap ? "7.0.2" : "6.0.3"}`],
+  },
+});
+
+test("JSONC preserves quoted comments, escaped quotes and URL slashes", () => {
+  expect(
+    parseChangedJson(
+      '{/* comment */"url":"https://example.test/a//b","quote":"\\\"/*literal*/", "list":[1,],}',
+    ),
+  ).toEqual({
+    url: "https://example.test/a//b",
+    quote: '"/*literal*/',
+    list: [1],
+  });
+  expect(() => parseChangedJson("{/*unfinished")).toThrow("Unterminated");
+});
+
+test("Bun resolution locations prevent root/member compiler swaps from looking unchanged", async () => {
+  const { repo, write, commit } = fixture();
+  write("package.json", {
+    packageManager: "bun@1.4.3",
+    workspaces: ["packages/*"],
+    devDependencies: { typescript: ">=6" },
+  });
+  write("packages/a/package.json", {
+    name: "a",
+    devDependencies: { typescript: ">=6" },
+  });
+  write("bun.lock", bunLock(false));
+  const since = commit();
+  write("bun.lock", bunLock(true));
+  commit();
+  const result = await detectToolchainChanges({ repo, since });
+  expect(result.status).toBe("compared");
+  expect(result.tools).toEqual(["typescript"]);
+  if (result.status === "compared")
+    expect(result.current).toEqual({
+      bun: ["1.4.3"],
+      typescript: ["typescript@6.0.3", "typescript@7.0.2"],
+    });
+});
+
+test("pnpm importer alias swaps detect changes with an unchanged global package pool", async () => {
+  const { repo, write, commit } = fixture();
+  write("package.json", {
+    workspaces: ["packages/*"],
+    devDependencies: { compiler: "npm:typescript@>=6" },
+  });
+  write("packages/a/package.json", {
+    devDependencies: { compiler: "npm:typescript@>=6" },
+  });
+  const lock = (swap: boolean) =>
+    `lockfileVersion: '9.0'\nimporters:\n  .:\n    devDependencies:\n      compiler:\n        specifier: npm:typescript@>=6\n        version: typescript@${swap ? "6.0.3" : "7.0.2"}\n  packages/a:\n    devDependencies:\n      compiler:\n        specifier: npm:typescript@>=6\n        version: typescript@${swap ? "7.0.2" : "6.0.3"}\npackages:\n  typescript@6.0.3: {}\n  typescript@7.0.2: {}\n`;
+  write("pnpm-lock.yaml", lock(false));
+  const since = commit();
+  write("pnpm-lock.yaml", lock(true));
+  commit();
+  expect((await detectToolchainChanges({ repo, since })).tools).toEqual([
+    "typescript",
+  ]);
+});
+
+test("npm nested resolutions retain their installation locations", async () => {
+  const { repo, write, commit } = fixture();
+  write("package.json", { devDependencies: { typescript: ">=6" } });
+  const lock = (swap: boolean) => ({
+    lockfileVersion: 3,
+    packages: {
+      "": { devDependencies: { typescript: ">=6" } },
+      "node_modules/typescript": { version: swap ? "6.0.3" : "7.0.2" },
+      "node_modules/a/node_modules/typescript": {
+        version: swap ? "7.0.2" : "6.0.3",
+      },
+    },
+  });
+  write("package-lock.json", lock(false));
+  const since = commit();
+  write("package-lock.json", lock(true));
+  commit();
+  expect((await detectToolchainChanges({ repo, since })).tools).toEqual([
+    "typescript",
+  ]);
+});
+
+test("immutable HEAD snapshots ignore working files and unrelated lock dependencies", async () => {
+  const { repo, write, commit } = fixture();
+  write("package.json", { packageManager: "bun@1.4.3" });
+  write("bun.lock", {
+    lockfileVersion: 1,
+    workspaces: { "": {} },
+    packages: { unrelated: ["unrelated@1.0.0"] },
+  });
+  const since = commit();
+  write("bun.lock", {
+    lockfileVersion: 1,
+    workspaces: { "": {} },
+    packages: { unrelated: ["unrelated@2.0.0"] },
+  });
+  commit();
+  write(".bun-version", "1.5.0");
+  expect(await detectToolchainChanges({ repo, since })).toEqual({
+    status: "compared",
+    changed: false,
+    tools: [],
+    current: { bun: ["1.4.3"], typescript: [] },
+  });
+});
+
+test("Bun, npm and pnpm declaration-only range edits preserve resolved compiler equality", async () => {
+  for (const format of ["bun", "npm", "pnpm"] as const) {
+    const { repo, write, commit } = fixture();
+    const writeSnapshot = (range: string) => {
+      write("package.json", { devDependencies: { typescript: range } });
+      if (format === "bun")
+        write("bun.lock", {
+          lockfileVersion: 1,
+          workspaces: { "": { devDependencies: { typescript: range } } },
+          packages: { typescript: ["typescript@7.0.2"] },
+        });
+      else if (format === "npm")
+        write("package-lock.json", {
+          lockfileVersion: 3,
+          packages: {
+            "": { devDependencies: { typescript: range } },
+            "node_modules/typescript": { version: "7.0.2" },
+          },
+        });
+      else
+        write(
+          "pnpm-lock.yaml",
+          `lockfileVersion: '9.0'\nimporters:\n  .:\n    devDependencies:\n      typescript:\n        specifier: '${range}'\n        version: 7.0.2\npackages:\n  typescript@7.0.2: {}\n`,
+        );
+    };
+    writeSnapshot("^7");
+    const since = commit();
+    writeSnapshot(">=7 <8");
+    commit();
+    expect(await detectToolchainChanges({ repo, since })).toEqual({
+      status: "compared",
+      changed: false,
+      tools: [],
+      current: { bun: [], typescript: ["typescript@7.0.2"] },
+    });
+  }
+});
+
+test("a compatible child compiler cannot conceal the root's stale resolution", async () => {
+  for (const format of ["bun", "npm"] as const) {
+    const { repo, write, commit } = fixture();
+    write("package.json", {
+      workspaces: ["packages/*"],
+      devDependencies: { typescript: "^6" },
+    });
+    write("packages/a/package.json", {
+      name: "a",
+      devDependencies: { typescript: "^6" },
+    });
+    if (format === "bun") write("bun.lock", bunLock(false));
+    else
+      write("package-lock.json", {
+        lockfileVersion: 3,
+        packages: {
+          "": { devDependencies: { typescript: "^6" } },
+          "node_modules/typescript": { version: "7.0.2" },
+          "packages/a/node_modules/typescript": { version: "6.0.3" },
+        },
+      });
+    commit();
+    const result = await detectToolchainChanges({ repo, since: "HEAD" });
+    expect(result.status).toBe("unreadable");
+    if (result.status === "unreadable")
+      expect(result.error).toContain(
+        "does not satisfy manifest: package.json:typescript",
+      );
+  }
+});
+
+test("switching the declared manager binds a different effective compiler in a fixed lock pool", async () => {
+  const { repo, write, commit } = fixture();
+  write("package.json", {
+    packageManager: "npm@11.6.0",
+    devDependencies: { typescript: ">=6" },
+  });
+  write("package-lock.json", {
+    lockfileVersion: 3,
+    packages: {
+      "": { devDependencies: { typescript: ">=6" } },
+      "node_modules/typescript": { version: "6.0.3" },
+    },
+  });
+  write(
+    "pnpm-lock.yaml",
+    "lockfileVersion: '9.0'\nimporters:\n  .:\n    devDependencies:\n      typescript:\n        version: 7.0.2\npackages:\n  typescript@7.0.2: {}\n",
+  );
+  const since = commit();
+  write("package.json", {
+    packageManager: "pnpm@12.9.1",
+    devDependencies: { typescript: ">=6" },
+  });
+  commit();
+  const result = await detectToolchainChanges({ repo, since });
+  expect(result.status).toBe("compared");
+  expect(result.tools).toEqual(["typescript"]);
+});
+
+test("nearest lock ownership outranks a longer root lock filename", async () => {
+  const { repo, write, commit } = fixture();
+  write("package.json", {
+    packageManager: "npm@11.6.0",
+    devDependencies: { typescript: "^6" },
+  });
+  write("npm-shrinkwrap.json", {
+    lockfileVersion: 3,
+    packages: {
+      "": { devDependencies: { typescript: "^6" } },
+      "node_modules/typescript": { version: "6.0.3" },
+    },
+  });
+  write("a/package.json", {
+    name: "a",
+    packageManager: "bun@1.4.3",
+    devDependencies: { typescript: "^7" },
+  });
+  const lock = (version: string) => ({
+    lockfileVersion: 1,
+    workspaces: { "": { devDependencies: { typescript: "^7" } } },
+    packages: { typescript: [`typescript@${version}`] },
+  });
+  write("a/bun.lock", lock("7.0.2"));
+  const since = commit();
+  const unchanged = await detectToolchainChanges({ repo, since });
+  expect(unchanged.status).toBe("compared");
+  expect(unchanged.changed).toBe(false);
+  write("a/bun.lock", lock("7.0.3"));
+  commit();
+  const changed = await detectToolchainChanges({ repo, since });
+  expect(changed.status).toBe("compared");
+  expect(changed.tools).toEqual(["typescript"]);
+});
+
+test("runtime changes and workflow fingerprints classify their independent categories", async () => {
+  const { repo, write, commit } = fixture();
+  write("package.json", { packageManager: "bun@1.4.3" });
+  write(".node-version", "26.0.0");
+  write(".github/workflows/ci.yml", "jobs: {}\n");
+  const since = commit();
+  write("package.json", { packageManager: "bun@1.4.4" });
+  write(".node-version", "26.1.0");
+  write(".github/workflows/ci.yml", "name: CI\njobs: {}\n");
+  commit();
+  expect((await detectToolchainChanges({ repo, since })).tools).toEqual([
+    "bun",
+    "node",
+    "shared",
+  ]);
+});
+
+test("unresolved dependencies, unknown refs and conflicting Bun selectors fail closed", async () => {
+  const { repo, write, commit } = fixture();
+  write("package.json", {
+    packageManager: "bun@1.4.3",
+    devDependencies: { typescript: "^7" },
+  });
+  const since = commit();
+  for (const reference of [since, "missing-reference"]) {
+    const result = await detectToolchainChanges({ repo, since: reference });
+    expect(result.status).toBe("unreadable");
+    expect(result.changed).toBe(true);
+  }
+  write("package.json", {
+    packageManager: "bun@1.4.3",
+    workspaces: ["packages/*"],
+  });
+  write("packages/a/package.json", { packageManager: "bun@1.4.4" });
+  commit();
+  expect((await detectToolchainChanges({ repo, since: "HEAD" })).status).toBe(
+    "unreadable",
+  );
+});
+
+test("supported lock generations resolve aliases and reject unknown tool resolutions", () => {
+  for (const version of [1, 2, 3]) {
+    const source =
+      version === 1
+        ? { dependencies: { compat: { version: "npm:typescript@6.0.3" } } }
+        : {
+            packages: {
+              "": {},
+              "node_modules/compat": { name: "typescript", version: "6.0.3" },
+            },
+          };
+    expect(
+      parseChangedLock({
+        file: "package-lock.json",
+        text: JSON.stringify({ lockfileVersion: version, ...source }),
+      }).resolutions.at(0)?.name,
+    ).toBe("typescript");
+  }
+  for (const version of [5.4, 6, 9]) {
+    const key = version === 9 ? "typescript@7.0.2" : "/typescript/7.0.2";
+    expect(
+      parseChangedLock({
+        file: "pnpm-lock.yaml",
+        text: `lockfileVersion: ${version}\npackages:\n  '${key}': {}\n`,
+      }).resolutions.at(0)?.version,
+    ).toBe("7.0.2");
+  }
+  expect(() =>
+    parseChangedLock({
+      file: "bun.lock",
+      text: JSON.stringify({
+        lockfileVersion: 1,
+        workspaces: { "": {} },
+        packages: { typescript: ["typescript@latest"] },
+      }),
+    }),
+  ).toThrow("Unresolved");
+});

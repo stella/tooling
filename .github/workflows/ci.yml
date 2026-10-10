@@ -101,7 +101,9 @@ jobs:
         run: |
           bun run check:toolchain
           node packages/oxlint-config/dist/toolchain-check-cli.mjs
-          node packages/oxlint-config/dist/typecheck-parity-cli.mjs
+          node packages/oxlint-config/dist/toolchain-changed-cli.mjs --since HEAD
+          node packages/oxlint-config/dist/typecheck-parity-cli.mjs --changed-since HEAD
+          node packages/oxlint-config/dist/typecheck-probe-cli.mjs --project packages/oxlint-config/tsconfig.json --seed-dir packages/oxlint-config/src -- bun check -p packages/oxlint-config
 
       - name: Published package contracts
         run: bun run check:publish-contract

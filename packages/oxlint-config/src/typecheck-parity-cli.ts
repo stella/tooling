@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 
 import { runTypecheckParity } from "./typecheck-parity";
 import { parityUsage, parseParityArguments } from "./typecheck-parity-args";
+import { runSelectedTypecheckParity } from "./typecheck-parity-selection";
 
 const main = async () => {
   const args = parseParityArguments(process.argv.slice(2));
@@ -14,10 +15,15 @@ const main = async () => {
     await readFile(new URL("../toolchain.json", import.meta.url), "utf8"),
   );
   if (
-    !(await runTypecheckParity({
+    !(await runSelectedTypecheckParity({
       repo: process.cwd(),
-      policy,
-      ...(args.mode === "selected" ? { projects: args.projects } : {}),
+      since: args.changedSince,
+      run: () =>
+        runTypecheckParity({
+          repo: process.cwd(),
+          policy,
+          ...(args.mode === "selected" ? { projects: args.projects } : {}),
+        }),
     }))
   )
     process.exitCode = 1;
