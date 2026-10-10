@@ -1,5 +1,16 @@
 # @stll/typescript-config
 
+## 0.8.0
+
+### Minor Changes
+
+- [#54](https://github.com/stella/tooling/pull/54) [`674ff06`](https://github.com/stella/tooling/commit/674ff064a02a2620c86fd17b813ec9e2af4a456e) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Move the shared toolchain policy to oxlint-config, pin Bun 1.4.3, and add the
+  stll-toolchain-check command to detect divergent consumer pins.
+
+### Patch Changes
+
+- [#52](https://github.com/stella/tooling/pull/52) [`4b2eef0`](https://github.com/stella/tooling/commit/4b2eef07893a36661bf26d872ce83fbfae69af1b) Thanks [@jan-kubica](https://github.com/jan-kubica)! - List `dependency-cruiser` as a TypeScript 6 compiler-API peer blocker. Its TypeScript-based import resolution needs the TypeScript 6 compiler API, so consumers install it in an isolated tool directory with TypeScript 6 until it supports the TypeScript 7 compiler API.
+
 ## 0.7.0
 
 ### Minor Changes
