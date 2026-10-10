@@ -118,6 +118,24 @@ test("all service subsets generate deterministic valid Bash regardless of declar
     });
     expect(syntax.exitCode).toBe(0);
     expect(syntax.stderr.toString()).toBe("");
+    expect(generated).not.toMatch(/\.s\.PGSQL|\s-k\s|\bunixsocket\s/);
+    const sockets = [
+      ...generated.matchAll(/unix_socket_directories=([^\s"']*)/g),
+    ];
+    expect(sockets.length).toBe(services.includes("postgres") ? 2 : 0);
+    for (const socket of sockets) expect(socket.at(1)).toBe("");
+    for (const line of generated.split("\n")) {
+      if (
+        line.includes('"$pg_bin/psql"') ||
+        line.includes('"$pg_bin/createdb"')
+      )
+        expect(line).toContain("-h 127.0.0.1 -p 55432");
+      if (
+        line.includes('"$pg_bin/initdb"') ||
+        line.includes('"$pg_bin/pg_ctl"')
+      )
+        expect(line).toContain("PGHOST=127.0.0.1 PGHOSTADDR=127.0.0.1");
+    }
     for (const service of cloudServices) {
       const marker = service === "postgres" ? "pg_ctl" : "valkey-server";
       expect(generated.includes(marker)).toBe(services.includes(service));

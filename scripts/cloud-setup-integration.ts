@@ -444,6 +444,10 @@ if (fs.statSync(path.join(vite, "consumer-cache")).uid !== uid) process.exit(1);
     );
     assert((await pgQuery("SELECT 1")) === "1", "PostgreSQL query failed");
     assert(
+      (await pgQuery("SHOW unix_socket_directories")) === "",
+      "PostgreSQL Unix sockets must be disabled",
+    );
+    assert(
       (await pgQuery("SHOW data_directory")) === `${state}/postgres`,
       "PostgreSQL data ownership differs",
     );

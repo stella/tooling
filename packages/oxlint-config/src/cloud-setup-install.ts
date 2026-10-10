@@ -11,7 +11,9 @@ type CloudServiceInstallOptions = {
 const packageInstall = String.raw`
 # Prevent package maintainer scripts from starting unmanaged system services.
 apt_install() (
-  local backup policy_state=untouched
+  # EXIT runs after function locals expire; this subshell owns the trap state.
+  backup=''
+  policy_state=untouched
   [[ ! -L /var/lock/stll-cloud-apt.lock ]] || fail 'Invalid package install lock'
   exec 8>/var/lock/stll-cloud-apt.lock
   flock -x -w 120 8 || fail 'Another package installation is active'

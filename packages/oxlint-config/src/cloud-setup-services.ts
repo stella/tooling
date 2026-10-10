@@ -53,16 +53,16 @@ const postgresStart = String.raw`
     service_file "$STATE/postgres.init-password" "$SERVICE_UID"
     (umask 077; printf '%s\n' "$pg_password" > "$STATE/postgres.init-password")
     root chown stll-cloud:stll-cloud "$STATE/postgres.init-password"
-    service_run "$pg_bin/initdb" -D "$pg_data" --username=stll_cloud --auth-host=scram-sha-256 --auth-local=scram-sha-256 --pwfile="$STATE/postgres.init-password" --encoding=UTF8 --locale=C >/dev/null || fail "PostgreSQL initialization failed"
+    service_run env PGHOST=127.0.0.1 PGHOSTADDR=127.0.0.1 "$pg_bin/initdb" -D "$pg_data" --username=stll_cloud --auth-host=scram-sha-256 --auth-local=scram-sha-256 --pwfile="$STATE/postgres.init-password" --encoding=UTF8 --locale=C --set=unix_socket_directories= >/dev/null || fail "PostgreSQL initialization failed"
     root rm "$STATE/postgres.init-password"
   fi
   [[ -f "$pg_data/PG_VERSION" && "$(cat "$pg_data/PG_VERSION")" == '@POSTGRES@' ]] || fail "PostgreSQL data has a different major version"
-  if ! service_run "$pg_bin/pg_ctl" -D "$pg_data" status >/dev/null 2>&1; then
-    service_run "$pg_bin/pg_ctl" -D "$pg_data" -l "$pg_data/cloud.log" -o "-h 127.0.0.1 -p 55432 -k $pg_data" -t 10 -w start >/dev/null || fail "PostgreSQL start failed; port 55432 must be available"
+  if ! service_run env PGHOST=127.0.0.1 PGHOSTADDR=127.0.0.1 "$pg_bin/pg_ctl" -D "$pg_data" status >/dev/null 2>&1; then
+    service_run env PGHOST=127.0.0.1 PGHOSTADDR=127.0.0.1 "$pg_bin/pg_ctl" -D "$pg_data" -l "$pg_data/cloud.log" -o "-h 127.0.0.1 -p 55432 -c unix_socket_directories=" -t 10 -w start >/dev/null || fail "PostgreSQL start failed; port 55432 must be available"
   fi
-  pg_details="$(env -u PGSERVICE -u PGSERVICEFILE -u PGOPTIONS PGHOSTADDR=127.0.0.1 PGPASSWORD="$pg_password" PGCONNECT_TIMEOUT=2 "$pg_bin/psql" -X -h 127.0.0.1 -p 55432 -U stll_cloud -d postgres -At -v ON_ERROR_STOP=1 -c "SELECT current_setting('data_directory'), current_setting('listen_addresses'), current_setting('port'), current_setting('server_version_num')")" || fail "PostgreSQL authenticated readiness failed"
+  pg_details="$(env -u PGSERVICE -u PGSERVICEFILE -u PGOPTIONS PGHOSTADDR=127.0.0.1 PGPASSWORD="$pg_password" PGCONNECT_TIMEOUT=2 "$pg_bin/psql" -X -h 127.0.0.1 -p 55432 -U stll_cloud -d postgres -At -v ON_ERROR_STOP=1 -c "SELECT current_setting('data_directory'), current_setting('listen_addresses'), current_setting('port'), current_setting('server_version_num'), current_setting('unix_socket_directories')")" || fail "PostgreSQL authenticated readiness failed"
   pg_version="$(printf '%s\n' "$pg_details" | cut -d '|' -f4)"
-  [[ "$pg_details" == "$pg_data|127.0.0.1|55432|$pg_version" && "$pg_version" =~ ^[0-9]{6}$ ]] || fail "PostgreSQL endpoint does not match managed data and listener"
+  [[ "$pg_details" == "$pg_data|127.0.0.1|55432|$pg_version|" && "$pg_version" =~ ^[0-9]{6}$ ]] || fail "PostgreSQL endpoint does not match managed data and listener"
   (( pg_version / 10000 == @POSTGRES@ )) || fail "PostgreSQL endpoint has a different major version"
   pg_pid="$(head -n 1 "$pg_data/postmaster.pid")"
   service_process "$pg_pid" "$pg_bin/postgres"
