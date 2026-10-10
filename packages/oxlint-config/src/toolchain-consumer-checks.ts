@@ -67,7 +67,7 @@ const cronFields = [
   },
   {
     minimum: 0,
-    maximum: 7,
+    maximum: 6,
     names: Object.fromEntries(
       ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"].map((name, index) => [
         name,

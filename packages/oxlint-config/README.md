@@ -381,6 +381,7 @@ The reusable consumer job declares its exact scope in `stll-toolchain.json`:
 The reusable consumer job must be stand-alone and unconditional (no `needs`, `if`, or `strategy`), so a job condition
 cannot skip its scheduled execution.
 The declared workflow requires a nonempty `on.schedule` with validated five-field cron (field bounds, lists, ranges, and positive steps);
+Day of week is 0–6 (SUN–SAT), matching the [GitHub Actions schedule contract](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule); numeric 7 is unsupported.
 `workflow_dispatch` may also be enabled. That job calls the shared
 `package-consumer-compat.yml` workflow at its approved immutable policy pin, with
 `packages` as the same JSON array and `consumer-node` equal to the consumer policy

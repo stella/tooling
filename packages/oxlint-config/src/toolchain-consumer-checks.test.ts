@@ -188,8 +188,8 @@ test("declared consumer workflows require valid scheduled execution", () => {
     "0 0 1 JAN MON",
     "20/15 0-4 * * 1,3,5",
     "0-59/5 0-23 1-31 JAN-DEC SUN-SAT",
-    "0 23 31 12 7",
-    "*/15 * * * 0,7",
+    "0 23 31 12 6",
+    "*/15 * * * 0,6",
   ])
     expect(
       check({
@@ -230,6 +230,7 @@ test("scheduled consumer cron fields enforce syntax and domain bounds", () => {
     "0 0 32 * *",
     "0 0 * 0 *",
     "0 0 * 13 *",
+    "0 0 * * 7",
     "0 0 * * 8",
     "-1 * * * *",
     "0 24 * * *",
