@@ -314,6 +314,26 @@ const runtimeImageSurfaces = (image: string) => [
   },
 ];
 
+const runtimeImageDiagnostics = (
+  file: string,
+  diagnostics: ReturnType<typeof check>,
+) => {
+  expect(diagnostics.filter(({ rule }) => rule === "action-pins")).toEqual(
+    file === "action.yml"
+      ? [
+          {
+            rule: "action-pins",
+            path: file,
+            line: 1,
+            message:
+              "Docker image actions require a reasoned action-pins opt-out",
+          },
+        ]
+      : [],
+  );
+  return diagnostics.filter(({ rule }) => rule !== "action-pins");
+};
+
 test("runtime image families are classified before unresolved tag variables", () => {
   for (const image of [
     "rust:${RUST_VERSION}-bookworm",
@@ -323,11 +343,13 @@ test("runtime image families are classified before unresolved tag variables", ()
     "ghcr.io/example/rust:${RUST_VERSION}",
   ])
     for (const { file, text } of runtimeImageSurfaces(image))
-      expect(check(file, text)).toEqual([]);
+      expect(runtimeImageDiagnostics(file, check(file, text))).toEqual([]);
   for (const image of [
     "node:${NODE_VERSION}-bookworm",
     "python:${PYTHON_VERSION}-slim",
     "oven/bun:${BUN_VERSION}",
+    "node:lts/*",
+    "python:3.13/invalid",
     "${BASE_IMAGE}",
     "${RUNTIME}:26.0.0",
     "oven/${RUNTIME}:1.4.3",
@@ -336,6 +358,10 @@ test("runtime image families are classified before unresolved tag variables", ()
       expect(
         check(file, text).some(({ rule }) => rule === "runtime-docker"),
       ).toBe(true);
+  for (const { file, text } of runtimeImageSurfaces("oven/bun:1.4.3/invalid"))
+    expect(check(file, text).some(({ rule }) => rule === "bun-pins")).toBe(
+      true,
+    );
   expect(
     check(
       "Dockerfile",
@@ -368,7 +394,9 @@ test("runtime image variants preserve stable pins across every image consumer", 
       for (const { file, text } of runtimeImageSurfaces(
         `${image}:${version}${variant}`,
       ))
-        expect(check(file, text, {}, "3.13")).toEqual([]);
+        expect(
+          runtimeImageDiagnostics(file, check(file, text, {}, "3.13")),
+        ).toEqual([]);
       for (const channel of [
         "rc",
         "rc.1",
@@ -657,7 +685,9 @@ test("runtime image digests require exact approved tags on every image surface",
       for (const { file, text } of runtimeImageSurfaces(
         `${image}:${version}${variant}@${sha256}`,
       ))
-        expect(check(file, text, trackedNode, "3.13")).toEqual([]);
+        expect(
+          runtimeImageDiagnostics(file, check(file, text, trackedNode, "3.13")),
+        ).toEqual([]);
     for (const reference of [
       `${image}:${wrongVersion}@${sha256}`,
       `${image}@${sha256}`,
@@ -679,36 +709,50 @@ test("runtime image digests require exact approved tags on every image surface",
         ),
       ).toBe(true);
   for (const { file, text } of runtimeImageSurfaces(`postgres:17@${sha256}`))
-    expect(check(file, text)).toEqual([]);
+    expect(runtimeImageDiagnostics(file, check(file, text))).toEqual([]);
 });
 
 test("Node image digest tags share the tracked root selector when present", () => {
   const image = `node:26.11.1-alpine@sha256:${"b".repeat(64)}`;
   for (const { file, text } of runtimeImageSurfaces(image)) {
-    expect(check(file, text, { ".node-version": "26.11.1\n" })).toEqual([]);
-    for (const selected of ["26.11.2", "26.x", "not-a-version"])
-      expect(check(file, text, { ".node-version": selected })).toMatchObject([
-        { rule: "runtime-docker" },
-      ]);
     expect(
-      checkRuntimeFile({
+      runtimeImageDiagnostics(
         file,
-        text,
-        policy,
-        trackedFiles: new Set(),
-        readFile: () => {
-          throw new Error("An untracked selector must not be read");
-        },
-      }),
+        check(file, text, { ".node-version": "26.11.1\n" }),
+      ),
+    ).toEqual([]);
+    for (const selected of ["26.11.2", "26.x", "not-a-version"])
+      expect(
+        runtimeImageDiagnostics(
+          file,
+          check(file, text, { ".node-version": selected }),
+        ),
+      ).toMatchObject([{ rule: "runtime-docker" }]);
+    expect(
+      runtimeImageDiagnostics(
+        file,
+        checkRuntimeFile({
+          file,
+          text,
+          policy,
+          trackedFiles: new Set(),
+          readFile: () => {
+            throw new Error("An untracked selector must not be read");
+          },
+        }),
+      ),
     ).toEqual([]);
     expect(
-      checkRuntimeFile({
+      runtimeImageDiagnostics(
         file,
-        text,
-        policy,
-        trackedFiles: new Set([".node-version"]),
-        readFile: () => undefined,
-      }),
+        checkRuntimeFile({
+          file,
+          text,
+          policy,
+          trackedFiles: new Set([".node-version"]),
+          readFile: () => undefined,
+        }),
+      ),
     ).toMatchObject([{ rule: "runtime-docker" }]);
   }
 });

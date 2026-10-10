@@ -547,8 +547,17 @@ export const checkRuntimeFile = ({
       digestSeparator < 0
         ? structuralImage
         : structuralImage.slice(0, digestSeparator);
-    const tagSeparator = structuralReference.lastIndexOf(":");
-    const hasTag = tagSeparator > structuralReference.lastIndexOf("/");
+    const managedFamily = /^(node|python|oven\/bun)(?=:|$)/i.exec(
+      structuralReference,
+    )?.[1];
+    const tagSeparator =
+      managedFamily === undefined
+        ? structuralReference.lastIndexOf(":")
+        : structuralReference.indexOf(":", managedFamily.length);
+    const hasTag =
+      managedFamily === undefined
+        ? tagSeparator > structuralReference.lastIndexOf("/")
+        : tagSeparator !== -1;
     const imageRepository = hasTag
       ? reference.slice(0, tagSeparator)
       : reference;
