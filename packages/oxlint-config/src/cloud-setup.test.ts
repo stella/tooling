@@ -35,6 +35,20 @@ const declaration = {
   envFile: ".env.cloud",
 };
 
+test("generated script rejects missing or unknown modes before platform checks", () => {
+  const generated = generate(declaration);
+  for (const args of [[], ["unknown"], ["--help"], ["install", "start"]]) {
+    const result = Bun.spawnSync(["bash", "-s", "--", ...args], {
+      stdin: Buffer.from(generated),
+    });
+    expect(result.exitCode).toBe(2);
+    expect(result.stdout.toString()).toBe("");
+    expect(result.stderr.toString()).toBe(
+      "Usage: cloud-setup.sh install|start\n",
+    );
+  }
+});
+
 const environmentParts = (generated: string) => {
   const assignment = /^ENV_FILE=.*$/m.exec(generated)?.at(0);
   const marker = /^ENV_MARKER=.*$/m.exec(generated)?.at(0);
