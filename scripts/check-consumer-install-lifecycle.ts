@@ -18,7 +18,10 @@ import {
 } from "../packages/oxlint-config/src/consumer-compat";
 import { parseToolchainPolicy } from "../packages/oxlint-config/src/toolchain-schema";
 import policyData from "../packages/oxlint-config/toolchain.json";
-import { assertConsumerReleasePackParity } from "./check-consumer-release-pack";
+import {
+  assertConsumerReleasePackParity,
+  assertPinnedPnpmReleasePack,
+} from "./check-consumer-release-pack";
 
 const scratch = await mkdtemp(path.join(tmpdir(), "consumer-lifecycle-"));
 try {
@@ -193,6 +196,7 @@ try {
     );
   }
   await assertConsumerReleasePackParity({ tools, scratch });
+  await assertPinnedPnpmReleasePack({ tools, scratch });
 } finally {
   await rm(scratch, { recursive: true, force: true });
 }

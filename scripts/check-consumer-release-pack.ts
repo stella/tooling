@@ -3,8 +3,12 @@ import { execFileSync } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { packConsumerArtifacts } from "../packages/oxlint-config/src/consumer-compat";
+import {
+  consumerCommandEnvironment,
+  packConsumerArtifacts,
+} from "../packages/oxlint-config/src/consumer-compat";
 import { discoverConsumerPackages } from "../packages/oxlint-config/src/consumer-compat-config";
+import policy from "../packages/oxlint-config/toolchain.json";
 
 type ReleasePackParityOptions = Pick<
   Parameters<typeof packConsumerArtifacts>[0],
@@ -88,5 +92,81 @@ export const assertConsumerReleasePackParity = async ({
   assert.equal(dependencies["is-number"], "catalog:");
   process.stdout.write(
     "release packer parity: actual npm tarball preserves source workspace specifiers\n",
+  );
+};
+
+export const assertPinnedPnpmReleasePack = async ({
+  tools,
+  scratch,
+}: ReleasePackParityOptions) => {
+  const root = path.join(scratch, "pnpm-release-pack-fixture");
+  const packing = path.join(scratch, "pnpm-release-pack-check");
+  await mkdir(packing);
+  const files = {
+    "package.json": JSON.stringify({
+      private: true,
+      packageManager: "pnpm@0.0.0",
+      workspaces: ["packages/*"],
+    }),
+    "pnpm-workspace.yaml": "packages:\n  - packages/*\n",
+    "packages/library/package.json": JSON.stringify({
+      name: "pinned-pnpm-pack-fixture",
+      version: "1.0.0",
+      files: ["index.js"],
+    }),
+    ".github/workflows/publish.yml": `name: Publish
+on: workflow_dispatch
+jobs:
+  pack:
+    runs-on: ubuntu-latest
+    steps:
+      - run: npm install --global --ignore-scripts pnpm@${policy.consumerPnpm}
+      - run: pnpm pack --ignore-scripts --pack-destination artifacts
+`,
+  };
+  for (const [file, contents] of Object.entries(files)) {
+    const destination = path.join(root, file);
+    await mkdir(path.dirname(destination), { recursive: true });
+    await writeFile(destination, contents);
+  }
+  await writeFile(
+    path.join(root, "packages/library/index.js"),
+    "module.exports = {};\n",
+  );
+  const packages = discoverConsumerPackages(files);
+  const artifacts = await packConsumerArtifacts({
+    files,
+    root,
+    scratch: packing,
+    tools,
+    packages,
+    workspacePackages: packages,
+  });
+  assert.ok(artifacts.get("pinned-pnpm-pack-fixture"));
+  const directory = path.join(packing, "pack-workspace/packages/library");
+  const env = consumerCommandEnvironment({
+    tools,
+    directory,
+    home: path.join(packing, "pack-home"),
+  });
+  const version = execFileSync(
+    tools.node,
+    [path.join(packing, "release-packer/node_modules/pnpm/pnpm"), "--version"],
+    { cwd: directory, env, encoding: "utf8" },
+  ).trim();
+  assert.equal(version, policy.consumerPnpm);
+  const staged: unknown = JSON.parse(
+    await readFile(path.join(packing, "pack-workspace/package.json"), "utf8"),
+  );
+  assert.ok(
+    typeof staged === "object" && staged !== null && "packageManager" in staged,
+  );
+  assert.equal(
+    staged.packageManager,
+    "pnpm@0.0.0",
+    "retain the staged declaration without allowing it to select the executed packer",
+  );
+  process.stdout.write(
+    "pnpm release packing: conflicting staged packageManager retains the verified pinned version\n",
   );
 };

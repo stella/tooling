@@ -1270,6 +1270,12 @@ describe("isolated consumer runtime", () => {
         npm_config_offline: "true",
         NPM_CONFIG_PREFIX: "/shared/prefix",
         PNPM_HOME: "/shared/pnpm",
+        pnpm_config_pm_on_fail: "download",
+        COREPACK_ENABLE_PROJECT_SPEC: "1",
+        COREPACK_ENABLE_NETWORK: "1",
+        COREPACK_ENABLE_AUTO_PIN: "1",
+        COREPACK_ENV_FILE: "/shared/corepack.env",
+        COREPACK_ROOT: "/shared/corepack",
         YARN_CACHE_FOLDER: "/shared/yarn",
         XDG_CONFIG_HOME: "/shared/config",
         KEEP: "value",
@@ -1289,6 +1295,12 @@ describe("isolated consumer runtime", () => {
     expect(env["npm_config_offline"]).toBeUndefined();
     expect(env["NPM_CONFIG_PREFIX"]).toBeUndefined();
     expect(env["PNPM_HOME"]).toBeUndefined();
+    expect(env["pnpm_config_pm_on_fail"]).toBe("ignore");
+    expect(env["COREPACK_ENABLE_PROJECT_SPEC"]).toBe("0");
+    expect(env["COREPACK_ENABLE_AUTO_PIN"]).toBe("0");
+    expect(env["COREPACK_ENABLE_NETWORK"]).toBe("0");
+    expect(env["COREPACK_ENV_FILE"]).toBe("0");
+    expect(env["COREPACK_ROOT"]).toBeUndefined();
     expect(env["YARN_CACHE_FOLDER"]).toBeUndefined();
     expect(env["XDG_CONFIG_HOME"]).toBe("/isolated/home/config");
     expect(env["KEEP"]).toBe("value");

@@ -559,7 +559,7 @@ export const consumerCommandEnvironment = ({
   const env = Object.fromEntries(
     Object.entries(environment).filter(
       ([key]) =>
-        !/^(?:npm_config_|pnpm_|yarn_)/i.test(key) &&
+        !/^(?:npm_config_|pnpm_|yarn_|corepack_)/i.test(key) &&
         key !== "NODE_PATH" &&
         key !== "NODE_OPTIONS",
     ),
@@ -570,6 +570,12 @@ export const consumerCommandEnvironment = ({
     npm_config_cache: path.join(home, "npm-cache"),
     npm_config_userconfig: path.join(home, "npmrc"),
     npm_config_registry: "https://registry.npmjs.org/",
+    // Project packageManager fields cannot replace the verified consumer/release tools.
+    pnpm_config_pm_on_fail: "ignore",
+    COREPACK_ENABLE_PROJECT_SPEC: "0",
+    COREPACK_ENABLE_AUTO_PIN: "0",
+    COREPACK_ENABLE_NETWORK: "0",
+    COREPACK_ENV_FILE: "0",
     CI: "true",
     NODE_ENV: "development",
     XDG_CONFIG_HOME: path.join(home, "config"),
