@@ -22,6 +22,16 @@ i18n, generated native artifacts, benchmark exceptions, and package-specific
 ignores. Route-query conventions are shared here because they are the common
 TanStack Router + React Query contract.
 
+## Bun version
+
+`@stll/oxlint-config/toolchain.json` owns the shared Bun version. Install
+`@stll/oxlint-config` as a dev dependency and align `packageManager` and
+`bun-types` with its `bun` field. Configure `oven-sh/setup-bun` with
+`bun-version-file: package.json`, then run `bunx --no-install stll-toolchain-check`
+from the repository root in CI. The check covers tracked manifests, workflows,
+Dockerfiles, and version-manager files. A non-Bun manifest requires an explicit
+`--allow-non-bun-package-manager path/to/package.json` exception.
+
 ## Usage
 
 Install the shared TypeScript and oxlint packages:
@@ -32,7 +42,7 @@ bun add -d @stll/typescript-config @stll/oxlint-config @stll/oxlint-plugin @oxli
 
 The shared defaults require TypeScript 7.0.2 or newer, oxlint 1.80.0 or
 newer, and oxlint-tsgolint 7.0.2001 or newer. Pin the current versions from
-`@stll/typescript-config/toolchain.json`; do not use the deprecated
+`@stll/oxlint-config/toolchain.json`; do not use the deprecated
 oxlint-tsgolint 0.x line.
 
 `toolchain.json` defines two supported TypeScript install layouts:

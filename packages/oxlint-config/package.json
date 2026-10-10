@@ -8,8 +8,12 @@
     "url": "git+https://github.com/stella/tooling.git",
     "directory": "packages/oxlint-config"
   },
+  "bin": {
+    "stll-toolchain-check": "./dist/toolchain-check-cli.mjs"
+  },
   "files": [
-    "dist"
+    "dist",
+    "toolchain.json"
   ],
   "type": "module",
   "main": "dist/index.mjs",
@@ -47,7 +51,8 @@
         "default": "./dist/no-raw-colors.cjs"
       },
       "default": "./dist/no-raw-colors.mjs"
-    }
+    },
+    "./toolchain.json": "./toolchain.json"
   },
   "publishConfig": {
     "access": "public"

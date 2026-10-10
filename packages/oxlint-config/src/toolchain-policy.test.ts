@@ -3,17 +3,30 @@
 import { describe, expect, test } from "bun:test";
 import path from "node:path";
 
+import toolchainPolicy from "../toolchain.json";
+
 const repositoryRoot = path.resolve(import.meta.dir, "../../..");
 
 const readJson = async (relativePath: string): Promise<unknown> =>
   Bun.file(path.join(repositoryRoot, relativePath)).json();
 
 describe("shared toolchain policy", () => {
+  test("keeps every Bun pin equal to the shared policy", async () => {
+    const rootPackage = await readJson("package.json");
+    const toolchain = await readJson("packages/oxlint-config/toolchain.json");
+    expect(toolchain).toEqual(expect.objectContaining({ bun: "1.4.3" }));
+    expect(rootPackage).toEqual(
+      expect.objectContaining({
+        packageManager: `bun@${toolchainPolicy.bun}`,
+        devDependencies: expect.objectContaining({
+          "bun-types": toolchainPolicy.bun,
+        }),
+      }),
+    );
+  });
   test("pins the current TS7 and Oxc toolchain", async () => {
     const rootPackage = await readJson("package.json");
-    const toolchain = await readJson(
-      "packages/typescript-config/toolchain.json",
-    );
+    const toolchain = await readJson("packages/oxlint-config/toolchain.json");
 
     expect(rootPackage).toEqual(
       expect.objectContaining({
@@ -26,6 +39,7 @@ describe("shared toolchain policy", () => {
     );
 
     expect(toolchain).toEqual({
+      bun: "1.4.3",
       oxlint: "1.81.0",
       "oxlint-tsgolint": "7.0.2001",
       typescript: "7.0.2",
