@@ -1,5 +1,11 @@
 # @stll/oxlint-config
 
+## 0.13.0
+
+### Minor Changes
+
+- [#77](https://github.com/stella/tooling/pull/77) [`516e145`](https://github.com/stella/tooling/commit/516e145d7e175d5dc1f73ce4d87f3a0017a6ca15) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Add published package contracts and isolated consumer artifact compatibility checks.
+
 ## 0.12.2
 
 ### Patch Changes
