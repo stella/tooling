@@ -1,5 +1,13 @@
 # @stll/oxlint-config
 
+## 0.11.0
+
+### Minor Changes
+
+- [#72](https://github.com/stella/tooling/pull/72) [`43e644b`](https://github.com/stella/tooling/commit/43e644b340aef0fb379d324fc312c62fe684e738) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Add repeatable `--project` selection and `--help` to the typecheck parity CLI. Selected projects use the repository-root compiler installation without requiring a root tsconfig or discovering unselected project references.
+
+- [#56](https://github.com/stella/tooling/pull/56) [`1e8c57a`](https://github.com/stella/tooling/commit/1e8c57aeea142fd5730d1d2bfc32954b34b14653) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Own shared tool and action pins in a versioned toolchain policy. Extend the tracked-file guard to check package catalogs, TypeScript layouts, runtime selectors, support ranges, action SHAs, and the shared Dependabot policy, with explicit reasoned repository opt-outs.
+
 ## 0.10.0
 
 ### Minor Changes
