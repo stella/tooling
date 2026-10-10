@@ -563,6 +563,10 @@ export const checkPackageFiles = ({
           !specifiers.has(other.compilerPackage),
       );
     });
+  const peerRange = (value: unknown): value is string =>
+    typeof value === "string" &&
+    valid(value) === null &&
+    validRange(value) !== null;
   const toolchainEntries = (file: string, json: Record<string, unknown>) => {
     const entries: { section: string; name: string; value: unknown }[] = [];
     for (const section of [
@@ -575,7 +579,9 @@ export const checkPackageFiles = ({
       if (!record(dependencies)) continue;
       for (const [name, value] of Object.entries(dependencies)) {
         if (!tsSpecifiers.has(name)) continue;
-        entries.push({ section, name, value: resolve(file, name, value) });
+        const resolved = resolve(file, name, value);
+        if (section === "peerDependencies" && peerRange(resolved)) continue;
+        entries.push({ section, name, value: resolved });
       }
     }
     return entries;
@@ -687,7 +693,8 @@ export const checkPackageFiles = ({
       checkEntries(json[key]);
     if (record(json["peerDependencies"]))
       for (const [name, value] of Object.entries(json["peerDependencies"])) {
-        if (tsSpecifiers.has(name)) checkEntries({ [name]: value });
+        if (tsSpecifiers.has(name) && !peerRange(resolve(file, name, value)))
+          checkEntries({ [name]: value });
       }
     for (const source of catalogSources(json)) {
       checkEntries(source["catalog"]);
@@ -833,8 +840,8 @@ export const checkPackageFiles = ({
     const usesCompiler = policy.typescriptInstallLayouts.some((layout) =>
       localEntries.some(({ name }) => name === layout.compilerPackage),
     );
+    let selectedLayout = layoutFor(specifierMap(localEntries));
     if (usesCompiler) {
-      let selectedLayout = layoutFor(specifierMap(localEntries));
       if (
         layoutFor(
           specifierMap(
@@ -871,6 +878,7 @@ export const checkPackageFiles = ({
             localEntries.every(
               ({ section, name, value }) =>
                 (section === "dependencies" ||
+                  section === "devDependencies" ||
                   section === "peerDependencies") &&
                 name === layout.compatibilityPackage &&
                 value === layout.compatibilitySpecifier,
@@ -913,6 +921,47 @@ export const checkPackageFiles = ({
           });
           break;
         }
+      }
+    }
+    if (record(json["peerDependencies"])) {
+      const peerLayout = selectedLayout ?? workspaceLayoutFor(file)?.layout;
+      for (const [name, raw] of Object.entries(json["peerDependencies"])) {
+        if (!tsSpecifiers.has(name)) continue;
+        const range = resolve(file, name, raw);
+        if (!peerRange(range)) continue;
+        const releases = new Set<string>();
+        for (const layout of policy.typescriptInstallLayouts) {
+          if (
+            layout.compilerPackage !== name &&
+            !(
+              layout.type === "split-compatibility" &&
+              layout.compatibilityPackage === name
+            )
+          )
+            continue;
+          const specifier = layout.compilerSpecifier;
+          releases.add(
+            specifier.startsWith("npm:")
+              ? specifier.slice(specifier.lastIndexOf("@") + 1)
+              : specifier,
+          );
+        }
+        if (name === policy.typescript6Compatibility.packageAlias)
+          releases.add(policy.typescript6Compatibility.version);
+        if (
+          peerLayout?.type === "split-compatibility" &&
+          name === peerLayout.compatibilityPackage
+        )
+          releases.add(peerLayout.compatibilitySpecifier);
+        if ([...releases].every((release) => satisfies(release, range)))
+          continue;
+        add({
+          file,
+          rule: "typescript-layout",
+          key: name,
+          value: raw,
+          message: `${name} peer support range must include ${[...releases].join(" and ")}, found ${range}`,
+        });
       }
     }
     if (

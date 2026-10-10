@@ -145,9 +145,12 @@ rule and a nonempty reason:
 ```
 
 Workspace TypeScript toolchains combine the root and declared members' devDependencies.
-An included member may depend on the exact TypeScript 6 compatibility API at runtime
-or as a peer when that shared install uses the complete split layout. Ambiguous or
-partial layouts do not grant this allowance.
+An included member may declare the exact TypeScript 6 compatibility API across
+dependencies, devDependencies, and peerDependencies when that shared install uses
+the complete split layout. Ambiguous or partial layouts do not grant this allowance.
+Peer ranges declare support: they must include the policy compiler release and the
+compatibility release when the selected layout uses it. Ranges do not contribute
+to the installed compiler inventory.
 
 JavaScript update roots come from the repository root, declared workspace membership,
 and directories with their own `bun.lock`, `package-lock.json`, `yarn.lock`, or

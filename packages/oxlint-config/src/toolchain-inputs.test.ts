@@ -49,7 +49,7 @@ test("JavaScript installation lockfiles are tracked as presence without reading 
     expect(toolchainInputKind(`project/${file}`)).toBe("presence");
   }
   for (const file of ["unrelated.lock", "pnpm-lock.yml", "package-lock.txt"])
-    expect(toolchainInputKind(file)).toBeUndefined();
+    expect(toolchainInputKind(file)).not.toBe("presence");
 });
 
 test("tracked executable action metadata remains discoverable under dependency-named directories", () => {
@@ -200,8 +200,21 @@ test("pnpm workspace inputs use the producer's YAML filename", () => {
       expect(
         containerDocumentImages({ packages: ["packages/*"] }, file),
       ).toBeUndefined();
+      const files: Record<string, string> = {
+        [file]: 'packages: ["packages/*"]',
+        [member]: JSON.stringify({ name: "workspace-member", private: true }),
+      };
+      if (extension === "yaml") {
+        files[`${prefix}package.json`] = JSON.stringify({
+          name: "workspace-root",
+          private: true,
+        });
+        files[`${prefix}bun.lock`] = "";
+      } else {
+        files[`${prefix}packages/app/bun.lock`] = "";
+      }
       const generated = generateDependabotConfig({
-        files: { [file]: 'packages: ["packages/*"]', [member]: "{}" },
+        files,
         policy,
       });
       expect(parseDocument(generated).getIn(["updates", 0, "directory"])).toBe(

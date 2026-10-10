@@ -909,6 +909,151 @@ describe("shared package pins", () => {
 });
 
 describe("TypeScript install layouts", () => {
+  test("exact member compatibility entries may span dependency, development and peer sections", () => {
+    const sections = ["dependencies", "devDependencies", "peerDependencies"];
+    const split = {
+      "@typescript/native": "npm:typescript@7.0.2",
+      typescript: "6.0.3",
+    };
+    for (const first of sections)
+      for (const second of sections) {
+        const member = {
+          [first]: { typescript: "6.0.3" },
+          [second]: { typescript: "6.0.3" },
+        };
+        const files = {
+          "package.json": json({
+            workspaces: ["packages/*"],
+            devDependencies: split,
+          }),
+          "packages/api/package.json": json(member),
+        };
+        expect(check(files)).toEqual([]);
+        for (const mutation of [
+          { ...member, optionalDependencies: { typescript: "6.0.3" } },
+          { ...member, [second]: { typescript: "6.0.2" } },
+          {
+            ...member,
+            peerDependencies: { "@typescript/native": "npm:typescript@7.0.2" },
+          },
+        ])
+          expect(
+            check({
+              ...files,
+              "packages/api/package.json": json(mutation),
+            }).some(
+              ({ rule, path: file }) =>
+                rule === "typescript-layout" &&
+                file === "packages/api/package.json",
+            ),
+          ).toBe(true);
+      }
+    expect(
+      check({
+        "package.json": json({
+          workspaces: ["packages/*"],
+          devDependencies: split,
+        }),
+        "packages/api/package.json": json(
+          Object.fromEntries(
+            sections.map((section) => [section, { typescript: "6.0.3" }]),
+          ),
+        ),
+      }),
+    ).toEqual([]);
+  });
+  test("peer ranges declare compiler support without installing a toolchain", () => {
+    for (const range of [">=6.0.3 <8", "^7", "7", "*", "6.0.3 || 7.0.2"])
+      expect(
+        manifest({
+          name: "@example/typescript-config",
+          peerDependencies: { typescript: range },
+        }),
+      ).toEqual([]);
+    for (const range of [
+      "^6",
+      ">=8",
+      "<7.0.2",
+      ">7.0.2",
+      "latest",
+      "npm:typescript@^7",
+      7,
+    ])
+      expect(
+        manifest({ peerDependencies: { typescript: range } }).some(
+          ({ rule }) => rule === "typescript-layout",
+        ),
+      ).toBe(true);
+    for (const range of ["^7", ">=7 <8", "*"])
+      expect(
+        manifest({ peerDependencies: { "@typescript/native": range } }),
+      ).toEqual([]);
+    expect(
+      manifest({ peerDependencies: { "@typescript/native": "^6" } }),
+    ).not.toEqual([]);
+    // An exact peer version remains a dependency contract, not a support range.
+    for (const version of ["6.0.3", "7.0.2"])
+      expect(
+        manifest({ peerDependencies: { typescript: version } }),
+      ).not.toEqual([]);
+  });
+  test("selected split peer support ranges include both compiler and compatibility releases", () => {
+    const split = {
+      "@typescript/native": "npm:typescript@7.0.2",
+      typescript: "6.0.3",
+    };
+    for (const range of [
+      ">=6.0.3 <8",
+      "6.0.3 || 7.0.2",
+      "*",
+      "^7",
+      ">=6.0.4 <8",
+      "^6",
+    ])
+      for (const context of ["local", "workspace"]) {
+        const member = {
+          peerDependencies: { typescript: range },
+          ...(context === "local" ? { devDependencies: split } : {}),
+        };
+        const diagnostics = check(
+          context === "local"
+            ? { "package.json": json(member) }
+            : {
+                "package.json": json({
+                  workspaces: ["packages/*"],
+                  devDependencies: split,
+                }),
+                "packages/api/package.json": json(member),
+              },
+        );
+        if ([">=6.0.3 <8", "6.0.3 || 7.0.2", "*"].includes(range))
+          expect(diagnostics).toEqual([]);
+        else
+          expect(diagnostics).toMatchObject([
+            {
+              rule: "typescript-layout",
+              message: expect.stringContaining("peer support range"),
+            },
+          ]);
+      }
+    expect(
+      manifest({
+        devDependencies: { typescript: "7.0.2" },
+        peerDependencies: { typescript: "^7" },
+      }),
+    ).toEqual([]);
+    expect(
+      check({
+        "package.json": json({
+          workspaces: ["packages/*"],
+          devDependencies: { "@typescript/native": "npm:typescript@7.0.2" },
+        }),
+        "packages/api/package.json": json({
+          peerDependencies: { typescript: ">=6.0.3 <8" },
+        }),
+      }),
+    ).toMatchObject([{ rule: "typescript-layout", path: "package.json" }]);
+  });
   test("workspace runtime and peer compiler APIs use the repository split devtoolchain", () => {
     const root = {
       private: true,
