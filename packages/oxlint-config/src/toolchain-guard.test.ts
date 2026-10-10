@@ -11,6 +11,7 @@ import {
   parseToolchainOptOuts,
   toolchainRules,
 } from "./toolchain-guard";
+import { toolchainInputKind } from "./toolchain-inputs";
 import { packagePinKeys, parseToolchainPolicy } from "./toolchain-schema";
 
 const policy = parseToolchainPolicy(toolchain);
@@ -38,6 +39,87 @@ const fixture = (
 
 test("empty repositories do not acquire unrelated tool requirements", () => {
   expect(fixture({ "readme.txt": "hello" })).toEqual([]);
+});
+
+test("tracked root and nested action metadata cannot bypass snapshot discovery", () => {
+  const config = JSON.stringify({
+    optOuts: [{ rule: "dependabot-policy", reason: "Action metadata fixture" }],
+  });
+  for (const file of [
+    "action.yml",
+    "action.yaml",
+    "tools/build/action.yml",
+    "tools/deep/build/action.yaml",
+  ]) {
+    expect(
+      fixture({
+        [file]:
+          "runs: {using: composite, steps: [{uses: 'actions/checkout@main'}]}",
+        "stll-toolchain.json": config,
+      }).some(({ rule, path }) => rule === "action-pins" && path === file),
+    ).toBe(true);
+    expect(
+      fixture(
+        { "stll-toolchain.json": config },
+        {
+          [file]:
+            "runs: {using: composite, steps: [{uses: 'actions/checkout@main'}]}",
+        },
+      ),
+    ).toEqual([]);
+  }
+});
+
+test("configuration discovery shares lockfile presence without parsing lock contents", () => {
+  for (const file of ["bun.lock", "uv.lock", "tools/bun.lock", "tools/uv.lock"])
+    expect(toolchainInputKind(file)).toBe("presence");
+  for (const file of [
+    "action.yml",
+    "tools/action.yaml",
+    ".github/workflows/ci.yml",
+    "package.json",
+    ".node-version",
+  ])
+    expect(toolchainInputKind(file)).toBe("config");
+  for (const file of ["source.ts", "example/bun.lock.txt", "uv.lock.backup"])
+    expect(toolchainInputKind(file)).toBeUndefined();
+  expect(
+    fixture({
+      "bun.lock": "invalid opaque content",
+      "uv.lock": "invalid opaque content",
+      "stll-toolchain.json": JSON.stringify({
+        optOuts: [
+          { rule: "dependabot-policy", reason: "Lockfile presence fixture" },
+        ],
+      }),
+    }),
+  ).toEqual([]);
+});
+
+test("Docker action policy opt-outs require a tracked explicit reason", () => {
+  const action =
+    "runs: {using: composite, steps: [{uses: 'docker://alpine:3'}]}";
+  const base = {
+    "action.yml": action,
+    "stll-toolchain.json": JSON.stringify({
+      optOuts: [{ rule: "dependabot-policy", reason: "Action fixture" }],
+    }),
+  };
+  expect(fixture(base).some(({ rule }) => rule === "action-pins")).toBe(true);
+  expect(
+    fixture({
+      ...base,
+      "stll-toolchain.json": JSON.stringify({
+        optOuts: [
+          { rule: "dependabot-policy", reason: "Action fixture" },
+          {
+            rule: "action-pins",
+            reason: "Repository maintains Docker image action digest policy",
+          },
+        ],
+      }),
+    }),
+  ).toEqual([]);
 });
 
 test("every named rule has a reasoned tracked opt-out and malformed choices fail", () => {

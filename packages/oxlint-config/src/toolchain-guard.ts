@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 import { checkDependabot, dependabotRules } from "./toolchain-dependabot";
+import { toolchainInputKind } from "./toolchain-inputs";
 import { checkPackageFiles, packageRules } from "./toolchain-packages";
 import { checkRuntimeFile, runtimeRules } from "./toolchain-runtime";
 import { parseToolchainPolicy } from "./toolchain-schema";
@@ -76,15 +77,12 @@ export const checkToolchain = ({
   const files: Record<string, string> = {};
   for (const file of tracked) {
     // Only configuration inputs are read; source files can contain arbitrary examples.
-    if (
-      !/(?:^|\/)(?:package\.json|stll-toolchain\.json|\.bun-version|\.node-version|\.nvmrc|\.python-version|rust-toolchain(?:\.toml)?|\.tool-versions|\.?mise\.toml|pyproject\.toml|uv\.toml|\.uv\.toml|\.github\/dependabot\.ya?ml|Dockerfile[^/]*|Containerfile|Cargo\.toml|requirements[^/]*\.txt)$/.test(
-        file,
-      ) &&
-      !/^\.github\/(?:workflows\/[^/]+\.ya?ml|actions\/.+\/action\.ya?ml)$/.test(
-        file,
-      )
-    )
+    const kind = toolchainInputKind(file);
+    if (kind === undefined) continue;
+    if (kind === "presence") {
+      files[file] = "";
       continue;
+    }
     try {
       files[file] = readFileSync(path.join(root, file), "utf8");
     } catch {

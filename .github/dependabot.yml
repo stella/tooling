@@ -1,5 +1,32 @@
 version: 2
 updates:
+  - package-ecosystem: bun
+    directory: /
+    schedule:
+      interval: weekly
+      day: saturday
+      time: 07:00
+      timezone: Europe/Prague
+    cooldown:
+      default-days: 5
+    groups:
+      dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+    ignore:
+      - dependency-name: oxlint
+      - dependency-name: oxlint-tsgolint
+      - dependency-name: "@oxlint/plugins"
+      - dependency-name: "@stll/oxlint-plugin"
+      - dependency-name: oxfmt
+      - dependency-name: lefthook
+      - dependency-name: typescript
+      - dependency-name: "@typescript/native"
+      - dependency-name: typescript-compat
+      - dependency-name: bun-types
   - package-ecosystem: cargo
     directory: /rust-lints/stella_lints
     schedule:
@@ -44,30 +71,3 @@ updates:
       - dependency-name: actions/cache/save
       - dependency-name: actions/upload-artifact
       - dependency-name: actions/download-artifact
-  - package-ecosystem: npm
-    directory: /
-    schedule:
-      interval: weekly
-      day: saturday
-      time: 07:00
-      timezone: Europe/Prague
-    cooldown:
-      default-days: 5
-    groups:
-      dependencies:
-        patterns:
-          - "*"
-        update-types:
-          - minor
-          - patch
-    ignore:
-      - dependency-name: oxlint
-      - dependency-name: oxlint-tsgolint
-      - dependency-name: "@oxlint/plugins"
-      - dependency-name: "@stll/oxlint-plugin"
-      - dependency-name: oxfmt
-      - dependency-name: lefthook
-      - dependency-name: typescript
-      - dependency-name: "@typescript/native"
-      - dependency-name: typescript-compat
-      - dependency-name: bun-types

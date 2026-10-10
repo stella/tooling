@@ -3,6 +3,7 @@ import { parse as parseToml } from "smol-toml";
 import { isAlias, isMap, isScalar, isSeq, parseDocument } from "yaml";
 
 import { canonicalDockerRuntime } from "./toolchain-images";
+import { githubAutomationFileKind } from "./toolchain-inputs";
 
 export const runtimeRules = [
   "bun-pins",
@@ -401,10 +402,8 @@ export const checkRuntimeFile = ({
     });
     if (instruction !== "") checkInstruction(instruction, startLine);
   }
-  const workflow =
-    /^\.github\/workflows\/[^/]+\.ya?ml$/.test(file) ||
-    /^\.github\/actions\/.+\/action\.ya?ml$/.test(file);
-  if (!workflow) return diagnostics;
+  const automationKind = githubAutomationFileKind(file);
+  if (automationKind === undefined) return diagnostics;
   const document = parseDocument(text, { uniqueKeys: true, merge: true });
   if (document.errors.length > 0) {
     add({
@@ -567,7 +566,32 @@ export const checkRuntimeFile = ({
       return;
     }
     const value = uses.value;
-    if (value.startsWith("./") || value.startsWith("docker://")) return;
+    if (value.startsWith("$/")) {
+      if (
+        value.length === 2 ||
+        /\s/.test(value) ||
+        value.includes("@") ||
+        value.includes("${{") ||
+        value.includes("\\") ||
+        value.split("/").includes("..")
+      )
+        add({
+          rule: "action-pins",
+          line,
+          message:
+            "self-repository actions must use a static repository path without a ref suffix",
+        });
+      return;
+    }
+    if (value.startsWith("./")) return;
+    if (value.startsWith("docker://")) {
+      add({
+        rule: "action-pins",
+        line,
+        message: "Docker image actions require a reasoned action-pins opt-out",
+      });
+      return;
+    }
     const remote = /^([^./][^\s@]*\/[^\s@]+)@([^\s]+)$/.exec(value);
     if (remote === null) {
       add({
@@ -641,7 +665,7 @@ export const checkRuntimeFile = ({
   try {
     // Resolve aliases first with an expansion bound before visiting executable fields.
     document.toJS({ maxAliasCount: 100 });
-    if (/^\.github\/workflows\//.test(file)) {
+    if (automationKind === "workflow") {
       const jobs = getNode(document.contents, "jobs");
       if (isMap(jobs))
         for (const key of keysOf(jobs)) {

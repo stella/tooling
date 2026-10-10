@@ -25,7 +25,7 @@ const policy = {
   groups: {
     dependencies: { patterns: ["*"], updateTypes: ["minor", "patch"] },
   },
-  ignoredPackages: ["oxlint", "typescript"],
+  ignoredPackages: ["oxlint", "typescript", "@oxlint/plugins"],
   ignoredActions: ["actions/checkout", "oven-sh/setup-bun"],
   ignoredImages: ["node", "python", "oven/bun"],
 } satisfies Policy;
@@ -41,7 +41,7 @@ const update = (ecosystem = "npm", directory = "/") => ({
       { patterns: group.patterns, "update-types": group.updateTypes },
     ]),
   ),
-  ignore: (ecosystem === "npm"
+  ignore: (ecosystem === "npm" || ecosystem === "bun"
     ? policy.ignoredPackages
     : ecosystem === "github-actions"
       ? policy.ignoredActions
@@ -59,6 +59,9 @@ const check = (
     files: { ...manifests, ".github/dependabot.yml": text },
     policy,
   });
+const ignoreDeclaration = (name: string) =>
+  stringify({ "dependency-name": name }).trim();
+
 const config = (updates: unknown[] = [update()]) =>
   stringify({ version: 2, updates });
 
@@ -103,6 +106,81 @@ describe("Dependabot policy", () => {
     expect(check(generateDependabotConfig({ files: {}, policy }), {})).toEqual(
       [],
     );
+  });
+
+  test("uses Bun ecosystem for package-manager and lockfile roots while retaining npm roots", () => {
+    const files = {
+      "package.json": JSON.stringify({
+        packageManager: "bun@1.4.3",
+        workspaces: ["packages/*"],
+      }),
+      "packages/member/package.json": "{}",
+      "locked/package.json": "{}",
+      "locked/bun.lock": "{}",
+      "npm/package.json": JSON.stringify({ packageManager: "npm@11.6.0" }),
+      "pnpm/package.json": JSON.stringify({ packageManager: "pnpm@10.0.0" }),
+      "yarn/package.json": JSON.stringify({ packageManager: "yarn@4.0.0" }),
+    };
+    const good = config([
+      update("bun"),
+      update("bun", "/locked"),
+      update("npm", "/npm"),
+      update("npm", "/pnpm"),
+      update("npm", "/yarn"),
+    ]);
+    expect(check(good, files)).toEqual([]);
+    const generated = generateDependabotConfig({ files, policy });
+    expect(check(generated, files)).toEqual([]);
+    expect(generated).not.toContain("/packages/member");
+    expect(
+      check(
+        good.replace("package-ecosystem: bun", "package-ecosystem: npm"),
+        files,
+      ).some(({ message }) =>
+        message.includes("add a bun update entry covering /"),
+      ),
+    ).toBe(true);
+    for (const name of policy.ignoredPackages) {
+      const bad = good.replace(
+        ignoreDeclaration(name),
+        ignoreDeclaration("other"),
+      );
+      expect(bad).not.toBe(good);
+      expect(
+        check(bad, files).some(({ message }) =>
+          message.includes(`bun: ignore all updates for shared pin ${name}`),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  test("selects uv for lockfile or explicit tool roots and pip for independent requirements", () => {
+    const files = {
+      "locked/pyproject.toml": "[project]\nname = 'locked'",
+      "locked/uv.lock": "version = 1",
+      "configured/pyproject.toml":
+        "[project]\nname = 'configured'\n[tool.uv]\npackage = true",
+      "standalone/requirements.txt": "requests",
+      "plain/pyproject.toml": "[project]\nname = 'plain'",
+    };
+    const good = config([
+      update("uv", "/locked"),
+      update("uv", "/configured"),
+      update("pip", "/standalone"),
+      update("pip", "/plain"),
+    ]);
+    expect(check(good, files)).toEqual([]);
+    expect(check(generateDependabotConfig({ files, policy }), files)).toEqual(
+      [],
+    );
+    expect(
+      check(
+        good.replace("package-ecosystem: uv", "package-ecosystem: pip"),
+        files,
+      ).some(({ message }) =>
+        message.includes("add a uv update entry covering /locked"),
+      ),
+    ).toBe(true);
   });
 
   test("does not require configuration in repositories without an ecosystem", () => {
@@ -152,6 +230,7 @@ describe("Dependabot policy", () => {
       ["patch", "major"],
       ["dependency-name: oxlint", "dependency-name: oxfmt"],
       ["dependency-name: typescript", "dependency-name: other"],
+      [ignoreDeclaration("@oxlint/plugins"), ignoreDeclaration("other")],
     ];
     const exercised = new Set<string>();
     for (const [before, after] of mutations) {
@@ -164,6 +243,28 @@ describe("Dependabot policy", () => {
       for (const diagnostic of diagnostics) exercised.add(diagnostic.rule);
     }
     expect([...exercised].sort()).toEqual([...dependabotRules].sort());
+  });
+
+  test("infers GitHub Actions from root and nested action metadata", () => {
+    for (const file of [
+      "action.yml",
+      "action.yaml",
+      "actions/composite/action.yml",
+      "nested/action.yaml",
+    ]) {
+      const files = {
+        [file]: "name: Example\nruns:\n  using: composite\n  steps: []",
+      };
+      expect(check(config([update("github-actions")]), files)).toEqual([]);
+      expect(check(generateDependabotConfig({ files, policy }), files)).toEqual(
+        [],
+      );
+      expect(
+        check(config([]), files).some(({ message }) =>
+          message.includes("github-actions"),
+        ),
+      ).toBe(true);
+    }
   });
 
   test("checks action ignores separately from npm package ignores", () => {

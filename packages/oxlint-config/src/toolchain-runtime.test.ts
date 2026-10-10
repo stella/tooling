@@ -2,6 +2,7 @@
 
 import { expect, test } from "bun:test";
 
+import { githubAutomationFileKind } from "./toolchain-inputs";
 import { checkRuntimeFile, runtimeRules } from "./toolchain-runtime";
 
 const sha = "a".repeat(40);
@@ -256,12 +257,21 @@ test("quoted and flow action pins still require the matching SHA and version com
   expect(
     check(file, workflow(`      - uses: external/action@${sha} # v1`)),
   ).toEqual([]);
-  expect(
-    check(
-      file,
-      workflow("      - uses: ./local/action\n      - uses: docker://alpine:3"),
-    ),
-  ).toEqual([]);
+  expect(check(file, workflow("      - uses: ./local/action"))).toEqual([]);
+});
+
+test("Docker image actions require an explicit action-pins decision", () => {
+  for (const reference of [
+    "docker://alpine:3",
+    `docker://alpine@sha256:${"a".repeat(64)}`,
+    `docker://alpine@${sha}`,
+  ])
+    expect(
+      check(
+        ".github/workflows/ci.yml",
+        workflow(`      - uses: ${reference}`),
+      ).some(({ rule }) => rule === "action-pins"),
+    ).toBe(true);
 });
 
 test("resolved aliases and merge keys cannot hide runtime declarations", () => {
@@ -428,9 +438,10 @@ test("semantic Bun setup requires a tracked packageManager source and rejects li
     "/package.json",
   ])
     expect(
-      check(file, workflow(step.replace("package.json", reference))).some(
-        ({ rule }) => rule === "bun-pins",
-      ),
+      check(
+        file,
+        workflow(step.replace("package.json", `'${reference}'`)),
+      ).some(({ rule }) => rule === "bun-pins"),
     ).toBe(true);
   expect(
     check(
@@ -561,4 +572,74 @@ test("Rust compiler development selects its explicit pin only with rustc-dev", (
       `[tools]\nrust = '${policy.rustCompilerDevelopment}'`,
     ).some(({ rule }) => rule === "runtime-manager"),
   ).toBe(true);
+});
+
+test("action metadata is checked at the root and in arbitrary directories", () => {
+  for (const file of [
+    "action.yml",
+    "action.yaml",
+    "actions/build/action.yml",
+    "tools/nested/action.yaml",
+    ".github/actions/build/action.yml",
+  ]) {
+    expect(githubAutomationFileKind(file)).toBe("action");
+    const content = `runs:\n  using: composite\n  steps:\n    - uses: actions/checkout@${sha} # v5\n`;
+    expect(check(file, content)).toEqual([]);
+    expect(
+      check(file, content.replace(sha, "main")).some(
+        ({ rule }) => rule === "action-pins",
+      ),
+    ).toBe(true);
+  }
+  expect(githubAutomationFileKind(".github/workflows/ci.yaml")).toBe(
+    "workflow",
+  );
+  for (const file of [
+    "README.md",
+    "action.yml.txt",
+    "actions/build/actions.yml",
+    "examples/workflow.yaml",
+  ])
+    expect(githubAutomationFileKind(file)).toBeUndefined();
+});
+
+test("self-repository actions and workflows use their running commit without a ref", () => {
+  const actions = ["$/actions/build", "$/.github/actions/build"];
+  for (const reference of actions) {
+    expect(
+      check(".github/workflows/ci.yml", workflow(`      - uses: ${reference}`)),
+    ).toEqual([]);
+    expect(
+      check(
+        "action.yml",
+        `runs: {using: composite, steps: [{uses: '${reference}'}]}`,
+      ),
+    ).toEqual([]);
+    for (const suffix of ["@main", `@${sha}`])
+      expect(
+        check(
+          "action.yml",
+          `runs: {using: composite, steps: [{uses: '${reference}${suffix}'}]}`,
+        ).some(({ rule }) => rule === "action-pins"),
+      ).toBe(true);
+  }
+  expect(
+    check(
+      ".github/workflows/ci.yml",
+      "jobs: {test: {uses: '$/.github/workflows/shared.yml'}}",
+    ),
+  ).toEqual([]);
+  for (const reference of [
+    "$/",
+    "$/actions/build step",
+    "$/../outside",
+    "$/actions/${{ inputs.action }}",
+    "$\\actions\\build",
+  ])
+    expect(
+      check(
+        "action.yml",
+        `runs: {using: composite, steps: [{uses: '${reference}'}]}`,
+      ).some(({ rule }) => rule === "action-pins"),
+    ).toBe(true);
 });

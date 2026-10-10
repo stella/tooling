@@ -77,7 +77,8 @@ Unknown rules, empty reasons, duplicate rules, and malformed configurations
 fail. Opt-outs apply repository-wide to the named rule, so keep them narrow.
 
 `.github/dependabot.yml` is the shared reference. It declares each detected
-package ecosystem and update root, uses the policy schedule/groups and a
+package ecosystem and update root (Bun roots use `bun`, npm/pnpm/Yarn use
+`npm`, and uv projects use `uv`), uses the policy schedule/groups and a
 five-day cooldown, and ignores tooling-owned npm and action pins. Workspace
 members share their update root; independent manifests need their own entry.
 The generator derives the reference from the same policy and ecosystem

@@ -4,6 +4,7 @@ import { parse as parseToml } from "smol-toml";
 import { isNode, LineCounter, parseDocument, stringify } from "yaml";
 
 import { ownedDockerImageAliases } from "./toolchain-images";
+import { githubAutomationFileKind } from "./toolchain-inputs";
 
 export const dependabotRules = ["dependabot-policy"] as const;
 
@@ -106,6 +107,48 @@ type CheckDependabotOptions = {
 const isDockerfile = (file: string) =>
   /^(?:Dockerfile|Containerfile)/.test(path.posix.basename(file));
 
+const javascriptEcosystem = (
+  directory: string,
+  files: Record<string, string>,
+) => {
+  const root = directory === "/" ? "." : directory.slice(1);
+  if (files[path.posix.join(root, "bun.lock")] !== undefined) return "bun";
+  try {
+    const manifest: unknown = JSON.parse(
+      files[path.posix.join(root, "package.json")] ?? "{}",
+    );
+    if (
+      record(manifest) &&
+      typeof manifest["packageManager"] === "string" &&
+      manifest["packageManager"].startsWith("bun@")
+    )
+      return "bun";
+  } catch {
+    // Package rules diagnose malformed JSON; the root still needs update coverage.
+  }
+  return "npm";
+};
+
+const pythonEcosystem = (file: string, files: Record<string, string>) => {
+  const root = path.posix.dirname(file);
+  if (
+    files[path.posix.join(root, "uv.lock")] !== undefined ||
+    files[path.posix.join(root, "uv.toml")] !== undefined
+  )
+    return "uv";
+  const pyproject = files[path.posix.join(root, "pyproject.toml")];
+  if (pyproject !== undefined) {
+    try {
+      const parsed = parseToml(pyproject);
+      const tool = parsed["tool"];
+      if (record(tool) && record(tool["uv"])) return "uv";
+    } catch {
+      // Runtime rules diagnose malformed TOML; retain its update coverage.
+    }
+  }
+  return "pip";
+};
+
 const ecosystemRoots = (files: Record<string, string>) => {
   const roots = new Map<string, Set<string>>();
   const requireRoot = (ecosystem: string, directory: string) => {
@@ -114,25 +157,27 @@ const ecosystemRoots = (files: Record<string, string>) => {
     roots.set(ecosystem, directories);
   };
   for (const directory of workspaceRoots(files, "npm"))
-    requireRoot("npm", directory);
+    requireRoot(javascriptEcosystem(directory, files), directory);
   for (const directory of workspaceRoots(files, "cargo"))
     requireRoot("cargo", directory);
   for (const file of Object.keys(files)) {
-    if (/^\.github\/workflows\/[^/]+\.ya?ml$/.test(file))
+    if (githubAutomationFileKind(file) !== undefined)
       requireRoot("github-actions", "/");
     const name = path.posix.basename(file);
     if (isDockerfile(file)) requireRoot("docker", directoryOf(file));
     if (
       name === "pyproject.toml" ||
+      name === "uv.lock" ||
+      name === "uv.toml" ||
       /^requirements(?:[.-][^/]*)?\.txt$/.test(name)
     )
-      requireRoot("pip", directoryOf(file));
+      requireRoot(pythonEcosystem(file, files), directoryOf(file));
   }
   return roots;
 };
 
 const ignoredFor = (ecosystem: string, policy: DependabotPolicy) => {
-  if (ecosystem === "npm") return policy.ignoredPackages;
+  if (ecosystem === "npm" || ecosystem === "bun") return policy.ignoredPackages;
   if (ecosystem === "github-actions") return policy.ignoredActions;
   if (ecosystem === "docker")
     return ownedDockerImageAliases(policy.ignoredImages);
