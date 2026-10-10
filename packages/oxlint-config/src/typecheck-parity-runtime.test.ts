@@ -763,3 +763,68 @@ test.skipIf(process.env["CI"] !== "true")(
   },
   60_000,
 );
+
+test.skipIf(process.env["CI"] !== "true")(
+  "temporary repository configs preserve explicit and default original source roots",
+  async () => {
+    const repo = process.cwd();
+    const policy: unknown = JSON.parse(
+      await readFile(
+        resolve(repo, "packages/oxlint-config/toolchain.json"),
+        "utf8",
+      ),
+    );
+    const compiler = await resolveCompiler(repo, policy);
+    const project = await realpath(
+      await mkdtemp(join(tmpdir(), "parity-original-source-roots-")),
+    );
+    try {
+      await mkdir(join(project, "src"));
+      await writeFile(join(project, "src/value.ts"), "export const value = 1;");
+      for (const rootDir of [undefined, "./src"]) {
+        await writeFile(
+          join(project, "tsconfig.json"),
+          JSON.stringify({
+            compilerOptions: {
+              noEmit: true,
+              types: [],
+              target: "ESNext",
+              module: "ESNext",
+              moduleResolution: "Bundler",
+              rootDirs: ["./src"],
+              paths: { "@/*": ["./src/*"] },
+              ...(rootDir === undefined ? {} : { rootDir }),
+            },
+            files: ["./src/input.ts", "./src/value.ts"],
+          }),
+        );
+        for (const seeded of [false, true]) {
+          await writeFile(
+            join(project, "src/input.ts"),
+            seeded
+              ? 'import { value } from "@/value"; export const result: string = value;'
+              : 'import { value } from "@/value"; export const result: number = value;',
+          );
+          const compared = await compareRepository({
+            repo: project,
+            compiler,
+            bun: process.execPath,
+            graph: discoverConfigGroups({ repo: project, compiler }),
+          });
+          if (!compared.repository.passed)
+            throw new Error(
+              compared.baseline.output + "\n" + compared.candidate.output,
+            );
+          expect(compared.repository.passed).toBe(true);
+          expect(compared.repository.configurationDiagnostics).toEqual([]);
+          const expected = seeded ? ["src/input.ts:1:2322"] : [];
+          expect(compared.baseline.diagnostics).toEqual(expected);
+          expect(compared.candidate.diagnostics).toEqual(expected);
+        }
+      }
+    } finally {
+      await rm(project, { recursive: true, force: true });
+    }
+  },
+  60_000,
+);
