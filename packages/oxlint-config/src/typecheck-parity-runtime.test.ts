@@ -383,13 +383,15 @@ test.skipIf(process.env["CI"] !== "true")(
       await writeFile(existingBuildInfo, originalBuildInfo);
       const passed = await runTypecheckParity({ repo: project, policy });
       if (!passed)
-        console.error(
-          logs
-            .filter(
-              (line) =>
-                line.includes("FAIL") || line.startsWith("Config group"),
-            )
-            .join("\n"),
+        throw new Error(
+          errors.join("\n") +
+            "\n" +
+            logs
+              .filter(
+                (line) =>
+                  line.includes("FAIL") || line.startsWith("Config group"),
+              )
+              .join("\n"),
         );
       expect(passed).toBe(true);
       expect(await readFile(existingBuildInfo, "utf8")).toBe(originalBuildInfo);
@@ -637,4 +639,83 @@ test.skipIf(process.env["CI"] !== "true")(
     }
   },
   120_000,
+);
+
+test.skipIf(process.env["CI"] !== "true")(
+  "temporary repository graph resolves root and workspace explicit type packages",
+  async () => {
+    const repo = process.cwd();
+    const policy: unknown = JSON.parse(
+      await readFile(
+        resolve(repo, "packages/oxlint-config/toolchain.json"),
+        "utf8",
+      ),
+    );
+    const compiler = await resolveCompiler(repo, policy);
+    const project = await realpath(
+      await mkdtemp(join(tmpdir(), "parity-repository-types-")),
+    );
+    try {
+      await symlink(
+        join(repo, "node_modules"),
+        join(project, "node_modules"),
+        "dir",
+      );
+      const leaf = join(project, "workspace");
+      const localTypes = join(leaf, "node_modules/workspace-test-types");
+      await mkdir(localTypes, { recursive: true });
+      await writeFile(
+        join(localTypes, "package.json"),
+        JSON.stringify({ name: "workspace-test-types", types: "index.d.ts" }),
+      );
+      await writeFile(
+        join(localTypes, "index.d.ts"),
+        "declare const workspaceValue: string;",
+      );
+      await writeFile(
+        join(project, "tsconfig.json"),
+        JSON.stringify({ files: [], references: [{ path: "./workspace" }] }),
+      );
+      await writeFile(
+        join(leaf, "tsconfig.json"),
+        JSON.stringify({
+          compilerOptions: {
+            composite: true,
+            skipLibCheck: true,
+            target: "ESNext",
+            module: "ESNext",
+            moduleResolution: "Bundler",
+            types: ["bun-types", "workspace-test-types"],
+          },
+          files: ["input.ts"],
+        }),
+      );
+      for (const seeded of [false, true]) {
+        await writeFile(
+          join(leaf, "input.ts"),
+          seeded
+            ? "export const value: typeof Bun.version = 42;"
+            : "export const value: typeof Bun.version = workspaceValue;",
+        );
+        const compared = await compareRepository({
+          repo: project,
+          compiler,
+          bun: process.execPath,
+          graph: discoverConfigGroups({ repo: project, compiler }),
+        });
+        if (!compared.repository.passed)
+          throw new Error(
+            compared.baseline.output + "\n" + compared.candidate.output,
+          );
+        expect(compared.repository.passed).toBe(true);
+        expect(compared.repository.configurationDiagnostics).toEqual([]);
+        const expected = seeded ? ["workspace/input.ts:1:2322"] : [];
+        expect(compared.baseline.diagnostics).toEqual(expected);
+        expect(compared.candidate.diagnostics).toEqual(expected);
+      }
+    } finally {
+      await rm(project, { recursive: true, force: true });
+    }
+  },
+  60_000,
 );

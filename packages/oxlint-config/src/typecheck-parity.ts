@@ -10,7 +10,7 @@ import {
 } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { resolve, join, relative, dirname } from "node:path";
+import { resolve, join, relative, dirname, basename } from "node:path";
 import { performance } from "node:perf_hooks";
 import { stripVTControlCharacters } from "node:util";
 
@@ -312,7 +312,7 @@ export const diagnosticParity = ({
 const configurationDiagnostics = (output: string, repo: string) =>
   diagnosticSet(output, repo).filter(
     (diagnostic) =>
-      /^(?:<config>:0:|.*\.json:[0-9]+:)(?:[56][0-9]{3}|1800[23])(?::|$)/.test(
+      /^(?:<config>:0:|.*\.json:[0-9]+:)(?:[56][0-9]{3}|1800[23]|2688)(?::|$)/.test(
         diagnostic,
       ) || /:1800[23](?::|$)/.test(diagnostic),
   );
@@ -923,6 +923,52 @@ type CompareRepositoryArgs = {
   bun: string;
   graph: ReturnType<typeof discoverConfigGroups>;
 };
+
+type RepositoryDiagnosticComparisonOptions = {
+  baseline: { status: number | null; output: string };
+  candidate: { status: number | null; output: string };
+  repo: string;
+  scratch: string;
+  configPaths: readonly string[];
+};
+export const repositoryDiagnosticComparison = ({
+  baseline,
+  candidate,
+  repo,
+  scratch,
+  configPaths,
+}: RepositoryDiagnosticComparisonOptions) => {
+  const configs = new Set(configPaths.map((path) => resolve(path)));
+  const configurationErrors = (output: string) => [
+    ...new Set([
+      ...configurationDiagnostics(output, repo),
+      ...diagnosticSet(output, repo).filter((diagnostic) => {
+        const file = /^(.*):[0-9]+:[0-9]+$/.exec(diagnostic)?.at(1);
+        return file !== undefined && configs.has(resolve(repo, file));
+      }),
+    ]),
+  ];
+  const configurationErrorsFound = [
+    ...configurationErrors(baseline.output).map(
+      (diagnostic) => `TypeScript: ${diagnostic}`,
+    ),
+    ...configurationErrors(candidate.output).map(
+      (diagnostic) => `Bun: ${diagnostic}`,
+    ),
+  ];
+  const diagnostics = (output: string) =>
+    sourceDiagnosticSet({ output, repo, scratch, configPaths });
+  const comparison = compareDiagnosticSets(
+    { status: baseline.status, diagnostics: diagnostics(baseline.output) },
+    { status: candidate.status, diagnostics: diagnostics(candidate.output) },
+  );
+  return {
+    ...comparison,
+    passed: configurationErrorsFound.length === 0 && comparison.passed,
+    configurationDiagnostics: configurationErrorsFound,
+  };
+};
+
 export const compareRepository = async ({
   repo,
   compiler,
@@ -932,17 +978,51 @@ export const compareRepository = async ({
   const scratch = await mkdtemp(join(tmpdir(), "parity-repository-"));
   try {
     const configPaths = new Map(
-      graph.projects.map((project, index) => [
+      graph.projects.map((project) => [
         project.path,
-        join(scratch, `project-${index}`, "tsconfig.json"),
+        join(scratch, "projects", relative(resolve("/"), project.path)),
       ]),
     );
+    const linkedFolders = new Set<string>();
     for (const project of graph.projects) {
       const configPath = configPaths.get(project.path);
       if (configPath === undefined)
         throw new Error(`Missing temporary project: ${project.path}`);
       const folder = dirname(configPath);
-      await mkdir(folder);
+      const outputFolder = join(
+        folder,
+        `${basename(configPath)}.parity-output`,
+      );
+      await mkdir(folder, { recursive: true });
+      for (
+        let original = dirname(project.path);
+        ;
+        original = dirname(original)
+      ) {
+        if (!linkedFolders.has(original)) {
+          linkedFolders.add(original);
+          const modules = join(original, "node_modules");
+          try {
+            if (statSync(modules).isDirectory()) {
+              const destination = join(
+                scratch,
+                "projects",
+                relative(resolve("/"), original),
+              );
+              await mkdir(destination, { recursive: true });
+              await symlink(modules, join(destination, "node_modules"), "dir");
+            }
+          } catch (error) {
+            if (
+              !(error instanceof Error) ||
+              !("code" in error) ||
+              error.code !== "ENOENT"
+            )
+              throw error;
+          }
+        }
+        if (dirname(original) === original) break;
+      }
       const options = resolvedCompilerOptions({
         configPath: project.path,
         compilerOptions: project.compilerOptions,
@@ -955,18 +1035,18 @@ export const compareRepository = async ({
       else if (options["composite"] === true)
         options["rootDir"] = dirname(project.path);
       options["noEmit"] = !graph.build;
-      options["outDir"] = join(folder, "output");
+      options["outDir"] = join(outputFolder, "output");
       const emitsDeclarations =
         options["declaration"] === true ||
         (options["composite"] === true && options["declaration"] !== false);
       if ((graph.build && emitsDeclarations) || "declarationDir" in options)
-        options["declarationDir"] = join(folder, "declarations");
+        options["declarationDir"] = join(outputFolder, "declarations");
       if (
         graph.build ||
         options["incremental"] === true ||
         options["composite"] === true
       )
-        options["tsBuildInfoFile"] = join(folder, "project.tsbuildinfo");
+        options["tsBuildInfoFile"] = join(outputFolder, "project.tsbuildinfo");
       if (graph.build) {
         options["declarationMap"] = false;
         if (emitsDeclarations) options["emitDeclarationOnly"] = true;
@@ -1028,16 +1108,16 @@ export const compareRepository = async ({
           : baselineRaw.status,
       diagnostics: baselineDiagnostics,
     };
-    const repository = compareDiagnosticSets(
-      {
-        status: baseline.status,
-        diagnostics: baselineDiagnostics,
-      },
-      {
-        status: candidate.status,
-        diagnostics: sourceDiagnostics(candidate.output),
-      },
-    );
+    const repository = repositoryDiagnosticComparison({
+      baseline,
+      candidate,
+      repo,
+      scratch,
+      configPaths: [
+        ...graph.projects.map(({ path }) => path),
+        ...configPaths.values(),
+      ],
+    });
     return {
       baseline,
       candidate: {
@@ -1083,6 +1163,8 @@ export const runTypecheckParity = async ({
   console.log(
     `repository bun: wall=${candidate.wall.toFixed(3)}s maxRSS=${candidate.maxRssKiB}KiB exit=${candidate.rawStatus}`,
   );
+  for (const diagnostic of repository.configurationDiagnostics)
+    console.error(`FAIL: invalid repository configuration: ${diagnostic}`);
   const scratch = await mkdtemp(join(tmpdir(), "typecheck-parity-"));
   const groupResults = [];
   try {

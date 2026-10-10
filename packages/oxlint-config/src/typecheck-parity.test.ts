@@ -27,9 +27,35 @@ import {
   fixtures,
   resolveCompiler,
   sourceDiagnosticSet,
+  repositoryDiagnosticComparison,
 } from "./typecheck-parity";
 
 const repo = resolve("/consumer-repo");
+
+test("repository parity rejects config diagnostics before source filtering in either direction", () => {
+  const source = "src/input.ts(1,1): error TS2322: Type mismatch.";
+  for (const configError of [
+    "/scratch/project/tsconfig.json(2,1): error TS5069: Invalid declarationDir.",
+    "/scratch/project/tsconfig.json(2,1): error TS2688: Missing types.",
+    "error TS2688: Cannot find type definition file for bun-types.",
+  ]) {
+    for (const candidateHasError of [false, true]) {
+      const clean = { status: 1, output: source };
+      const invalid = { status: 1, output: source + "\n" + configError };
+      const result = repositoryDiagnosticComparison({
+        baseline: candidateHasError ? clean : invalid,
+        candidate: candidateHasError ? invalid : clean,
+        repo,
+        scratch: "/scratch",
+        configPaths: ["/scratch/project/tsconfig.json"],
+      });
+      expect(result.passed).toBe(false);
+      expect(result.configurationDiagnostics.length).toBeGreaterThan(0);
+      expect(result.missing).toEqual([]);
+      expect(result.extra).toEqual([]);
+    }
+  }
+});
 
 test("fixture inputs reject inadmissible source kinds before compiler execution", () => {
   for (const files of [
