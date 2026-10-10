@@ -24,7 +24,10 @@ test("every service subset, including no services, round-trips without assuming 
       (_, index) => (mask & (1 << index)) !== 0,
     );
     for (const ordered of [services, services.toReversed()]) {
-      const selected = { services: ordered, install: cloudInstallCommand };
+      const selected = {
+        services: ordered,
+        install: cloudInstallCommand,
+      } as const;
       if (ordered.length === 0) {
         expect(parseCloudSetup(selected)).toEqual(selected);
         expect(parseCloudSetup(selected)).not.toHaveProperty("envFile");
@@ -46,7 +49,7 @@ test("nonobject declarations and unsupported keys fail closed", () => {
 });
 
 test("omitted services are install-only and env files require actual services", () => {
-  const installOnly = { install: cloudInstallCommand };
+  const installOnly = { install: cloudInstallCommand } as const;
   expect(parseCloudSetup(installOnly)).toEqual({
     ...installOnly,
     services: [],
