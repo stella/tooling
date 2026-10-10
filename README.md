@@ -63,7 +63,9 @@ TypeScript wherever a tool needs its compiler API or declaration generation.
 `stll-typecheck-parity` runs from a consumer repository root. It uses that repo's
 TypeScript compiler (including the declared split layout), compares repository
 diagnostics by file, line, and code, then checks 31 shipped fixture classes under
-the consumer tsconfig flags. Disabled flags are identified in the table. The
+the consumer tsconfig flags. TypeScript diagnostics determine each class's
+activation; inactive classes are identified in the table, and zero active classes
+fail the check. The
 command fails on diagnostic differences or lost seeded coverage and reports wall
 time and peak RSS for TypeScript and Bun. It requires Bun and `/usr/bin/time`
 on Linux or macOS, and runs with Node or Bun. Tooling invokes the same bin through

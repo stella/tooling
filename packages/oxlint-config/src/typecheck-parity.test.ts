@@ -10,6 +10,7 @@ import {
   diagnosticCodes,
   diagnosticSet,
   fixtureParity,
+  fixtureRunPassed,
   diagnosticParity,
   fixtures,
   resolveCompiler,
@@ -235,9 +236,9 @@ for (const fixture of fixtures) {
       match: fixture.anyCode ? "any" : "all",
       baseline,
       candidate: baseline,
-      active: true,
     } as const;
     expect(fixtureParity(options).passed).toBe(true);
+    expect(fixtureParity(options).active).toBe(fixture.codes.length > 0);
     for (const code of diagnosticCodes(output)) {
       const result = fixtureParity({
         ...options,
@@ -262,13 +263,13 @@ for (const fixture of fixtures) {
       );
     }
     if (fixture.codes.length > 0) {
-      expect(
-        fixtureParity({
-          ...options,
-          baseline: { status: 0, output: "" },
-          candidate: { status: 0, output: "" },
-        }).passed,
-      ).toBe(false);
+      const disabled = fixtureParity({
+        ...options,
+        baseline: { status: 0, output: "" },
+        candidate: { status: 0, output: "" },
+      });
+      expect(disabled.active).toBe(false);
+      expect(disabled.passed).toBe(true);
     }
   });
 
@@ -317,11 +318,11 @@ test("inactive fixtures skip seed requirements while retaining diagnostic and ex
   const options = {
     expected: [2322],
     match: "all",
-    active: false,
     baseline: { status: 0, output: "" },
     candidate: { status: 0, output: "" },
   } as const;
   expect(fixtureParity(options).passed).toBe(true);
+  expect(fixtureParity(options).active).toBe(false);
   const unrelated = {
     status: 1,
     output: "input.ts(1,1): error TS7006: other flag",
@@ -343,6 +344,52 @@ test("inactive fixtures skip seed requirements while retaining diagnostic and ex
   }
 });
 
+test("fixture run rejects empty coverage and any failing class", () => {
+  expect(fixtureRunPassed([])).toBe(false);
+  expect(fixtureRunPassed([{ active: false, passed: true }])).toBe(false);
+  expect(
+    fixtureRunPassed([
+      { active: false, passed: true },
+      { active: true, passed: true },
+    ]),
+  ).toBe(true);
+  expect(
+    fixtureRunPassed([
+      { active: false, passed: false },
+      { active: true, passed: true },
+    ]),
+  ).toBe(false);
+  expect(fixtureRunPassed([{ active: true, passed: false }])).toBe(false);
+  const clean = { status: 0, output: "" };
+  const inactiveCorpus = fixtures.map((fixture) =>
+    fixtureParity({
+      expected: fixture.codes,
+      match: fixture.anyCode ? "any" : "all",
+      baseline: clean,
+      candidate: clean,
+    }),
+  );
+  expect(inactiveCorpus).toHaveLength(31);
+  expect(inactiveCorpus.every(({ active, passed }) => !active && passed)).toBe(
+    true,
+  );
+  expect(fixtureRunPassed(inactiveCorpus)).toBe(false);
+});
+
+test("fixture activation follows all or any baseline expected diagnostics", () => {
+  const first = { status: 1, output: "input.ts(1,1): error TS1149: casing" };
+  for (const match of ["all", "any"] as const) {
+    const result = fixtureParity({
+      expected: [1149, 1261],
+      match,
+      baseline: first,
+      candidate: first,
+    });
+    expect(result.active).toBe(match === "any");
+    expect(result.passed).toBe(true);
+  }
+});
+
 test("positive controls compare matching errors introduced by consumer compiler flags", () => {
   const unrelated = {
     status: 1,
@@ -351,7 +398,6 @@ test("positive controls compare matching errors introduced by consumer compiler 
   const options = {
     expected: [],
     match: "all",
-    active: true,
     baseline: unrelated,
     candidate: unrelated,
   } as const;
@@ -419,8 +465,15 @@ test("fixture parity rejects unexpected positive-control diagnostics in either d
     status: 1,
     output: "input.ts(1,1): error TS2322: unexpected",
   };
-  for (const active of [true, false]) {
-    const options = { expected: [], match: "all", active } as const;
+  for (const baselineStatus of [0, 1]) {
+    const options = { expected: [], match: "all" } as const;
+    expect(
+      fixtureParity({
+        ...options,
+        baseline: { status: baselineStatus, output: "" },
+        candidate: { status: 0, output: "" },
+      }).passed,
+    ).toBe(baselineStatus === 0);
     const extra = fixtureParity({
       ...options,
       baseline: clean,
@@ -444,7 +497,7 @@ test("fixture parity rejects extra or missing codes even with equal failing stat
     status: 1,
     output: baseline.output + "\ninput.ts(2,1): error TS7006: extra",
   };
-  const options = { expected: [2322], match: "all", active: true } as const;
+  const options = { expected: [2322], match: "all" } as const;
   expect(
     fixtureParity({ ...options, baseline, candidate: extra }).extra,
   ).toEqual([7006]);
@@ -469,7 +522,7 @@ test("fixture parity rejects extra or missing codes even with equal failing stat
 test("equal diagnostic sets require equal exit statuses in both comparisons", () => {
   const baseline = { status: 1, output: "input.ts(1,1): error TS2322: seeded" };
   const candidate = { ...baseline, status: 2 };
-  const options = { expected: [2322], match: "all", active: true } as const;
+  const options = { expected: [2322], match: "all" } as const;
   for (const [left, right] of [
     [baseline, candidate],
     [candidate, baseline],

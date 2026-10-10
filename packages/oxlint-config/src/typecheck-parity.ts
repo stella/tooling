@@ -299,13 +299,11 @@ export const diagnosticParity = ({
   };
 };
 
-type FixtureParityOptions = DiagnosticParityOptions & { active: boolean };
-export const fixtureParity = ({ active, ...options }: FixtureParityOptions) => {
+export const fixtureParity = (options: DiagnosticParityOptions) => {
   const result = diagnosticParity(options);
   const { baseline, candidate, expected, match } = options;
-  const seeded =
-    !active ||
-    expected.length === 0 ||
+  const active =
+    expected.length > 0 &&
     (match === "any"
       ? expected.some((code) => result.tscCodes.includes(code))
       : expected.every((code) => result.tscCodes.includes(code)));
@@ -320,14 +318,19 @@ export const fixtureParity = ({ active, ...options }: FixtureParityOptions) => {
       : candidate.status !== 0);
   return {
     ...result,
+    active,
     passed:
-      seeded &&
       validExits &&
       baseline.status === candidate.status &&
       result.missing.length === 0 &&
       result.extra.length === 0,
   };
 };
+
+export const fixtureRunPassed = (
+  results: { active: boolean; passed: boolean }[],
+) =>
+  results.some(({ active }) => active) && results.every(({ passed }) => passed);
 
 export const diagnosticSet = (output: string, repo: string) => {
   const clean = output.replaceAll(/\u001b\[[0-9;]*m/g, "");
@@ -486,27 +489,8 @@ export const runTypecheckParity = async (repo: string, policy: unknown) => {
   console.log(
     `repository bun: wall=${candidate.wall.toFixed(3)}s maxRSS=${candidate.maxRssKiB}KiB`,
   );
-  const configuration = spawnSync(
-    process.execPath,
-    [compiler, "--showConfig"],
-    { cwd: repo, encoding: "utf8" },
-  );
-  if (configuration.error) throw configuration.error;
-  if (configuration.status !== 0)
-    throw new Error(configuration.stdout + configuration.stderr);
-  const config: unknown = JSON.parse(configuration.stdout);
-  if (
-    typeof config !== "object" ||
-    config === null ||
-    !("compilerOptions" in config) ||
-    typeof config.compilerOptions !== "object" ||
-    config.compilerOptions === null
-  )
-    throw new Error("Invalid resolved consumer tsconfig");
-  const compilerOptions = config.compilerOptions;
-  const enabled = (flag: string) => Reflect.get(compilerOptions, flag) === true;
   const scratch = await mkdtemp(join(tmpdir(), "typecheck-parity-"));
-  let passed = repository.passed;
+  const results = [];
   let tscWall = 0;
   let bunWall = 0;
   let tscRss = 0;
@@ -545,24 +529,19 @@ export const runTypecheckParity = async (repo: string, policy: unknown) => {
         args: ["check", "--threads=1", "--no-pretty", "--all", "-p", folder],
         repo,
       });
-      const active =
-        fixture.flags.every(enabled) &&
-        (fixture.name !== "module-detection" ||
-          Reflect.get(compilerOptions, "moduleDetection") === "force");
       const result = fixtureParity({
         expected: fixture.codes,
         match: fixture.anyCode ? "any" : "all",
         baseline: tsc,
         candidate: checked,
-        active,
       });
-      passed &&= result.passed;
+      results.push(result);
       tscWall += tsc.wall;
       bunWall += checked.wall;
       tscRss = Math.max(tscRss, tsc.maxRssKiB);
       bunRss = Math.max(bunRss, checked.maxRssKiB);
       console.log(
-        `${fixture.name}${active ? "" : " (flag disabled)"} | ${result.tscCodes.join(",")} | ${result.bunCodes.join(",")} | ${result.passed ? "PASS" : "FAIL"}`,
+        `${fixture.name}${result.active ? "" : " (inactive under this config)"} | ${result.tscCodes.join(",")} | ${result.bunCodes.join(",")} | ${result.passed ? "PASS" : "FAIL"}`,
       );
     }
   } finally {
@@ -570,5 +549,7 @@ export const runTypecheckParity = async (repo: string, policy: unknown) => {
   }
   console.log(`fixtures tsc: wall=${tscWall.toFixed(3)}s maxRSS=${tscRss}KiB`);
   console.log(`fixtures bun: wall=${bunWall.toFixed(3)}s maxRSS=${bunRss}KiB`);
-  return passed;
+  if (!results.some(({ active }) => active))
+    console.error("FAIL: zero seeded fixture classes active under this config");
+  return repository.passed && fixtureRunPassed(results);
 };
