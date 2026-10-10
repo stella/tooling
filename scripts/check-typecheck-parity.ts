@@ -297,10 +297,10 @@ const run = async () => {
   const basePath = join(repo, "packages/typescript-config/base.json");
   const base: unknown = JSON.parse(await readFile(basePath, "utf8"));
   if (
-    !base ||
+    base === null ||
     typeof base !== "object" ||
     !("compilerOptions" in base) ||
-    !base.compilerOptions ||
+    base.compilerOptions === null ||
     typeof base.compilerOptions !== "object"
   )
     throw new Error("Invalid base config");
@@ -330,7 +330,7 @@ const run = async () => {
         }),
       );
       for (const [name, content] of Object.entries(fixture.files))
-        if (content !== undefined) await writeFile(join(folder, name), content);
+        await writeFile(join(folder, name), content);
       const tsc = spawnSync(
         bun,
         [
