@@ -767,19 +767,14 @@ export const checkRuntimeFile = ({
       const self =
         repo === undefined ||
         repo === "${{ github.repository }}" ||
-        repo === "${{ job.workflow_repository }}" ||
         (typeof repo === "string" &&
           repository !== undefined &&
           repo.toLowerCase() === repository.toLowerCase());
-      const immutableRef =
+      const workflowSource =
+        repo === "${{ job.workflow_repository }}" &&
         isScalar(checkoutRef) &&
-        typeof checkoutRef.value === "string" &&
-        (/^[a-f0-9]{40}$/.test(checkoutRef.value) ||
-          checkoutRef.value === "${{ job.workflow_sha }}");
-      const currentRoot =
-        staticRepositoryPath(prefix) &&
-        path.posix.normalize(prefix) === "." &&
-        checkoutRef === undefined;
+        checkoutRef.value === "${{ job.workflow_sha }}";
+      const currentSource = self && checkoutRef === undefined;
       if (!staticRepositoryPath(prefix)) {
         // Unknown checkout destinations may shadow any tracked selector.
         checkoutBindings.push({ path: ".", source: "untrusted" });
@@ -787,7 +782,7 @@ export const checkRuntimeFile = ({
         checkoutBindings.push({
           path: path.posix.normalize(prefix),
           source:
-            self && (immutableRef || currentRoot) && ref === approved?.sha
+            (workflowSource || currentSource) && ref === approved?.sha
               ? "tracked"
               : "untrusted",
         });

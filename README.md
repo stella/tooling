@@ -68,12 +68,13 @@ CI also checks the shared release policy's runtime selector action set against
 release-policy workflow reference.
 Other remote actions and reusable workflows require a full SHA. Local actions
 are repository-owned. The checker resolves YAML aliases and TOML tool tables.
-A runtime version file may come from a prefixed checkout of the same repository
-when that checkout uses a full commit SHA or `${{ job.workflow_sha }}` and its
-repository is omitted, names this repository, or uses `${{ github.repository }}`
-or `${{ job.workflow_repository }}`. Branches, tags, `${{ github.sha }}`, and
-foreign repositories cannot supply mapped runtime files. The guard maps its
-selector to the corresponding tracked source file; traversal paths fail.
+A runtime version file may come from a preceding checkout in the same job:
+use the exact `${{ job.workflow_repository }}` / `${{ job.workflow_sha }}` pair,
+or a same-repository checkout with no `ref`. For no-ref checkouts, omit
+`repository`, name this repository literally, or use `${{ github.repository }}`.
+The guard maps a prefixed selector to the corresponding tracked source file.
+Literal commit SHAs, branches, tags, `${{ github.sha }}`, mixed workflow contexts,
+foreign repositories, and traversal paths cannot supply mapped runtime files.
 
 The named rules are `bun-pins`, `package-pins`, `typescript-layout`,
 `node-engine`, `node-version`, `python-version`, `rust-version`,

@@ -282,7 +282,7 @@ test("GitHub origin identity reaches prefixed workflow selector validation", () 
       );
       writeFileSync(
         path.join(root, ".github/workflows/ci.yml"),
-        `jobs:\n  test:\n    steps:\n      - uses: actions/checkout@${checkout.sha} # ${checkout.version}\n        with: {repository: stella/example, ref: '${"a".repeat(40)}', path: source}\n      - uses: actions/setup-node@${setup.sha} # ${setup.version}\n        with: {node-version-file: source/.node-version}`,
+        `jobs:\n  test:\n    steps:\n      - uses: actions/checkout@${checkout.sha} # ${checkout.version}\n        with: {repository: stella/example, path: source}\n      - uses: actions/setup-node@${setup.sha} # ${setup.version}\n        with: {node-version-file: source/.node-version}`,
       );
       execFileSync("git", ["add", "."], { cwd: root });
       const diagnostics = checkToolchain({ root, policy });

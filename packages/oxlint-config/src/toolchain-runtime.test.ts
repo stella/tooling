@@ -867,7 +867,7 @@ test("aliases for whole service tables cannot hide runtime images", () => {
   }
 });
 
-test("prefixed runtime selectors map only preceding immutable same-repository checkouts", () => {
+test("prefixed runtime selectors map only preceding matching source snapshots", () => {
   const checkout = (options: string) =>
     `      - uses: actions/checkout@${sha} # v5\n        with: {${options}}`;
   const checkSource = (
@@ -893,28 +893,50 @@ test("prefixed runtime selectors map only preceding immutable same-repository ch
       `      - uses: ${action}@${sha} # ${version}\n        with: {${tool}-version-file: '${prefix}${target}'}`;
     const rule = tool === "bun" ? "bun-pins" : "runtime-workflow";
     for (const repo of [
-      "",
+      undefined,
       "stella/example",
       "STELLA/EXAMPLE",
       "${{ github.repository }}",
       "${{ job.workflow_repository }}",
+      "other/repository",
     ]) {
-      for (const revision of [sha, "${{ job.workflow_sha }}"]) {
-        const pinned = checkout(
-          `${repo === "" ? "" : `repository: '${repo}', `}ref: '${revision}', path: source`,
+      for (const revision of [
+        undefined,
+        sha,
+        "${{ job.workflow_sha }}",
+        "${{ github.sha }}",
+        "main",
+        "v1",
+      ]) {
+        const binding = checkout(
+          `${repo === undefined ? "" : `repository: '${repo}', `}${revision === undefined ? "" : `ref: '${revision}', `}path: source`,
         );
-        expect(checkSource(workflow(`${pinned}\n${setup("source/")}`))).toEqual(
-          [],
+        const trusted =
+          (repo === "${{ job.workflow_repository }}" &&
+            revision === "${{ job.workflow_sha }}") ||
+          (revision === undefined &&
+            repo !== "${{ job.workflow_repository }}" &&
+            repo !== "other/repository");
+        const mapped = checkSource(
+          workflow(`${binding}\n${setup("source/")}`),
+          { [`source/${target}`]: files[target] ?? "" },
         );
+        expect(mapped.some((entry) => entry.rule === rule)).toBe(!trusted);
+        if (!trusted) continue;
         expect(
-          checkSource(workflow(`${setup("source/")}\n${pinned}`)).some(
+          checkSource(workflow(`${setup("source/")}\n${binding}`)).some(
             (entry) => entry.rule === rule,
           ),
         ).toBe(true);
         expect(
           checkSource(
-            `jobs:\n  first:\n    steps:\n${pinned}\n  second:\n    steps:\n${setup("source/")}`,
+            `jobs:\n  first:\n    steps:\n${binding}\n  second:\n    steps:\n${setup("source/")}`,
           ).some((entry) => entry.rule === rule),
+        ).toBe(true);
+        expect(
+          checkSource(workflow(`${binding}\n${setup("source/")}`), {
+            [target]: "invalid",
+          }).some((entry) => entry.rule === rule),
         ).toBe(true);
       }
     }
@@ -926,12 +948,11 @@ test("prefixed runtime selectors map only preceding immutable same-repository ch
       "repository: '${{ job.workflow_repository }}', ref: '${{ github.sha }}', path: source",
       "repository: stella/example, ref: main, path: source",
       "repository: stella/example, ref: v1, path: source",
-      "repository: stella/example, path: source",
       "repository: stella/example, ref: '${{ github.sha }}', path: source",
-      "repository: stella/example, ref: '" + sha + "', path: '../source'",
-      "repository: stella/example, ref: '" + sha + "', path: '/source'",
-      "repository: stella/example, ref: '" + sha + "', path: 'C:/source'",
-      "repository: stella/example, ref: '" + sha + "', path: 'source\\nested'",
+      "repository: stella/example, path: '../source'",
+      "repository: stella/example, path: '/source'",
+      "repository: stella/example, path: 'C:/source'",
+      "repository: stella/example, path: 'source\\nested'",
     ]) {
       // A real tracked shadow target must never rescue a foreign/mutable binding.
       expect(
@@ -953,9 +974,7 @@ test("prefixed runtime selectors map only preceding immutable same-repository ch
         (entry) => entry.rule === rule,
       ),
     ).toBe(true);
-    const pinned = checkout(
-      `repository: stella/example, ref: '${sha}', path: source`,
-    );
+    const pinned = checkout("repository: stella/example, path: source");
     const foreign = checkout(
       `repository: other/repository, ref: '${sha}', path: source`,
     );
