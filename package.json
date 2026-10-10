@@ -32,9 +32,9 @@
     "@stll/oxlint-config": "workspace:*",
     "@stll/oxlint-plugin": "workspace:*",
     "bun-types": "1.4.3",
-    "oxfmt": "0.48.0",
-    "oxlint": "1.81.0",
-    "oxlint-tsgolint": "7.0.2001",
+    "oxfmt": "0.72.0",
+    "oxlint": "1.87.0",
+    "oxlint-tsgolint": "7.0.2003",
     "publint": "0.3.21",
     "tsdown": "0.22.9",
     "typescript": "7.0.2"

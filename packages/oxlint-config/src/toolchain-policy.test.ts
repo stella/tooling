@@ -31,8 +31,8 @@ describe("shared toolchain policy", () => {
     expect(rootPackage).toEqual(
       expect.objectContaining({
         devDependencies: expect.objectContaining({
-          oxlint: "1.81.0",
-          "oxlint-tsgolint": "7.0.2001",
+          oxlint: "1.87.0",
+          "oxlint-tsgolint": "7.0.2003",
           typescript: "7.0.2",
         }),
       }),
@@ -40,8 +40,10 @@ describe("shared toolchain policy", () => {
 
     expect(toolchain).toEqual({
       bun: "1.4.3",
-      oxlint: "1.81.0",
-      "oxlint-tsgolint": "7.0.2001",
+      oxlint: "1.87.0",
+      "@oxlint/plugins": "1.87.0",
+      oxfmt: "0.72.0",
+      "oxlint-tsgolint": "7.0.2003",
       typescript: "7.0.2",
       typescriptInstallLayouts: [
         {
@@ -78,8 +80,8 @@ describe("shared toolchain policy", () => {
     expect(oxlintPackage).toEqual(
       expect.objectContaining({
         peerDependencies: {
-          oxlint: ">=1.80.0 <2",
-          "oxlint-tsgolint": ">=7.0.2001 <8",
+          oxlint: ">=1.87.0 <2",
+          "oxlint-tsgolint": ">=7.0.2003 <8",
         },
       }),
     );

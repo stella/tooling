@@ -102,10 +102,10 @@
     "format": "oxfmt ."
   },
   "devDependencies": {
-    "@oxlint/plugins": "1.81.0",
+    "@oxlint/plugins": "1.87.0",
     "@stll/typescript-config": "workspace:*",
     "@types/node": "25.9.1",
-    "oxfmt": "0.48.0",
+    "oxfmt": "0.72.0",
     "typescript": "7.0.2"
   },
   "peerDependencies": {

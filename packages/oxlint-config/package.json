@@ -66,13 +66,13 @@
   },
   "devDependencies": {
     "@stll/typescript-config": "workspace:*",
-    "oxfmt": "0.48.0",
-    "oxlint": "1.81.0",
+    "oxfmt": "0.72.0",
+    "oxlint": "1.87.0",
     "typescript": "7.0.2"
   },
   "peerDependencies": {
-    "oxlint": ">=1.80.0 <2",
-    "oxlint-tsgolint": ">=7.0.2001 <8"
+    "oxlint": ">=1.87.0 <2",
+    "oxlint-tsgolint": ">=7.0.2003 <8"
   },
   "engines": {
     "node": "^20.19.0 || >=22.12.0"
