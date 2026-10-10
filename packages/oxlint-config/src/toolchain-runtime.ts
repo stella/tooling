@@ -891,6 +891,37 @@ export const checkRuntimeFile = ({
           selector === entry.path ||
           selector?.startsWith(`${entry.path}/`)),
     );
+    const sparseFailure = checkoutBindings.find((entry) => {
+      if (
+        selector !== undefined &&
+        entry.path !== "." &&
+        selector !== entry.path &&
+        !selector.startsWith(`${entry.path}/`)
+      )
+        return false;
+      if (entry.sparse.mode === "invalid") return true;
+      if (entry.sparse.mode !== "files") return false;
+      if (selector === undefined) return true;
+      const selectedFile =
+        entry.path === "."
+          ? selector
+          : path.posix.relative(entry.path, selector);
+      return !entry.sparse.paths.has(selectedFile);
+    });
+    if (sparseFailure !== undefined) {
+      let missingFile = "the selected version file";
+      if (selector !== undefined)
+        missingFile =
+          sparseFailure.path === "."
+            ? selector
+            : path.posix.relative(sparseFailure.path, selector);
+      add({
+        rule,
+        line,
+        message: `checkout sparse-checkout must explicitly list ${missingFile} without invalid literal patterns`,
+      });
+      return;
+    }
     if (selector === undefined) {
       if (
         tool === "bun" &&
@@ -960,15 +991,9 @@ export const checkRuntimeFile = ({
       });
       return;
     }
-    if (
-      binding !== undefined &&
-      (binding.sparse.mode === "invalid" ||
-        binding.sparse.mode === "dynamic" ||
-        (binding.sparse.mode === "files" && !binding.sparse.paths.has(target)))
-    ) {
+    if (binding !== undefined && binding.sparse.mode === "dynamic") {
       if (
         tool === "bun" &&
-        binding.sparse.mode === "dynamic" &&
         !unreviewableCheckoutSource &&
         authorizeDynamic("bun-source", line)
       )
@@ -1127,10 +1152,10 @@ export const checkRuntimeFile = ({
   };
   const getInput = (node: unknown, key: string) =>
     inputsOf(node).get(key.toUpperCase());
-  const dynamicRefBody = (value: unknown) => {
-    if (typeof value !== "string" || !value.startsWith("${{")) return undefined;
+  const expressionAt = (value: string, start: number) => {
+    if (!value.startsWith("${{", start)) return undefined;
     let quote: "'" | '"' | undefined;
-    for (let index = 3; index < value.length; index++) {
+    for (let index = start + 3; index < value.length; index++) {
       const character = value.at(index);
       if (quote !== undefined) {
         if (character === quote) {
@@ -1142,11 +1167,31 @@ export const checkRuntimeFile = ({
       if (character === "'" || character === '"') quote = character;
       else if (value.startsWith("${{", index)) return undefined;
       else if (character === "}" && value.at(index + 1) === "}")
-        return index === value.length - 2
-          ? value.slice(3, index).trim()
-          : undefined;
+        return { body: value.slice(start + 3, index).trim(), end: index + 2 };
     }
     return undefined;
+  };
+  const dynamicRefBody = (value: unknown) => {
+    if (typeof value !== "string") return undefined;
+    const expression = expressionAt(value, 0);
+    return expression?.end === value.length ? expression.body : undefined;
+  };
+  const sparseEntryIsValid = (entry: string) => {
+    let literalPath = "";
+    let position = 0;
+    while (position < entry.length) {
+      const start = entry.indexOf("${{", position);
+      const literal = entry.slice(position, start < 0 ? entry.length : start);
+      if (/[!$*?\[\]\\:]/.test(literal) || literal.split("/").includes(".."))
+        return false;
+      literalPath += literal;
+      if (start < 0) break;
+      const expression = expressionAt(entry, start);
+      if (expression === undefined || expression.body === "") return false;
+      literalPath += "expression";
+      position = expression.end;
+    }
+    return staticRepositoryPath(literalPath);
   };
   const checkoutPrefixOf = (node: unknown) => {
     const destination = getInput(node, "path");
@@ -1182,15 +1227,7 @@ export const checkRuntimeFile = ({
       .split(/\r?\n/)
       .map((entry) => entry.trim().replace(/^\//, ""))
       .filter((entry) => entry !== "");
-    if (
-      paths.length === 0 ||
-      paths.some(
-        (entry) =>
-          entry.startsWith("!") ||
-          (!dynamic(entry) &&
-            (!staticRepositoryPath(entry) || /[*?[\]]/.test(entry))),
-      )
-    )
+    if (paths.length === 0 || paths.some((entry) => !sparseEntryIsValid(entry)))
       return { mode: "invalid" };
     if (paths.some(dynamic)) return { mode: "dynamic" };
     return { mode: "files", paths: new Set(paths) };
@@ -1334,8 +1371,6 @@ export const checkRuntimeFile = ({
         repo === "${{ job.workflow_repository }}" &&
         isScalar(checkoutRef) &&
         checkoutRef.value === "${{ job.workflow_sha }}";
-      const refValue = isScalar(checkoutRef) ? checkoutRef.value : undefined;
-      const currentRef = dynamicRefBody(refValue);
       const triggers = getNode(document.contents, "on");
       const events = (() => {
         if (isMap(triggers)) return [...keysOf(triggers)];
@@ -1347,6 +1382,10 @@ export const checkRuntimeFile = ({
         return [];
       })();
       const callerContext = events.includes("workflow_call");
+      let refValue = isScalar(checkoutRef) ? checkoutRef.value : undefined;
+      if (callerContext && self && checkoutRef === undefined)
+        refValue = "${{ github.sha }}";
+      const currentRef = dynamicRefBody(refValue);
       const branchRefIsCurrent =
         events.length > 0 &&
         events.every((event) => event === "push" || event === "merge_group");
@@ -1385,7 +1424,7 @@ export const checkRuntimeFile = ({
           source: "untrusted",
           reason: "checkout destination must be a static repository path",
           line,
-          sparse: { mode: "invalid" },
+          sparse: sparseCheckoutOf(node),
         });
       } else {
         const destination = normalizeCheckoutPath(prefix);

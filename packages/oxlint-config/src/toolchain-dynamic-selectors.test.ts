@@ -346,3 +346,87 @@ test("mixed sparse expressions cannot conceal literal invalid patterns", () => {
       expect(result.diagnostics).toMatchObject([{ rule: "bun-pins" }]);
     }
 });
+
+test("default reusable checkout delegates caller manifests without inspected reads", () => {
+  for (const trigger of [
+    "workflow_call",
+    "[workflow_call, push]",
+    "{workflow_call: {}, push: {}}",
+  ])
+    for (const inputs of [
+      "",
+      "        with: {repository: '${{ github.repository }}'}\n",
+    ]) {
+      const reports: unknown[] = [];
+      expect(
+        checkRuntimeFile({
+          file,
+          text: `on: ${trigger}\njobs:\n  example:\n    steps:\n      - uses: ${action("actions/checkout")}\n${inputs}      - uses: ${action("oven-sh/setup-bun")}\n        with: {bun-version-file: package.json}\n`,
+          policy,
+          trackedFiles: new Set(["package.json"]),
+          readFile: () => {
+            throw new Error("Default caller checkout must delegate");
+          },
+          onDelegated: (report) => reports.push(report),
+        }),
+      ).toEqual([]);
+      expect(reports).toMatchObject([
+        { tool: "bun", ref: "${{ github.sha }}" },
+      ]);
+    }
+});
+
+test("expression-bearing sparse entries validate every literal fragment", () => {
+  const source = (entry: string) =>
+    `on: push\njobs:\n  example:\n    steps:\n      - uses: ${action("actions/checkout")}\n        with:\n          ref: '\${{ inputs.ref }}'\n          sparse-checkout-cone-mode: false\n          sparse-checkout: |\n            ${entry}\n      - id: setup\n        uses: ${action("oven-sh/setup-bun")}\n        with: {bun-version-file: package.json}\n`;
+  for (const entry of [
+    "*${{ inputs.suffix }}",
+    "${{ inputs.prefix }}*.json",
+    "[${{ inputs.pattern }}]",
+    "../${{ inputs.file }}",
+    "${{ inputs.path }}/../package.json",
+    "${{ inputs.prefix }}!package.json",
+    "${{ inputs.prefix }}:package.json",
+    "$UNKNOWN",
+    "${{ inputs.unclosed",
+    "${{ }}",
+    "${{ inputs.outer ${{ inputs.inner }} }}",
+  ]) {
+    const result = check(source(entry), [bunDecision]);
+    expect(result.matched).toEqual([]);
+    expect(result.diagnostics).toMatchObject([{ rule: "bun-pins" }]);
+  }
+  for (const entry of [
+    "${{ inputs.sparse }}",
+    "${{ format('}}-{0}', inputs.path) }}",
+    "${{ inputs.directory }}/package.json",
+  ])
+    expect(check(source(entry), [bunDecision])).toEqual({
+      diagnostics: [],
+      matched: [bunDecision],
+    });
+});
+
+test("all overlapping checkout sparse configurations precede declaration authorization", () => {
+  const source = (sparse: string, reverse: boolean, selector: string) => {
+    const checkout = `      - uses: ${action("actions/checkout")}\n        with: {path: snapshot}\n`;
+    const dynamicCheckout = `      - uses: ${action("actions/checkout")}\n        with:\n          path: snapshot\n          ref: '\${{ inputs.ref }}'\n          sparse-checkout-cone-mode: false\n          sparse-checkout: |\n            ${sparse}\n`;
+    return `on: push\njobs:\n  example:\n    steps:\n${reverse ? dynamicCheckout + checkout : checkout + dynamicCheckout}      - id: setup\n        uses: ${action("oven-sh/setup-bun")}\n        with: {bun-version-file: '${selector}'}\n`;
+  };
+  for (const sparse of ["src", "!package.json", "*${{ inputs.suffix }}"])
+    for (const reverse of [false, true])
+      for (const selector of [
+        "snapshot/package.json",
+        "${{ inputs.manifest }}",
+      ]) {
+        const result = check(source(sparse, reverse, selector), [bunDecision]);
+        expect(result.matched).toEqual([]);
+        expect(result.diagnostics).toMatchObject([{ rule: "bun-pins" }]);
+      }
+  for (const reverse of [false, true])
+    expect(
+      check(source("/package.json", reverse, "snapshot/package.json"), [
+        bunDecision,
+      ]),
+    ).toEqual({ diagnostics: [], matched: [bunDecision] });
+});
