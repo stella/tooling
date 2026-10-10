@@ -670,8 +670,8 @@ const resolvedCompilerOptions = ({
   const rootDir = options["rootDir"];
   if (rootDir !== undefined && typeof rootDir !== "string")
     throw new Error(`Invalid rootDir: ${configPath}`);
-  options["rootDir"] =
-    typeof rootDir === "string" ? resolve(directory, rootDir) : directory;
+  if (typeof rootDir === "string")
+    options["rootDir"] = resolve(directory, rootDir);
   let resolutionDirectory = directory;
   const absolutePaths = (value: unknown) => {
     if (
@@ -1095,7 +1095,14 @@ export const compareRepository = async ({
         options["composite"] === true;
       options["noEmit"] =
         !graph.build || (options["noEmit"] === true && !declarationsRequired);
-      options["outDir"] = join(outputFolder, "output");
+      const relocatesOutput =
+        options["noEmit"] !== true ||
+        "outDir" in options ||
+        "declarationDir" in options;
+      // Explicit source/output directories enforce containment in noEmit checks.
+      if (!("rootDir" in options) && relocatesOutput)
+        options["rootDir"] = dirname(project.path);
+      if (relocatesOutput) options["outDir"] = join(outputFolder, "output");
       const emitsDeclarations =
         options["declaration"] === true ||
         (options["composite"] === true && options["declaration"] !== false);
