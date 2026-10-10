@@ -6,6 +6,10 @@ import { cloudSetupPath, generateCloudSetup } from "./cloud-setup";
 import { parseCloudSetup } from "./cloud-setup-schema";
 import { checkDependabot, dependabotRules } from "./toolchain-dependabot";
 import {
+  parseDynamicSelectors,
+  type DynamicSelector,
+} from "./toolchain-dynamic-selectors";
+import {
   parseEngineFloors,
   resolveEngineFloor,
   type ResolvedEngineFloor,
@@ -46,12 +50,16 @@ export const parseToolchainConfiguration = (input: unknown) => {
   if (
     !record(input) ||
     Object.keys(input).some(
-      (key) => key !== "optOuts" && key !== "cloud" && key !== "engineFloors",
+      (key) =>
+        key !== "optOuts" &&
+        key !== "cloud" &&
+        key !== "engineFloors" &&
+        key !== "dynamicSelectors",
     ) ||
     (input["optOuts"] !== undefined && !array(input["optOuts"]))
   )
     throw new Error(
-      "stll-toolchain.json accepts only optOuts, cloud and engineFloors declarations",
+      "stll-toolchain.json accepts only optOuts, cloud, engineFloors and dynamicSelectors declarations",
     );
   const disabled = new Set<string>();
   const optOuts = input["optOuts"] ?? [];
@@ -83,6 +91,7 @@ export const parseToolchainConfiguration = (input: unknown) => {
     disabled,
     cloud: parseCloudSetup(input["cloud"]),
     engineFloors: parseEngineFloors(input["engineFloors"]),
+    dynamicSelectors: parseDynamicSelectors(input["dynamicSelectors"]),
   };
 };
 
@@ -158,6 +167,7 @@ export const checkToolchain = ({
   let disabled = new Set<string>();
   let cloud: ReturnType<typeof parseCloudSetup>;
   const engineFloors: ResolvedEngineFloor[] = [];
+  let dynamicSelectors: DynamicSelector[] = [];
   if (files["stll-toolchain.json"] !== undefined) {
     try {
       const configuration = parseToolchainConfiguration(
@@ -165,6 +175,7 @@ export const checkToolchain = ({
       );
       disabled = configuration.disabled;
       cloud = configuration.cloud;
+      dynamicSelectors = configuration.dynamicSelectors;
       for (const entry of configuration.engineFloors)
         engineFloors.push(resolveEngineFloor(entry, files));
     } catch (error) {
@@ -217,6 +228,7 @@ export const checkToolchain = ({
   const exercisedFloors = new Set<ResolvedEngineFloor>();
   const mismatchedFloors = new Set<ResolvedEngineFloor>();
 
+  const selectorMatches = new Map<DynamicSelector, number>();
   diagnostics.push(...checkPackageFiles({ files, policy }));
   for (const [file, text] of Object.entries(files))
     diagnostics.push(
@@ -228,6 +240,11 @@ export const checkToolchain = ({
           packages: { ...policy.packages, typescript: policy.typescript },
         },
         trackedFiles,
+        dynamicSelectors: dynamicSelectors.filter(
+          (entry) => entry.path === file,
+        ),
+        onDynamicSelector: (entry) =>
+          selectorMatches.set(entry, (selectorMatches.get(entry) ?? 0) + 1),
         repository,
         onDelegated,
         engineFloors: engineFloors.filter((entry) => entry.workflow === file),
@@ -245,6 +262,14 @@ export const checkToolchain = ({
         path: "stll-toolchain.json",
         line: 1,
         message: `engine floor ${entry.workflow}:${entry.job} requires a setup-node exact patch satisfying ${entry.package} engines.node minimum major ${entry.major}`,
+      });
+  for (const entry of dynamicSelectors)
+    if (selectorMatches.get(entry) !== 1)
+      diagnostics.push({
+        rule: "configuration",
+        path: "stll-toolchain.json",
+        line: 1,
+        message: `dynamic selector ${entry.path}:${entry.at ?? entry.line} must match exactly one unresolved ${entry.kind} selector`,
       });
   diagnostics.push(...checkDependabot({ files, policy: policy.dependabot }));
   return diagnostics.filter((diagnostic) => !disabled.has(diagnostic.rule));

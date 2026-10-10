@@ -15,6 +15,7 @@ import {
   isComposeDefinitionPath,
   isKubernetesDefinitionPath,
 } from "./toolchain-container-inputs";
+import type { DynamicSelector } from "./toolchain-dynamic-selectors";
 import {
   engineFloorSelectorMatches,
   type ResolvedEngineFloor,
@@ -74,6 +75,8 @@ type CheckRuntimeFileOptions = {
   readFile: (file: string) => string | undefined;
   repository?: string | undefined;
   onDelegated?: ((report: RuntimeDelegation) => void) | undefined;
+  dynamicSelectors?: readonly DynamicSelector[] | undefined;
+  onDynamicSelector?: ((entry: DynamicSelector) => void) | undefined;
   engineFloors?: readonly ResolvedEngineFloor[] | undefined;
   onEngineFloor?:
     | ((floor: ResolvedEngineFloor, status: "matched" | "mismatch") => void)
@@ -217,6 +220,8 @@ export const checkRuntimeFile = ({
   readFile,
   repository,
   onDelegated,
+  dynamicSelectors = [],
+  onDynamicSelector,
   engineFloors = [],
   onEngineFloor,
 }: CheckRuntimeFileOptions): RuntimeDiagnostic[] => {
@@ -229,6 +234,26 @@ export const checkRuntimeFile = ({
   >;
   const add = ({ rule, line, message }: RuntimeDiagnosticOptions) => {
     diagnostics.push({ rule, path: file, line, message });
+  };
+  let currentLocation: string | undefined;
+  const dynamic = (value: unknown) =>
+    typeof value === "string" && value.includes("$");
+  const authorizeDynamic = (
+    kind: DynamicSelector["kind"],
+    line: number,
+    at = currentLocation,
+  ) => {
+    const matches = dynamicSelectors.filter(
+      (entry) =>
+        entry.path === file &&
+        entry.kind === kind &&
+        (entry.at !== undefined ? entry.at === at : entry.line === line),
+    );
+    if (matches.length !== 1) return false;
+    const entry = matches.at(0);
+    if (entry === undefined) return false;
+    onDynamicSelector?.(entry);
+    return true;
   };
   const lineOf = (key: string) =>
     Math.max(1, lines.findIndex((line) => line.includes(key)) + 1);
@@ -521,13 +546,20 @@ export const checkRuntimeFile = ({
     image: unknown;
     line: number;
     label: string;
+    at?: string | undefined;
   };
-  const checkRuntimeImage = ({ image, line, label }: RuntimeImageOptions) => {
+  const checkRuntimeImage = ({
+    image,
+    line,
+    label,
+    at,
+  }: RuntimeImageOptions) => {
     const unknownRuntime = () => {
+      if (dynamic(image) && authorizeDynamic("image", line, at)) return;
       add({
         rule: "runtime-docker",
         line,
-        message: `cannot determine ${label} runtime; use a static image or a reasoned runtime-docker opt-out`,
+        message: `cannot determine ${label} runtime; use a static image or a scoped dynamicSelectors declaration`,
       });
     };
     if (typeof image !== "string") {
@@ -815,6 +847,7 @@ export const checkRuntimeFile = ({
           checkRuntimeImage({
             image: entry.image,
             line,
+            at: entry.path.join("."),
             label:
               classified?.ecosystem === "docker-compose"
                 ? "Compose image"
@@ -852,8 +885,14 @@ export const checkRuntimeFile = ({
   type SparseCheckout =
     | { mode: "all" }
     | { mode: "files"; paths: ReadonlySet<string> }
-    | { mode: "invalid" };
-  type CheckoutBinding = { path: string; sparse: SparseCheckout } & (
+    | { mode: "invalid" }
+    | { mode: "dynamic" }
+    | { mode: "mixed"; paths: ReadonlySet<string> };
+  type CheckoutBinding = {
+    path: string;
+    sparse: SparseCheckout;
+    dynamicSource: boolean;
+  } & (
     | { source: "tracked" }
     | { source: "untrusted"; reason: string; line: number }
     | { source: "delegated"; ref: string }
@@ -861,6 +900,7 @@ export const checkRuntimeFile = ({
   let checkoutBindings: CheckoutBinding[] = [];
   let checkoutDestinations = new Map<string, number>();
   let unknownCheckoutDestination = false;
+  let unreviewableCheckoutSource = false;
   const staticRepositoryPath = (value: unknown): value is string =>
     typeof value === "string" &&
     value !== "" &&
@@ -876,6 +916,43 @@ export const checkRuntimeFile = ({
     tool: "node" | "python" | "bun";
     line: number;
   };
+  const checkoutProvidersFor = (selector: string | undefined) => {
+    if (selector === undefined) return checkoutBindings;
+    let deepest: CheckoutBinding | undefined;
+    for (const entry of checkoutBindings) {
+      if (
+        entry.path !== "." &&
+        selector !== entry.path &&
+        !selector.startsWith(`${entry.path}/`)
+      )
+        continue;
+      if (
+        deepest === undefined ||
+        (entry.path !== "." &&
+          (deepest.path === "." || entry.path.length > deepest.path.length))
+      )
+        deepest = entry;
+    }
+    return checkoutBindings.filter((entry) => entry.path === deepest?.path);
+  };
+  const hasAmbiguousCheckoutWriters = (
+    selector: string | undefined,
+    providers: readonly CheckoutBinding[],
+  ) => {
+    if (providers.length > 0)
+      return providers.some(
+        (entry) => (checkoutDestinations.get(entry.path) ?? 0) > 1,
+      );
+    // A selector before checkout cannot borrow a tracked shadow of an ambiguous destination.
+    return [...checkoutDestinations].some(
+      ([prefix, count]) =>
+        count > 1 &&
+        (selector === undefined ||
+          prefix === "." ||
+          selector === prefix ||
+          selector.startsWith(`${prefix}/`)),
+    );
+  };
   const checkReference = ({ value, tool, line }: RuntimeReferenceOptions) => {
     const selectors = {
       node: [".node-version", ".nvmrc"],
@@ -887,16 +964,42 @@ export const checkRuntimeFile = ({
     const selector = staticRepositoryPath(value)
       ? path.posix.normalize(value)
       : undefined;
-    const binding =
-      selector === undefined
-        ? undefined
-        : checkoutBindings.findLast(
-            (entry) =>
-              entry.path === "." ||
-              selector === entry.path ||
-              selector.startsWith(`${entry.path}/`),
-          );
+    const providers = checkoutProvidersFor(selector);
+    const binding = selector === undefined ? undefined : providers.at(-1);
+    const dynamicSource = providers.some((entry) => entry.dynamicSource);
+    const sparseFailure = providers.find((entry) => {
+      if (entry.sparse.mode === "invalid") return true;
+      if (entry.sparse.mode !== "files" && entry.sparse.mode !== "mixed")
+        return false;
+      if (selector === undefined) return true;
+      const selectedFile =
+        entry.path === "."
+          ? selector
+          : path.posix.relative(entry.path, selector);
+      return !entry.sparse.paths.has(selectedFile);
+    });
+    if (sparseFailure !== undefined) {
+      let missingFile = "the selected version file";
+      if (selector !== undefined)
+        missingFile =
+          sparseFailure.path === "."
+            ? selector
+            : path.posix.relative(sparseFailure.path, selector);
+      add({
+        rule,
+        line,
+        message: `checkout sparse-checkout must explicitly list ${missingFile} without invalid literal patterns`,
+      });
+      return;
+    }
     if (selector === undefined) {
+      if (
+        tool === "bun" &&
+        dynamic(value) &&
+        !unreviewableCheckoutSource &&
+        authorizeDynamic("bun-source", line)
+      )
+        return;
       add({
         rule,
         line,
@@ -906,14 +1009,15 @@ export const checkRuntimeFile = ({
     }
     if (
       unknownCheckoutDestination ||
-      [...checkoutDestinations].some(
-        ([prefix, count]) =>
-          count > 1 &&
-          (prefix === "." ||
-            selector === prefix ||
-            selector.startsWith(`${prefix}/`)),
-      )
+      hasAmbiguousCheckoutWriters(selector, providers)
     ) {
+      if (
+        tool === "bun" &&
+        dynamicSource &&
+        !unreviewableCheckoutSource &&
+        authorizeDynamic("bun-source", line)
+      )
+        return;
       add({
         rule,
         line,
@@ -922,6 +1026,13 @@ export const checkRuntimeFile = ({
       return;
     }
     if (binding?.source === "untrusted") {
+      if (
+        tool === "bun" &&
+        dynamicSource &&
+        !unreviewableCheckoutSource &&
+        authorizeDynamic("bun-source", line)
+      )
+        return;
       add({
         rule,
         line: binding.line,
@@ -946,15 +1057,20 @@ export const checkRuntimeFile = ({
     }
     if (
       binding !== undefined &&
-      (binding.sparse.mode === "invalid" ||
-        (binding.sparse.mode === "files" && !binding.sparse.paths.has(target)))
+      (binding.sparse.mode === "dynamic" || binding.sparse.mode === "mixed")
     ) {
-      add({
-        rule,
-        line,
-        message: `checkout sparse-checkout must explicitly list ${target} without dynamic, glob, or negation patterns`,
-      });
-      return;
+      if (
+        tool !== "bun" ||
+        unreviewableCheckoutSource ||
+        !authorizeDynamic("bun-source", line)
+      ) {
+        add({
+          rule,
+          line,
+          message: `checkout sparse-checkout must explicitly list ${target} without dynamic, glob, or negation patterns`,
+        });
+        return;
+      }
     }
     if (binding?.source === "delegated") {
       onDelegated?.({
@@ -1103,10 +1219,10 @@ export const checkRuntimeFile = ({
   };
   const getInput = (node: unknown, key: string) =>
     inputsOf(node).get(key.toUpperCase());
-  const dynamicRefBody = (value: unknown) => {
-    if (typeof value !== "string" || !value.startsWith("${{")) return undefined;
+  const expressionAt = (value: string, start: number) => {
+    if (!value.startsWith("${{", start)) return undefined;
     let quote: "'" | '"' | undefined;
-    for (let index = 3; index < value.length; index++) {
+    for (let index = start + 3; index < value.length; index++) {
       const character = value.at(index);
       if (quote !== undefined) {
         if (character === quote) {
@@ -1118,11 +1234,31 @@ export const checkRuntimeFile = ({
       if (character === "'" || character === '"') quote = character;
       else if (value.startsWith("${{", index)) return undefined;
       else if (character === "}" && value.at(index + 1) === "}")
-        return index === value.length - 2
-          ? value.slice(3, index).trim()
-          : undefined;
+        return { body: value.slice(start + 3, index).trim(), end: index + 2 };
     }
     return undefined;
+  };
+  const dynamicRefBody = (value: unknown) => {
+    if (typeof value !== "string") return undefined;
+    const expression = expressionAt(value, 0);
+    return expression?.end === value.length ? expression.body : undefined;
+  };
+  const sparseEntryIsValid = (entry: string) => {
+    let literalPath = "";
+    let position = 0;
+    while (position < entry.length) {
+      const start = entry.indexOf("${{", position);
+      const literal = entry.slice(position, start < 0 ? entry.length : start);
+      if (/[!$*?[\]\\:]/.test(literal) || literal.split("/").includes(".."))
+        return false;
+      literalPath += literal;
+      if (start < 0) break;
+      const expression = expressionAt(entry, start);
+      if (expression === undefined || expression.body === "") return false;
+      literalPath += "expression";
+      position = expression.end;
+    }
+    return staticRepositoryPath(literalPath);
   };
   const checkoutPrefixOf = (node: unknown) => {
     const destination = getInput(node, "path");
@@ -1156,19 +1292,16 @@ export const checkRuntimeFile = ({
       return { mode: "invalid" };
     const paths = value.value
       .split(/\r?\n/)
-      .map((entry) => entry.trim())
+      .map((entry) => entry.trim().replace(/^\//, ""))
       .filter((entry) => entry !== "");
-    if (
-      paths.length === 0 ||
-      paths.some(
-        (entry) =>
-          !staticRepositoryPath(entry) ||
-          entry.startsWith("!") ||
-          /[*?[\]]/.test(entry),
-      )
-    )
+    if (paths.length === 0 || paths.some((entry) => !sparseEntryIsValid(entry)))
       return { mode: "invalid" };
-    return { mode: "files", paths: new Set(paths) };
+    const literalPaths = new Set(paths.filter((entry) => !dynamic(entry)));
+    if (paths.some(dynamic)) {
+      if (literalPaths.size === 0) return { mode: "dynamic" };
+      return { mode: "mixed", paths: literalPaths };
+    }
+    return { mode: "files", paths: literalPaths };
   };
   let currentEngineFloor: ResolvedEngineFloor | undefined;
   const checkAction = (node: unknown) => {
@@ -1208,26 +1341,13 @@ export const checkRuntimeFile = ({
       const selector = staticRepositoryPath(value)
         ? path.posix.normalize(value)
         : undefined;
-      const binding =
-        selector === undefined
-          ? undefined
-          : checkoutBindings.findLast(
-              (entry) =>
-                entry.path === "." ||
-                selector === entry.path ||
-                selector.startsWith(`${entry.path}/`),
-            );
+      const providers = checkoutProvidersFor(selector);
+      const binding = selector === undefined ? undefined : providers.at(-1);
       if (
         selector === undefined ||
         unknownCheckoutDestination ||
         (binding !== undefined && binding.source !== "tracked") ||
-        [...checkoutDestinations].some(
-          ([prefix, count]) =>
-            count > 1 &&
-            (prefix === "." ||
-              selector === prefix ||
-              selector.startsWith(`${prefix}/`)),
-        )
+        hasAmbiguousCheckoutWriters(selector, providers)
       )
         add({
           rule: "action-pins",
@@ -1296,6 +1416,9 @@ export const checkRuntimeFile = ({
       const checkoutRepository = getInput(node, "repository");
       const checkoutRef = getInput(node, "ref");
       const prefix = checkoutPrefixOf(node);
+      const clean = getInput(node, "clean");
+      const cleanIsResolved =
+        clean === undefined || (isScalar(clean) && !dynamic(clean.value));
       let repo: unknown;
       if (checkoutRepository !== undefined)
         repo = isScalar(checkoutRepository) ? checkoutRepository.value : null;
@@ -1309,32 +1432,82 @@ export const checkRuntimeFile = ({
         repo === "${{ job.workflow_repository }}" &&
         isScalar(checkoutRef) &&
         checkoutRef.value === "${{ job.workflow_sha }}";
-      const currentSource = self && checkoutRef === undefined;
-      const refValue = isScalar(checkoutRef) ? checkoutRef.value : undefined;
+      const triggers = getNode(document.contents, "on");
+      const events = (() => {
+        if (isMap(triggers)) return [...keysOf(triggers)];
+        if (isSeq(triggers))
+          return triggers.items.map((event) =>
+            isScalar(event) ? event.value : undefined,
+          );
+        if (isScalar(triggers)) return [triggers.value];
+        return [];
+      })();
+      const callerContext = events.includes("workflow_call");
+      let refValue = isScalar(checkoutRef) ? checkoutRef.value : undefined;
+      if (
+        callerContext &&
+        (repo === undefined || repo === "${{ github.repository }}") &&
+        checkoutRef === undefined
+      )
+        refValue = "${{ github.sha }}";
+      const currentRef = dynamicRefBody(refValue);
+      const currentSource =
+        self &&
+        !callerContext &&
+        (checkoutRef === undefined || currentRef === "github.sha");
+
       const dynamicRef = dynamicRefBody(refValue);
       const delegatedSource =
+        !currentSource &&
         (self || repo === "${{ job.workflow_repository }}") &&
         dynamicRef !== undefined &&
         dynamicRef !== "" &&
         !/^(?:'(?:[^']|'')*'|"(?:[^"\\]|\\.)*"|(?:true|false|null)|-?(?:0x[\da-f]+|(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?))$/i.test(
           dynamicRef,
         ) &&
-        !/^(?:github\s*(?:\.\s*sha|\[\s*['"]sha['"]\s*\])|job\s*(?:\.\s*workflow_sha|\[\s*['"]workflow_sha['"]\s*\]))$/i.test(
+        (!/^(?:github\s*(?:\.\s*sha|\[\s*['"]sha['"]\s*\])|job\s*(?:\.\s*workflow_sha|\[\s*['"]workflow_sha['"]\s*\]))$/i.test(
           dynamicRef,
-        );
+        ) ||
+          (callerContext && currentRef === "github.sha"));
 
+      const validSource =
+        cleanIsResolved &&
+        ref === approved?.sha &&
+        sourceMap({ node, key: "if" }) === undefined &&
+        sourceMap({ node, key: "continue-on-error" }) === undefined &&
+        (currentSource || workflowSource || delegatedSource);
+      if (!validSource) unreviewableCheckoutSource = true;
       if (!staticRepositoryPath(prefix)) {
         // Unknown checkout destinations may shadow any tracked selector.
         checkoutBindings.push({
           path: ".",
+          dynamicSource: validSource && dynamic(prefix),
           source: "untrusted",
           reason: "checkout destination must be a static repository path",
           line,
-          sparse: { mode: "invalid" },
+          sparse: sparseCheckoutOf(node),
         });
       } else {
         const destination = normalizeCheckoutPath(prefix);
+        checkoutBindings = checkoutBindings.map((entry) => {
+          if (
+            entry.path === destination ||
+            (destination !== "." && !entry.path.startsWith(`${destination}/`))
+          )
+            return entry;
+          // Ancestor checkout may clear an uninitialized destination even with clean: false.
+          return {
+            path: entry.path,
+            sparse: { mode: "all" },
+            dynamicSource: false,
+            source: "untrusted",
+            reason:
+              "a later ancestor checkout invalidates this descendant destination",
+            line,
+          };
+        });
         const trustedWriter =
+          cleanIsResolved &&
           ref === approved?.sha &&
           sourceMap({ node, key: "if" }) === undefined &&
           sourceMap({ node, key: "continue-on-error" }) === undefined &&
@@ -1343,6 +1516,7 @@ export const checkRuntimeFile = ({
         if (trustedWriter && delegatedSource && typeof refValue === "string")
           checkoutBindings.push({
             path: destination,
+            dynamicSource: validSource && delegatedSource,
             sparse: sparseCheckoutOf(node),
             source: "delegated",
             ref: refValue,
@@ -1350,13 +1524,16 @@ export const checkRuntimeFile = ({
         else if (trustedWriter && (workflowSource || currentSource))
           checkoutBindings.push({
             path: destination,
+            dynamicSource: validSource && delegatedSource,
             sparse: sparseCheckoutOf(node),
             source: "tracked",
           });
         else {
           let reason =
             "checkout does not select a trusted repository source snapshot";
-          if (ref !== approved?.sha)
+          if (!cleanIsResolved)
+            reason = "checkout clean must be statically resolved";
+          else if (ref !== approved?.sha)
             reason = "actions/checkout must use the approved action SHA";
           else if (
             sourceMap({ node, key: "if" }) !== undefined ||
@@ -1371,6 +1548,7 @@ export const checkRuntimeFile = ({
             reason = "checkout destination must have exactly one static writer";
           checkoutBindings.push({
             path: destination,
+            dynamicSource: validSource && delegatedSource,
             sparse: sparseCheckoutOf(node),
             source: "untrusted",
             reason,
@@ -1425,7 +1603,7 @@ export const checkRuntimeFile = ({
       line: reference === undefined ? line : nodeLine(reference),
     });
   };
-  const checkContainer = (node: unknown) => {
+  const checkContainer = (node: unknown, at: string) => {
     node = resolveNode(node);
     if (node === undefined) return;
     const image = isMap(node) ? getNode(node, "image") : node;
@@ -1433,13 +1611,19 @@ export const checkRuntimeFile = ({
       image: isScalar(image) ? image.value : undefined,
       line: nodeLine(image ?? node),
       label: "container image",
+      at,
     });
   };
-  const checkSteps = (node: unknown, floor?: ResolvedEngineFloor) => {
+  const checkSteps = (
+    node: unknown,
+    locationPrefix: string,
+    floor?: ResolvedEngineFloor,
+  ) => {
     currentEngineFloor = undefined;
     checkoutBindings = [];
     checkoutDestinations = new Map();
     unknownCheckoutDestination = false;
+    unreviewableCheckoutSource = false;
     node = resolveNode(node);
     if (!isSeq(node)) return;
     for (const step of node.items) {
@@ -1463,9 +1647,17 @@ export const checkRuntimeFile = ({
     }
     currentEngineFloor = floor;
     try {
-      for (const step of node.items) checkAction(step);
+      for (const step of node.items) {
+        const id = getNode(step, "id");
+        currentLocation =
+          isScalar(id) && typeof id.value === "string"
+            ? `${locationPrefix}.steps.${id.value}`
+            : undefined;
+        checkAction(step);
+      }
     } finally {
       currentEngineFloor = undefined;
+      currentLocation = undefined;
     }
   };
   try {
@@ -1481,13 +1673,17 @@ export const checkRuntimeFile = ({
           currentEngineFloor = undefined;
           const job = getNode(jobs, key);
           checkAction(job);
-          checkContainer(getNode(job, "container"));
+          checkContainer(getNode(job, "container"), `jobs.${key}.container`);
           const services = getNode(job, "services");
           if (isMap(services))
             for (const service of keysOf(services))
-              checkContainer(getNode(services, service));
+              checkContainer(
+                getNode(services, service),
+                `jobs.${key}.services.${service}`,
+              );
           checkSteps(
             getNode(job, "steps"),
+            `jobs.${key}`,
             engineFloors.find((entry) => entry.job === key),
           );
         }
@@ -1495,7 +1691,7 @@ export const checkRuntimeFile = ({
       const runs = getNode(document.contents, "runs");
       const using = getNode(runs, "using");
       if (isScalar(using) && using.value === "composite")
-        checkSteps(getNode(runs, "steps"));
+        checkSteps(getNode(runs, "steps"), "runs");
       if (isScalar(using) && using.value === "docker") {
         const image = getNode(runs, "image");
         const value = isScalar(image) ? image.value : undefined;

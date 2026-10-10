@@ -693,3 +693,45 @@ test("engine floor configuration is closed, scoped and independent of optional o
   ])
     expect(() => parseToolchainConfiguration({ engineFloors })).toThrow();
 });
+
+test("dynamic selector declarations fail when absent, stale, duplicated by aliases or static", () => {
+  const file = ".github/workflows/example.yml";
+  const entry = {
+    path: file,
+    at: "jobs.example.container",
+    kind: "image",
+    reason: "Scoped image producer",
+  };
+  const source = "jobs:\n  example:\n    container: '${{ vars.IMAGE }}'\n";
+  const configured = (text: string, entries: unknown[]) =>
+    fixture({
+      [file]: text,
+      "stll-toolchain.json": JSON.stringify({ dynamicSelectors: entries }),
+    }).filter(
+      ({ rule }) => rule === "configuration" || rule === "runtime-docker",
+    );
+  expect(configured(source, [])).toMatchObject([{ rule: "runtime-docker" }]);
+  expect(configured(source, [entry])).toEqual([]);
+  for (const text of [
+    source.replace("${{ vars.IMAGE }}", "custom/image:tag"),
+    "jobs: {}\n",
+  ])
+    expect(configured(text, [entry])).toMatchObject([
+      { rule: "configuration" },
+    ]);
+  expect(
+    configured(source, [{ ...entry, path: ".github/workflows/missing.yml" }]),
+  ).toHaveLength(2);
+  const composeEntry = {
+    path: "compose.yml",
+    at: "services.example.image",
+    kind: "image",
+    reason: "Scoped service image",
+  };
+  const multi = fixture({
+    "compose.yml":
+      "services:\n  example:\n    image: '${IMAGE}'\n---\nservices:\n  example:\n    image: '${IMAGE}'\n",
+    "stll-toolchain.json": JSON.stringify({ dynamicSelectors: [composeEntry] }),
+  });
+  expect(multi.some(({ rule }) => rule === "configuration")).toBe(true);
+});

@@ -1676,7 +1676,7 @@ test("prefixed runtime selectors map only preceding matching source snapshots", 
         const trusted =
           (repo === "${{ job.workflow_repository }}" &&
             revision === "${{ job.workflow_sha }}") ||
-          (revision === undefined &&
+          ((revision === undefined || revision === "${{ github.sha }}") &&
             repo !== "${{ job.workflow_repository }}" &&
             repo !== "other/repository");
         const mapped = checkSource(
@@ -1710,7 +1710,6 @@ test("prefixed runtime selectors map only preceding matching source snapshots", 
       "repository: '${{ job.workflow_repository }}', ref: '${{ github.sha }}', path: source",
       "repository: stella/example, ref: main, path: source",
       "repository: stella/example, ref: v1, path: source",
-      "repository: stella/example, ref: '${{ github.sha }}', path: source",
       "repository: stella/example, path: '../source'",
       "repository: stella/example, path: '/source'",
       "repository: stella/example, path: 'C:/source'",
@@ -1924,7 +1923,6 @@ test("dynamic self-repository refs delegate safe selectors without reading curre
       ["stella/example", sha],
       ["stella/example", "main"],
       ["stella/example", "v1"],
-      ["stella/example", "${{ github.sha }}"],
       ["stella/example", "${{ job.workflow_sha }}"],
       ["other/repository", "${{ inputs.ref }}"],
     ]) {

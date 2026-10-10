@@ -64,15 +64,41 @@ The checkout must omit both `if` and `continue-on-error`, and its normalized
 path must be unique among every checkout in that job, including later steps.
 Unknown checkout destinations prevent mapped selectors from proving provenance.
 Sparse checkouts must explicitly list the selected repository-relative file,
-without the checkout prefix, in `sparse-checkout`. This applies in either cone
-mode and to delegated sources. Dynamic, empty, glob, negation, or unsupported
-sparse configurations fail; a cone-mode input alone is insufficient. Directory
-entries cannot substitute for the selected file.
+without the checkout prefix, in `sparse-checkout`; a root-anchored entry such as
+`/package.json` is accepted. This applies in either cone mode and to delegated
+sources. Empty, glob, negation, or unsupported sparse configurations fail; a
+cone-mode input alone is insufficient. Directory entries cannot substitute for
+the selected file. A scoped Bun-source declaration can acknowledge a dynamic
+sparse expression, but cannot waive a literal omission or invalid pattern,
+including literal patterns mixed with expression lines or literal fragments
+adjoining an expression. The deepest checkout destination containing a static selected file supplies that
+file. Sparse validation checks that provider, including every writer at the same
+destination, before expression acknowledgement; ancestor sparse settings do not
+constrain an independent nested checkout. Checkout writes are processed in step
+order: any later ancestor checkout invalidates earlier descendants, regardless of
+its clean input. Checkout may clear a destination without a matching Git repository
+even when clean is false. Unresolved clean values remain untrusted. Unknown
+selectors remain fail closed. Mixed literal/expression sparse
+configurations retain their literal paths: those paths must explicitly include a
+static selected manifest. A declaration acknowledges only expression additions;
+For every static manifest selector from the inspected source, the manifest pin
+is validated after sparse acknowledgement, including fully dynamic sparse inputs.
 Other nonempty, nonconstant GitHub expression refs on same-repository checkouts
 (including `${{ job.workflow_repository }}`) delegate a safe static version-file selector
 to that checkout. The CLI reports delegation on stdout without validating the
-current source's version file. Literal refs and unpaired `${{ github.sha }}` /
-`${{ job.workflow_sha }}` remain rejected.
+current source's version file. Current-source checkouts also accept
+`${{ github.sha }}` on the same repository, except reusable `workflow_call`
+workflows whose GitHub context belongs to the caller. Reusable workflows must
+use the exact workflow repository/SHA pair to authorize local actions. A default
+reusable-workflow checkout delegates the caller manifest just like an explicit
+caller repository/SHA binding. This default applies only when the repository is
+omitted or exactly `${{ github.repository }}`; a literal workflow-repository
+checkout without a ref does not identify the caller snapshot. Mutable `${{ github.ref }}` bindings delegate
+on every event; only the event SHA establishes the inspected snapshot. PR-head
+SHA/ref expressions and their fallbacks are delegated: they cannot establish
+local-action provenance or validate the inspected source's manifest. Local
+actions require current-source bindings. Literal refs, foreign repositories and
+unpaired `${{ job.workflow_sha }}` remain rejected.
 For snapshot-bound sources, the guard maps the selector to its tracked source
 file. Literal commit SHAs,
 branches, tags, unpaired snapshot contexts, foreign repositories, and traversal
@@ -127,6 +153,44 @@ also apply. Other jobs and runtime files follow the shared Node series.
 Missing packages or jobs, private packages, absent setup-node selectors and
 floor mismatches fail configuration validation. `optOuts` is optional when
 only `engineFloors` is declared.
+
+A runtime image or Bun source selected by an expression can have a scoped,
+reviewed `dynamicSelectors` declaration instead of a whole-rule opt-out:
+
+```json
+{
+  "dynamicSelectors": [
+    {
+      "path": ".github/workflows/example.yml",
+      "at": "jobs.example.services.database",
+      "kind": "image",
+      "reason": "The scoped image producer validates the selected image."
+    },
+    {
+      "path": ".github/workflows/example.yml",
+      "at": "jobs.example.steps.setup",
+      "kind": "bun-source",
+      "reason": "The manifest producer selects the owned source snapshot."
+    }
+  ]
+}
+```
+
+`at` identifies a job container (`jobs.<job>.container`), job service
+(`jobs.<job>.services.<service>`), Compose image (`services.<service>.image`),
+or setup step ID (`jobs.<job>.steps.<id>`; `runs.steps.<id>` in a composite
+action). If a step has no ID, replace `at` with a positive `line` number
+pointing at its version-file selector. Images without an ID locator (including
+unresolved Dockerfile `FROM` arguments) can also use a line number. Prefer IDs so unrelated edits do not
+move the declaration. Each declaration requires an exact tracked path, one
+locator, a known kind and a nonempty reason. It must match exactly one unresolved
+selector; missing, static or ambiguous locations fail configuration validation.
+An image declaration applies only to an expression, never a literal runtime pin.
+A Bun declaration acknowledges an unresolved manifest expression or same-source
+dynamic checkout ambiguity; it does not verify the selected version. Foreign or
+literal-ref checkouts, incorrect action pins and conditional/error-tolerant
+checkouts still fail. Local-action provenance is independent of these declarations.
+Review the producer named in the reason whenever the selector changes.
 
 Run the installed checker from the repository root in CI:
 

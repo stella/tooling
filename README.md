@@ -116,27 +116,12 @@ CI also checks the shared release policy's runtime selector action set against
 release-policy workflow reference.
 Other remote actions and reusable workflows require a full SHA. Local actions
 are repository-owned. The checker resolves YAML aliases and TOML tool tables.
-A runtime version file may come from a preceding checkout in the same job:
-use the exact `${{ job.workflow_repository }}` / `${{ job.workflow_sha }}` pair,
-or a same-repository checkout with no `ref`. For no-ref checkouts, omit
-`repository`, name this repository literally, or use `${{ github.repository }}`.
-The checkout must omit both `if` and `continue-on-error`, and its normalized
-path must be unique among every checkout in that job, including later steps.
-Unknown checkout destinations prevent mapped selectors from proving provenance.
-Sparse checkouts must explicitly list the selected repository-relative file,
-without the checkout prefix, in `sparse-checkout`. This applies in either cone
-mode and to delegated sources. Dynamic, empty, glob, negation, or unsupported
-sparse configurations fail; a cone-mode input alone is insufficient. Directory
-entries cannot substitute for the selected file.
-Other nonempty, nonconstant GitHub expression refs on same-repository checkouts
-(including `${{ job.workflow_repository }}`) delegate a safe static version-file selector
-to that checkout. The CLI reports delegation on stdout without validating the
-current source's version file. Literal refs and unpaired `${{ github.sha }}` /
-`${{ job.workflow_sha }}` remain rejected.
-For snapshot-bound sources, the guard maps a prefixed selector to the
-corresponding tracked source file.
-Literal commit SHAs, branches, tags, unpaired snapshot contexts,
-foreign repositories, and traversal paths cannot supply mapped runtime files.
+The package guide is the canonical contract for
+[checkout provenance, runtime version files and scoped `dynamicSelectors`](packages/oxlint-config/README.md).
+It documents current-source and delegated refs, reusable-workflow caller context,
+sparse-checkout requirements, declaration locators and fail-closed validation.
+Use scoped declarations for reviewed unresolved selectors rather than broader
+rule opt-outs; literal pins and local-action provenance remain enforced.
 
 The named rules are `bun-pins`, `package-pins`, `typescript-layout`,
 `node-engine`, `node-version`, `python-version`, `rust-version`,
