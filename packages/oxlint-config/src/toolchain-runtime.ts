@@ -904,7 +904,7 @@ export const checkRuntimeFile = ({
       });
       return;
     }
-    if (binding?.source === "delegated" && selector !== undefined) {
+    if (binding?.source === "delegated") {
       onDelegated?.({
         path: file,
         line,
