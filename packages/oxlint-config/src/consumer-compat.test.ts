@@ -35,6 +35,7 @@ import {
   consumerStagingPaths,
   consumerPackRootManifest,
   bindConsumerManifest,
+  discoverConsumerManifests,
   discoverConsumerPackages,
   oldestPublishedConsumerVersion,
   parseConsumerFixtures,
@@ -230,6 +231,22 @@ describe("consumer compatibility declarations", () => {
               pkg.manifest,
             );
         }
+        const owners = discoverConsumerManifests(files);
+        expect(owners.get(".")).toEqual(sourceRoot.manifest);
+        expect(owners.get("packages/owner")?.["private"]).toBe(true);
+        const namedOwners = discoverConsumerPackages({
+          ...files,
+          "package.json": JSON.stringify({
+            ...sourceRoot.manifest,
+            name: "root",
+          }),
+          "packages/owner/package.json": JSON.stringify({
+            ...owners.get("packages/owner"),
+            name: "owner",
+          }),
+        });
+        expect(namedOwners.get("root")?.manifest["private"]).toBe(true);
+        expect(namedOwners.get("owner")?.manifest["private"]).toBe(true);
         const discovered = discoverConsumerPackages(files);
         expect(
           [...discovered.values()].some((pkg) => pkg.directory === "."),
@@ -414,6 +431,64 @@ describe("consumer compatibility declarations", () => {
       }
     } finally {
       await rm(directory, { recursive: true, force: true });
+    }
+  });
+  test("named private workspace owners remain discoverable but cannot be selected as consumers", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "consumer-private-owner-"));
+    const fetchSpy = spyOn(globalThis, "fetch").mockRejectedValue(
+      new Error("Consumer selection must precede provisioning"),
+    );
+    try {
+      await mkdir(path.join(root, "packages/owner"), { recursive: true });
+      await mkdir(path.join(root, "fixtures/node"), { recursive: true });
+      const files = {
+        "package.json": JSON.stringify({
+          name: "root",
+          private: true,
+          workspaces: ["packages/*"],
+        }),
+        "packages/owner/package.json": JSON.stringify({
+          name: "owner",
+          private: true,
+          workspaces: ["children/*"],
+        }),
+      };
+      for (const [file, content] of Object.entries(files))
+        await writeFile(path.join(root, file), content);
+      const discovered = discoverConsumerPackages(files);
+      expect([...discovered.keys()].sort()).toEqual(["owner", "root"]);
+      execFileSync("git", ["init", "-q"], { cwd: root });
+      for (const pkg of discovered.values()) {
+        await writeFile(
+          path.join(root, "fixtures/consumer-compat.json"),
+          JSON.stringify({
+            packages: [
+              {
+                package: pkg.directory,
+                fixture: "node",
+                kind: "node",
+                build: ["npm", "run", "build"],
+                smoke: ["node", "smoke.mjs"],
+              },
+            ],
+          }),
+        );
+        execFileSync("git", ["add", "."], { cwd: root });
+        await assert.rejects(
+          runConsumerCompat({
+            root,
+            packages: [pkg.directory],
+            consumerNode: policy.consumerNode,
+            fixturePath: "fixtures",
+            policy,
+          }),
+          /selected package is not a public root or declared workspace package/u,
+        );
+      }
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+      await rm(root, { recursive: true, force: true });
     }
   });
   test("a React package cannot select a node fixture before provisioning or installing", async () => {
