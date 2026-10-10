@@ -684,6 +684,87 @@ describe("TypeScript install layouts", () => {
       }
     }
   });
+  test("launcher flags cannot conceal a compiler or broaden the declared command", () => {
+    const dependencies = {
+      "@typescript/native": "npm:typescript@7.0.2",
+      typescript: "6.0.3",
+    };
+    const expected = "node ./node_modules/@typescript/native/bin/tsc --noEmit";
+    for (const invocation of [
+      "npx -y tsc --noEmit",
+      "npx --yes --package typescript tsc --noEmit",
+      "bunx --bun tsc --noEmit",
+      "pnpm --filter app exec tsc --noEmit",
+      "pnpm dlx --package=typescript tsc --noEmit",
+      "pnpm -r tsc --noEmit",
+      "pnpm exec -r tsc --noEmit",
+      "pnpm dlx -c tsc --noEmit",
+      "pnpm -c tsc --noEmit",
+      "yarn --cwd packages/app tsc --noEmit",
+      "yarn run -- tsc --noEmit",
+      "bun x --bun tsc --noEmit",
+      "bun --cwd packages/app run tsc --noEmit",
+      "node --max-old-space-size=4096 ./node_modules/typescript/bin/tsc --noEmit",
+      "node --max-old-space-size 4096 ./node_modules/typescript/bin/tsc --noEmit",
+      "node --require ./bootstrap.js ./node_modules/typescript/bin/tsc --noEmit",
+      "node --require ./node_modules/typescript/bin/tsc --noEmit",
+      "node --import ./node_modules/@typescript/native/bin/tsc.js --noEmit",
+      "custom-launcher --flag tsc --noEmit",
+      "unknown-launcher ./node_modules/typescript/bin/tsc --noEmit",
+      "unknown-launcher bun check",
+      "unknown-launcher bun --cwd . check",
+      "unknown-launcher bun --bun check",
+      'npx -y "tsc" --noEmit',
+      'npx -y t"sc" --noEmit',
+      "npx -y 't'\"sc\" --noEmit",
+      "node ./node_modules/typescript/bin/t\\sc --noEmit",
+      "node --max-old-space-size=4096 ./node_modules/@typescript/native/bin/tsc --noEmit",
+      "node -e 'process.exit(0)' ./node_modules/@typescript/native/bin/tsc --noEmit",
+      "node --require ./bootstrap.js ./node_modules/@typescript/native/bin/tsc --noEmit",
+      "bun --cwd . check",
+    ]) {
+      for (const typecheck of [
+        invocation,
+        `NODE_OPTIONS=--trace-warnings ${invocation}`,
+        `env CI=1 ${invocation}`,
+        `${expected} && ${invocation}`,
+        `${expected} || ${invocation}`,
+        `${expected}; ${invocation}`,
+        `${expected} | ${invocation}`,
+      ])
+        expect(
+          manifest({ dependencies, scripts: { typecheck } }),
+        ).toMatchObject([{ rule: "typescript-layout" }]);
+    }
+    for (const typecheck of [
+      expected,
+      `env NODE_OPTIONS=--trace-warnings ${expected}`,
+      "node --max-old-space-size=4096 scripts/typecheck.js",
+      "node --require ./bootstrap.js scripts/typecheck.js",
+      "node -e 'process.exit(0)'",
+      "node -p 'process.version'",
+      "npx -c 'echo delegated'",
+      "bun --filter tsc typecheck",
+      "pnpm --filter tsc exec node scripts/typecheck.js",
+      "npx --package tsc node scripts/typecheck.js",
+      "bun --cwd packages/app scripts/typecheck.ts",
+      "custom-launcher scripts/typecheck.ts",
+    ])
+      expect(manifest({ dependencies, scripts: { typecheck } })).toEqual([]);
+    for (const typecheck of ["tsc --noEmit", "env CI=1 tsc --noEmit"])
+      expect(
+        manifest({
+          dependencies: { typescript: "7.0.2" },
+          scripts: { typecheck },
+        }),
+      ).toEqual([]);
+    expect(
+      manifest({
+        dependencies: { typescript: "7.0.2" },
+        scripts: { typecheck: "npx -y tsc --noEmit" },
+      }),
+    ).toMatchObject([{ rule: "typescript-layout" }]);
+  });
   test("a Bun check layout validates its direct compiler command", () => {
     const selectedPolicy = {
       ...policy,

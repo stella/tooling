@@ -85,8 +85,130 @@ const compilerCommandSegments = (command: string) => {
       }
       skipAssignments();
     }
-    return words.slice(start).join(" ");
+    return words.slice(start);
   });
+};
+
+const launcherValueOptions = new Map(
+  Object.entries({
+    npx: [
+      "-p",
+      "--package",
+      "-c",
+      "--call",
+      "--cache",
+      "--registry",
+      "--userconfig",
+    ],
+    bunx: ["-p", "--package"],
+    pnpm: ["--filter", "-F", "--dir", "-C", "--package"],
+    yarn: [
+      "--cwd",
+      "--cache-folder",
+      "--mutex",
+      "--use-yarnrc",
+      "--modules-folder",
+      "--registry",
+    ],
+    bun: [
+      "--cwd",
+      "--filter",
+      "-F",
+      "--config",
+      "-c",
+      "--env-file",
+      "-e",
+      "--eval",
+      "-p",
+      "--print",
+    ],
+    node: [
+      "-e",
+      "--eval",
+      "-p",
+      "--print",
+      "--conditions",
+      "-C",
+      "--inspect-port",
+      "--max-old-space-size",
+      "--stack-size",
+      "--title",
+      "--icu-data-dir",
+      "--openssl-config",
+      "--input-type",
+    ],
+  }).map(([launcher, options]) => [launcher, new Set(options)]),
+);
+
+// Classification sees launcher arguments; acceptance still uses the declared command.
+const invokesCompiler = (words: string[]) => {
+  const literal = (word: string) => {
+    let result = "";
+    let quote: "'" | '"' | undefined;
+    for (let index = 0; index < word.length; index += 1) {
+      const character = word.at(index);
+      if (character === quote) {
+        quote = undefined;
+        continue;
+      }
+      if (quote === undefined && (character === "'" || character === '"')) {
+        quote = character;
+        continue;
+      }
+      const next = word.at(index + 1);
+      if (
+        character === "\\" &&
+        next !== undefined &&
+        quote !== "'" &&
+        (quote === undefined || /[$`"\\\n]/.test(next))
+      ) {
+        result += next;
+        index += 1;
+      } else result += character;
+    }
+    return result;
+  };
+  const tokens = words.map(literal);
+  const compiler = (word: string) =>
+    /(?:^|\/)(?:tsc|tsgo)(?:\.js)?$/.test(word);
+  let start = 0;
+  const skipOptions = (index: number, launcher: string) => {
+    while (tokens.at(index)?.startsWith("-")) {
+      const option = tokens.at(index);
+      index += 1;
+      if (option === "--") break;
+      if (
+        option !== undefined &&
+        launcherValueOptions.get(launcher)?.has(option)
+      )
+        index += 1;
+    }
+    return index;
+  };
+  while (start < tokens.length) {
+    const launcher = tokens.at(start);
+    if (launcher === undefined || !launcherValueOptions.has(launcher)) break;
+    start = skipOptions(start + 1, launcher);
+    if (launcher === "bun" && tokens.at(start) === "check") return true;
+    const subcommand = tokens.at(start);
+    if (
+      (launcher === "bun" && (subcommand === "x" || subcommand === "run")) ||
+      (launcher === "pnpm" &&
+        (subcommand === "exec" || subcommand === "dlx")) ||
+      (launcher === "yarn" &&
+        (subcommand === "exec" || subcommand === "dlx" || subcommand === "run"))
+    ) {
+      start = skipOptions(start + 1, launcher);
+    }
+  }
+  // Explicit compiler tokens behind unsupported launchers fail closed.
+  const remaining = tokens.slice(start);
+  return remaining.some(
+    (word, index) =>
+      compiler(word) ||
+      (word === "bun" &&
+        tokens.at(skipOptions(start + index + 1, "bun")) === "check"),
+  );
 };
 
 type CheckPackageFilesOptions = {
@@ -463,13 +585,12 @@ export const checkPackageFiles = ({
         ? json["scripts"]["typecheck"]
         : undefined;
       if (selectedLayout !== undefined && typeof command === "string") {
-        const directCompiler =
-          /^bun\s+check(?:\s|$)|^(?:(?:bunx|npx|bun run|bun x)\s+(?:--[\w-]+\s+)*)?(?:\S*\/)?(?:tsc|tsgo)(?:\.js)?(?:\s|$)|^node\s+\S*\/bin\/(?:tsc|tsgo)(?:\.js)?(?:\s|$)/;
         const normalizedExpected = selectedLayout.typecheckCommand
           .replace(/\s+/g, " ")
           .trim();
-        for (const normalized of compilerCommandSegments(command)) {
-          if (!directCompiler.test(normalized)) continue;
+        for (const words of compilerCommandSegments(command)) {
+          if (!invokesCompiler(words)) continue;
+          const normalized = words.join(" ");
           if (
             normalized === normalizedExpected ||
             normalized.startsWith(`${normalizedExpected} `)
