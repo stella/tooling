@@ -12,7 +12,7 @@ import {
 import { parseToolchainPolicy } from "./toolchain-schema";
 
 const root = process.cwd();
-try {
+const main = async () => {
   const args = process.argv.slice(2);
   if (args.length === 1 && args.at(0) === "--help") {
     process.stdout.write("Usage: stll-publish-contract [--write]\n");
@@ -90,9 +90,11 @@ try {
     }
     if (checked === 0) throw new Error("No published workspace packages found");
   }
-} catch (error) {
+};
+
+main().catch((error: unknown) => {
   process.stderr.write(
     `publish-contract:1: ${error instanceof Error ? error.message : String(error)}\n`,
   );
   process.exitCode = 1;
-}
+});
