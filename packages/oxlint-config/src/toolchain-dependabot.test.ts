@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { describe, expect, test } from "bun:test";
-import { stringify } from "yaml";
+import { parseDocument, stringify } from "yaml";
 
 import {
   checkDependabot,
@@ -30,6 +30,13 @@ const policy = {
   ignoredImages: ["node", "python", "oven/bun"],
 } satisfies Policy;
 
+const fixtureIgnores = (ecosystem: string) => {
+  if (ecosystem === "npm" || ecosystem === "bun") return policy.ignoredPackages;
+  if (ecosystem === "github-actions") return policy.ignoredActions;
+  if (ecosystem === "docker" || ecosystem === "docker-compose")
+    return ownedDockerImageAliases(policy.ignoredImages);
+  return [];
+};
 const update = (ecosystem = "npm", directory = "/") => ({
   "package-ecosystem": ecosystem,
   directory,
@@ -41,14 +48,9 @@ const update = (ecosystem = "npm", directory = "/") => ({
       { patterns: group.patterns, "update-types": group.updateTypes },
     ]),
   ),
-  ignore: (ecosystem === "npm" || ecosystem === "bun"
-    ? policy.ignoredPackages
-    : ecosystem === "github-actions"
-      ? policy.ignoredActions
-      : ecosystem === "docker"
-        ? policy.ignoredImages
-        : []
-  ).map((name) => ({ "dependency-name": name })),
+  ignore: fixtureIgnores(ecosystem).map((name) => ({
+    "dependency-name": name,
+  })),
 });
 
 const check = (
@@ -66,6 +68,199 @@ const config = (updates: unknown[] = [update()]) =>
   stringify({ version: 2, updates });
 
 describe("Dependabot policy", () => {
+  test("rootless pnpm workspaces own their members while exclusions remain separate", () => {
+    const files = {
+      "pnpm-workspace.yaml": 'packages: ["packages/*", "!packages/excluded"]',
+      "packages/member/package.json": "{}",
+      "packages/excluded/package.json": "{}",
+      "standalone/package.json": "{}",
+    };
+    const good = config([
+      update(),
+      update("npm", "/packages/excluded"),
+      update("npm", "/standalone"),
+    ]);
+    expect(check(good, files)).toEqual([]);
+    const generated = generateDependabotConfig({ files, policy });
+    expect(check(generated, files)).toEqual([]);
+    expect(generated).not.toContain("/packages/member");
+    expect(
+      check(
+        config([
+          update("npm", "/packages/member"),
+          update("npm", "/packages/excluded"),
+          update("npm", "/standalone"),
+        ]),
+        files,
+      ).some(({ message }) => message.includes("covering /")),
+    ).toBe(true);
+  });
+
+  test("Cargo recursively includes in-tree path dependencies and honors workspace exclusions", () => {
+    const files = {
+      "Cargo.toml":
+        '[workspace]\nmembers=["app"]\nexclude=["excluded"]\n[workspace.dependencies]\nimplicit={path="implicit"}',
+      "app/Cargo.toml":
+        '[package]\nname="app"\n[dependencies]\nimplicit.workspace=true\nexcluded={path="../excluded"}\nexternal={path="../../external"}',
+      "implicit/Cargo.toml":
+        '[package]\nname="implicit"\n[target.cfg.dependencies]\nnested={path="../nested"}',
+      "nested/Cargo.toml":
+        '[package]\nname="nested"\n[build-dependencies]\napp={path="../app"}',
+      "excluded/Cargo.toml": '[package]\nname="excluded"',
+      "independent/Cargo.toml": '[package]\nname="independent"',
+    };
+    const good = config([
+      update("cargo"),
+      update("cargo", "/excluded"),
+      update("cargo", "/independent"),
+    ]);
+    expect(check(good, files)).toEqual([]);
+    const generated = generateDependabotConfig({ files, policy });
+    expect(check(generated, files)).toEqual([]);
+    for (const member of ["app", "implicit", "nested"])
+      expect(generated).not.toContain(`/${member}`);
+    const noMembers = {
+      "Cargo.toml":
+        '[package]\nname="root"\n[workspace]\n[dependencies]\nimplicit={path="implicit"}',
+      "implicit/Cargo.toml": '[package]\nname="implicit"',
+    };
+    expect(check(config([update("cargo")]), noMembers)).toEqual([]);
+  });
+
+  test("Cargo dependency metadata stays independent and path members are literal directories", () => {
+    const files = {
+      "Cargo.toml":
+        '[package]\nname="root"\n[workspace]\n[dependencies]\nliteral={path="crates/[lib]"}\n[package.metadata.dependencies]\nfake={path="standalone"}\n[target.cfg.metadata.dependencies]\nfake={path="target-metadata"}',
+      "crates/[lib]/Cargo.toml": '[package]\nname="literal"',
+      "crates/l/Cargo.toml": '[package]\nname="independent"',
+      "standalone/Cargo.toml": '[package]\nname="metadata"',
+      "target-metadata/Cargo.toml": '[package]\nname="target_metadata"',
+    };
+    const generated = generateDependabotConfig({ files, policy });
+    expect(check(generated, files)).toEqual([]);
+    expect(generated).not.toContain("/crates/[lib]");
+    for (const directory of ["crates/l", "standalone", "target-metadata"])
+      expect(generated).toContain(`/${directory}`);
+    expect(check(config([update("cargo")]), files)).toHaveLength(3);
+  });
+
+  test("surplus ignores cannot disable updates outside the shared pin set", () => {
+    for (const name of ["*", "ox*", "unowned-package"]) {
+      const entry = update();
+      expect(
+        check(
+          config([
+            {
+              ...entry,
+              ignore: [...entry.ignore, { "dependency-name": name }],
+            },
+          ]),
+        ).some(({ message }) => message.includes("ignore only packages owned")),
+      ).toBe(true);
+    }
+  });
+
+  test("aliased schedules and update entries preserve time strings for both YAML consumers", () => {
+    const timePolicy = {
+      ...policy,
+      schedule: { ...policy.schedule, time: "17:00" },
+    };
+    const generated = generateDependabotConfig({
+      files: { "package.json": "{}" },
+      policy: timePolicy,
+    });
+    for (const clock of ['"17:00"', "17:00"]) {
+      const withAlias = `clock: &clock ${clock}\n${generated.replace('time: "17:00"', "time: *clock")}`;
+      const updateBody = generated
+        .slice(generated.indexOf("updates:\n") + "updates:\n".length)
+        .replace(/^  - /, "  ")
+        .replace(/^    /gm, "  ")
+        .replace('time: "17:00"', "time: *clock");
+      const withUpdateAlias = `clock: &clock ${clock}\nshared: &entry\n${updateBody}\nversion: 2\nupdates:\n  - *entry\n`;
+      for (const text of [withAlias, withUpdateAlias]) {
+        const diagnostics = checkDependabot({
+          files: { "package.json": "{}", ".github/dependabot.yml": text },
+          policy: timePolicy,
+        });
+        expect(
+          diagnostics.some(({ message }) =>
+            message.includes("quote schedule time"),
+          ),
+        ).toBe(clock === "17:00");
+        if (clock !== "17:00") expect(diagnostics).toEqual([]);
+      }
+    }
+  });
+
+  test("generated schedule times are quoted strings for YAML 1.1 consumers", () => {
+    for (const time of ["07:00", "17:00", "23:59"]) {
+      const generated = generateDependabotConfig({
+        files: { "package.json": "{}" },
+        policy: { ...policy, schedule: { ...policy.schedule, time } },
+      });
+      expect(generated).toContain(`time: "${time}"`);
+      const document = parseDocument(generated, { version: "1.1" });
+      expect(document.getIn(["updates", 0, "schedule", "time"])).toBe(time);
+      expect(
+        checkDependabot({
+          files: { "package.json": "{}", ".github/dependabot.yml": generated },
+          policy: { ...policy, schedule: { ...policy.schedule, time } },
+        }),
+      ).toEqual([]);
+      expect(
+        parseDocument(generated, { version: "1.2" }).getIn([
+          "updates",
+          0,
+          "schedule",
+          "time",
+        ]),
+      ).toBe(time);
+      if (time === "17:00") {
+        const unquoted = generated.replace('time: "17:00"', "time: 17:00");
+        expect(unquoted).not.toBe(generated);
+        expect(
+          checkDependabot({
+            files: { "package.json": "{}", ".github/dependabot.yml": unquoted },
+            policy: { ...policy, schedule: { ...policy.schedule, time } },
+          }).some(({ message }) => message.includes("quote schedule time")),
+        ).toBe(true);
+      }
+    }
+  });
+
+  test("Compose and Kubernetes documents derive update roots from shared semantic images", () => {
+    const files = {
+      "compose.yaml": "services: {app: {image: 'node:26'}}",
+      "nested/COMPOSE.OVERRIDE.YAML": "services: {app: {image: 'python:3.13'}}",
+      "hidden/.compose.yaml": "services: {app: {image: 'oven/bun:1.4.3'}}",
+      "deploy/workload.yaml":
+        "apiVersion: apps/v1\nkind: Deployment\nspec: {template: {spec: {containers: [{image: 'node:26'}]}}}",
+      "notes/contract.yaml": "image: node:latest",
+    };
+    const generated = generateDependabotConfig({ files, policy });
+    expect(check(generated, files)).toEqual([]);
+    expect(generated).toContain("package-ecosystem: docker-compose");
+    expect(generated).toContain("package-ecosystem: docker");
+    for (const root of ["/nested", "/hidden", "/deploy"])
+      expect(generated).toContain(root);
+    expect(generated).not.toContain("/notes");
+    expect(
+      check(config(), files).some(({ message }) =>
+        message.includes("docker-compose"),
+      ),
+    ).toBe(true);
+    for (const name of [
+      "app.Dockerfile",
+      "dockerfile.dev",
+      "APP.CONTAINERFILE",
+    ]) {
+      const manifests = { [`images/${name}`]: "FROM node:26" };
+      const docker = generateDependabotConfig({ files: manifests, policy });
+      expect(check(docker, manifests)).toEqual([]);
+      expect(docker).toContain("package-ecosystem: docker");
+    }
+  });
+
   test("directory normalization preserves valid coverage without hiding traversal", () => {
     const files = { "app/package.json": "{}" };
     for (const directory of ["/app/", "/./app", "//app///", "/app"]) {

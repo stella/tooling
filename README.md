@@ -70,7 +70,9 @@ and comma intersections are supported for final releases; unsupported syntax
 produces a diagnostic.
 
 Direct compiler invocations in `scripts.typecheck` must use the selected
-layout command. Delegated wrappers and workspace runners are checked by the
+layout command. Classification decodes shell tokens to find compiler calls;
+acceptance requires the declared command text after leading environment
+prefixes are removed, including its option spelling and quoting. Delegated wrappers and workspace runners are checked by the
 consumer typecheck parity contract rather than inferred from manifests.
 
 Listed shared actions require their approved SHA and matching `# vX` comment.
@@ -112,6 +114,8 @@ The named rules are `bun-pins`, `package-pins`, `typescript-layout`,
   "optOuts": [{ "rule": "bun-pins", "reason": "This repository uses npm." }]
 }
 ```
+
+`node-engine` is mandatory: an opt-out cannot bypass the shared Node support range.
 
 Unknown rules, empty reasons, duplicate rules, and malformed configurations
 fail. Opt-outs apply repository-wide to the named rule, so keep them narrow.

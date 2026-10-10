@@ -41,6 +41,227 @@ const check = (files: Record<string, string>) =>
 const manifest = (value: unknown) => check({ "package.json": json(value) });
 
 describe("shared package pins", () => {
+  test("resolution selectors preserve every owned package pin", () => {
+    const owned = { ...policy.packages, "bun-types": policy.bun };
+    for (const [name, pin] of Object.entries(owned)) {
+      for (const selector of [
+        name,
+        `${name}@^1`,
+        `parent>${name}`,
+        `parent@2>${name}@^1`,
+        `**/${name}`,
+        `parent/${name}`,
+      ]) {
+        for (const field of ["overrides", "resolutions", "pnpm"])
+          for (const replacement of [
+            pin,
+            "0.0.1",
+            "^" + pin,
+            "npm:other@" + pin,
+            "-",
+          ]) {
+            const entries = { [selector]: replacement };
+            const diagnostics = manifest({
+              dependencies: { [name]: pin },
+              [field]: field === "pnpm" ? { overrides: entries } : entries,
+            });
+            if (replacement === pin) expect(diagnostics).toEqual([]);
+            else
+              expect(diagnostics).toMatchObject([
+                { rule: name === "bun-types" ? "bun-pins" : "package-pins" },
+              ]);
+          }
+      }
+      expect(
+        manifest({ overrides: { parent: { [`${name}@^1`]: { ".": pin } } } }),
+      ).toEqual([]);
+      expect(
+        manifest({ overrides: { parent: { [name]: { ".": "0.0.1" } } } }),
+      ).not.toEqual([]);
+      expect(
+        manifest({
+          devDependencies: { [name]: pin },
+          overrides: { [name]: `$${name}` },
+        }),
+      ).toEqual([]);
+      expect(manifest({ overrides: { [name]: "$missing" } })).not.toEqual([]);
+    }
+    expect(manifest({ resolutions: { "**/oxlint*": "0.0.1" } })).not.toEqual(
+      [],
+    );
+    expect(
+      manifest({
+        overrides: { unrelated: "0.0.1" },
+        resolutions: { "**/unrelated": "0.0.1" },
+      }),
+    ).toEqual([]);
+    expect(manifest({ overrides: { "oxlint>": "0.0.1" } })).toMatchObject([
+      { rule: "package-pins" },
+    ]);
+  });
+  test("pnpm workspace overrides validate references, catalogs and source lines", () => {
+    for (const replacement of [
+      "1.87.0",
+      "$oxlint",
+      "catalog:",
+      "0.0.1",
+      "$missing",
+    ]) {
+      const files = {
+        "package.json": json({ devDependencies: { oxlint: "1.87.0" } }),
+        "pnpm-workspace.yaml": stringify({
+          catalog: { oxlint: "1.87.0" },
+          overrides: { "parent>oxlint@^1": replacement },
+        }),
+      };
+      const diagnostics = check(files);
+      if (["1.87.0", "$oxlint", "catalog:"].includes(replacement))
+        expect(diagnostics).toEqual([]);
+      else
+        expect(diagnostics).toMatchObject([
+          { rule: "package-pins", path: "pnpm-workspace.yaml", line: 4 },
+        ]);
+    }
+  });
+  test("TypeScript resolution overrides cannot switch the declared compiler layout", () => {
+    const dependencies = {
+      "@typescript/native": "npm:typescript@7.0.2",
+      typescript: "6.0.3",
+    };
+    expect(manifest({ dependencies, overrides: dependencies })).toEqual([]);
+    for (const overrides of [
+      { typescript: "7.0.2" },
+      { "@typescript/native": "0.0.1" },
+      { "typescript-compat": "npm:typescript@5.0.0" },
+    ])
+      expect(manifest({ dependencies, overrides })).toMatchObject([
+        { rule: "typescript-layout" },
+      ]);
+  });
+  test("version-qualified overrides affect only matching member compiler releases", () => {
+    const children = {
+      "packages/direct/package.json": json({
+        devDependencies: { typescript: "7.0.2" },
+      }),
+      "packages/split/package.json": json({
+        devDependencies: {
+          "@typescript/native": "npm:typescript@7.0.2",
+          typescript: "6.0.3",
+        },
+      }),
+    };
+    for (const selector of [
+      "typescript@^6",
+      "typescript@>=6 <7",
+      "**/typescript@npm:^6",
+      "parent>typescript@^6",
+    ]) {
+      expect(
+        check({
+          ...children,
+          "package.json": json({
+            workspaces: ["packages/*"],
+            overrides: { [selector]: "6.0.3" },
+          }),
+        }),
+      ).toEqual([]);
+      expect(
+        check({
+          ...children,
+          "package.json": json({
+            workspaces: ["packages/*"],
+            overrides: { [selector]: "7.0.2" },
+          }),
+        }),
+      ).toMatchObject([{ rule: "typescript-layout" }]);
+    }
+    expect(
+      check({
+        ...children,
+        "package.json": json({
+          workspaces: ["packages/*"],
+          overrides: { typescript: "6.0.3" },
+        }),
+      }),
+    ).toMatchObject([{ rule: "typescript-layout" }]);
+    expect(
+      check({
+        ...children,
+        "package.json": json({
+          workspaces: ["packages/*"],
+          overrides: { "@typescript/native@^7": "npm:typescript@7.0.2" },
+        }),
+      }),
+    ).toEqual([]);
+    expect(
+      check({
+        ...children,
+        "package.json": json({
+          workspaces: ["packages/*"],
+          overrides: { "@typescript/native@^7": "7.0.2" },
+        }),
+      }),
+    ).toMatchObject([{ rule: "typescript-layout" }]);
+  });
+  test("workspace resolution overrides preserve member layouts and stop at owner boundaries", () => {
+    const split = json({
+      devDependencies: {
+        "@typescript/native": "npm:typescript@7.0.2",
+        typescript: "6.0.3",
+      },
+    });
+    for (const patterns of [
+      ["packages/**", "!packages/excluded"],
+      { packages: ["packages/**", "!packages/excluded"] },
+    ]) {
+      const root = json({
+        workspaces: patterns,
+        overrides: { typescript: "7.0.2" },
+      });
+      expect(
+        check({ "package.json": root, "packages/app/package.json": split }),
+      ).toMatchObject([{ rule: "typescript-layout", path: "package.json" }]);
+      expect(
+        check({
+          "package.json": root,
+          "standalone/package.json": split,
+          "packages/excluded/package.json": split,
+        }),
+      ).toEqual([]);
+      expect(
+        check({
+          "package.json": root,
+          "packages/nested/package.json": json({ workspaces: ["apps/*"] }),
+          "packages/nested/apps/app/package.json": split,
+        }),
+      ).toEqual([]);
+    }
+    expect(
+      check({
+        "package.json": json({}),
+        "pnpm-workspace.yaml": stringify({
+          packages: ["packages/*"],
+          overrides: { typescript: "7.0.2" },
+        }),
+        "packages/app/package.json": split,
+      }),
+    ).toMatchObject([
+      { rule: "typescript-layout", path: "pnpm-workspace.yaml" },
+    ]);
+    expect(
+      check({
+        "package.json": json({}),
+        "pnpm-workspace.yaml": stringify({
+          packages: ["packages/**"],
+          overrides: { typescript: "7.0.2" },
+        }),
+        "packages/nested/pnpm-workspace.yaml": stringify({
+          packages: ["apps/*"],
+        }),
+        "packages/nested/apps/app/package.json": split,
+      }),
+    ).toEqual([]);
+  });
   test("pnpm descendant catalogs require explicit package membership", () => {
     const files = {
       "pnpm-workspace.yaml": stringify({
@@ -836,6 +1057,72 @@ describe("TypeScript install layouts", () => {
         ]);
       }
     }
+  });
+  test("shell grouping cannot hide compiler calls or broaden approved raw commands", () => {
+    const dependencies = {
+      "@typescript/native": "npm:typescript@7.0.2",
+      typescript: "6.0.3",
+    };
+    const expected = "node ./node_modules/@typescript/native/bin/tsc --noEmit";
+    for (const invocation of [
+      "tsc --noEmit",
+      "npx -y tsc --noEmit",
+      "env NODE_OPTIONS= tsc --noEmit",
+      "bun check",
+      expected,
+    ]) {
+      for (const typecheck of [
+        `(${invocation})`,
+        `(( ${invocation} ))`,
+        `{ ${invocation}; }`,
+        `bun run prepare && (${invocation})`,
+        `(${expected}) || (${invocation})`,
+      ])
+        expect(
+          manifest({ dependencies, scripts: { typecheck } }),
+        ).toMatchObject([{ rule: "typescript-layout" }]);
+    }
+    for (const typecheck of [
+      expected,
+      "(bun scripts/typecheck.ts)",
+      "node -e 'console.log(\"tsc\")' scripts/typecheck.js",
+    ])
+      expect(manifest({ dependencies, scripts: { typecheck } })).toEqual([]);
+  });
+  test("active substitutions cannot hide compilers behind approved prefixes", () => {
+    const dependencies = {
+      "@typescript/native": "npm:typescript@7.0.2",
+      typescript: "6.0.3",
+    };
+    const expected = "node ./node_modules/@typescript/native/bin/tsc --noEmit";
+    for (const substitution of [
+      "$(tsc --noEmit)",
+      '"$(tsc --noEmit)"',
+      "`tsc --noEmit`",
+      '"`tsc --noEmit`"',
+      "$(echo $(tsc --noEmit))",
+      '"$(echo \"$(tsc --noEmit)\")"',
+    ])
+      for (const typecheck of [
+        substitution,
+        `${expected} ${substitution}`,
+        `NODE_OPTIONS=${substitution} ${expected}`,
+      ])
+        expect(
+          manifest({ dependencies, scripts: { typecheck } }),
+        ).toMatchObject([{ rule: "typescript-layout" }]);
+    for (const suffix of [
+      "'$(tsc --noEmit)'",
+      "'`tsc --noEmit`'",
+      '"\\$(tsc --noEmit)"',
+      '"\\`tsc --noEmit\\`"',
+    ])
+      expect(
+        manifest({
+          dependencies,
+          scripts: { typecheck: `${expected} ${suffix}` },
+        }),
+      ).toEqual([]);
   });
   test("launcher flags cannot conceal a compiler or broaden the declared command", () => {
     const dependencies = {

@@ -1,7 +1,20 @@
 import path from "node:path";
 import { parse as parseToml } from "smol-toml";
-import { isAlias, isMap, isScalar, isSeq, parseDocument } from "yaml";
+import {
+  isAlias,
+  isMap,
+  isScalar,
+  isSeq,
+  LineCounter,
+  parseAllDocuments,
+  parseDocument,
+} from "yaml";
 
+import {
+  containerDocumentImages,
+  isComposeDefinitionPath,
+  isKubernetesDefinitionPath,
+} from "./toolchain-container-inputs";
 import { canonicalDockerRuntime } from "./toolchain-images";
 import {
   githubAutomationFileKind,
@@ -225,13 +238,11 @@ export const checkRuntimeFile = ({
     line = 1,
     selector,
   }: RuntimePinOptions) => {
-    if (
-      !(selector === "node"
-        ? nodeSelectorMatches(value, expected)
-        : label.includes("python")
-          ? pythonSelectorMatches(value, expected)
-          : value === expected)
-    )
+    let matches = value === expected;
+    if (selector === "node") matches = nodeSelectorMatches(value, expected);
+    else if (label.includes("python"))
+      matches = pythonSelectorMatches(value, expected);
+    if (!matches)
       add({
         rule,
         line,
@@ -324,6 +335,115 @@ export const checkRuntimeFile = ({
       });
     }
   }
+  if (name === "Cargo.toml") {
+    const parsed = toml("rust-version");
+    const rustFloor = (value: unknown) => {
+      const parts =
+        typeof value === "string" &&
+        /^(?:0|[1-9]\d*)(?:\.(?:0|[1-9]\d*)){0,2}$/.test(value)
+          ? value.split(".").map(Number)
+          : undefined;
+      if (
+        parts === undefined ||
+        !parts.every(Number.isSafeInteger) ||
+        compareRelease(parts, policy.rust.split(".").map(Number)) > 0
+      )
+        add({
+          rule: "rust-version",
+          line: lineOf("rust-version"),
+          message: `Cargo rust-version must be a bare support floor at or below Rust ${policy.rust}`,
+        });
+    };
+    const readManifest = (candidate: string) => {
+      if (candidate === file) return parsed;
+      if (!trackedFiles.has(candidate)) return undefined;
+      try {
+        return parseToml(readFile(candidate) ?? "");
+      } catch {
+        return undefined;
+      }
+    };
+    if (parsed !== undefined) {
+      const workspace = parsed["workspace"];
+      const defaults = record(workspace) ? workspace["package"] : undefined;
+      if (record(defaults) && defaults["rust-version"] !== undefined)
+        rustFloor(defaults["rust-version"]);
+      const pkg = parsed["package"];
+      const version = record(pkg) ? pkg["rust-version"] : undefined;
+      if (version !== undefined) {
+        if (!record(version)) rustFloor(version);
+        else {
+          let inherited: unknown;
+          if (version["workspace"] === true && record(pkg)) {
+            const explicit = pkg["workspace"];
+            let directory = path.posix.dirname(file);
+            const explicitPath =
+              typeof explicit === "string" &&
+              !explicit.includes("\\") &&
+              !explicit.includes(":") &&
+              !explicit.includes("${{") &&
+              !path.posix.isAbsolute(explicit)
+                ? path.posix.normalize(path.posix.join(directory, explicit))
+                : undefined;
+            if (
+              explicit === undefined ||
+              (explicitPath !== undefined &&
+                explicitPath !== ".." &&
+                !explicitPath.startsWith("../"))
+            ) {
+              if (explicitPath !== undefined) directory = explicitPath;
+              while (true) {
+                const owner = readManifest(
+                  path.posix.join(directory, "Cargo.toml"),
+                );
+                const table = owner?.["workspace"];
+                if (record(table)) {
+                  const fields = table["package"];
+                  inherited = record(fields)
+                    ? fields["rust-version"]
+                    : undefined;
+                  break;
+                }
+                if (explicit !== undefined || directory === ".") break;
+                directory = path.posix.dirname(directory);
+              }
+            }
+          }
+          rustFloor(inherited);
+        }
+      }
+    }
+  }
+  if (name === "Pipfile") {
+    const parsed = toml("python-version");
+    const requires = parsed?.["requires"];
+    if (record(requires)) {
+      const minor = requires["python_version"];
+      if (
+        minor !== undefined &&
+        minor !== policy.python.split(".").slice(0, 2).join(".")
+      )
+        add({
+          rule: "python-version",
+          line: lineOf("python_version"),
+          message: `Pipfile python_version must select Python ${policy.python}`,
+        });
+      const full = requires["python_full_version"];
+      if (
+        full !== undefined &&
+        !(
+          typeof full === "string" &&
+          /^\d+\.\d+\.\d+$/.test(full) &&
+          pythonSelectorMatches(full, policy.python)
+        )
+      )
+        add({
+          rule: "python-version",
+          line: lineOf("python_full_version"),
+          message: `Pipfile python_full_version must select Python ${policy.python}`,
+        });
+    }
+  }
   if (name === "pyproject.toml" || name === "uv.toml") {
     const parsed = toml("python-version");
     if (parsed !== undefined) {
@@ -338,8 +458,8 @@ export const checkRuntimeFile = ({
             message: `requires-python must include Python ${policy.python}; unsupported constraints must use final-release version specifiers`,
           });
       const tool = parsed["tool"];
-      const uv =
-        name === "uv.toml" ? parsed : record(tool) ? tool["uv"] : undefined;
+      const configuredUv = record(tool) ? tool["uv"] : undefined;
+      const uv = name === "uv.toml" ? parsed : configuredUv;
       if (record(uv) && uv["python"] !== undefined)
         pin({
           rule: "python-version",
@@ -393,7 +513,7 @@ export const checkRuntimeFile = ({
     label: string;
   };
   const checkRuntimeImage = ({ image, line, label }: RuntimeImageOptions) => {
-    if (typeof image !== "string" || image.includes("${{")) {
+    if (typeof image !== "string" || image.includes("$")) {
       add({
         rule: "runtime-docker",
         line,
@@ -406,6 +526,14 @@ export const checkRuntimeFile = ({
     );
     if (runtime === null) return;
     const tool = runtime[1]?.toLowerCase();
+    if (image.includes("@")) {
+      add({
+        rule: tool === "oven/bun" ? "bun-pins" : "runtime-docker",
+        line,
+        message: `${label} ${tool} digest requires an approved digest policy; use a tag-only runtime image`,
+      });
+      return;
+    }
     const tag = runtime[2];
     const version =
       tool === "node"
@@ -414,12 +542,9 @@ export const checkRuntimeFile = ({
             "",
           )
         : tag?.split("-").at(0);
-    const expected =
-      tool === "node"
-        ? policy.node
-        : tool === "python"
-          ? policy.python
-          : policy.bun;
+    let expected = policy.bun;
+    if (tool === "node") expected = policy.node;
+    else if (tool === "python") expected = policy.python;
     pin({
       rule: tool === "oven/bun" ? "bun-pins" : "runtime-docker",
       value: version,
@@ -590,6 +715,61 @@ export const checkRuntimeFile = ({
         message: `unterminated Docker heredoc ${heredoc.delimiter}`,
       });
   }
+  if (isComposeDefinitionPath(file) || isKubernetesDefinitionPath(file)) {
+    const lineCounter = new LineCounter();
+    for (const containerDocument of parseAllDocuments(text, {
+      lineCounter,
+      merge: true,
+      uniqueKeys: true,
+    })) {
+      const contents = containerDocument.contents;
+      const declaredResource =
+        isMap(contents) &&
+        isScalar(contents.get("apiVersion", true)) &&
+        isScalar(contents.get("kind", true));
+      const recognizedContainer =
+        isComposeDefinitionPath(file) || declaredResource;
+      if (containerDocument.errors.length > 0) {
+        if (recognizedContainer)
+          add({
+            rule: "runtime-docker",
+            line: 1,
+            message: "invalid container YAML",
+          });
+        continue;
+      }
+      try {
+        const classified = containerDocumentImages(
+          containerDocument.toJS({ maxAliasCount: 100 }),
+          file,
+        );
+        for (const entry of classified?.images ?? []) {
+          const node = containerDocument.getIn(entry.path, true);
+          const line =
+            (isMap(node) || isScalar(node) || isSeq(node) || isAlias(node)) &&
+            node.range !== undefined &&
+            node.range !== null
+              ? lineCounter.linePos(node.range[0]).line
+              : 1;
+          checkRuntimeImage({
+            image: entry.image,
+            line,
+            label:
+              classified?.ecosystem === "docker-compose"
+                ? "Compose image"
+                : "Kubernetes image",
+          });
+        }
+      } catch {
+        if (recognizedContainer)
+          add({
+            rule: "runtime-docker",
+            line: 1,
+            message: "invalid container YAML aliases",
+          });
+      }
+    }
+  }
   const automationKind = githubAutomationFileKind(file);
   if (automationKind === undefined) return diagnostics;
   const document = parseDocument(text, { uniqueKeys: true, merge: true });
@@ -635,12 +815,12 @@ export const checkRuntimeFile = ({
     line: number;
   };
   const checkReference = ({ value, tool, line }: RuntimeReferenceOptions) => {
-    const allowed =
-      tool === "node"
-        ? [".node-version", ".nvmrc"]
-        : tool === "python"
-          ? [".python-version"]
-          : ["package.json"];
+    const selectors = {
+      node: [".node-version", ".nvmrc"],
+      python: [".python-version"],
+      bun: ["package.json"],
+    };
+    const allowed = selectors[tool];
     const rule = tool === "bun" ? "bun-pins" : "runtime-workflow";
     const selector = staticRepositoryPath(value)
       ? path.posix.normalize(value)
@@ -654,19 +834,23 @@ export const checkRuntimeFile = ({
               selector === entry.path ||
               selector.startsWith(`${entry.path}/`),
           );
-    const target =
-      selector === undefined ||
-      unknownCheckoutDestination ||
-      binding?.source === "untrusted" ||
-      [...checkoutDestinations].some(
-        ([prefix, count]) =>
-          count > 1 &&
-          (prefix === "." ||
-            selector === prefix ||
-            selector.startsWith(`${prefix}/`)),
+    let target: string | undefined;
+    if (
+      !(
+        selector === undefined ||
+        unknownCheckoutDestination ||
+        binding?.source === "untrusted" ||
+        [...checkoutDestinations].some(
+          ([prefix, count]) =>
+            count > 1 &&
+            (prefix === "." ||
+              selector === prefix ||
+              selector.startsWith(`${prefix}/`)),
+        )
       )
-        ? undefined
-        : binding === undefined || binding.path === "."
+    )
+      target =
+        binding === undefined || binding.path === "."
           ? selector
           : path.posix.relative(binding.path, selector);
     if (
@@ -831,11 +1015,8 @@ export const checkRuntimeFile = ({
   };
   const checkoutPrefixOf = (node: unknown) => {
     const destination = getNode(getNode(node, "with"), "path");
-    return destination === undefined
-      ? "."
-      : isScalar(destination)
-        ? destination.value
-        : undefined;
+    if (destination === undefined) return ".";
+    return isScalar(destination) ? destination.value : undefined;
   };
   const sparseCheckoutOf = (node: unknown): SparseCheckout => {
     const options = getNode(node, "with");
@@ -873,7 +1054,7 @@ export const checkRuntimeFile = ({
         (entry) =>
           !staticRepositoryPath(entry) ||
           entry.startsWith("!") ||
-          /[*?\[\]]/.test(entry),
+          /[*?[\]]/.test(entry),
       )
     )
       return { mode: "invalid" };
@@ -911,7 +1092,39 @@ export const checkRuntimeFile = ({
         });
       return;
     }
-    if (value.startsWith("./")) return;
+    if (value.startsWith("./")) {
+      const selector = staticRepositoryPath(value)
+        ? path.posix.normalize(value)
+        : undefined;
+      const binding =
+        selector === undefined
+          ? undefined
+          : checkoutBindings.findLast(
+              (entry) =>
+                entry.path === "." ||
+                selector === entry.path ||
+                selector.startsWith(`${entry.path}/`),
+            );
+      if (
+        selector === undefined ||
+        unknownCheckoutDestination ||
+        (binding !== undefined && binding.source !== "tracked") ||
+        [...checkoutDestinations].some(
+          ([prefix, count]) =>
+            count > 1 &&
+            (prefix === "." ||
+              selector === prefix ||
+              selector.startsWith(`${prefix}/`)),
+        )
+      )
+        add({
+          rule: "action-pins",
+          line,
+          message:
+            "local actions require an unambiguous checkout of the current source snapshot",
+        });
+      return;
+    }
     if (value.startsWith("docker://")) {
       add({
         rule: "action-pins",
@@ -967,17 +1180,14 @@ export const checkRuntimeFile = ({
         line,
         message: `${action} requires a # ${approved.version} version comment`,
       });
-    if (automationKind === "workflow" && action === "actions/checkout") {
+    if (action === "actions/checkout") {
       const options = getNode(node, "with");
       const checkoutRepository = getNode(options, "repository");
       const checkoutRef = getNode(options, "ref");
       const prefix = checkoutPrefixOf(node);
-      const repo =
-        checkoutRepository === undefined
-          ? undefined
-          : isScalar(checkoutRepository)
-            ? checkoutRepository.value
-            : null;
+      let repo: unknown;
+      if (checkoutRepository !== undefined)
+        repo = isScalar(checkoutRepository) ? checkoutRepository.value : null;
       const self =
         repo === undefined ||
         repo === "${{ github.repository }}" ||
@@ -1035,14 +1245,20 @@ export const checkRuntimeFile = ({
           });
       }
     }
-    const tool =
-      action === "actions/setup-node"
-        ? "node"
-        : action === "actions/setup-python"
-          ? "python"
-          : action === "oven-sh/setup-bun"
-            ? "bun"
-            : undefined;
+    let tool: RuntimeDelegation["tool"] | undefined;
+    switch (action) {
+      case "actions/setup-node":
+        tool = "node";
+        break;
+      case "actions/setup-python":
+        tool = "python";
+        break;
+      case "oven-sh/setup-bun":
+        tool = "bun";
+        break;
+      default:
+        return;
+    }
     if (tool === undefined) return;
     const options = getNode(node, "with");
     const literal = getNode(options, `${tool}-version`);
@@ -1075,26 +1291,25 @@ export const checkRuntimeFile = ({
     unknownCheckoutDestination = false;
     node = resolveNode(node);
     if (!isSeq(node)) return;
-    if (automationKind === "workflow")
-      for (const step of node.items) {
-        const uses = getNode(step, "uses");
-        if (
-          !isScalar(uses) ||
-          typeof uses.value !== "string" ||
-          !uses.value.toLowerCase().startsWith("actions/checkout@")
-        )
-          continue;
-        const prefix = checkoutPrefixOf(step);
-        if (!staticRepositoryPath(prefix)) {
-          unknownCheckoutDestination = true;
-          continue;
-        }
-        const destination = normalizeCheckoutPath(prefix);
-        checkoutDestinations.set(
-          destination,
-          (checkoutDestinations.get(destination) ?? 0) + 1,
-        );
+    for (const step of node.items) {
+      const uses = getNode(step, "uses");
+      if (
+        !isScalar(uses) ||
+        typeof uses.value !== "string" ||
+        !uses.value.toLowerCase().startsWith("actions/checkout@")
+      )
+        continue;
+      const prefix = checkoutPrefixOf(step);
+      if (!staticRepositoryPath(prefix)) {
+        unknownCheckoutDestination = true;
+        continue;
       }
+      const destination = normalizeCheckoutPath(prefix);
+      checkoutDestinations.set(
+        destination,
+        (checkoutDestinations.get(destination) ?? 0) + 1,
+      );
+    }
     for (const step of node.items) checkAction(step);
   };
   try {

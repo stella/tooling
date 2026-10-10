@@ -1,5 +1,6 @@
 import path from "node:path";
 import picomatch from "picomatch";
+import { satisfies, valid, validRange } from "semver";
 import { isNode, LineCounter, parseDocument } from "yaml";
 
 import { nodeSupportRangeMatches } from "./toolchain-node";
@@ -45,15 +46,83 @@ type Diagnostic = {
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+// Inspect explicit substitution bodies without evaluating shell expressions.
+const shellSubstitutions = (command: string) => {
+  type Frame = {
+    kind: "root" | "parentheses" | "backticks";
+    start: number;
+    depth: number;
+    quote: "'" | '"' | undefined;
+  };
+  const frames: Frame[] = [
+    { kind: "root", start: 0, depth: 0, quote: undefined },
+  ];
+  const bodies: string[] = [];
+  for (let index = 0; index < command.length; index += 1) {
+    const frame = frames.at(-1);
+    if (frame === undefined) break;
+    const character = command.at(index);
+    if (character === "\\" && frame.quote !== "'") {
+      index += 1;
+      continue;
+    }
+    if (character === "`" && frame.kind === "backticks") {
+      bodies.push(command.slice(frame.start, index));
+      frames.pop();
+      continue;
+    }
+    if (character === frame.quote) {
+      frame.quote = undefined;
+      continue;
+    }
+    if (frame.quote === "'") continue;
+    if (character === "$" && command.at(index + 1) === "(") {
+      frames.push({
+        kind: "parentheses",
+        start: index + 2,
+        depth: 1,
+        quote: undefined,
+      });
+      index += 1;
+      continue;
+    }
+    if (character === "`") {
+      frames.push({
+        kind: "backticks",
+        start: index + 1,
+        depth: 0,
+        quote: undefined,
+      });
+      continue;
+    }
+    if (frame.quote !== undefined) continue;
+    if (character === "'" || character === '"') {
+      frame.quote = character;
+      continue;
+    }
+    if (frame.kind !== "parentheses") continue;
+    if (character === "(") frame.depth += 1;
+    if (character === ")" && --frame.depth === 0) {
+      bodies.push(command.slice(frame.start, index));
+      frames.pop();
+    }
+  }
+  for (const frame of frames.slice(1)) bodies.push(command.slice(frame.start));
+  return bodies;
+};
+
 // Preserve quoted assignment values when separating direct shell commands.
 const compilerCommandSegments = (command: string) => {
-  const words = command.match(
-    /(?:[^\s"'\\;&|]|\\[^\n]|"(?:[^"\\]|\\.)*"|'[^']*')+|&&|\|\||[;&|\n]/g,
-  );
   const segments: string[][] = [[]];
-  for (const word of words ?? []) {
-    if (/^(?:&&|\|\||[;&|\n])$/.test(word)) segments.push([]);
-    else segments.at(-1)?.push(word);
+  for (const source of [command, ...shellSubstitutions(command)]) {
+    segments.push([]);
+    const shellWords = source.match(
+      /(?:[^\s"'\\;&|()]|\\[^\n]|"(?:[^"\\]|\\.)*"|'[^']*')+|&&|\|\||[();&|\n]/g,
+    );
+    for (const word of shellWords ?? []) {
+      if (/^(?:&&|\|\||[;&|\n])$/.test(word)) segments.push([]);
+      else segments.at(-1)?.push(word);
+    }
   }
   return segments.map((words) => {
     let start = 0;
@@ -238,19 +307,18 @@ export const checkPackageFiles = ({
   const yamlLocations = new Map<string, number[]>();
   const reportedLines = new Map<string, number>();
   const add = ({ file, rule, key, value, message }: AddDiagnosticOptions) => {
-    const serialized = JSON.stringify(value);
+    const serialized = value === undefined ? undefined : JSON.stringify(value);
     const locationKey = `${file}:${key}:${serialized ?? ""}`;
     const previous = reportedLines.get(locationKey) ?? -1;
     const yamlLine = yamlLocations.get(locationKey)?.shift();
-    const index =
-      files[file]
-        ?.split(/\r?\n/)
-        .findIndex(
-          (line, lineIndex) =>
-            lineIndex > previous &&
-            line.includes(JSON.stringify(key)) &&
-            (serialized === undefined || line.includes(serialized)),
-        ) ?? -1;
+    const index = files[file]
+      .split(/\r?\n/)
+      .findIndex(
+        (line, lineIndex) =>
+          lineIndex > previous &&
+          line.includes(JSON.stringify(key)) &&
+          (serialized === undefined || line.includes(serialized)),
+      );
     if (index >= 0) reportedLines.set(locationKey, index);
     diagnostics.push({
       rule,
@@ -292,6 +360,7 @@ export const checkPackageFiles = ({
       if (document === undefined) continue;
       const catalogEntries = [
         { catalog: json["catalog"], prefix: ["catalog"] },
+        { catalog: json["overrides"], prefix: ["overrides"] },
         ...(record(json["catalogs"])
           ? Object.entries(json["catalogs"]).map(([name, catalog]) => ({
               catalog,
@@ -424,6 +493,28 @@ export const checkPackageFiles = ({
     }
     return value;
   };
+  const workspaceOwnerFor = (file: string) => {
+    const pnpm = pnpmWorkspaceFor(file);
+    if (pnpm !== undefined)
+      return {
+        directory: pnpm.directory,
+        patterns: pnpm.workspace["packages"],
+        source: "pnpm" as const,
+      };
+    let directory = path.posix.dirname(file);
+    while (true) {
+      const root = manifests.get(path.posix.join(directory, "package.json"));
+      const workspaces = root?.["workspaces"];
+      if (workspaces !== undefined)
+        return {
+          directory,
+          patterns: record(workspaces) ? workspaces["packages"] : workspaces,
+          source: "json" as const,
+        };
+      if (directory === ".") return undefined;
+      directory = path.posix.dirname(directory);
+    }
+  };
   type WorkspaceResolution = "matched" | "nonmember" | "mismatch";
   const workspaceResolution = ({
     file,
@@ -434,22 +525,10 @@ export const checkPackageFiles = ({
     name: string;
     pin: string;
   }): WorkspaceResolution => {
-    const pnpm = pnpmWorkspaceFor(file);
-    let directory = pnpm?.directory ?? path.posix.dirname(file);
-    let patterns: unknown = pnpm?.workspace["packages"];
-    if (pnpm === undefined) {
-      while (true) {
-        const root = manifests.get(path.posix.join(directory, "package.json"));
-        const workspaces = root?.["workspaces"];
-        if (workspaces !== undefined) {
-          patterns = record(workspaces) ? workspaces["packages"] : workspaces;
-          if (!Array.isArray(patterns)) return "mismatch";
-          break;
-        }
-        if (directory === ".") return "nonmember";
-        directory = path.posix.dirname(directory);
-      }
-    }
+    const owner = workspaceOwnerFor(file);
+    if (owner === undefined) return "nonmember";
+    const { directory, patterns, source } = owner;
+    if (source === "json" && !Array.isArray(patterns)) return "mismatch";
     if (
       !workspaceContains({
         directory,
@@ -467,7 +546,7 @@ export const checkPackageFiles = ({
           directory,
           file: candidate,
           patterns,
-          rootMembership: pnpm === undefined ? "patterns" : "implicit",
+          rootMembership: source === "json" ? "patterns" : "implicit",
         }),
     );
     return candidates.length === 1 &&
@@ -499,10 +578,14 @@ export const checkPackageFiles = ({
         rule: "bun-pins",
         key: "packageManager",
         value: manager,
-        message: `packageManager Bun version must be ${policy.bun}, found ${String(manager)}`,
+        message: `packageManager Bun version must be ${policy.bun}, found ${JSON.stringify(manager)}`,
       });
     const dependencies: Record<string, unknown> = {};
-    const checkEntries = (entries: unknown, installed: boolean) => {
+    const checkEntries = (
+      entries: unknown,
+      installed: boolean,
+      location?: { key: string; value: unknown },
+    ) => {
       if (!record(entries)) return;
       for (const [name, raw] of Object.entries(entries)) {
         const value = resolve(file, name, raw);
@@ -513,8 +596,8 @@ export const checkPackageFiles = ({
             add({
               file,
               rule: "typescript-layout",
-              key: name,
-              value: raw,
+              key: location?.key ?? name,
+              value: location === undefined ? raw : location.value,
               message: `${name} must use a declared TypeScript specifier, found ${String(value)}`,
             });
           continue;
@@ -530,8 +613,8 @@ export const checkPackageFiles = ({
         add({
           file,
           rule: name === "bun-types" ? "bun-pins" : "package-pins",
-          key: name,
-          value: raw,
+          key: location?.key ?? name,
+          value: location === undefined ? raw : location.value,
           message:
             workspace === "nonmember"
               ? `${name} workspace:* consumer is not a member of its nearest workspace`
@@ -551,6 +634,140 @@ export const checkPackageFiles = ({
       for (const catalog of Object.values(source["catalogs"]))
         checkEntries(catalog, false);
     }
+    const ownedNames = new Set([...pins.keys(), ...tsSpecifiers.keys()]);
+    const resolutionDependencies: Record<string, unknown> = {};
+    const resolutionRoot = manifests.get(
+      path.posix.join(path.posix.dirname(file), "package.json"),
+    );
+    if (resolutionRoot !== undefined)
+      for (const section of [
+        "dependencies",
+        "devDependencies",
+        "optionalDependencies",
+      ]) {
+        const entries = resolutionRoot[section];
+        if (!record(entries)) continue;
+        for (const [name, value] of Object.entries(entries))
+          resolutionDependencies[name] = resolve(file, name, value);
+      }
+    const affectedSpecifiers = new Map<string, Set<unknown>>();
+    const owner = workspaceOwnerFor(file);
+    for (const [candidate, member] of manifests) {
+      if (path.posix.basename(candidate) !== "package.json") continue;
+      const memberOwner = workspaceOwnerFor(candidate);
+      const ownManifest =
+        candidate === path.posix.join(path.posix.dirname(file), "package.json");
+      if (
+        !ownManifest &&
+        !(
+          owner !== undefined &&
+          owner.directory === path.posix.dirname(file) &&
+          memberOwner?.directory === owner.directory &&
+          memberOwner.source === owner.source &&
+          workspaceContains({
+            directory: owner.directory,
+            file: candidate,
+            patterns: owner.patterns,
+            rootMembership: "implicit",
+          })
+        )
+      )
+        continue;
+      for (const section of [
+        "dependencies",
+        "devDependencies",
+        "optionalDependencies",
+      ]) {
+        const entries = member[section];
+        if (!record(entries)) continue;
+        for (const [name, value] of Object.entries(entries)) {
+          if (!tsSpecifiers.has(name)) continue;
+          const values = affectedSpecifiers.get(name) ?? new Set<unknown>();
+          values.add(resolve(candidate, name, value));
+          affectedSpecifiers.set(name, values);
+        }
+      }
+    }
+    const checkResolutionMap = (entries: unknown, parent?: string) => {
+      if (!record(entries)) return;
+      for (const [selector, replacement] of Object.entries(entries)) {
+        // npm's nested '.' replaces the enclosing package; Yarn and pnpm
+        // qualify a target with a dependency path or a parent selector.
+        const target = selector === "." ? parent : selector;
+        if (target === undefined) continue;
+        let pattern =
+          target
+            .split(/>\s*(?=[@A-Za-z_*])/)
+            .at(-1)
+            ?.trim() ?? "";
+        const version = pattern.lastIndexOf("@");
+        let qualifier: string | undefined;
+        if (version > pattern.lastIndexOf("/")) {
+          qualifier = pattern.slice(version + 1).replace(/^npm:/, "");
+          pattern = pattern.slice(0, version);
+        }
+        const parts = pattern.split("/");
+        pattern = parts.at(-2)?.startsWith("@")
+          ? parts.slice(-2).join("/")
+          : (parts.at(-1) ?? "");
+        if (pattern === "") {
+          add({
+            file,
+            rule: "package-pins",
+            key: selector,
+            value: replacement,
+            message: "resolution selector must name a package",
+          });
+          continue;
+        }
+        if (record(replacement)) {
+          checkResolutionMap(replacement, target);
+          continue;
+        }
+        for (const name of ownedNames) {
+          if (!picomatch(pattern)(name)) continue;
+          let value = replacement;
+          if (typeof replacement === "string" && replacement.startsWith("$")) {
+            const reference = replacement.slice(1);
+            value = resolutionDependencies[reference];
+          }
+          const resolved = resolve(file, name, value);
+          checkEntries({ [name]: value }, false, {
+            key: selector,
+            value: replacement,
+          });
+          if (
+            tsSpecifiers.has(name) &&
+            [...(affectedSpecifiers.get(name) ?? [])].some((specifier) => {
+              if (resolved === specifier) return false;
+              if (qualifier === undefined || validRange(qualifier) === null)
+                return true;
+              const release =
+                typeof specifier === "string"
+                  ? valid(
+                      specifier.startsWith("npm:")
+                        ? specifier.slice(specifier.lastIndexOf("@") + 1)
+                        : specifier,
+                    )
+                  : null;
+              return release !== null && satisfies(release, qualifier);
+            }) &&
+            typeof resolved === "string" &&
+            tsSpecifiers.get(name)?.has(resolved)
+          )
+            add({
+              file,
+              rule: "typescript-layout",
+              key: selector,
+              value: replacement,
+              message: `${name} resolution must preserve its declared TypeScript install specifier`,
+            });
+        }
+      }
+    };
+    checkResolutionMap(json["overrides"]);
+    checkResolutionMap(json["resolutions"]);
+    if (record(json["pnpm"])) checkResolutionMap(json["pnpm"]["overrides"]);
     const usesCompiler = policy.typescriptInstallLayouts.some(
       (layout) => dependencies[layout.compilerPackage] !== undefined,
     );
@@ -588,8 +805,10 @@ export const checkPackageFiles = ({
           if (!invokesCompiler(words)) continue;
           const normalized = words.join(" ");
           if (
-            normalized === normalizedExpected ||
-            normalized.startsWith(`${normalizedExpected} `)
+            !words.some((word) => word === "(" || word === ")") &&
+            shellSubstitutions(normalized).length === 0 &&
+            (normalized === normalizedExpected ||
+              normalized.startsWith(`${normalizedExpected} `))
           )
             continue;
           add({
@@ -614,7 +833,7 @@ export const checkPackageFiles = ({
         rule: "node-engine",
         key: "node",
         value: json["engines"]["node"],
-        message: `engines.node must support ${policy.node}, found ${String(json["engines"]["node"])}`,
+        message: `engines.node must support ${policy.node}, found ${JSON.stringify(json["engines"]["node"])}`,
       });
   }
   return diagnostics;

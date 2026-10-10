@@ -5,7 +5,7 @@ updates:
     schedule:
       interval: weekly
       day: saturday
-      time: 07:00
+      time: "07:00"
       timezone: Europe/Prague
     cooldown:
       default-days: 5
@@ -32,7 +32,7 @@ updates:
     schedule:
       interval: weekly
       day: saturday
-      time: 07:00
+      time: "07:00"
       timezone: Europe/Prague
     cooldown:
       default-days: 5
@@ -49,7 +49,7 @@ updates:
     schedule:
       interval: weekly
       day: saturday
-      time: 07:00
+      time: "07:00"
       timezone: Europe/Prague
     cooldown:
       default-days: 5

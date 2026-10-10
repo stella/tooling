@@ -51,6 +51,328 @@ const check = (
   });
 };
 const workflow = (step: string) => `jobs:\n  test:\n    steps:\n${step}`;
+const runtimeImageVersions = {
+  node: policy.node,
+  python: policy.python,
+  "oven/bun": policy.bun,
+};
+
+test("Compose and Kubernetes declarations share semantic image validation", () => {
+  const digest = `node:26.0.0@sha256:${"b".repeat(64)}`;
+  for (const file of [
+    "compose.yaml",
+    "docker-compose.yml",
+    "images/compose.prod.yaml",
+  ])
+    for (const image of [
+      "node:latest",
+      "python:3.12",
+      "oven/bun:1.4.0",
+      digest,
+      "${NODE_IMAGE}",
+    ])
+      expect(
+        check(file, `services:\n  app:\n    image: '${image}'`).some(
+          (entry) =>
+            entry.line === 3 &&
+            ["runtime-docker", "bun-pins"].includes(entry.rule),
+        ),
+      ).toBe(true);
+  expect(
+    check(
+      "compose.yaml",
+      `shared: &image {image: 'node:latest'}\nservices:\n  app:\n    <<: *image`,
+    ),
+  ).toMatchObject([{ rule: "runtime-docker" }]);
+  expect(
+    check(
+      "compose.yaml",
+      `services:\n  app: {image: 'node:26.1'}\n  database: {image: postgres:17}\n  built: {build: .}`,
+    ),
+  ).toEqual([]);
+  expect(
+    check(
+      "compose.yaml",
+      `services:\n  app: {build: .}\nlabels: {image: 'node:latest'}`,
+    ),
+  ).toEqual([]);
+  for (const kind of [
+    "Pod",
+    "Deployment",
+    "DaemonSet",
+    "StatefulSet",
+    "ReplicaSet",
+    "ReplicationController",
+    "Job",
+    "CronJob",
+  ]) {
+    for (const key of ["containers", "initContainers", "ephemeralContainers"]) {
+      const pod = { [key]: [{ name: "app", image: "node:latest" }] };
+      const specific = {
+        Pod: pod,
+        CronJob: { jobTemplate: { spec: { template: { spec: pod } } } },
+      };
+      const spec =
+        kind === "Pod" || kind === "CronJob"
+          ? specific[kind]
+          : { template: { spec: pod } };
+      expect(
+        check(
+          "deploy/deployment.yaml",
+          JSON.stringify({ apiVersion: "v1", kind, spec }),
+        ),
+      ).toMatchObject([{ rule: "runtime-docker" }]);
+      pod[key] = [{ name: "app", image: "node:26.1.0" }];
+      expect(
+        check(
+          "deploy/deployment.yaml",
+          JSON.stringify({ apiVersion: "v1", kind, spec }),
+        ),
+      ).toEqual([]);
+    }
+  }
+  const pod = `apiVersion: v1\nkind: Pod\nspec:\n  containers:\n    - name: app\n      image: '${digest}'`;
+  expect(check("deploy/pod.yaml", pod)).toMatchObject([
+    { rule: "runtime-docker", line: 6 },
+  ]);
+  expect(
+    check(
+      "deploy/pod.yaml",
+      `defaults: &image {image: 'node:latest'}\napiVersion: v1\nkind: Pod\nspec:\n  containers:\n    - <<: *image`,
+    ),
+  ).toMatchObject([{ rule: "runtime-docker" }]);
+  expect(
+    check(
+      "deploy/list.yaml",
+      JSON.stringify({
+        apiVersion: "v1",
+        kind: "List",
+        items: [
+          {
+            apiVersion: "v1",
+            kind: "Pod",
+            spec: { containers: [{ image: "python:3.12" }] },
+          },
+        ],
+      }),
+    ),
+  ).toMatchObject([{ rule: "runtime-docker" }]);
+  expect(
+    check(
+      "deploy/multi.yaml",
+      `kind: ConfigMap\napiVersion: v1\ndata: {image: 'node:latest'}\n---\n${pod}`,
+    ),
+  ).toMatchObject([{ rule: "runtime-docker", line: 10 }]);
+  for (const unrelated of [
+    `image: node:latest`,
+    `kind: ConfigMap\napiVersion: v1\ndata: {image: 'node:latest'}`,
+    `kind: Deployment\nspec: {template: {spec: {containers: [{image: 'node:latest'}]}}}`,
+    `apiVersion: v1\nkind: CustomResource\nspec: {containers: [{image: 'node:latest'}]}`,
+  ])
+    expect(check("config.yaml", unrelated)).toEqual([]);
+});
+
+test("recognized Kubernetes resources fail closed on malformed or excessive aliases", () => {
+  expect(
+    check("deploy/pod.yaml", "apiVersion: v1\nkind: Pod\nspec: ["),
+  ).toMatchObject([
+    { rule: "runtime-docker", message: "invalid container YAML" },
+  ]);
+  const expansions = ["a0: &a0 {image: 'node:latest'}"];
+  for (let level = 1; level <= 8; level++)
+    expansions.push(`a${level}: &a${level} [*a${level - 1}, *a${level - 1}]`);
+  expect(
+    check(
+      "deploy/pod.yaml",
+      `${expansions.join("\n")}\napiVersion: v1\nkind: Pod\nspec: {containers: *a8}`,
+    ),
+  ).toMatchObject([
+    { rule: "runtime-docker", message: "invalid container YAML aliases" },
+  ]);
+  expect(check("config.yaml", "unrelated: [")).toEqual([]);
+});
+
+test("Pipfile Python selectors use their declared minor or full version", () => {
+  for (const selectedPython of ["3.13", "3.13.7"]) {
+    for (const text of [
+      '[requires]\npython_version = "3.13"',
+      '[requires]\npython_full_version = "3.13.7"',
+      '[requires]\npython_version = "3.13"\npython_full_version = "3.13.7"',
+      '[scripts]\npython_version = "3.12"',
+    ])
+      expect(check("Pipfile", text, {}, selectedPython)).toEqual([]);
+    for (const declaration of [
+      'python_version = "3.12"',
+      'python_version = "3.13.7"',
+      "python_version = 3.13",
+      'python_full_version = "3.12.7"',
+      'python_full_version = "3.13"',
+      'python_full_version = "3.13.7rc1"',
+      'python_version = "3.12"\npython_full_version = "3.13.7"',
+    ])
+      expect(
+        check("Pipfile", `[requires]\n${declaration}`, {}, selectedPython),
+      ).toMatchObject([{ rule: "python-version", line: 2 }]);
+  }
+  expect(
+    check("Pipfile", '[requires]\npython_full_version = "3.13.8"'),
+  ).toMatchObject([{ rule: "python-version" }]);
+});
+
+test("Cargo MSRV is a stable support floor with tracked workspace inheritance", () => {
+  for (const value of ["1", "1.56", "1.89.99", "1.90", "1.90.0"])
+    expect(check("Cargo.toml", `[package]\nrust-version = "${value}"`)).toEqual(
+      [],
+    );
+  for (const value of [
+    "1.90.1",
+    "1.91",
+    "2",
+    "^1.56",
+    "1.90.0-nightly",
+    "9007199254740992",
+    "",
+    "01.56",
+  ])
+    expect(
+      check("Cargo.toml", `[package]\nrust-version = "${value}"`),
+    ).toMatchObject([{ rule: "rust-version", line: 2 }]);
+  expect(check("Cargo.toml", '[package]\nname = "app"')).toEqual([]);
+  const inherited = "[package]\nrust-version.workspace = true";
+  for (const root of [
+    '[workspace]\n[workspace.package]\nrust-version = "1.56"',
+    '[workspace]\n[workspace.package]\nrust-version = "1.90"',
+  ])
+    expect(
+      check("crates/app/Cargo.toml", inherited, { "Cargo.toml": root }),
+    ).toEqual([]);
+  for (const root of [
+    '[workspace]\n[workspace.package]\nrust-version = "1.91"',
+    "[workspace]\n[workspace.package]",
+    "invalid TOML [",
+  ])
+    expect(
+      check("crates/app/Cargo.toml", inherited, { "Cargo.toml": root }),
+    ).toMatchObject([{ rule: "rust-version", line: 2 }]);
+  expect(
+    check("crates/app/Cargo.toml", inherited, {
+      "Cargo.toml": '[workspace]\n[workspace.package]\nrust-version = "1.56"',
+      "crates/Cargo.toml":
+        '[workspace]\n[workspace.package]\nrust-version = "1.91"',
+    }),
+  ).toMatchObject([{ rule: "rust-version" }]);
+  expect(
+    check("apps/app/Cargo.toml", `${inherited}\nworkspace = "../../shared"`, {
+      "shared/Cargo.toml":
+        '[workspace]\n[workspace.package]\nrust-version = "1.56"',
+      "Cargo.toml": '[workspace]\n[workspace.package]\nrust-version = "1.91"',
+    }),
+  ).toEqual([]);
+  for (const workspace of [
+    "../../../outside",
+    "/outside",
+    "C:/outside",
+    "..\\outside",
+    "missing",
+  ])
+    expect(
+      check("apps/app/Cargo.toml", `${inherited}\nworkspace = '${workspace}'`),
+    ).toMatchObject([{ rule: "rust-version" }]);
+  let reads = 0;
+  expect(
+    checkRuntimeFile({
+      file: "crates/app/Cargo.toml",
+      text: inherited,
+      policy,
+      trackedFiles: new Set(),
+      readFile: () => {
+        reads++;
+        return '[workspace.package]\nrust-version="1.56"';
+      },
+    }),
+  ).toMatchObject([{ rule: "rust-version" }]);
+  expect(reads).toBe(0);
+});
+
+test("runtime image digests cannot override approved tags on any image surface", () => {
+  for (const [image, rule] of [
+    ["node:26.0.0", "runtime-docker"],
+    [`python:${policy.python}`, "runtime-docker"],
+    [`oven/bun:${policy.bun}`, "bun-pins"],
+  ] as const) {
+    const digest = `${image}@sha256:${"b".repeat(64)}`;
+    for (const [file, text] of [
+      ["Dockerfile", `FROM ${digest}`],
+      [".github/workflows/ci.yml", `jobs:\n  test:\n    container: ${digest}`],
+      [
+        ".github/workflows/ci.yml",
+        `jobs:\n  test:\n    services:\n      db: {image: '${digest}'}`,
+      ],
+      ["action.yml", `runs: {using: docker, image: 'docker://${digest}'}`],
+    ] as const)
+      expect(
+        check(file, text).some(
+          (entry) => entry.rule === rule && entry.message.includes("digest"),
+        ),
+      ).toBe(true);
+    expect(check("Dockerfile", `FROM ${image}`)).toEqual([]);
+  }
+  expect(
+    check("Dockerfile", `FROM postgres:17@sha256:${"b".repeat(64)}`),
+  ).toEqual([]);
+});
+
+test("workflow and composite local actions share checkout source provenance", () => {
+  const checkout = (options: string, fields = "") =>
+    `      - uses: actions/checkout@${sha} # v5\n        with: {${options}}${fields}`;
+  const composite = (steps: string) =>
+    `runs:\n  using: composite\n  steps:\n${steps}`;
+  for (const [file, wrap] of [
+    [".github/workflows/ci.yml", workflow],
+    ["action.yml", composite],
+  ] as const) {
+    const local = "      - uses: ./source/action";
+    const setup = `      - uses: actions/setup-node@${sha} # v5\n        with: {node-version-file: source/.node-version}`;
+    for (const endpoint of [local, setup]) {
+      const rule = endpoint === local ? "action-pins" : "runtime-workflow";
+      const shadows = { "source/.node-version": policy.node };
+      for (const binding of [
+        checkout("repository: foreign/repository, ref: main, path: source"),
+        checkout(`repository: foreign/repository, ref: '${sha}', path: source`),
+        checkout("path: source", "\n        if: false"),
+        checkout("path: source", "\n        continue-on-error: false"),
+        checkout("path: '${{ inputs.path }}'"),
+      ])
+        expect(
+          check(file, wrap(`${binding}\n${endpoint}`), shadows).some(
+            (entry) => entry.rule === rule,
+          ),
+        ).toBe(true);
+      const trusted = checkout("path: source");
+      expect(check(file, wrap(`${trusted}\n${endpoint}`))).toEqual([]);
+      expect(
+        check(file, wrap(`${trusted}\n${endpoint}\n${trusted}`), shadows).some(
+          (entry) => entry.rule === rule,
+        ),
+      ).toBe(true);
+      const aliases = `checkout: &checkout {uses: 'actions/checkout@${sha}', with: {repository: foreign/repository, ref: main, path: source}}\n`;
+      expect(
+        check(
+          file,
+          `${aliases}${wrap(`      - <<: *checkout\n${endpoint}`)}`,
+          shadows,
+        ).some((entry) => entry.rule === rule),
+      ).toBe(true);
+    }
+    expect(
+      check(
+        file,
+        wrap(`${checkout("ref: '${{ inputs.ref }}', path: source")}\n${local}`),
+      ),
+    ).toMatchObject([{ rule: "action-pins" }]);
+    expect(check(file, wrap(local))).toEqual([]);
+  }
+});
 const cases = [
   { rule: "bun-pins", file: ".bun-version", pass: policy.bun, fail: "1.4.0" },
   {
@@ -738,13 +1060,7 @@ test("every shared Docker definition suffix enforces base image pins", () => {
 });
 
 test("workflow containers and services share Docker runtime pin validation", () => {
-  for (const image of ["node", "python", "oven/bun"]) {
-    const version =
-      image === "node"
-        ? policy.node
-        : image === "python"
-          ? policy.python
-          : policy.bun;
+  for (const [image, version] of Object.entries(runtimeImageVersions)) {
     const rule = image === "oven/bun" ? "bun-pins" : "runtime-docker";
     for (const declaration of [
       `container: ${image}:VERSION`,
@@ -784,26 +1100,20 @@ test("workflow containers and services share Docker runtime pin validation", () 
 });
 
 test("Docker action metadata requires opt-out and validates runtime images", () => {
-  for (const image of ["node", "python", "oven/bun"]) {
-    const version =
-      image === "node"
-        ? policy.node
-        : image === "python"
-          ? policy.python
-          : policy.bun;
+  for (const [image, version] of Object.entries(runtimeImageVersions)) {
     const rule = image === "oven/bun" ? "bun-pins" : "runtime-docker";
     for (const file of ["action.yml", "nested/action.yaml"]) {
       const source = (tag: string) =>
         `runs: &runs\n  using: docker\n  image: docker://${image}:${tag}`;
-      expect(check(file, source(version)).map(({ rule }) => rule)).toEqual([
+      expect(check(file, source(version)).map((entry) => entry.rule)).toEqual([
         "action-pins",
       ]);
-      expect(check(file, source("latest")).map(({ rule }) => rule)).toEqual([
+      expect(check(file, source("latest")).map((entry) => entry.rule)).toEqual([
         "action-pins",
         rule,
       ]);
       const alias = `defaults: &docker {using: docker, image: 'docker://${image}:latest'}\nruns: {<<: *docker}`;
-      expect(check(file, alias).map(({ rule }) => rule)).toEqual([
+      expect(check(file, alias).map((entry) => entry.rule)).toEqual([
         "action-pins",
         rule,
       ]);
@@ -812,7 +1122,7 @@ test("Docker action metadata requires opt-out and validates runtime images", () 
       check(
         ".github/workflows/ci.yml",
         workflow(`      - uses: docker://${image}:latest`),
-      ).map(({ rule }) => rule),
+      ).map((entry) => entry.rule),
     ).toEqual(["action-pins", rule]);
   }
   for (const file of ["Dockerfile", "./Dockerfile", "docker/Dockerfile"])

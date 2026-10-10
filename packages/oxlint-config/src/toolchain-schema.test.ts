@@ -50,10 +50,11 @@ test("each layout requires a nonempty compiler command", () => {
     for (const typecheckCommand of [undefined, "", "   ", null, 42]) {
       const mutated = {
         ...policy,
-        typescriptInstallLayouts: policy.typescriptInstallLayouts.map(
-          (layout, layoutIndex) =>
-            layoutIndex === index ? { ...layout, typecheckCommand } : layout,
-        ),
+        typescriptInstallLayouts: [
+          ...policy.typescriptInstallLayouts.slice(0, index),
+          { ...policy.typescriptInstallLayouts.at(index), typecheckCommand },
+          ...policy.typescriptInstallLayouts.slice(index + 1),
+        ],
       };
       expect(() => parseToolchainPolicy(mutated)).toThrow("typecheckCommand");
     }

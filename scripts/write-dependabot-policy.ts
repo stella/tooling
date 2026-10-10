@@ -12,7 +12,7 @@ const { files, diagnostics } = readToolchainInputs(root);
 if (diagnostics.length > 0)
   throw new Error(
     diagnostics
-      .map(({ path, line, message }) => `${path}:${line}: ${message}`)
+      .map(({ path: file, line, message }) => `${file}:${line}: ${message}`)
       .join("\n"),
   );
 writeFileSync(

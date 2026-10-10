@@ -1,3 +1,8 @@
+import {
+  isComposeDefinitionPath,
+  isKubernetesDefinitionPath,
+} from "./toolchain-container-inputs";
+
 const excludedInputPath = (file: string) =>
   file === "" ||
   file.split("/").some((part) => part === "node_modules" || part === "vendor");
@@ -15,7 +20,7 @@ export const isMiseConfigPath = (file: string) =>
 
 /** GitHub action metadata may live at the repository root or in any directory. */
 export const githubAutomationFileKind = (file: string) => {
-  if (excludedInputPath(file)) return undefined;
+  if (file === "") return undefined;
   if (/^\.github\/workflows\/[^/]+\.ya?ml$/.test(file)) return "workflow";
   if (/(?:^|\/)action\.ya?ml$/.test(file)) return "action";
   return undefined;
@@ -46,10 +51,11 @@ export const isPythonDependencyManifest = (file: string) =>
 /** Docker and Containerfile suffix variants share runtime and update policy coverage. */
 export const isDockerDefinitionPath = (file: string) =>
   !excludedInputPath(file) &&
-  /(?:^|\/)(?:Dockerfile|Containerfile)[^/]*$/.test(file);
+  /dockerfile|containerfile/i.test(file.split("/").at(-1) ?? "");
 
 /** Lockfiles establish ecosystem presence without reading their dependency graphs. */
 export const toolchainInputKind = (file: string) => {
+  if (githubAutomationFileKind(file) !== undefined) return "config";
   if (excludedInputPath(file)) return undefined;
   if (
     pythonDependencyManifestKind(file) === "pipfile-lock" ||
@@ -61,6 +67,8 @@ export const toolchainInputKind = (file: string) => {
     isMiseConfigPath(file) ||
     isPythonDependencyManifest(file) ||
     isDockerDefinitionPath(file) ||
+    isComposeDefinitionPath(file) ||
+    isKubernetesDefinitionPath(file) ||
     /(?:^|\/)(?:package\.json|pnpm-workspace\.yaml|stll-toolchain\.json|\.bun-version|\.node-version|\.nvmrc|\.python-version|rust-toolchain(?:\.toml)?|\.tool-versions|\.?mise\.toml|uv\.toml|\.uv\.toml|\.github\/dependabot\.ya?ml|Cargo\.toml)$/.test(
       file,
     )

@@ -120,6 +120,8 @@ rule and a nonempty reason:
 }
 ```
 
+`node-engine` is mandatory: an opt-out cannot bypass the shared Node support range.
+
 Opt-outs apply to the entire repository for that rule. Unknown or duplicate
 rules, empty reasons, and malformed configuration fail validation. See the
 [shared toolchain reference](https://github.com/stella/tooling#shared-toolchain)

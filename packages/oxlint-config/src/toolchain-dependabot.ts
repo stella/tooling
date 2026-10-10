@@ -1,8 +1,20 @@
 import path from "node:path";
 import picomatch from "picomatch";
 import { parse as parseToml } from "smol-toml";
-import { isNode, LineCounter, parseDocument, stringify } from "yaml";
+import {
+  isNode,
+  LineCounter,
+  parseAllDocuments,
+  parseDocument,
+  Scalar,
+  stringify,
+} from "yaml";
 
+import {
+  containerDocumentImages,
+  isComposeDefinitionPath,
+  isKubernetesDefinitionPath,
+} from "./toolchain-container-inputs";
 import { ownedDockerImageAliases } from "./toolchain-images";
 import {
   isDependabotGithubActionsPath,
@@ -74,7 +86,7 @@ const workspaceTable = (
     }
     default: {
       const unexpected: never = ecosystem;
-      throw new Error(`unknown workspace ecosystem: ${unexpected}`);
+      throw new Error("unknown workspace ecosystem", { cause: unexpected });
     }
   }
 };
@@ -85,7 +97,10 @@ const workspaceRoots = (
   ecosystem: keyof typeof workspaceManifests,
 ) => {
   const manifests = Object.keys(files).filter(
-    (file) => path.posix.basename(file) === workspaceManifests[ecosystem],
+    (file) =>
+      path.posix.basename(file) === workspaceManifests[ecosystem] ||
+      (ecosystem === "npm" &&
+        path.posix.basename(file) === "pnpm-workspace.yaml"),
   );
   const workspaces = new Map<string, string[]>();
   for (const file of manifests) {
@@ -134,15 +149,103 @@ const workspaceRoots = (
       const patterns = record(value)
         ? value[ecosystem === "npm" ? "packages" : "members"]
         : value;
-      if (strings(patterns)) {
+      const members =
+        ecosystem === "cargo" && record(value) && patterns === undefined
+          ? []
+          : patterns;
+      if (strings(members)) {
         const excluded =
           ecosystem !== "npm" && record(value) && strings(value["exclude"])
             ? value["exclude"].map((pattern) => `!${pattern}`)
             : [];
-        workspaces.set(path.posix.dirname(file), [...patterns, ...excluded]);
+        workspaces.set(path.posix.dirname(file), [...members, ...excluded]);
       }
     } catch {
       // Other toolchain rules validate manifests; retain the update root here.
+    }
+  }
+  const implicitCargoMembers = new Map<string, Set<string>>();
+  if (ecosystem === "cargo") {
+    for (const [root, patterns] of workspaces) {
+      const includes = patterns.filter((pattern) => !pattern.startsWith("!"));
+      const excludes = patterns.filter((pattern) => pattern.startsWith("!"));
+      const memberDirectories = new Set([root]);
+      for (const file of manifests) {
+        const directory = path.posix.dirname(file);
+        const relative = path.posix.relative(root, directory);
+        if (
+          includes.some((pattern) => picomatch.isMatch(relative, pattern)) &&
+          !excludes.some((pattern) =>
+            picomatch.isMatch(relative, pattern.slice(1)),
+          )
+        )
+          memberDirectories.add(directory);
+      }
+      for (const directory of memberDirectories) {
+        try {
+          const parsed = parseToml(
+            files[path.posix.join(directory, "Cargo.toml")] ?? "",
+          );
+          const rootParsed = parseToml(
+            files[path.posix.join(root, "Cargo.toml")] ?? "",
+          );
+          const workspace = rootParsed["workspace"];
+          const inherited = record(workspace)
+            ? workspace["dependencies"]
+            : undefined;
+          const dependencyOwners = [parsed];
+          const targets = parsed["target"];
+          if (record(targets)) {
+            for (const target of Object.values(targets))
+              if (record(target)) dependencyOwners.push(target);
+          }
+          for (const owner of dependencyOwners) {
+            for (const key of [
+              "dependencies",
+              "dev-dependencies",
+              "build-dependencies",
+            ]) {
+              const dependencies = owner[key];
+              if (!record(dependencies)) continue;
+              for (const [name, dependency] of Object.entries(dependencies)) {
+                if (!record(dependency)) continue;
+                const isInherited = dependency["workspace"] === true;
+                const resolved =
+                  isInherited && record(inherited)
+                    ? inherited[name]
+                    : dependency;
+                if (!record(resolved) || typeof resolved["path"] !== "string")
+                  continue;
+                if (
+                  path.posix.isAbsolute(resolved["path"]) ||
+                  /\\|\$|^[A-Za-z]:/.test(resolved["path"])
+                )
+                  continue;
+                const target = path.posix.normalize(
+                  path.posix.join(
+                    isInherited ? root : directory,
+                    resolved["path"],
+                  ),
+                );
+                const relative = path.posix.relative(root, target);
+                if (
+                  relative.startsWith("../") ||
+                  relative === ".." ||
+                  files[path.posix.join(target, "Cargo.toml")] === undefined ||
+                  excludes.some((pattern) =>
+                    picomatch.isMatch(relative, pattern.slice(1)),
+                  )
+                )
+                  continue;
+                memberDirectories.add(target);
+              }
+            }
+          }
+        } catch {
+          // Manifest validation diagnoses malformed TOML independently.
+        }
+      }
+      implicitCargoMembers.set(root, memberDirectories);
     }
   }
   return manifests
@@ -154,14 +257,16 @@ const workspaceRoots = (
         const includes = patterns.filter((pattern) => !pattern.startsWith("!"));
         const excludes = patterns.filter((pattern) => pattern.startsWith("!"));
         return (
-          includes.some((pattern) => picomatch.isMatch(relative, pattern)) &&
+          (implicitCargoMembers.get(root)?.has(directory) === true ||
+            includes.some((pattern) => picomatch.isMatch(relative, pattern))) &&
           !excludes.some((pattern) =>
             picomatch.isMatch(relative, pattern.slice(1)),
           )
         );
       });
     })
-    .map(directoryOf);
+    .map(directoryOf)
+    .filter((directory, index, values) => values.indexOf(directory) === index);
 };
 
 type CheckDependabotOptions = {
@@ -240,6 +345,23 @@ const ecosystemRoots = (files: Record<string, string>) => {
     if (isDependabotGithubActionsPath(file)) requireRoot("github-actions", "/");
     const name = path.posix.basename(file);
     if (isDockerDefinitionPath(file)) requireRoot("docker", directoryOf(file));
+    if (isComposeDefinitionPath(file) || isKubernetesDefinitionPath(file)) {
+      for (const document of parseAllDocuments(files[file] ?? "", {
+        merge: true,
+      })) {
+        if (document.errors.length > 0) continue;
+        try {
+          const classified = containerDocumentImages(
+            document.toJS({ maxAliasCount: 100 }),
+            file,
+          );
+          if (classified !== undefined)
+            requireRoot(classified.ecosystem, directoryOf(file));
+        } catch {
+          // Runtime validation reports malformed or excessive YAML aliases.
+        }
+      }
+    }
     if (
       name === "uv.lock" ||
       name === "uv.toml" ||
@@ -253,7 +375,7 @@ const ecosystemRoots = (files: Record<string, string>) => {
 const ignoredFor = (ecosystem: string, policy: DependabotPolicy) => {
   if (ecosystem === "npm" || ecosystem === "bun") return policy.ignoredPackages;
   if (ecosystem === "github-actions") return policy.ignoredActions;
-  if (ecosystem === "docker")
+  if (ecosystem === "docker" || ecosystem === "docker-compose")
     return ownedDockerImageAliases(policy.ignoredImages);
   return [];
 };
@@ -267,12 +389,18 @@ export const generateDependabotConfig = ({
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([ecosystem, roots]) => {
       const directories = [...roots].sort();
+      const time = new Scalar(policy.schedule.time);
+      time.type = Scalar.QUOTE_DOUBLE;
       return {
         "package-ecosystem": ecosystem,
-        ...(directories.length === 1
-          ? { directory: directories.at(0) }
-          : { directories }),
-        schedule: policy.schedule,
+        directory: directories.length === 1 ? directories.at(0) : undefined,
+        directories: directories.length > 1 ? directories : undefined,
+        schedule: {
+          interval: policy.schedule.interval,
+          day: policy.schedule.day,
+          time,
+          timezone: policy.schedule.timezone,
+        },
         cooldown: { "default-days": policy.cooldown.defaultDays },
         groups: Object.fromEntries(
           Object.entries(policy.groups).map(([name, group]) => [
@@ -311,7 +439,9 @@ export const checkDependabot = ({
   }
   if (paths.length > 1) add("keep one Dependabot configuration file");
   const lineCounter = new LineCounter();
-  const document = parseDocument(files[file] ?? "", { lineCounter });
+  const document = parseDocument(files[file] ?? "", {
+    lineCounter,
+  });
   if (document.errors.length > 0) {
     for (const error of document.errors)
       add(
@@ -336,6 +466,19 @@ export const checkDependabot = ({
     return diagnostics;
   }
   const covered = new Map<string, Set<string>>();
+  let legacy: unknown;
+  try {
+    const legacyDocument = parseDocument(files[file] ?? "", {
+      version: "1.1",
+      schema: "yaml-1.1",
+    });
+    if (legacyDocument.errors.length === 0)
+      legacy = legacyDocument.toJS({ maxAliasCount: 100 });
+  } catch {
+    // The canonical parser reports invalid aliases; incompatible times fail below.
+  }
+  const legacyUpdates =
+    record(legacy) && Array.isArray(legacy["updates"]) ? legacy["updates"] : [];
   const rootClaims = new Map<string, Map<string, number>>();
   const directoryClaims = new Map<string, Map<string, number>>();
   for (const [index, update] of parsed["updates"].entries()) {
@@ -365,12 +508,10 @@ export const checkDependabot = ({
       );
     const single = update["directory"];
     const multiple = update["directories"];
-    const directories =
-      typeof single === "string" && multiple === undefined
-        ? [single]
-        : single === undefined && strings(multiple)
-          ? multiple
-          : [];
+    let directories: string[] = [];
+    if (typeof single === "string" && multiple === undefined)
+      directories = [single];
+    else if (single === undefined && strings(multiple)) directories = multiple;
     const validDirectories = directories.filter(
       (directory) =>
         directory.startsWith("/") && !directory.split("/").includes(".."),
@@ -426,6 +567,20 @@ export const checkDependabot = ({
     rootClaims.set(ecosystem, claimedRoots);
     covered.set(ecosystem, matches);
     const schedule = update["schedule"];
+    const legacyUpdate: unknown = legacyUpdates.at(index);
+    const legacySchedule = record(legacyUpdate)
+      ? legacyUpdate["schedule"]
+      : undefined;
+    if (
+      record(schedule) &&
+      schedule["time"] === policy.schedule.time &&
+      (!record(legacySchedule) ||
+        legacySchedule["time"] !== policy.schedule.time)
+    )
+      report(
+        "schedule",
+        `${ecosystem}: quote schedule time to preserve its string value in YAML 1.1`,
+      );
     if (
       !record(schedule) ||
       Object.keys(schedule).length !== Object.keys(policy.schedule).length ||
@@ -461,6 +616,19 @@ export const checkDependabot = ({
       report("groups", `${ecosystem}: groups must match the shared policy`);
     const ignored = ignoredFor(ecosystem, policy);
     const ignore = update["ignore"];
+    if (
+      Array.isArray(ignore) &&
+      ignore.some(
+        (entry: unknown) =>
+          !record(entry) ||
+          typeof entry["dependency-name"] !== "string" ||
+          !ignored.includes(entry["dependency-name"]),
+      )
+    )
+      report(
+        "ignore",
+        `${ecosystem}: ignore only packages owned by the shared policy`,
+      );
     for (const name of ignored) {
       if (
         !Array.isArray(ignore) ||

@@ -51,6 +51,10 @@ export const parseToolchainOptOuts = (input: unknown) => {
       throw new Error(
         "each opt-out requires a unique known rule and a nonempty reason",
       );
+    if (entry["rule"] === "node-engine")
+      throw new Error(
+        "node-engine cannot be opted out; engines.node must support the shared Node series",
+      );
     disabled.add(entry["rule"]);
   }
   return disabled;
@@ -64,13 +68,7 @@ export const readToolchainInputs = (root: string) => {
     encoding: "utf8",
   })
     .split("\0")
-    .filter(
-      (file) =>
-        file !== "" &&
-        !file
-          .split("/")
-          .some((part) => part === "node_modules" || part === "vendor"),
-    );
+    .filter((file) => file !== "");
   const files: Record<string, string> = {};
   const trackedFiles = new Set(tracked);
   const resolvedRoot = realpathSync(root);

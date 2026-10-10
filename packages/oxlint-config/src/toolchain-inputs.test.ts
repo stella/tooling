@@ -12,15 +12,7 @@ import {
 } from "./toolchain-inputs";
 
 test("both input readers exclude dependency trees for every accepted input kind", () => {
-  const inputs = [
-    "package.json",
-    "bun.lock",
-    "uv.lock",
-    "pyproject.toml",
-    "action.yml",
-    "action.yaml",
-    ".github/workflows/ci.yml",
-  ];
+  const inputs = ["package.json", "bun.lock", "uv.lock", "pyproject.toml"];
   for (const file of inputs) {
     expect(toolchainInputKind(file)).toBeDefined();
     for (const prefix of [
@@ -38,6 +30,21 @@ test("both input readers exclude dependency trees for every accepted input kind"
   expect(githubAutomationFileKind("")).toBeUndefined();
   expect(toolchainInputKind("vendor-example/package.json")).toBe("config");
   expect(githubAutomationFileKind("vendor-example/action.yml")).toBe("action");
+});
+
+test("tracked executable action metadata remains discoverable under dependency-named directories", () => {
+  for (const prefix of [
+    "vendor",
+    "node_modules",
+    "nested/vendor",
+    "nested/node_modules",
+  ]) {
+    for (const name of ["action.yml", "action.yaml"]) {
+      expect(githubAutomationFileKind(`${prefix}/${name}`)).toBe("action");
+      expect(toolchainInputKind(`${prefix}/${name}`)).toBe("config");
+      expect(isDependabotGithubActionsPath(`${prefix}/${name}`)).toBe(false);
+    }
+  }
 });
 
 test("Python dependency filename classification is shared and scoped to manifests", () => {
@@ -109,6 +116,9 @@ test("all Docker definition suffixes remain in the shared reader and runtime cla
     "Dockerfile.production",
     "Containerfile",
     "Containerfile.production",
+    "app.Dockerfile",
+    "dockerfile.dev",
+    "app.CONTAINERFILE.dev",
   ]) {
     expect(isDockerDefinitionPath(`image/${name}`)).toBe(true);
     expect(toolchainInputKind(`image/${name}`)).toBe("config");

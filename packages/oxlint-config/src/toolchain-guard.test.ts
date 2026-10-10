@@ -35,7 +35,7 @@ const fixture = (
       }
     };
     write(files);
-    execFileSync("git", ["add", "."], { cwd: root });
+    execFileSync("git", ["add", "-f", "."], { cwd: root });
     write(untracked);
     return checkToolchain({ root, policy });
   } finally {
@@ -56,13 +56,17 @@ test("tracked root and nested action metadata cannot bypass snapshot discovery",
     "action.yaml",
     "tools/build/action.yml",
     "tools/deep/build/action.yaml",
+    "vendor/build/action.yml",
+    "node_modules/build/action.yaml",
   ]) {
     expect(
       fixture({
         [file]:
           "runs: {using: composite, steps: [{uses: 'actions/checkout@main'}]}",
         "stll-toolchain.json": config,
-      }).some(({ rule, path }) => rule === "action-pins" && path === file),
+      }).some(
+        ({ rule, path: source }) => rule === "action-pins" && source === file,
+      ),
     ).toBe(true);
     expect(
       fixture(
@@ -86,7 +90,8 @@ test("mise environment overrides remain part of the tracked configuration snapsh
   ])
     expect(
       fixture({ [file]: "[tools]\nnode = 'latest'" }).some(
-        ({ rule, path }) => rule === "runtime-manager" && path === file,
+        ({ rule, path: source }) =>
+          rule === "runtime-manager" && source === file,
       ),
     ).toBe(true);
 });
@@ -143,9 +148,17 @@ test("Docker action policy opt-outs require a tracked explicit reason", () => {
   ).toEqual([]);
 });
 
-test("every named rule has a reasoned tracked opt-out and malformed choices fail", () => {
+test("permitted named rules have reasoned opt-outs; mandatory and malformed choices fail", () => {
   expect(new Set(toolchainRules).size).toBe(toolchainRules.length);
   for (const rule of toolchainRules) {
+    if (rule === "node-engine") {
+      expect(() =>
+        parseToolchainOptOuts({
+          optOuts: [{ rule, reason: "Explicit repository decision" }],
+        }),
+      ).toThrow("node-engine cannot be opted out");
+      continue;
+    }
     expect(
       parseToolchainOptOuts({
         optOuts: [{ rule, reason: "Explicit repository decision" }],
@@ -346,4 +359,20 @@ test("configuration readers accept only resolved targets inside the tracked tree
       rmSync(workspace, { recursive: true, force: true });
     }
   }
+});
+
+test("a reasoned opt-out cannot hide a Node support range outside the shared series", () => {
+  const diagnostics = fixture({
+    "package.json": JSON.stringify({ engines: { node: "<26" } }),
+    "stll-toolchain.json": JSON.stringify({
+      optOuts: [{ rule: "node-engine", reason: "Alternate runtime" }],
+    }),
+  });
+  expect(diagnostics.some(({ rule }) => rule === "node-engine")).toBe(true);
+  expect(
+    diagnostics.some(
+      ({ rule, message }) =>
+        rule === "configuration" && message.includes("cannot be opted out"),
+    ),
+  ).toBe(true);
 });
