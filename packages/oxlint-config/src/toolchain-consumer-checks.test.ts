@@ -616,3 +616,41 @@ test("static consumer checks validate the runner's full transitive workspace clo
       }),
     );
 });
+
+test("static fixture kinds use the runner's published React peer validation", () => {
+  const withPeers = (react: string) => ({
+    ...files,
+    "packages/library/package.json": JSON.stringify({
+      name: "@example/library",
+      version: "1.0.0",
+      peerDependencies: { react },
+    }),
+  });
+  expect(check(withPeers(">=18"))).toContainEqual(
+    expect.objectContaining({
+      message:
+        "@example/library requires fixture kind react from its published peers",
+    }),
+  );
+  const configuration = {
+    [`${declaration.fixturePath}/consumer-compat.json`]: JSON.stringify({
+      packages: [
+        {
+          package: "packages/library",
+          fixture: "library",
+          kind: "react",
+          build: ["npm", "run", "build"],
+          smoke: ["node", "smoke.mjs"],
+        },
+      ],
+    }),
+  };
+  expect(check({ ...withPeers(">=18"), ...configuration })).toEqual([]);
+  expect(
+    check({ ...withPeers("invalid-range"), ...configuration }),
+  ).toContainEqual(
+    expect.objectContaining({
+      message: "invalid published React peer: @example/library",
+    }),
+  );
+});

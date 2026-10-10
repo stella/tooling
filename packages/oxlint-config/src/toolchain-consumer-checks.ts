@@ -4,6 +4,7 @@ import { parseDocument } from "yaml";
 import packageMetadata from "../package.json";
 import {
   assertConsumerFixtureSelection,
+  assertConsumerFixtureKind,
   consumerPackageClosure,
   parseConsumerFixtures,
   discoverConsumerPackages,
@@ -334,9 +335,10 @@ export const checkConsumerChecks = ({
             `consumerChecks fixture configuration must be tracked: ${fixtureManifest}`,
           );
         const fixtureConfiguration: unknown = JSON.parse(fixtureSource);
+        const fixtures = parseConsumerFixtures(fixtureConfiguration);
         assertConsumerFixtureSelection({
           selected: declaration.packages,
-          fixtures: parseConsumerFixtures(fixtureConfiguration),
+          fixtures,
         });
         const rawPackages = inputs["packages"];
         if (typeof rawPackages !== "string")
@@ -373,6 +375,12 @@ export const checkConsumerChecks = ({
             throw new Error(
               `consumerChecks package must be a discovered workspace member: ${manifestPath}`,
             );
+          const fixture = fixtures.find(
+            (candidate) => candidate.package === directory,
+          );
+          if (fixture === undefined)
+            throw new Error(`missing declared consumer fixture: ${directory}`);
+          assertConsumerFixtureKind({ fixture, pkg: selectedPackage });
           const manifest = selectedPackage.manifest;
           if (
             manifest["private"] === true ||
