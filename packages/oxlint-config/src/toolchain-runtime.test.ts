@@ -866,3 +866,136 @@ test("aliases for whole service tables cannot hide runtime images", () => {
     ).toEqual([rule]);
   }
 });
+
+test("prefixed runtime selectors map only preceding immutable same-repository checkouts", () => {
+  const checkout = (options: string) =>
+    `      - uses: actions/checkout@${sha} # v5\n        with: {${options}}`;
+  const checkSource = (
+    text: string,
+    extraFiles: Record<string, string> = {},
+  ) => {
+    const entries = { ...files, ...extraFiles };
+    return checkRuntimeFile({
+      file: ".github/workflows/ci.yml",
+      text,
+      policy,
+      repository: "stella/example",
+      trackedFiles: new Set(Object.keys(entries)),
+      readFile: (file) => entries[file],
+    });
+  };
+  for (const [action, version, tool, target] of [
+    ["actions/setup-node", "v5", "node", ".node-version"],
+    ["actions/setup-python", "v6", "python", ".python-version"],
+    ["oven-sh/setup-bun", "v2", "bun", "package.json"],
+  ]) {
+    const setup = (prefix: string) =>
+      `      - uses: ${action}@${sha} # ${version}\n        with: {${tool}-version-file: '${prefix}${target}'}`;
+    const rule = tool === "bun" ? "bun-pins" : "runtime-workflow";
+    for (const repo of [
+      "stella/example",
+      "STELLA/EXAMPLE",
+      "${{ github.repository }}",
+    ]) {
+      const pinned = checkout(
+        `repository: '${repo}', ref: '${sha}', path: source`,
+      );
+      expect(checkSource(workflow(`${pinned}\n${setup("source/")}`))).toEqual(
+        [],
+      );
+      expect(
+        checkSource(workflow(`${setup("source/")}\n${pinned}`)).some(
+          (entry) => entry.rule === rule,
+        ),
+      ).toBe(true);
+      expect(
+        checkSource(
+          `jobs:\n  first:\n    steps:\n${pinned}\n  second:\n    steps:\n${setup("source/")}`,
+        ).some((entry) => entry.rule === rule),
+      ).toBe(true);
+    }
+    for (const options of [
+      "repository: other/repository, ref: '" + sha + "', path: source",
+      "repository: stella/example, ref: main, path: source",
+      "repository: stella/example, ref: v1, path: source",
+      "repository: stella/example, path: source",
+      "repository: stella/example, ref: '${{ github.sha }}', path: source",
+      "repository: stella/example, ref: '" + sha + "', path: '../source'",
+      "repository: stella/example, ref: '" + sha + "', path: '/source'",
+      "repository: stella/example, ref: '" + sha + "', path: 'C:/source'",
+      "repository: stella/example, ref: '" + sha + "', path: 'source\\nested'",
+    ]) {
+      // A real tracked shadow target must never rescue a foreign/mutable binding.
+      expect(
+        checkSource(workflow(`${checkout(options)}\n${setup("source/")}`), {
+          [`source/${target}`]: files[target] ?? "",
+        }).some((entry) => entry.rule === rule),
+      ).toBe(true);
+    }
+    const pinned = checkout(
+      `repository: stella/example, ref: '${sha}', path: source`,
+    );
+    const foreign = checkout(
+      `repository: other/repository, ref: '${sha}', path: source`,
+    );
+    expect(
+      checkSource(workflow(`${pinned}\n${foreign}\n${setup("source/")}`)).some(
+        (entry) => entry.rule === rule,
+      ),
+    ).toBe(true);
+    expect(
+      checkSource(workflow(`${foreign}\n${pinned}\n${setup("source/")}`)),
+    ).toEqual([]);
+    expect(
+      checkSource(
+        workflow(`${checkout("repository: other/repository")}\n${setup("")}`),
+      ).some((entry) => entry.rule === rule),
+    ).toBe(true);
+    expect(
+      checkSource(workflow(`${checkout("ref: main")}\n${setup("")}`)).some(
+        (entry) => entry.rule === rule,
+      ),
+    ).toBe(true);
+    expect(
+      checkSource(
+        workflow(`      - uses: actions/checkout@${sha} # v5\n${setup("")}`),
+      ),
+    ).toEqual([]);
+    expect(
+      checkSource(workflow(`${pinned}\n${setup("source/../")}`)).some(
+        (entry) => entry.rule === rule,
+      ),
+    ).toBe(true);
+  }
+});
+
+test("current root checkout spelling preserves selectors and unknown paths fail only when selected", () => {
+  for (const prefix of [".", "./"]) {
+    expect(
+      check(
+        ".github/workflows/ci.yml",
+        workflow(
+          `      - uses: actions/checkout@${sha} # v5\n        with: {path: '${prefix}'}\n      - uses: actions/setup-node@${sha} # v5\n        with: {node-version-file: .node-version}`,
+        ),
+      ),
+    ).toEqual([]);
+  }
+  for (const prefix of [
+    "${{ inputs.path }}",
+    "../source",
+    "/source",
+    "C:/source",
+    "source\\nested",
+  ]) {
+    const checkout = `      - uses: actions/checkout@${sha} # v5\n        with: {path: '${prefix}'}`;
+    expect(check(".github/workflows/ci.yml", workflow(checkout))).toEqual([]);
+    expect(
+      check(
+        ".github/workflows/ci.yml",
+        workflow(
+          `${checkout}\n      - uses: actions/setup-node@${sha} # v5\n        with: {node-version-file: .node-version}`,
+        ),
+      ).some(({ rule }) => rule === "runtime-workflow"),
+    ).toBe(true);
+  }
+});

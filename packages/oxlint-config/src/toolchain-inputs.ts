@@ -34,7 +34,8 @@ export const pythonDependencyManifestKind = (file: string) => {
   if (name === "pyproject.toml") return "project";
   if (name === "Pipfile") return "pipfile";
   if (name === "Pipfile.lock") return "pipfile-lock";
-  if (name !== undefined && /^requirements[^/]*\.txt$/.test(name))
+  if (name === "setup.py" || name === "setup.cfg") return "setup";
+  if (name !== undefined && /^requirements[^/]*\.(?:txt|in)$/.test(name))
     return "requirements";
   return undefined;
 };

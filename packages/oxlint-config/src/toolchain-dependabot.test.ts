@@ -66,6 +66,114 @@ const config = (updates: unknown[] = [update()]) =>
   stringify({ version: 2, updates });
 
 describe("Dependabot policy", () => {
+  test("directory normalization preserves valid coverage without hiding traversal", () => {
+    const files = { "app/package.json": "{}" };
+    for (const directory of ["/app/", "/./app", "//app///", "/app"]) {
+      expect(check(config([update("npm", directory)]), files)).toEqual([]);
+      const list = {
+        ...update(),
+        directory: undefined,
+        directories: [directory],
+      };
+      expect(check(config([list]), files)).toEqual([]);
+      expect(
+        check(
+          config([update("npm", "/app"), update("npm", directory)]),
+          files,
+        ).some(({ message }) => message.includes("overlaps update entry")),
+      ).toBe(true);
+    }
+    const invalid = check(config([update("npm", "/other/../app")]), files);
+    expect(
+      invalid.some(({ message }) =>
+        message.includes("absolute repository paths"),
+      ),
+    ).toBe(true);
+    expect(
+      invalid.some(({ message }) => message.includes("covering /app")),
+    ).toBe(true);
+  });
+
+  test("standard Python build and compile manifests derive update roots without reading arbitrary text files", () => {
+    for (const name of [
+      "requirements.in",
+      "requirements_dev.in",
+      "setup.py",
+      "setup.cfg",
+    ]) {
+      for (const uv of [false, true]) {
+        const files: Record<string, string> = { [`python/${name}`]: "" };
+        if (uv) files["python/uv.lock"] = "";
+        const ecosystem = uv && name.startsWith("requirements") ? "uv" : "pip";
+        expect(
+          check(config(), files).some(({ message }) =>
+            message.includes(
+              `add a ${ecosystem} update entry covering /python`,
+            ),
+          ),
+        ).toBe(true);
+        const generated = generateDependabotConfig({ files, policy });
+        expect(check(generated, files)).toEqual([]);
+        expect(generated).toContain(`package-ecosystem: ${ecosystem}`);
+        expect(generated).toContain("/python");
+      }
+    }
+    expect(
+      checkDependabot({
+        files: { "legal/contract.in": "", "legal/act.txt": "" },
+        policy,
+      }),
+    ).toEqual([]);
+  });
+
+  test("update entries must claim distinct roots within each ecosystem", () => {
+    const files = {
+      "package.json": "{}",
+      "packages/a/package.json": "{}",
+      "packages/b/package.json": "{}",
+      "pyproject.toml": "[project]\nname='example'",
+    };
+    const base = [
+      update(),
+      update("npm", "/packages/a"),
+      update("npm", "/packages/b"),
+      update("pip"),
+    ];
+    expect(check(config(base), files)).toEqual([]);
+    for (const extra of [
+      update(),
+      update("npm", "/packages/a"),
+      { ...update(), directory: undefined, directories: ["/packages/*"] },
+      { ...update(), directory: undefined, directories: ["/**"] },
+    ]) {
+      const overlaps = check(config([...base, extra]), files).filter(
+        ({ message }) => message.includes("overlaps update entry"),
+      );
+      expect(overlaps.length).toBeGreaterThan(0);
+      expect(overlaps.every(({ line }) => line > 1)).toBe(true);
+    }
+    expect(
+      check(
+        config([
+          ...base,
+          update("npm", "/untracked"),
+          update("npm", "/untracked/"),
+        ]),
+        files,
+      ).some(
+        ({ message }) =>
+          message.includes("directory /untracked/ overlaps update entry") ||
+          message.includes("directory /untracked overlaps update entry"),
+      ),
+    ).toBe(true);
+    const grouped = {
+      ...update(),
+      directory: undefined,
+      directories: ["/", "/packages/*", "/packages/a"],
+    };
+    expect(check(config([grouped, update("pip")]), files)).toEqual([]);
+  });
+
   test("generated YAML remains valid as new manifest roots and ecosystems are added", () => {
     const manifests = {
       "package.json": JSON.stringify({ workspaces: ["packages/*"] }),

@@ -1,7 +1,13 @@
 /// <reference types="bun-types" />
 import { expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import {
+  mkdtempSync,
+  writeFileSync,
+  mkdirSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -246,4 +252,98 @@ test("all package and runtime diagnostics survive orchestration and only named r
       }),
     }).map((entry) => entry.rule),
   ).toEqual(["package-pins"]);
+});
+
+test("GitHub origin identity reaches prefixed workflow selector validation", () => {
+  const checkout = policy.actions["actions/checkout"];
+  const setup = policy.actions["actions/setup-node"];
+  if (checkout === undefined || setup === undefined)
+    throw new Error("Missing workflow action pins");
+  for (const origin of [
+    "https://github.com/stella/example.git",
+    "git@github.com:stella/example.git",
+    "ssh://git@github.com/stella/example.git",
+    "https://github.com/stella/example",
+    "https://github.com/foreign/example.git",
+  ]) {
+    const root = mkdtempSync(path.join(tmpdir(), "stll-checkout-binding-"));
+    try {
+      execFileSync("git", ["init", "-q", root]);
+      execFileSync("git", ["remote", "add", "origin", origin], { cwd: root });
+      mkdirSync(path.join(root, ".github/workflows"), { recursive: true });
+      writeFileSync(path.join(root, ".node-version"), policy.node);
+      writeFileSync(
+        path.join(root, "stll-toolchain.json"),
+        JSON.stringify({
+          optOuts: [
+            { rule: "dependabot-policy", reason: "Workflow identity fixture" },
+          ],
+        }),
+      );
+      writeFileSync(
+        path.join(root, ".github/workflows/ci.yml"),
+        `jobs:\n  test:\n    steps:\n      - uses: actions/checkout@${checkout.sha} # ${checkout.version}\n        with: {repository: stella/example, ref: '${"a".repeat(40)}', path: source}\n      - uses: actions/setup-node@${setup.sha} # ${setup.version}\n        with: {node-version-file: source/.node-version}`,
+      );
+      execFileSync("git", ["add", "."], { cwd: root });
+      const diagnostics = checkToolchain({ root, policy });
+      expect(diagnostics.some(({ rule }) => rule === "runtime-workflow")).toBe(
+        origin.includes("foreign"),
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("configuration readers accept only resolved targets inside the tracked tree", () => {
+  for (const target of [
+    "outside",
+    "untracked",
+    "tracked",
+    "parent-directory",
+  ]) {
+    const workspace = mkdtempSync(path.join(tmpdir(), "stll-config-boundary-"));
+    const root = path.join(workspace, "repository");
+    mkdirSync(root);
+    execFileSync("git", ["init", "-q", root]);
+    try {
+      if (target === "parent-directory") {
+        mkdirSync(path.join(root, "tools"));
+        writeFileSync(path.join(root, "tools/.node-version"), policy.node);
+        execFileSync("git", ["add", "."], { cwd: root });
+        rmSync(path.join(root, "tools"), { recursive: true });
+        mkdirSync(path.join(workspace, "tools"));
+        writeFileSync(path.join(workspace, "tools/.node-version"), policy.node);
+        symlinkSync(path.join(workspace, "tools"), path.join(root, "tools"));
+      } else {
+        const aliasTarget =
+          target === "outside"
+            ? path.join(workspace, ".nvmrc")
+            : path.join(root, ".nvmrc");
+        writeFileSync(aliasTarget, policy.node);
+        symlinkSync(aliasTarget, path.join(root, ".node-version"));
+        execFileSync("git", ["add", ".node-version"], { cwd: root });
+        if (target === "tracked")
+          execFileSync("git", ["add", ".nvmrc"], { cwd: root });
+      }
+      const diagnostics = checkToolchain({ root, policy });
+      if (target === "tracked") {
+        expect(diagnostics).toEqual([]);
+        continue;
+      }
+      expect(diagnostics).toEqual([
+        {
+          rule: "configuration",
+          path:
+            target === "parent-directory"
+              ? "tools/.node-version"
+              : ".node-version",
+          line: 1,
+          message: "cannot read tracked configuration file",
+        },
+      ]);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  }
 });

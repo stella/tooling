@@ -1,24 +1,20 @@
 #!/usr/bin/env bun
-import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { generateDependabotConfig } from "../packages/oxlint-config/src/toolchain-dependabot";
-import { toolchainInputKind } from "../packages/oxlint-config/src/toolchain-inputs";
+import { readToolchainInputs } from "../packages/oxlint-config/src/toolchain-guard";
 import { parseToolchainPolicy } from "../packages/oxlint-config/src/toolchain-schema";
 import toolchain from "../packages/oxlint-config/toolchain.json";
 
 const root = path.resolve(import.meta.dir, "..");
-const files: Record<string, string> = {};
-for (const file of execFileSync("git", ["ls-files", "-z", "--cached"], {
-  cwd: root,
-  encoding: "utf8",
-}).split("\0")) {
-  const kind = toolchainInputKind(file);
-  if (kind === undefined) continue;
-  files[file] =
-    kind === "presence" ? "" : readFileSync(path.join(root, file), "utf8");
-}
+const { files, diagnostics } = readToolchainInputs(root);
+if (diagnostics.length > 0)
+  throw new Error(
+    diagnostics
+      .map(({ path, line, message }) => `${path}:${line}: ${message}`)
+      .join("\n"),
+  );
 writeFileSync(
   path.join(root, ".github/dependabot.yml"),
   generateDependabotConfig({

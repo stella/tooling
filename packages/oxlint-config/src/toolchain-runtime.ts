@@ -45,6 +45,7 @@ type CheckRuntimeFileOptions = {
   policy: RuntimePolicy;
   trackedFiles: ReadonlySet<string>;
   readFile: (file: string) => string | undefined;
+  repository?: string | undefined;
 };
 
 const record = (value: unknown): value is Record<string, unknown> =>
@@ -182,6 +183,7 @@ export const checkRuntimeFile = ({
   policy,
   trackedFiles,
   readFile,
+  repository,
 }: CheckRuntimeFileOptions): RuntimeDiagnostic[] => {
   const diagnostics: RuntimeDiagnostic[] = [];
   const name = path.posix.basename(file);
@@ -501,6 +503,16 @@ export const checkRuntimeFile = ({
       ? text.slice(0, offset).split("\n").length
       : 1;
   };
+  type CheckoutBinding = { path: string; source: "tracked" | "untrusted" };
+  let checkoutBindings: CheckoutBinding[] = [];
+  const staticRepositoryPath = (value: unknown): value is string =>
+    typeof value === "string" &&
+    value !== "" &&
+    !value.includes("${{") &&
+    !value.includes("\\") &&
+    !value.includes(":") &&
+    !path.posix.isAbsolute(value) &&
+    !value.split("/").includes("..");
   type RuntimeReferenceOptions = {
     value: unknown;
     tool: "node" | "python" | "bun";
@@ -514,13 +526,28 @@ export const checkRuntimeFile = ({
           ? [".python-version"]
           : ["package.json"];
     const rule = tool === "bun" ? "bun-pins" : "runtime-workflow";
+    const selector = staticRepositoryPath(value)
+      ? path.posix.normalize(value)
+      : undefined;
+    const binding =
+      selector === undefined
+        ? undefined
+        : checkoutBindings.findLast(
+            (entry) =>
+              entry.path === "." ||
+              selector === entry.path ||
+              selector.startsWith(`${entry.path}/`),
+          );
+    const target =
+      selector === undefined || binding?.source === "untrusted"
+        ? undefined
+        : binding === undefined || binding.path === "."
+          ? selector
+          : path.posix.relative(binding.path, selector);
     if (
-      typeof value !== "string" ||
-      value.includes("${{") ||
-      path.posix.isAbsolute(value) ||
-      value.split("/").includes("..") ||
-      !allowed.includes(path.posix.basename(value)) ||
-      !trackedFiles.has(path.posix.normalize(value))
+      target === undefined ||
+      !allowed.includes(path.posix.basename(target)) ||
+      !trackedFiles.has(target)
     ) {
       add({
         rule,
@@ -529,7 +556,7 @@ export const checkRuntimeFile = ({
       });
       return;
     }
-    const content = readFile(path.posix.normalize(value));
+    const content = readFile(target);
     if (tool === "bun") {
       try {
         const manifest: unknown = JSON.parse(content ?? "");
@@ -720,6 +747,50 @@ export const checkRuntimeFile = ({
         line,
         message: `${action} requires a # ${approved.version} version comment`,
       });
+    if (automationKind === "workflow" && action === "actions/checkout") {
+      const options = getNode(node, "with");
+      const checkoutPath = getNode(options, "path");
+      const checkoutRepository = getNode(options, "repository");
+      const checkoutRef = getNode(options, "ref");
+      const prefix =
+        checkoutPath === undefined
+          ? "."
+          : isScalar(checkoutPath)
+            ? checkoutPath.value
+            : undefined;
+      const repo =
+        checkoutRepository === undefined
+          ? undefined
+          : isScalar(checkoutRepository)
+            ? checkoutRepository.value
+            : null;
+      const self =
+        repo === undefined ||
+        repo === "${{ github.repository }}" ||
+        (typeof repo === "string" &&
+          repository !== undefined &&
+          repo.toLowerCase() === repository.toLowerCase());
+      const literalRef =
+        isScalar(checkoutRef) &&
+        typeof checkoutRef.value === "string" &&
+        /^[a-f0-9]{40}$/.test(checkoutRef.value);
+      const currentRoot =
+        staticRepositoryPath(prefix) &&
+        path.posix.normalize(prefix) === "." &&
+        checkoutRef === undefined;
+      if (!staticRepositoryPath(prefix)) {
+        // Unknown checkout destinations may shadow any tracked selector.
+        checkoutBindings.push({ path: ".", source: "untrusted" });
+      } else {
+        checkoutBindings.push({
+          path: path.posix.normalize(prefix),
+          source:
+            self && (literalRef || currentRoot) && ref === approved?.sha
+              ? "tracked"
+              : "untrusted",
+        });
+      }
+    }
     const tool =
       action === "actions/setup-node"
         ? "node"
@@ -755,6 +826,7 @@ export const checkRuntimeFile = ({
     });
   };
   const checkSteps = (node: unknown) => {
+    checkoutBindings = [];
     node = resolveNode(node);
     if (isSeq(node)) for (const step of node.items) checkAction(step);
   };
@@ -765,6 +837,7 @@ export const checkRuntimeFile = ({
       const jobs = getNode(document.contents, "jobs");
       if (isMap(jobs))
         for (const key of keysOf(jobs)) {
+          checkoutBindings = [];
           const job = getNode(jobs, key);
           checkAction(job);
           checkContainer(getNode(job, "container"));

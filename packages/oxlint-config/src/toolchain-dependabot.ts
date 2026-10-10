@@ -193,7 +193,11 @@ const javascriptEcosystem = (
 
 const pythonEcosystem = (file: string, files: Record<string, string>) => {
   const manifestKind = pythonDependencyManifestKind(file);
-  if (manifestKind === "pipfile" || manifestKind === "pipfile-lock")
+  if (
+    manifestKind === "pipfile" ||
+    manifestKind === "pipfile-lock" ||
+    manifestKind === "setup"
+  )
     return "pip";
   const root = path.posix.dirname(file);
   if (
@@ -332,6 +336,8 @@ export const checkDependabot = ({
     return diagnostics;
   }
   const covered = new Map<string, Set<string>>();
+  const rootClaims = new Map<string, Map<string, number>>();
+  const directoryClaims = new Map<string, Map<string, number>>();
   for (const [index, update] of parsed["updates"].entries()) {
     const lineOf = (key: string) => {
       const node: unknown = document.getIn(["updates", index, key], true);
@@ -365,29 +371,59 @@ export const checkDependabot = ({
         : single === undefined && strings(multiple)
           ? multiple
           : [];
+    const validDirectories = directories.filter(
+      (directory) =>
+        directory.startsWith("/") && !directory.split("/").includes(".."),
+    );
     if (
       directories.length === 0 ||
-      directories.some(
-        (directory) =>
-          !directory.startsWith("/") || directory.split("/").includes(".."),
-      )
+      validDirectories.length !== directories.length
     ) {
       report(
         "directory",
         `${ecosystem}: declare directory or nonempty directories with absolute repository paths`,
       );
     }
+    const normalizedDirectories = Array.from(
+      new Set(
+        validDirectories.map(
+          (value) => path.posix.normalize(value).replace(/\/+$/, "") || "/",
+        ),
+      ),
+    );
     const matches = covered.get(ecosystem) ?? new Set<string>();
+    const claimedDirectories =
+      directoryClaims.get(ecosystem) ?? new Map<string, number>();
+    for (const directory of normalizedDirectories) {
+      const previous = claimedDirectories.get(directory);
+      if (previous !== undefined)
+        report(
+          multiple === undefined ? "directory" : "directories",
+          `${ecosystem}: directory ${directory} overlaps update entry ${previous + 1}`,
+        );
+      else claimedDirectories.set(directory, index);
+    }
+    directoryClaims.set(ecosystem, claimedDirectories);
+    const claimedRoots = rootClaims.get(ecosystem) ?? new Map<string, number>();
     for (const root of roots.get(ecosystem) ?? []) {
       if (
-        directories.some(
+        normalizedDirectories.some(
           (directory) =>
             directory === root ||
             (multiple !== undefined && picomatch.isMatch(root, directory)),
         )
-      )
+      ) {
+        const previous = claimedRoots.get(root);
+        if (previous !== undefined)
+          report(
+            multiple === undefined ? "directory" : "directories",
+            `${ecosystem}: update root ${root} overlaps update entry ${previous + 1}`,
+          );
+        else claimedRoots.set(root, index);
         matches.add(root);
+      }
     }
+    rootClaims.set(ecosystem, claimedRoots);
     covered.set(ecosystem, matches);
     const schedule = update["schedule"];
     if (

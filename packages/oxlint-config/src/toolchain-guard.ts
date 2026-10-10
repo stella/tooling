@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 
 import { checkDependabot, dependabotRules } from "./toolchain-dependabot";
@@ -52,15 +52,8 @@ export const parseToolchainOptOuts = (input: unknown) => {
   return disabled;
 };
 
-type CheckSharedToolchainOptions = {
-  root: string;
-  policy: ReturnType<typeof parseToolchainPolicy>;
-};
-
-export const checkToolchain = ({
-  root,
-  policy,
-}: CheckSharedToolchainOptions) => {
+/** Read one tracked configuration snapshot for guards and policy generation. */
+export const readToolchainInputs = (root: string) => {
   const diagnostics: SharedToolchainDiagnostic[] = [];
   const tracked = execFileSync("git", ["ls-files", "-z", "--cached"], {
     cwd: root,
@@ -75,6 +68,8 @@ export const checkToolchain = ({
           .some((part) => part === "node_modules" || part === "vendor"),
     );
   const files: Record<string, string> = {};
+  const trackedFiles = new Set(tracked);
+  const resolvedRoot = realpathSync(root);
   for (const file of tracked) {
     // Only configuration inputs are read; source files can contain arbitrary examples.
     const kind = toolchainInputKind(file);
@@ -84,7 +79,15 @@ export const checkToolchain = ({
       continue;
     }
     try {
-      files[file] = readFileSync(path.join(root, file), "utf8");
+      const resolvedFile = realpathSync(path.join(resolvedRoot, file));
+      const relative = path.relative(resolvedRoot, resolvedFile);
+      if (
+        path.isAbsolute(relative) ||
+        relative.split(path.sep).at(0) === ".." ||
+        !trackedFiles.has(relative.split(path.sep).join("/"))
+      )
+        throw new Error("Configuration target is outside the tracked tree");
+      files[file] = readFileSync(resolvedFile, "utf8");
     } catch {
       diagnostics.push({
         rule: "configuration",
@@ -94,6 +97,34 @@ export const checkToolchain = ({
       });
     }
   }
+  return { files, trackedFiles, diagnostics };
+};
+
+type CheckSharedToolchainOptions = {
+  root: string;
+  policy: ReturnType<typeof parseToolchainPolicy>;
+};
+
+export const checkToolchain = ({
+  root,
+  policy,
+}: CheckSharedToolchainOptions) => {
+  const { files, trackedFiles, diagnostics } = readToolchainInputs(root);
+  let repository: string | undefined;
+  try {
+    const origin = execFileSync("git", ["remote", "get-url", "origin"], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    repository =
+      /^(?:https?:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([^/]+\/[^/]+?)(?:\.git)?\/?$/.exec(
+        origin,
+      )?.[1];
+  } catch {
+    // Repositories without a GitHub origin can still use github.repository.
+  }
+
   let disabled = new Set<string>();
   if (files["stll-toolchain.json"] !== undefined) {
     try {
@@ -110,7 +141,6 @@ export const checkToolchain = ({
     }
   }
   diagnostics.push(...checkPackageFiles({ files, policy }));
-  const trackedFiles = new Set(tracked);
   for (const [file, text] of Object.entries(files))
     diagnostics.push(
       ...checkRuntimeFile({
@@ -121,6 +151,7 @@ export const checkToolchain = ({
           packages: { ...policy.packages, typescript: policy.typescript },
         },
         trackedFiles,
+        repository,
         readFile: (target) => files[target],
       }),
     );

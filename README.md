@@ -68,6 +68,9 @@ CI also checks the shared release policy's runtime selector action set against
 release-policy workflow reference.
 Other remote actions and reusable workflows require a full SHA. Local actions
 are repository-owned. The checker resolves YAML aliases and TOML tool tables.
+A runtime version file may come from a prefixed checkout of the same repository
+when that checkout pins a full commit SHA. The guard maps its selector to the
+tracked source file; foreign repositories, mutable refs and traversal paths fail.
 
 The named rules are `bun-pins`, `package-pins`, `typescript-layout`,
 `node-engine`, `node-version`, `python-version`, `rust-version`,

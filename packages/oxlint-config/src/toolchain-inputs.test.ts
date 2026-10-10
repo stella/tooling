@@ -47,6 +47,10 @@ test("Python dependency filename classification is shared and scoped to manifest
     "requirements_dev.txt",
     "python/requirements.prod.txt",
     "tools/requirements-ci.txt",
+    "requirements.in",
+    "tools/requirements_dev.in",
+    "setup.py",
+    "python/setup.cfg",
   ]) {
     expect(isPythonDependencyManifest(file)).toBe(true);
     expect(toolchainInputKind(file)).toBe("config");
@@ -66,6 +70,8 @@ test("Python dependency filename classification is shared and scoped to manifest
     "docs/act.txt",
     "requirements.md",
     "requirements_dev.txt.bak",
+    "contract.in",
+    "setup.py.bak",
   ]) {
     expect(isPythonDependencyManifest(file)).toBe(false);
     expect(toolchainInputKind(file)).toBeUndefined();
