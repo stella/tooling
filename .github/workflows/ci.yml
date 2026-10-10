@@ -71,8 +71,18 @@ jobs:
       - name: Registry version check
         run: bun run check:registry-versions
 
-      - name: Typecheck
-        run: bun run typecheck
+      - name: Typecheck diagnostic parity
+        run: bun run check:typecheck-parity
+
+      - name: Typecheck with TypeScript (timed)
+        run: |
+          /usr/bin/time -v sh -c '
+            bun node_modules/typescript/bin/tsc --noEmit -p packages/oxlint-config &&
+            bun node_modules/typescript/bin/tsc --noEmit -p packages/oxlint-plugin
+          '
+
+      - name: Typecheck with Bun (timed)
+        run: /usr/bin/time -v bun run typecheck
 
       - name: Test
         run: bun run test

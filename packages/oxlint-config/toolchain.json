@@ -8,7 +8,7 @@
       "type": "direct",
       "compilerPackage": "typescript",
       "compilerSpecifier": "7.0.2",
-      "typecheckCommand": "tsc --noEmit"
+      "typecheckCommand": "bun check"
     },
     {
       "type": "split-compatibility",
@@ -16,7 +16,7 @@
       "compilerSpecifier": "npm:typescript@7.0.2",
       "compatibilityPackage": "typescript",
       "compatibilitySpecifier": "6.0.3",
-      "typecheckCommand": "node ./node_modules/@typescript/native/bin/tsc --noEmit"
+      "typecheckCommand": "bun check"
     }
   ],
   "typescript6Compatibility": {

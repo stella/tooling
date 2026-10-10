@@ -48,7 +48,7 @@ describe("shared toolchain policy", () => {
           compilerPackage: "typescript",
           compilerSpecifier: "7.0.2",
           type: "direct",
-          typecheckCommand: "tsc --noEmit",
+          typecheckCommand: "bun check",
         },
         {
           compatibilityPackage: "typescript",
@@ -56,8 +56,7 @@ describe("shared toolchain policy", () => {
           compilerPackage: "@typescript/native",
           compilerSpecifier: "npm:typescript@7.0.2",
           type: "split-compatibility",
-          typecheckCommand:
-            "node ./node_modules/@typescript/native/bin/tsc --noEmit",
+          typecheckCommand: "bun check",
         },
       ],
       typescript6Compatibility: {

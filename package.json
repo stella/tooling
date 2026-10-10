@@ -12,7 +12,7 @@
     "changeset:version": "changeset version && bun scripts/check-lockfile-workspace-versions.ts --write && bun install --frozen-lockfile",
     "check:lockfile-versions": "bun scripts/check-lockfile-workspace-versions.ts",
     "check:registry-versions": "bun scripts/check-registry-versions.ts",
-    "typecheck": "bun --filter @stll/oxlint-config typecheck && bun --filter @stll/oxlint-plugin typecheck",
+    "typecheck": "bun check -p packages/oxlint-config && bun check -p packages/oxlint-plugin",
     "test": "bun test",
     "test:rust-lints": "cd rust-lints/stella_lints && cargo test",
     "lint": "bun run build && bun --bun oxlint -c oxlint.config.ts --report-unused-disable-directives-severity=error --deny-warnings --type-aware .",
@@ -23,7 +23,8 @@
     "prepack": "bun run build && bun run typecheck",
     "sync-ai": "bash .ai/shared/scripts/sync-ai-skills.sh .",
     "sync-ai:check": "bash .ai/shared/scripts/sync-ai-skills.sh --check .",
-    "check:toolchain": "bun packages/oxlint-config/dist/toolchain-check-cli.mjs"
+    "check:toolchain": "bun packages/oxlint-config/dist/toolchain-check-cli.mjs",
+    "check:typecheck-parity": "bun scripts/check-typecheck-parity.ts"
   },
   "devDependencies": {
     "@changesets/changelog-github": "1.0.0",
