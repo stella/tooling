@@ -20,7 +20,7 @@
     },
     "packages/oxlint-config": {
       "name": "@stll/oxlint-config",
-      "version": "0.10.0",
+      "version": "0.11.0",
       "bin": {
         "stll-toolchain-check": "./dist/toolchain-check-cli.mjs",
         "stll-typecheck-parity": "./dist/typecheck-parity-cli.mjs",
