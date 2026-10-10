@@ -28,7 +28,6 @@ const invoke = (root: string, args: string[] = []) =>
 const declaration = {
   services: [],
   install: "bun install --frozen-lockfile",
-  envFile: ".env.cloud",
 };
 const withRepository = async (run: (root: string) => Promise<void>) => {
   const root = await mkdtemp(join(tmpdir(), "cloud-cli-"));

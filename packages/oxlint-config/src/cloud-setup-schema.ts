@@ -13,10 +13,25 @@ export const parseCloudSetup = (input: unknown) => {
   for (const key of Object.keys(input))
     if (key !== "services" && key !== "install" && key !== "envFile")
       throw new Error(`unsupported cloud key: ${key}`);
-  if (!("services" in input) || !Array.isArray(input.services))
-    throw new Error("cloud.services must be an explicit array");
+  const selected = "services" in input ? input.services : [];
+  if (!Array.isArray(selected))
+    throw new Error("cloud.services must be an array when provided");
   if (!("install" in input) || input.install !== cloudInstallCommand)
     throw new Error(`cloud.install must be exactly ${cloudInstallCommand}`);
+  const seen = new Set<CloudService>();
+  const services = Array.from(selected, (service: unknown) => {
+    if (!cloudService(service))
+      throw new Error("cloud.services contains an unsupported service");
+    if (seen.has(service))
+      throw new Error(`cloud.services contains duplicate service: ${service}`);
+    seen.add(service);
+    return service;
+  });
+  if (services.length === 0) {
+    if ("envFile" in input)
+      throw new Error("cloud.envFile is not allowed without services");
+    return { services, install: cloudInstallCommand } as const;
+  }
   if (!("envFile" in input) || typeof input.envFile !== "string")
     throw new Error(
       "cloud.envFile must be a canonical repository-relative path",
@@ -34,14 +49,5 @@ export const parseCloudSetup = (input: unknown) => {
     throw new Error(
       "cloud.envFile must be a canonical repository-relative path",
     );
-  const seen = new Set<CloudService>();
-  const services = Array.from(input.services, (service: unknown) => {
-    if (!cloudService(service))
-      throw new Error("cloud.services contains an unsupported service");
-    if (seen.has(service))
-      throw new Error(`cloud.services contains duplicate service: ${service}`);
-    seen.add(service);
-    return service;
-  });
   return { services, install: cloudInstallCommand, envFile } as const;
 };

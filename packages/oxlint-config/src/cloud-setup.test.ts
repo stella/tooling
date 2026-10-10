@@ -30,7 +30,7 @@ const generate = (input: unknown, nodeVersion = "26.10.0") => {
   return generateCloudSetup({ policy, cloud, nodeVersion });
 };
 const declaration = {
-  services: [],
+  services: ["postgres"],
   install: cloudInstallCommand,
   envFile: ".env.cloud",
 };
@@ -117,9 +117,13 @@ test("all service subsets generate deterministic valid Bash regardless of declar
     const services = cloudServices.filter(
       (_, index) => (mask & (1 << index)) !== 0,
     );
-    const generated = generate({ ...declaration, services });
-    expect(generate({ ...declaration, services })).toBe(generated);
-    expect(generate({ ...declaration, services: services.toReversed() })).toBe(
+    const input =
+      services.length === 0
+        ? { services, install: cloudInstallCommand }
+        : { ...declaration, services };
+    const generated = generate(input);
+    expect(generate(input)).toBe(generated);
+    expect(generate({ ...input, services: services.toReversed() })).toBe(
       generated,
     );
     const syntax = Bun.spawnSync(["bash", "-n"], {
@@ -337,4 +341,26 @@ dependency_install`,
     );
     expect(existsSync(join(cacheParent, "bun/4242"))).toBe(true);
   });
+});
+
+test("runtime-only declarations emit no environment file code", () => {
+  for (const input of [
+    { install: cloudInstallCommand },
+    { install: cloudInstallCommand, services: [] },
+  ]) {
+    const generated = generate(input);
+    expect(generated).not.toMatch(
+      /ENV_FILE|ENV_MARKER|validate_environment|write_environment|DATABASE_URL|REDIS_URL/,
+    );
+    expect(generated).not.toContain(cloudEnvironmentMarker);
+    expect(
+      Bun.spawnSync(["bash", "-n"], { stdin: Buffer.from(generated) }).exitCode,
+    ).toBe(0);
+  }
+  for (const service of cloudServices) {
+    const generated = generate({ ...declaration, services: [service] });
+    expect(generated).toContain("validate_environment");
+    expect(generated).toContain("write_environment");
+    expect(generated).toContain(cloudEnvironmentMarker);
+  }
 });
