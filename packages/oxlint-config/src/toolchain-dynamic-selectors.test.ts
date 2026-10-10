@@ -288,3 +288,61 @@ test("PR-head manifest selectors delegate without reading the inspected manifest
       ]);
     }
 });
+
+test("reusable workflow caller checkouts cannot authorize inspected local actions", () => {
+  for (const trigger of [
+    "workflow_call",
+    "[workflow_call, push]",
+    "{workflow_call: {}, push: {}}",
+  ])
+    for (const binding of [
+      undefined,
+      "repository: '\${{ github.repository }}', ref: '\${{ github.sha }}'",
+    ]) {
+      const source = `on: ${trigger}\njobs:\n  example:\n    steps:\n      - uses: ${action("actions/checkout")}\n${binding === undefined ? "" : `        with: {${binding}}\n`}      - uses: ./.github/actions/example\n`;
+      expect(
+        check(source).diagnostics.some(({ rule }) => rule === "action-pins"),
+      ).toBe(true);
+      const owned = source.replace(
+        binding === undefined
+          ? `      - uses: ./.github/actions/example`
+          : `        with: {${binding}}`,
+        binding === undefined
+          ? "        with: {repository: '\${{ job.workflow_repository }}', ref: '\${{ job.workflow_sha }}'}\n      - uses: ./.github/actions/example"
+          : "        with: {repository: '\${{ job.workflow_repository }}', ref: '\${{ job.workflow_sha }}'}",
+      );
+      expect(check(owned).diagnostics).toEqual([]);
+    }
+  const reports: unknown[] = [];
+  expect(
+    checkRuntimeFile({
+      file,
+      text: `on: workflow_call\njobs:\n  example:\n    steps:\n      - uses: ${action("actions/checkout")}\n        with: {repository: '\${{ github.repository }}', ref: '\${{ github.sha }}'}\n      - uses: ${action("oven-sh/setup-bun")}\n        with: {bun-version-file: package.json}\n`,
+      policy,
+      trackedFiles: new Set(["package.json"]),
+      readFile: () => {
+        throw new Error("Caller manifests must be delegated");
+      },
+      onDelegated: (report) => reports.push(report),
+    }),
+  ).toEqual([]);
+  expect(reports).toMatchObject([{ tool: "bun", ref: "${{ github.sha }}" }]);
+});
+
+test("mixed sparse expressions cannot conceal literal invalid patterns", () => {
+  for (const literal of [
+    "!package.json",
+    "*.json",
+    "../package.json",
+    "!${{ inputs.excluded }}",
+  ])
+    for (const entries of [
+      [literal, "${{ inputs.sparse }}"],
+      ["${{ inputs.sparse }}", literal],
+    ]) {
+      const source = `on: push\njobs:\n  example:\n    steps:\n      - uses: ${action("actions/checkout")}\n        with:\n          path: snapshot\n          ref: '\${{ inputs.ref }}'\n          sparse-checkout-cone-mode: false\n          sparse-checkout: |\n${entries.map((entry) => `            ${entry}\n`).join("")}      - id: setup\n        uses: ${action("oven-sh/setup-bun")}\n        with: {bun-version-file: snapshot/package.json}\n`;
+      const result = check(source, [bunDecision]);
+      expect(result.matched).toEqual([]);
+      expect(result.diagnostics).toMatchObject([{ rule: "bun-pins" }]);
+    }
+});

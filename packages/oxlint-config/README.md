@@ -69,12 +69,15 @@ without the checkout prefix, in `sparse-checkout`; a root-anchored entry such as
 sources. Empty, glob, negation, or unsupported sparse configurations fail; a
 cone-mode input alone is insufficient. Directory entries cannot substitute for
 the selected file. A scoped Bun-source declaration can acknowledge a dynamic
-sparse expression, but cannot waive a literal omission or invalid pattern.
+sparse expression, but cannot waive a literal omission or invalid pattern,
+including literal patterns mixed with expression lines.
 Other nonempty, nonconstant GitHub expression refs on same-repository checkouts
 (including `${{ job.workflow_repository }}`) delegate a safe static version-file selector
 to that checkout. The CLI reports delegation on stdout without validating the
 current source's version file. Current-source checkouts also accept
-`${{ github.sha }}` on the same repository. `${{ github.ref }}` is current-source
+`${{ github.sha }}` on the same repository, except reusable `workflow_call`
+workflows whose GitHub context belongs to the caller. Reusable workflows must
+use the exact workflow repository/SHA pair to authorize local actions. `${{ github.ref }}` is current-source
 only when every declared workflow event is `push` or `merge_group`. PR-head
 SHA/ref expressions and their fallbacks are delegated: they cannot establish
 local-action provenance or validate the inspected source's manifest. Local

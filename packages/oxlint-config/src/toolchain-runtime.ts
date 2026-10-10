@@ -1178,7 +1178,6 @@ export const checkRuntimeFile = ({
             cone.value !== "false")))
     )
       return { mode: "invalid" };
-    if (dynamic(value.value)) return { mode: "dynamic" };
     const paths = value.value
       .split(/\r?\n/)
       .map((entry) => entry.trim().replace(/^\//, ""))
@@ -1187,12 +1186,13 @@ export const checkRuntimeFile = ({
       paths.length === 0 ||
       paths.some(
         (entry) =>
-          !staticRepositoryPath(entry) ||
           entry.startsWith("!") ||
-          /[*?[\]]/.test(entry),
+          (!dynamic(entry) &&
+            (!staticRepositoryPath(entry) || /[*?[\]]/.test(entry))),
       )
     )
       return { mode: "invalid" };
+    if (paths.some(dynamic)) return { mode: "dynamic" };
     return { mode: "files", paths: new Set(paths) };
   };
   let currentEngineFloor: ResolvedEngineFloor | undefined;
@@ -1337,20 +1337,22 @@ export const checkRuntimeFile = ({
       const refValue = isScalar(checkoutRef) ? checkoutRef.value : undefined;
       const currentRef = dynamicRefBody(refValue);
       const triggers = getNode(document.contents, "on");
-      const events = isMap(triggers)
-        ? [...keysOf(triggers)]
-        : isSeq(triggers)
-          ? triggers.items.map((event) =>
-              isScalar(event) ? event.value : undefined,
-            )
-          : isScalar(triggers)
-            ? [triggers.value]
-            : [];
+      const events = (() => {
+        if (isMap(triggers)) return [...keysOf(triggers)];
+        if (isSeq(triggers))
+          return triggers.items.map((event) =>
+            isScalar(event) ? event.value : undefined,
+          );
+        if (isScalar(triggers)) return [triggers.value];
+        return [];
+      })();
+      const callerContext = events.includes("workflow_call");
       const branchRefIsCurrent =
         events.length > 0 &&
         events.every((event) => event === "push" || event === "merge_group");
       const currentSource =
         self &&
+        !callerContext &&
         (checkoutRef === undefined ||
           currentRef === "github.sha" ||
           (currentRef === "github.ref" && branchRefIsCurrent));
@@ -1364,9 +1366,10 @@ export const checkRuntimeFile = ({
         !/^(?:'(?:[^']|'')*'|"(?:[^"\\]|\\.)*"|(?:true|false|null)|-?(?:0x[\da-f]+|(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?))$/i.test(
           dynamicRef,
         ) &&
-        !/^(?:github\s*(?:\.\s*sha|\[\s*['"]sha['"]\s*\])|job\s*(?:\.\s*workflow_sha|\[\s*['"]workflow_sha['"]\s*\]))$/i.test(
+        (!/^(?:github\s*(?:\.\s*sha|\[\s*['"]sha['"]\s*\])|job\s*(?:\.\s*workflow_sha|\[\s*['"]workflow_sha['"]\s*\]))$/i.test(
           dynamicRef,
-        );
+        ) ||
+          (callerContext && currentRef === "github.sha"));
 
       const validSource =
         ref === approved?.sha &&
