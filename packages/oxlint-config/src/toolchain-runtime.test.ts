@@ -57,6 +57,105 @@ const runtimeImageVersions = {
   "oven/bun": policy.bun,
 };
 
+test("all setup action inputs reject casing bypasses and folded duplicates", () => {
+  for (const { reference, selector, literal, target } of [
+    {
+      reference: `actions/setup-node@${sha} # v5`,
+      selector: "node-version-file",
+      literal: "node-version",
+      target: ".node-version",
+    },
+    {
+      reference: `oven-sh/setup-bun@${sha} # v2`,
+      selector: "bun-version-file",
+      literal: "bun-version",
+      target: "package.json",
+    },
+    {
+      reference: `actions/setup-python@${sha} # v6`,
+      selector: "python-version-file",
+      literal: "python-version",
+      target: ".python-version",
+    },
+    {
+      reference: `astral-sh/setup-uv@${sha}`,
+      selector: "version-file",
+      literal: "version",
+      target: ".tool-versions",
+    },
+  ]) {
+    const action = (inputs: string) =>
+      workflow(`      - uses: ${reference}\n        with: {${inputs}}`);
+    const canonical = `${selector}: ${target}`;
+    expect(check(".github/workflows/ci.yml", action(canonical))).toEqual([]);
+    for (const input of [
+      literal.toUpperCase(),
+      selector.toUpperCase(),
+      literal.replace("s", "ſ"),
+    ])
+      expect(
+        check(
+          ".github/workflows/ci.yml",
+          action(`${canonical}, ${input}: '22'`),
+        ).some(({ message }) => message.includes("canonical lowercase")),
+      ).toBe(true);
+    for (const key of [
+      selector.toUpperCase(),
+      `${selector.slice(0, 1)}${selector.slice(1).toUpperCase()}`,
+    ])
+      expect(
+        check(
+          ".github/workflows/ci.yml",
+          action(`${canonical}, ${key}: ${target}`),
+        ).some(({ message }) =>
+          message.includes("collides after case-folding"),
+        ),
+      ).toBe(true);
+  }
+});
+
+test("input case-folding covers caches, local actions, merges and checkout provenance", () => {
+  for (const reference of [`actions/cache@${sha}`, "./actions/cache"])
+    expect(
+      check(
+        ".github/workflows/ci.yml",
+        workflow(
+          `      - uses: ${reference}\n        with: {key: cache, KEY: other}`,
+        ),
+        { "actions/cache/action.yml": "runs: {using: composite, steps: []}" },
+      ).some(({ message }) => message.includes("collides after case-folding")),
+    ).toBe(true);
+  expect(
+    check(
+      ".github/workflows/ci.yml",
+      workflow(
+        `      - uses: actions/setup-node@${sha} # v5\n        with: {<<: &selector {node-version-file: .node-version}, NODE-VERSION-FILE: .node-version}`,
+      ),
+    ).some(({ message }) => message.includes("collides after case-folding")),
+  ).toBe(true);
+  const checkout = (inputs: string) =>
+    workflow(
+      `      - uses: actions/checkout@${sha} # v5\n        with: {${inputs}}\n      - uses: actions/setup-node@${sha} # v5\n        with: {node-version-file: source/.node-version}`,
+    );
+  expect(check(".github/workflows/ci.yml", checkout("PATH: source"))).toEqual(
+    [],
+  );
+  expect(
+    check(
+      ".github/workflows/ci.yml",
+      checkout(
+        "PATH: source, SPARSE-CHECKOUT: .node-version, SPARSE-CHECKOUT-CONE-MODE: false",
+      ),
+    ),
+  ).toEqual([]);
+  expect(
+    check(
+      ".github/workflows/ci.yml",
+      checkout("PATH: source, REPOSITORY: foreign/repository"),
+    ).length,
+  ).toBeGreaterThan(0);
+});
+
 test("runtime image variants preserve stable pins across every image consumer", () => {
   const families = [
     {
@@ -1684,6 +1783,8 @@ test("sparse checkouts must explicitly include each selected repository file", (
         `, sparse-checkout: '${target}', sparse-checkout-cone-mode: true`,
         `, sparse-checkout: '${target}', sparse-checkout-cone-mode: false`,
         `, sparse-checkout: '${target}', sparse-checkout-cone-mode: 'false'`,
+        `, sparse-checkout: '${target}', Sparse-Checkout-Cone-Mode: false`,
+        `, SPARSE-CHECKOUT: '${target}', SPARSE-CHECKOUT-CONE-MODE: false`,
       ]) {
         const reports: unknown[] = [];
         const reads: string[] = [];
@@ -1707,7 +1808,6 @@ test("sparse checkouts must explicitly include each selected repository file", (
         ", sparse-checkout: README.md",
         ", Sparse-Checkout: README.md",
         ", SPARSE-CHECKOUT: README.md",
-        `, sparse-checkout: '${target}', Sparse-Checkout-Cone-Mode: false`,
         ", sparse-checkout: source",
         `, sparse-checkout: 'source/${target}'`,
         ", sparse-checkout: ''",
@@ -1751,24 +1851,18 @@ test("sparse checkouts must explicitly include each selected repository file", (
         }),
       ).toEqual([]);
       expect(reports).toHaveLength(mode === "delegated" ? 1 : 0);
-      const badAliasReports: unknown[] = [];
+      const foldedAliasReports: unknown[] = [];
       expect(
         checkRuntimeFile({
           file: ".github/workflows/ci.yml",
           text: `${alias.replace("sparse-checkout:", "Sparse-Checkout:")}${workflow(`      - uses: actions/checkout@${sha} # v5\n        with: {<<: *checkout}\n${setup}`)}`,
           policy,
           trackedFiles: new Set(Object.keys(files)),
-          readFile: () => {
-            throw new Error(
-              "Invalid sparse casing must fail before source reads",
-            );
-          },
-          onDelegated: (report) => badAliasReports.push(report),
-        }).some(({ message }) =>
-          message.includes(`sparse-checkout must explicitly list ${target}`),
-        ),
-      ).toBe(true);
-      expect(badAliasReports).toEqual([]);
+          readFile: (file) => files[file],
+          onDelegated: (report) => foldedAliasReports.push(report),
+        }),
+      ).toEqual([]);
+      expect(foldedAliasReports).toHaveLength(mode === "delegated" ? 1 : 0);
     }
   }
 });

@@ -34,7 +34,7 @@
       "dependency-cruiser"
     ]
   },
-  "@stll/oxlint-plugin": "0.2.1",
+  "@stll/oxlint-plugin": "0.2.2",
   "lefthook": "2.1.16",
   "node": "26.x",
   "python": "3.13",

@@ -991,6 +991,38 @@ export const checkRuntimeFile = ({
     const source = sourceMap({ node, key });
     return isMap(source) ? resolveNode(source.get(key, true)) : undefined;
   };
+  const actionInputs = new Map<unknown, Map<string, unknown>>();
+  const inputsOf = (node: unknown) => {
+    node = resolveNode(node);
+    const cached = actionInputs.get(node);
+    if (cached !== undefined) return cached;
+    const options = getNode(node, "with");
+    const inputs = new Map<string, unknown>();
+    for (const key of keysOf(options)) {
+      const folded = key.toUpperCase();
+      const value = getNode(options, key);
+      if (inputs.has(folded))
+        add({
+          rule: "action-pins",
+          line: nodeLine(value),
+          message: `action input ${key} collides after case-folding`,
+        });
+      if (
+        /(?:^|-)VERSION(?:-FILE)?$/.test(folded) &&
+        key !== folded.toLowerCase()
+      )
+        add({
+          rule: "action-pins",
+          line: nodeLine(value),
+          message: `selector input ${key} must use canonical lowercase casing`,
+        });
+      inputs.set(folded, value);
+    }
+    actionInputs.set(node, inputs);
+    return inputs;
+  };
+  const getInput = (node: unknown, key: string) =>
+    inputsOf(node).get(key.toUpperCase());
   const dynamicRefBody = (value: unknown) => {
     if (typeof value !== "string" || !value.startsWith("${{")) return undefined;
     let quote: "'" | '"' | undefined;
@@ -1013,25 +1045,24 @@ export const checkRuntimeFile = ({
     return undefined;
   };
   const checkoutPrefixOf = (node: unknown) => {
-    const destination = getNode(getNode(node, "with"), "path");
+    const destination = getInput(node, "path");
     if (destination === undefined) return ".";
     return isScalar(destination) ? destination.value : undefined;
   };
   const sparseCheckoutOf = (node: unknown): SparseCheckout => {
-    const options = getNode(node, "with");
-    const sparseKeys = [...keysOf(options)].filter((key) =>
-      key.toLowerCase().startsWith("sparse-checkout"),
+    const sparseKeys = [...inputsOf(node).keys()].filter((key) =>
+      key.startsWith("SPARSE-CHECKOUT"),
     );
     if (sparseKeys.length === 0) return { mode: "all" };
     if (
       sparseKeys.some(
         (key) =>
-          key !== "sparse-checkout" && key !== "sparse-checkout-cone-mode",
+          key !== "SPARSE-CHECKOUT" && key !== "SPARSE-CHECKOUT-CONE-MODE",
       )
     )
       return { mode: "invalid" };
-    const value = getNode(options, "sparse-checkout");
-    const cone = getNode(options, "sparse-checkout-cone-mode");
+    const value = getInput(node, "sparse-checkout");
+    const cone = getInput(node, "sparse-checkout-cone-mode");
     if (
       !isScalar(value) ||
       typeof value.value !== "string" ||
@@ -1062,6 +1093,7 @@ export const checkRuntimeFile = ({
   const checkAction = (node: unknown) => {
     node = resolveNode(node);
     if (!isMap(node)) return;
+    inputsOf(node);
     const uses = getNode(node, "uses");
     if (uses === undefined) return;
     const line = nodeLine(uses);
@@ -1180,9 +1212,8 @@ export const checkRuntimeFile = ({
         message: `${action} requires a # ${approved.version} version comment`,
       });
     if (action === "actions/checkout") {
-      const options = getNode(node, "with");
-      const checkoutRepository = getNode(options, "repository");
-      const checkoutRef = getNode(options, "ref");
+      const checkoutRepository = getInput(node, "repository");
+      const checkoutRef = getInput(node, "ref");
       const prefix = checkoutPrefixOf(node);
       let repo: unknown;
       if (checkoutRepository !== undefined)
@@ -1258,15 +1289,14 @@ export const checkRuntimeFile = ({
       default:
         return;
     }
-    const options = getNode(node, "with");
-    const literal = getNode(options, `${tool}-version`);
+    const literal = getInput(node, `${tool}-version`);
     if (literal !== undefined)
       add({
         rule: tool === "bun" ? "bun-pins" : "runtime-workflow",
         line: nodeLine(literal),
         message: `setup-${tool} must use ${tool}-version-file`,
       });
-    const reference = getNode(options, `${tool}-version-file`);
+    const reference = getInput(node, `${tool}-version-file`);
     checkReference({
       value: isScalar(reference) ? reference.value : undefined,
       tool,

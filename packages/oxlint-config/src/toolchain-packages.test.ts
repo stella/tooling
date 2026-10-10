@@ -1109,7 +1109,7 @@ describe("TypeScript install layouts", () => {
       "`tsc --noEmit`",
       '"`tsc --noEmit`"',
       "$(echo $(tsc --noEmit))",
-      '"$(echo \"$(tsc --noEmit)\")"',
+      '"$(echo "$(tsc --noEmit)")"',
     ])
       for (const typecheck of [
         substitution,
