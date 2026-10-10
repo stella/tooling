@@ -188,6 +188,27 @@ test("CommonJS wrapper syntax agrees with native Node and remains forbidden in E
   }
 });
 
+test("CommonJS syntax diagnostics retain original positions through wrapper and prefix removal", () => {
+  for (const [source, position] of [
+    ["const =;", "(1:6)"],
+    ["\uFEFFconst =;", "(1:7)"],
+    ["#!/usr/bin/env node\nconst =;", "(2:6)"],
+    ["\uFEFF#!/usr/bin/env node\r\nconst =;", "(2:6)"],
+  ]) {
+    if (source === undefined || position === undefined)
+      throw new Error(
+        "Syntax diagnostic fixture must contain source and position",
+      );
+    expect(() =>
+      assertPackedArtifactSyntax({
+        files: files({ "index.cjs": source }),
+        target,
+        node,
+      }),
+    ).toThrow(`SyntaxError: Unexpected token ${position}`);
+  }
+});
+
 test("unbounded targets still pass through native Node parsing without executing artifact code", async () => {
   const executable = execFileSync("node", ["-p", "process.execPath"], {
     encoding: "utf8",

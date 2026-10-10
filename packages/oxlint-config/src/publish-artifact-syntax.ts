@@ -139,6 +139,35 @@ type ArtifactSyntaxOptions = {
   node: string;
 };
 
+const parseArtifactSource = (source: string, options: Options) => {
+  const script = options.sourceType === "script";
+  const content = script
+    ? source.replace(/^\uFEFF/, "").replace(/^#![^\r\n]*/, "")
+    : source;
+  try {
+    return parse(script ? wrap(content) : content, options);
+  } catch (error) {
+    if (
+      !script ||
+      !(error instanceof SyntaxError) ||
+      !record(error) ||
+      typeof error["pos"] !== "number"
+    )
+      throw error;
+    const prefixLength = wrap("\u0000").indexOf("\u0000");
+    const position = Math.max(
+      0,
+      Math.min(
+        source.length,
+        error["pos"] - prefixLength + source.length - content.length,
+      ),
+    );
+    const lines = source.slice(0, position).split(/\r\n|[\n\r\u2028\u2029]/);
+    const location = `(${lines.length}:${lines.at(-1)?.length ?? 0})`;
+    throw new SyntaxError(error.message.replace(/\(\d+:\d+\)$/, location));
+  }
+};
+
 /** Enumerate all chunks and bins, including JavaScript outside declared exports. */
 export const assertPackedArtifactSyntax = ({
   files,
@@ -157,11 +186,7 @@ export const assertPackedArtifactSyntax = ({
     if (/\.mjs$/i.test(file)) mode = "module";
     if (/\.cjs$/i.test(file)) mode = "script";
     const parseMode = (sourceType: "script" | "module") => {
-      const input =
-        sourceType === "script"
-          ? wrap(source.replace(/^\uFEFF/, "").replace(/^#![^\r\n]*/, ""))
-          : source;
-      const tree = parse(input, {
+      const tree = parseArtifactSource(source, {
         ecmaVersion,
         sourceType,
         allowHashBang: true,
