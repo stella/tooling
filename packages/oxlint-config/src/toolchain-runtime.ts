@@ -1365,6 +1365,14 @@ export const checkRuntimeFile = ({
       const checkoutRepository = getInput(node, "repository");
       const checkoutRef = getInput(node, "ref");
       const prefix = checkoutPrefixOf(node);
+      const clean = getInput(node, "clean");
+      const cleanIsResolved =
+        clean === undefined || (isScalar(clean) && !dynamic(clean.value));
+      const cleanIsDisabled =
+        isScalar(clean) &&
+        (clean.value === false ||
+          (typeof clean.value === "string" &&
+            clean.value.trim().toLowerCase() === "false"));
       let repo: unknown;
       if (checkoutRepository !== undefined)
         repo = isScalar(checkoutRepository) ? checkoutRepository.value : null;
@@ -1417,6 +1425,7 @@ export const checkRuntimeFile = ({
           (callerContext && currentRef === "github.sha"));
 
       const validSource =
+        cleanIsResolved &&
         ref === approved?.sha &&
         sourceMap({ node, key: "if" }) === undefined &&
         sourceMap({ node, key: "continue-on-error" }) === undefined &&
@@ -1434,7 +1443,27 @@ export const checkRuntimeFile = ({
         });
       } else {
         const destination = normalizeCheckoutPath(prefix);
+        if (!cleanIsDisabled)
+          checkoutBindings = checkoutBindings.map((entry) => {
+            if (
+              entry.path === destination ||
+              (destination !== "." && !entry.path.startsWith(`${destination}/`))
+            )
+              return entry;
+            // A later ancestor clean removes the independent descendant writer.
+            return {
+              path: entry.path,
+              sparse: { mode: "all" },
+              dynamicSource: false,
+              source: "untrusted",
+              reason: cleanIsResolved
+                ? "a later ancestor checkout cleans this descendant destination"
+                : "ancestor checkout clean must be statically resolved",
+              line,
+            };
+          });
         const trustedWriter =
+          cleanIsResolved &&
           ref === approved?.sha &&
           sourceMap({ node, key: "if" }) === undefined &&
           sourceMap({ node, key: "continue-on-error" }) === undefined &&
@@ -1458,7 +1487,9 @@ export const checkRuntimeFile = ({
         else {
           let reason =
             "checkout does not select a trusted repository source snapshot";
-          if (ref !== approved?.sha)
+          if (!cleanIsResolved)
+            reason = "checkout clean must be statically resolved";
+          else if (ref !== approved?.sha)
             reason = "actions/checkout must use the approved action SHA";
           else if (
             sourceMap({ node, key: "if" }) !== undefined ||

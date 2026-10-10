@@ -561,7 +561,8 @@ test("deepest checkout owns sparse validation independently of ancestor checkout
   }: NestedCheckoutOptions) => {
     const checkout = (destination: string, sparse: string | undefined) =>
       `      - uses: ${action("actions/checkout")}\n        with:\n          path: ${destination}\n${sparse === undefined ? "" : `          sparse-checkout: '${sparse}'\n`}`;
-    const root = checkout(".", rootSparse);
+    const root =
+      checkout(".", rootSparse) + (reverse ? "          clean: false\n" : "");
     const nested = checkout("snapshot", nestedSparse);
     return `on: push\njobs:\n  example:\n    steps:\n${reverse ? nested + root : root + nested}      - id: setup\n        uses: ${action("oven-sh/setup-bun")}\n        with: {bun-version-file: '${selector}'}\n`;
   };
@@ -615,5 +616,33 @@ test("deepest checkout owns sparse validation independently of ancestor checkout
           [bunDecision],
         ),
       ).toMatchObject({ diagnostics: [{ rule: "bun-pins" }], matched: [] });
+  }
+});
+
+test("ancestor checkout cleaning invalidates earlier descendant provenance in order", () => {
+  for (const destination of ["snapshot", "snapshot/deep"]) {
+    const nested = `      - uses: ${action("actions/checkout")}\n        with: {path: ${destination}}\n`;
+    const setup = `      - id: setup\n        uses: ${action("oven-sh/setup-bun")}\n        with: {bun-version-file: ${destination}/package.json}\n      - uses: ./${destination}/.github/actions/example\n`;
+    const root = (clean: string | undefined) =>
+      `      - uses: ${action("actions/checkout")}\n${clean === undefined ? "" : `        with: {clean: ${clean}}\n`}`;
+    const source = (steps: string) =>
+      `on: push\njobs:\n  example:\n    steps:\n${steps}${setup}`;
+    for (const clean of [
+      undefined,
+      "true",
+      "'true'",
+      "'\${{ inputs.clean }}'",
+      "'\${{ false }}'",
+    ]) {
+      const result = check(source(nested + root(clean)), [bunDecision]);
+      expect(result.matched).toEqual([]);
+      expect(result.diagnostics).toMatchObject([
+        { rule: "bun-pins" },
+        { rule: "action-pins" },
+      ]);
+    }
+    expect(check(source(root(undefined) + nested)).diagnostics).toEqual([]);
+    for (const clean of ["false", "'false'", "' FALSE '"])
+      expect(check(source(nested + root(clean))).diagnostics).toEqual([]);
   }
 });
