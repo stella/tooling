@@ -73,6 +73,251 @@ const fixture = () => {
   return { repo, write, commit };
 };
 
+const runtimeActions = [
+  {
+    uses: "oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6",
+    input: "bun-version",
+    exact: "1.4.3",
+  },
+  {
+    uses: "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+    input: "node-version",
+    exact: "26.10.0",
+  },
+] as const;
+const setupDeclaration = (surface: string, step: Record<string, unknown>) =>
+  surface === "workflow"
+    ? { jobs: { runtime: { "runs-on": "ubuntu-latest", steps: [step] } } }
+    : { runs: { using: "composite", steps: [step] } };
+
+for (const surface of ["workflow", "composite"])
+  for (const runtime of runtimeActions)
+    test(`${surface} ${runtime.input} selectors require an immutable release even without a commit change`, async () => {
+      for (const selector of [
+        "latest",
+        "${{ vars.X }}",
+        "1.x",
+        "",
+        undefined,
+        runtime.exact,
+      ]) {
+        const { repo, write, commit } = fixture();
+        write("package.json", { private: true, packageManager: "bun@1.4.3" });
+        write(
+          surface === "workflow"
+            ? ".github/workflows/runtime.yml"
+            : ".github/actions/runtime/action.yml",
+          setupDeclaration(surface, {
+            uses: runtime.uses,
+            ...(selector === undefined
+              ? {}
+              : { with: { [runtime.input]: selector } }),
+          }),
+        );
+        const since = commit();
+        const result = await detectToolchainChanges({ repo, since });
+        const stable = selector === runtime.exact;
+        expect(result.status).toBe(stable ? "compared" : "unreadable");
+        expect(result.changed).toBe(!stable);
+        let invocations = 0;
+        await runSelectedTypecheckParity({
+          repo,
+          since,
+          run: async () => {
+            invocations++;
+            return true;
+          },
+          output: () => {},
+        });
+        expect(invocations).toBe(stable ? 0 : 1);
+      }
+    });
+
+for (const surface of ["workflow", "composite"])
+  for (const runtime of runtimeActions)
+    test(`${surface} ${runtime.input}-file validates the selected bytes, not only the tracked path`, async () => {
+      for (const selector of [
+        "latest",
+        "${{ vars.X }}",
+        "1.x",
+        "",
+        runtime.exact,
+      ]) {
+        const { repo, write, commit } = fixture();
+        write("package.json", { private: true, packageManager: "bun@1.4.3" });
+        write("config/runtime.txt", selector + "\n");
+        write(
+          surface === "workflow"
+            ? ".github/workflows/runtime.yml"
+            : ".github/actions/runtime/action.yml",
+          setupDeclaration(surface, {
+            uses: runtime.uses,
+            with: { [runtime.input + "-file"]: "config/runtime.txt" },
+          }),
+        );
+        const since = commit();
+        const result = await detectToolchainChanges({ repo, since });
+        const stable = selector === runtime.exact;
+        expect(result.status).toBe(stable ? "compared" : "unreadable");
+        expect(result.changed).toBe(!stable);
+        let invocations = 0;
+        await runSelectedTypecheckParity({
+          repo,
+          since,
+          run: async () => {
+            invocations++;
+            return true;
+          },
+          output: () => {},
+        });
+        expect(invocations).toBe(stable ? 0 : 1);
+      }
+    });
+
+test("non-Node setup version files reject floating runtime series", async () => {
+  for (const runtime of [
+    { name: "python", exact: "3.13.0", floating: "3.13" },
+    { name: "go", exact: "1.24.3", floating: "1.24" },
+    { name: "java", exact: "21.0.2", floating: "21" },
+  ]) {
+    for (const selector of [runtime.exact, runtime.floating]) {
+      const { repo, write, commit } = fixture();
+      const file =
+        runtime.name === "go" ? "config/go.mod" : "config/runtime.txt";
+      write("package.json", { private: true, packageManager: "bun@1.4.3" });
+      write(
+        file,
+        runtime.name === "go"
+          ? `module example.test/library\ngo ${selector}\n`
+          : selector + "\n",
+      );
+      write(
+        ".github/actions/runtime/action.yml",
+        setupDeclaration("composite", {
+          uses: `actions/setup-${runtime.name}@${"1".repeat(40)}`,
+          with: { [runtime.name + "-version-file"]: file },
+        }),
+      );
+      const since = commit();
+      const stable = selector === runtime.exact;
+      expect(await detectToolchainChanges({ repo, since })).toMatchObject({
+        status: stable ? "compared" : "unreadable",
+        changed: !stable,
+      });
+    }
+  }
+});
+
+test("Bun JSON version selectors validate the exact packageManager release", async () => {
+  for (const manager of [
+    "bun@1.4.3",
+    "bun@latest",
+    "bun@1.x",
+    "bun@${{ vars.X }}",
+    undefined,
+  ]) {
+    const { repo, write, commit } = fixture();
+    write("package.json", { private: true, packageManager: "bun@1.4.3" });
+    write("config/runtime.json", {
+      private: true,
+      ...(manager === undefined ? {} : { packageManager: manager }),
+    });
+    write(
+      ".github/workflows/runtime.yml",
+      setupDeclaration("workflow", {
+        uses: runtimeActions[0].uses,
+        with: { "bun-version-file": "config/runtime.json" },
+      }),
+    );
+    const since = commit();
+    const stable = manager === "bun@1.4.3";
+    expect(await detectToolchainChanges({ repo, since })).toMatchObject({
+      status: stable ? "compared" : "unreadable",
+      changed: !stable,
+    });
+  }
+});
+
+test("Go file selection validates an overriding toolchain directive", async () => {
+  for (const selector of ["go1.24.4", "go1.25rc1", "go1.25"]) {
+    const { repo, write, commit } = fixture();
+    write("package.json", { private: true, packageManager: "bun@1.4.3" });
+    write(
+      "config/go.mod",
+      `module example.test/library\ngo 1.24.0\ntoolchain ${selector}\n`,
+    );
+    write(
+      ".github/workflows/runtime.yml",
+      setupDeclaration("workflow", {
+        uses: `actions/setup-go@${"1".repeat(40)}`,
+        with: { "go-version-file": "config/go.mod" },
+      }),
+    );
+    const since = commit();
+    const stable = selector === "go1.24.4";
+    expect(await detectToolchainChanges({ repo, since })).toMatchObject({
+      status: stable ? "compared" : "unreadable",
+      changed: !stable,
+    });
+  }
+});
+
+test("Rust setup toolchains require an immutable stable or dated nightly release", async () => {
+  for (const selector of ["1.96.0", "nightly-2026-04-16", "nightly"]) {
+    const { repo, write, commit } = fixture();
+    write("package.json", { private: true, packageManager: "bun@1.4.3" });
+    write(
+      ".github/actions/runtime/action.yml",
+      setupDeclaration("composite", {
+        uses: `dtolnay/rust-toolchain@${"1".repeat(40)}`,
+        with: { toolchain: selector },
+      }),
+    );
+    const since = commit();
+    const stable = selector !== "nightly";
+    expect(await detectToolchainChanges({ repo, since })).toMatchObject({
+      status: stable ? "compared" : "unreadable",
+      changed: !stable,
+    });
+  }
+});
+
+test("canonical Node runtime selectors cannot float without a setup action", async () => {
+  for (const declaration of [
+    { file: ".node-version", content: (version: string) => version + "\n" },
+    { file: ".nvmrc", content: (version: string) => version + "\n" },
+    {
+      file: ".tool-versions",
+      content: (version: string) => `nodejs ${version}\n`,
+    },
+    {
+      file: "mise.toml",
+      content: (version: string) => `[tools]\nnode = "${version}"\n`,
+    },
+    {
+      file: ".npmrc",
+      content: (version: string) => `use-node-version=${version}\n`,
+    },
+    {
+      file: "pnpm-workspace.yaml",
+      content: (version: string) =>
+        `packages: []\nuseNodeVersion: '${version}'\n`,
+    },
+  ]) {
+    for (const version of ["26.10.0", "latest"]) {
+      const { repo, write, commit } = fixture();
+      write("package.json", { private: true, packageManager: "bun@1.4.3" });
+      write(declaration.file, declaration.content(version));
+      const since = commit();
+      const stable = version === "26.10.0";
+      expect(await detectToolchainChanges({ repo, since })).toMatchObject({
+        status: stable ? "compared" : "unreadable",
+        changed: !stable,
+      });
+    }
+  }
+});
+
 for (const location of ["catalog", "catalogs", "workspaces", "pnpm"])
   test(`compiler catalog alias in ${location} retains patch bytes and canonical resolution`, async () => {
     const { repo, write, commit } = fixture();

@@ -594,13 +594,7 @@ const installedFields = [
   "devDependencies",
   "optionalDependencies",
 ] as const;
-const exactBun = (value: string) => {
-  const version = value.trim().replace(/^v/, "");
-  const exact = valid(version);
-  if (exact === null)
-    throw new Error("Bun runtime declaration is not an exact version");
-  return exact;
-};
+const exactBun = (value: string) => stableVersion(value);
 const nonRegistryResolution = (specifier: string) =>
   /^(?:link:|workspace:|file:|portal:|catalog:|git:|github:|gitlab:|bitbucket:|git\+|https?:|ssh:|git@)/i.test(
     specifier,
@@ -746,17 +740,186 @@ const boundResolution = ({
     `Missing resolved toolchain dependency: ${file}:${dependency}`,
   );
 };
+const stableVersion = (value: unknown) => {
+  if (typeof value !== "string")
+    throw new Error("Runtime selector is not an exact stable version");
+  const version = value.trim().replace(/^v/, "");
+  if (!/^\d+\.\d+\.\d+$/.test(version) || valid(version) !== version)
+    throw new Error("Runtime selector is not an exact stable version");
+  return version;
+};
+type SetupRuntimeVersionOptions = { value: unknown; runtime: string };
+const setupRuntimeVersion = ({
+  value,
+  runtime,
+}: SetupRuntimeVersionOptions) => {
+  if (typeof value !== "string" && typeof value !== "number")
+    throw new Error("Unclassifiable setup runtime selector");
+  const selector = String(value).trim();
+  if (runtime === "rust" && /^nightly-\d{4}-\d{2}-\d{2}$/.test(selector)) {
+    const date = selector.slice("nightly-".length);
+    if (new Date(date).toISOString().slice(0, 10) !== date)
+      throw new Error("Invalid dated Rust toolchain");
+    return selector;
+  }
+  return stableVersion(selector);
+};
+type SetupRuntimeFileOptions = {
+  snapshot: GitSnapshot;
+  file: string;
+  runtime: string;
+};
+const setupRuntimeFileVersion = ({
+  snapshot,
+  file,
+  runtime,
+}: SetupRuntimeFileOptions) => {
+  const text = snapshotText({ snapshot, file }).trim();
+  if (runtime === "bun" && file.endsWith(".json")) {
+    const manifest = parseChangedJson(text);
+    const manager = changedRecord(manifest)
+      ? manifest["packageManager"]
+      : undefined;
+    if (typeof manager !== "string" || !manager.startsWith("bun@"))
+      throw new Error(
+        "Bun selector manifest lacks an exact Bun packageManager",
+      );
+    return stableVersion(manager.slice(4));
+  }
+  if (runtime === "go" && path.posix.basename(file) === "go.mod") {
+    const goLines = text.split(/\r?\n/).filter((line) => /^\s*go\b/.test(line));
+    const toolchainLines = text
+      .split(/\r?\n/)
+      .filter((line) => /^\s*toolchain\b/.test(line));
+    if (goLines.length !== 1 || toolchainLines.length > 1)
+      throw new Error("Unclassifiable Go runtime directives");
+    const version = /^\s*go\s+(\S+)\s*(?:\/\/.*)?$/.exec(
+      goLines.at(0) ?? "",
+    )?.[1];
+    const go = stableVersion(version);
+    if (toolchainLines.length === 0) return go;
+    const toolchain = /^\s*toolchain\s+(\S+)\s*(?:\/\/.*)?$/.exec(
+      toolchainLines.at(0) ?? "",
+    )?.[1];
+    if (toolchain === undefined)
+      throw new Error("Unclassifiable Go toolchain directive");
+    if (!toolchain.startsWith("go"))
+      throw new Error("Unclassifiable Go toolchain directive");
+    return stableVersion(toolchain.slice(2));
+  }
+  if (file.endsWith(".toml")) {
+    const value: unknown = parseToml(text);
+    if (!changedRecord(value))
+      throw new Error("Unclassifiable setup runtime TOML");
+    if (runtime === "rust" && changedRecord(value["toolchain"]))
+      return setupRuntimeVersion({
+        value: value["toolchain"]["channel"],
+        runtime,
+      });
+    if (runtime === "python")
+      return setupRuntimeVersion({ value: value["python-version"], runtime });
+    throw new Error("Unclassifiable setup runtime TOML");
+  }
+  return setupRuntimeVersion({ value: text, runtime });
+};
+
+const setupRuntimeVersions = (snapshot: GitSnapshot) => {
+  const versions: { file: string; runtime: string; version: string }[] = [];
+  const step = (value: unknown, file: string) => {
+    if (!changedRecord(value) || typeof value["uses"] !== "string") return;
+    const action = value["uses"].split("@").at(0)?.toLowerCase();
+    let runtime = /(?:^|\/)setup-([^/]+)$/.exec(action ?? "")?.[1];
+    if (action === "dtolnay/rust-toolchain") runtime = "rust";
+    if (runtime === undefined) return;
+    const raw = value["with"];
+    if (!changedRecord(raw))
+      throw new Error(`Missing setup runtime selector: ${file}:${runtime}`);
+    const inputs = new Map<string, unknown>();
+    for (const [key, input] of Object.entries(raw)) {
+      const folded = key.toLowerCase();
+      if (inputs.has(folded))
+        throw new Error(`Duplicate setup input: ${file}:${folded}`);
+      inputs.set(folded, input);
+    }
+    let selected = false;
+    for (const [key, input] of inputs) {
+      if (
+        !/(?:^|-)version(?:-file)?$/.test(key) &&
+        !["toolchain", "toolchain-file", "rust-toolchain-file"].includes(key)
+      )
+        continue;
+      if (["bun", "node", "python", "go", "java"].includes(runtime)) {
+        if (key === `${runtime}-version` || key === `${runtime}-version-file`)
+          selected = true;
+      } else if (runtime === "rust") {
+        if (
+          [
+            "toolchain",
+            "toolchain-file",
+            "rust-toolchain-file",
+            "rust-version",
+            "rust-version-file",
+          ].includes(key)
+        )
+          selected = true;
+      } else if (
+        key === "version" ||
+        key === "version-file" ||
+        key === `${runtime}-version` ||
+        key === `${runtime}-version-file`
+      )
+        selected = true;
+      const inputRuntime =
+        ["bun", "node", "python", "go", "java", "rust"].find((candidate) =>
+          key.startsWith(`${candidate}-`),
+        ) ?? runtime;
+      let version: string;
+      if (key.endsWith("-file")) {
+        if (
+          typeof input !== "string" ||
+          input.trim() === "" ||
+          input.includes("${{")
+        )
+          throw new Error("Unclassifiable setup version-file declaration");
+        version = setupRuntimeFileVersion({
+          snapshot,
+          file: path.posix.normalize(input),
+          runtime: inputRuntime,
+        });
+      } else
+        version = setupRuntimeVersion({ value: input, runtime: inputRuntime });
+      versions.push({ file, runtime: inputRuntime, version });
+    }
+    if (!selected)
+      throw new Error(`Missing setup runtime selector: ${file}:${runtime}`);
+  };
+  const visit = (value: unknown, file: string) => {
+    if (Array.isArray(value)) {
+      for (const entry of value) visit(entry, file);
+      return;
+    }
+    if (!changedRecord(value)) return;
+    for (const [key, entry] of Object.entries(value)) {
+      if (key === "steps" && Array.isArray(entry)) {
+        for (const child of entry) step(child, file);
+      } else visit(entry, file);
+    }
+  };
+  for (const file of snapshot.entries.keys()) {
+    if (githubAutomationFileKind(file) === undefined) continue;
+    const document = parseDocument(snapshotText({ snapshot, file }));
+    if (document.errors.length > 0)
+      throw new Error("Unreadable workflow declaration");
+    visit(document.toJS({ maxAliasCount: 100 }), file);
+  }
+  return versions;
+};
+
 const stableBunImageVersion = (image: string) => {
   const match = /^oven\/bun(?::([^@]+))?(?:@[^\s]+)?$/.exec(image);
   if (match === null) return undefined;
   const version = match[1]?.replace(/-(?:alpine|slim|debian|distroless)$/, "");
-  if (
-    version === undefined ||
-    !/^\d+\.\d+\.\d+$/.test(version) ||
-    valid(version) !== version
-  )
-    throw new Error("Bun image selector is not an exact stable version");
-  return version;
+  return stableVersion(version);
 };
 
 const assertLiteralDockerImages = (text: string) => {
@@ -798,6 +961,12 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
   const workspacePatterns = new Map<string, unknown>();
   const typescript = new Set<string>();
   const selectedFiles = selectorFiles(snapshot);
+  for (const { file, runtime, version } of setupRuntimeVersions(snapshot)) {
+    let tool: ToolchainChangedTool = "shared";
+    if (runtime === "bun") tool = "bun";
+    else if (runtime === "node") tool = "node";
+    tools[tool].add(`setup-runtime:${file}:${runtime}:${version}`);
+  }
   const compilerNames = compilerInstallationNames(snapshot);
   for (const patch of compilerPatches(snapshot)) {
     tools.typescript.add(
@@ -864,7 +1033,11 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
         if (!/^\s*(?:use-node-version|node-version)\s*=/i.test(line)) continue;
         if (/\$\{/.test(line))
           throw new Error("Unclassifiable npm Node selector");
-        tools.node.add(`${file}:${line.trim()}`);
+        const selector =
+          /^\s*(?:use-node-version|node-version)\s*=\s*(.*?)\s*$/i.exec(
+            line,
+          )?.[1];
+        tools.node.add(`${file}:${stableVersion(selector)}`);
       }
     } else if (name === "pnpm-workspace.yaml") {
       const document = parseDocument(text);
@@ -877,7 +1050,7 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
       catalogs(file, workspace);
       for (const key of ["useNodeVersion", "nodeVersion"]) {
         if (workspace[key] !== undefined)
-          tools.node.add(`${file}:${key}:${stableJson(workspace[key])}`);
+          tools.node.add(`${file}:${key}:${stableVersion(workspace[key])}`);
       }
     } else if (
       [
@@ -901,7 +1074,7 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
     } else if (name === ".bun-version") addBun(text.trim());
     else if (otherRuntimeFiles.has(name)) tools.shared.add(`${file}:${text}`);
     else if (name === ".node-version" || name === ".nvmrc")
-      tools.node.add(`${file}:${text.trim()}`);
+      tools.node.add(`${file}:${stableVersion(text)}`);
     else if (name === "toolchain.json") {
       const policy = parseChangedJson(text);
       if (!changedRecord(policy))
@@ -915,8 +1088,8 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
         const [tool, ...versions] = line.trim().split(/\s+/);
         const value = versions.join(" ").split("#")[0]?.trim();
         if (tool === "bun" && value) addBun(value);
-        if ((tool === "node" || tool === "nodejs") && value)
-          tools.node.add(`${file}:${value}`);
+        if (tool === "node" || tool === "nodejs")
+          tools.node.add(`${file}:${stableVersion(value)}`);
       }
     } else if (isMiseConfigPath(file)) {
       tools.bun.add(`${file}:${text}`);
@@ -934,8 +1107,12 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
                 throw new Error("Unresolved mise Bun selector");
               addBun(version);
             }
-          if (["node", "nodejs", "core:node"].includes(tool))
-            tools.node.add(`${file}:${stableJson(values)}`);
+          if (["node", "nodejs", "core:node"].includes(tool)) {
+            if (values.length === 0)
+              throw new Error("Unresolved mise Node selector");
+            for (const version of values)
+              tools.node.add(`${file}:${stableVersion(version)}`);
+          }
         }
       }
     } else if (githubAutomationFileKind(file) !== undefined) {

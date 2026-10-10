@@ -464,6 +464,11 @@ shrinkwrap (1/2/3), and bounded Yarn Classic/Berry shapes; a binary-only Bun loc
 cannot be compared without executing Bun.
 Workflow/action and Docker definition edits conservatively force full CI.
 Unrelated application dependency changes do not force compiler parity.
+Setup-action runtime selectors and their tracked version-file contents must
+identify an exact stable release (or a dated Rust nightly). Floating selectors,
+ranges, expressions, empty
+values, or omitted runtime versions report an unreadable snapshot and run parity
+even when their committed text is unchanged.
 
 On pull requests, run the repository's ordinary Bun typecheck and the probe,
 then select parity using the same detector:
