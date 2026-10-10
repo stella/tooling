@@ -584,10 +584,14 @@ const canonicalOptions = (value: unknown): string => {
           `${JSON.stringify(key)}:${canonicalOptions(Reflect.get(value, key))}`,
       )
       .join(",")}}`;
-  const serialized = JSON.stringify(value);
-  if (serialized === undefined)
+  if (
+    value !== null &&
+    typeof value !== "string" &&
+    typeof value !== "number" &&
+    typeof value !== "boolean"
+  )
     throw new Error("Invalid effective compiler option");
-  return serialized;
+  return JSON.stringify(value);
 };
 
 type CompilerConfig = { path: string; compilerOptions: unknown };
@@ -815,8 +819,10 @@ export const runTypecheckParity = async ({
         bunWall += checked.wall;
         tscRss = Math.max(tscRss, tsc.maxRssKiB);
         bunRss = Math.max(bunRss, checked.maxRssKiB);
+        let outcome = "INACTIVE";
+        if (result.active) outcome = result.passed ? "PASS" : "FAIL";
         console.log(
-          `${fixture.name}${result.active ? "" : " (inactive under this config)"} | ${result.tscCodes.join(",")} | ${result.bunCodes.join(",")} | ${result.active ? (result.passed ? "PASS" : "FAIL") : "INACTIVE"}`,
+          `${fixture.name}${result.active ? "" : " (inactive under this config)"} | ${result.tscCodes.join(",")} | ${result.bunCodes.join(",")} | ${outcome}`,
         );
         if (!result.active && !result.passed)
           console.error(
