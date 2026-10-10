@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { realpathSync, statSync } from "node:fs";
+import { readFileSync, realpathSync, statSync } from "node:fs";
 import {
   mkdtemp,
   mkdir,
@@ -10,7 +10,7 @@ import {
 } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { resolve, join, relative, dirname, basename } from "node:path";
+import { resolve, join, relative, dirname } from "node:path";
 import { performance } from "node:perf_hooks";
 import { stripVTControlCharacters } from "node:util";
 
@@ -269,6 +269,7 @@ type DiagnosticParityOptions = {
   match: "all" | "any";
   baseline: DiagnosticCheckResult;
   candidate: DiagnosticCheckResult;
+  repo?: string;
 };
 export const diagnosticParity = ({
   expected,
@@ -308,9 +309,43 @@ export const diagnosticParity = ({
   };
 };
 
+const configurationDiagnostics = (output: string, repo: string) =>
+  diagnosticSet(output, repo).filter(
+    (diagnostic) =>
+      /^(?:<config>:0:|.*\.json:[0-9]+:)(?:[56][0-9]{3}|1800[23])(?::|$)/.test(
+        diagnostic,
+      ) || /:1800[23](?::|$)/.test(diagnostic),
+  );
+
 export const fixtureParity = (options: DiagnosticParityOptions) => {
   const result = diagnosticParity(options);
   const { baseline, candidate, expected, match } = options;
+  const identityParity = compareDiagnosticSets(
+    {
+      status: baseline.status,
+      diagnostics: diagnosticSet(
+        baseline.output,
+        options.repo ?? process.cwd(),
+      ),
+    },
+    {
+      status: candidate.status,
+      diagnostics: diagnosticSet(
+        candidate.output,
+        options.repo ?? process.cwd(),
+      ),
+    },
+  );
+  const configDiagnostics = [
+    ...configurationDiagnostics(
+      baseline.output,
+      options.repo ?? process.cwd(),
+    ).map((diagnostic) => `TypeScript: ${diagnostic}`),
+    ...configurationDiagnostics(
+      candidate.output,
+      options.repo ?? process.cwd(),
+    ).map((diagnostic) => `Bun: ${diagnostic}`),
+  ];
   const active =
     expected.length > 0 &&
     (match === "any"
@@ -328,7 +363,12 @@ export const fixtureParity = (options: DiagnosticParityOptions) => {
   return {
     ...result,
     active,
+    configurationDiagnostics: configDiagnostics,
+    identityMissing: identityParity.missing,
+    identityExtra: identityParity.extra,
     passed:
+      configDiagnostics.length === 0 &&
+      identityParity.passed &&
       validExits &&
       baseline.status === candidate.status &&
       result.missing.length === 0 &&
@@ -341,43 +381,59 @@ export const fixtureRunPassed = (
 ) =>
   results.some(({ active }) => active) && results.every(({ passed }) => passed);
 
+const diagnosticLocation = (file: string, repo: string) => {
+  const normalized = file.replaceAll("\\", "/");
+  const bundled = /^bundled:\/\/\/libs\/(lib\.[^/]+\.d\.ts)$/.exec(normalized);
+  const installed =
+    /(?:^|\/)node_modules\/(?:typescript|@typescript\/(?:native|typescript-[^/]+))\/(?:.*\/)?(lib\.[^/]+\.d\.ts)$/.exec(
+      normalized,
+    );
+  const library = bundled?.at(1) ?? installed?.at(1);
+  return library === undefined
+    ? relative(repo, resolve(repo, file)).replaceAll("\\", "/")
+    : `<lib>/${library}`;
+};
+const globalDiagnosticKey = (code: string, message: string) =>
+  `<config>:0:${code}:${message.trim().replaceAll(/\s+/g, " ")}`;
+
 export const diagnosticSet = (output: string, repo: string) => {
   const clean = stripVTControlCharacters(output);
   const diagnostics = new Set<string>();
-  for (const line of clean.split("\n")) {
-    if (line.startsWith("<error ")) {
-      const openingTag = line.slice(0, line.indexOf(">") + 1);
-      const attributes = new Map(
-        [...openingTag.matchAll(/(\w+)="([^"]*)"/g)].map((match) => [
-          match.at(1),
-          match.at(2),
-        ]),
+  for (const block of clean.matchAll(/<error\b([^>]*)>([\s\S]*?)<\/error>/g)) {
+    const attributes = new Map(
+      [...(block.at(1) ?? "").matchAll(/(\w+)="([^"]*)"/g)].map((match) => [
+        match.at(1),
+        match.at(2),
+      ]),
+    );
+    const file = attributes.get("file");
+    const row = attributes.get("line");
+    const code = attributes.get("code");
+    if (code === undefined || !/^TS\d+$/.test(code)) continue;
+    if (file !== undefined && row !== undefined && row !== "0")
+      diagnostics.add(
+        `${diagnosticLocation(file, repo)}:${row}:${code.slice(2)}`,
       );
-      const file = attributes.get("file");
-      const row = attributes.get("line");
-      const code = attributes.get("code");
-      if (
-        file !== undefined &&
-        row !== undefined &&
-        code !== undefined &&
-        /^TS\d+$/.test(code)
-      )
-        diagnostics.add(
-          `${relative(repo, resolve(repo, file)).replaceAll("\\", "/")}:${row}:${code.slice(2)}`,
-        );
-      continue;
+    else {
+      const message =
+        (block.at(2) ?? "").split(/<(?:source|related)\b/).at(0) ?? "";
+      diagnostics.add(globalDiagnosticKey(code.slice(2), message));
     }
+  }
+  for (const line of clean.split("\n")) {
+    if (line.startsWith("<error ")) continue;
     const match =
       /^(.*?)\((\d+),\d+\):\s*(?:error|warning) TS(\d+)/.exec(line) ??
       /^(.*?):(\d+):\d+:\s*(?:error|warning) (?:TS)?(\d+)/.exec(line);
     if (match) {
       const [, file = "", row = "", code = ""] = match;
-      diagnostics.add(
-        `${relative(repo, resolve(repo, file)).replaceAll("\\", "/")}:${row}:${code}`,
-      );
+      diagnostics.add(`${diagnosticLocation(file, repo)}:${row}:${code}`);
     } else {
-      const global = /^(?:error|warning) TS(\d+):/.exec(line);
-      if (global) diagnostics.add(`<config>:0:${global[1]}`);
+      const global = /^(?:error|warning) TS(\d+):\s*(.*)/.exec(line);
+      if (global)
+        diagnostics.add(
+          globalDiagnosticKey(global.at(1) ?? "", global.at(2) ?? ""),
+        );
     }
   }
   return [...diagnostics].sort();
@@ -513,67 +569,6 @@ export const assertBunVersion = (bun: string, policy: unknown) => {
     );
 };
 
-const buildInfoPath = ({ path, compilerOptions }: CompilerConfig) => {
-  const options =
-    typeof compilerOptions === "object" && compilerOptions !== null
-      ? compilerOptions
-      : {};
-  const optionPath = (name: string) => {
-    const value: unknown = Reflect.get(options, name);
-    return typeof value === "string"
-      ? resolve(dirname(path), value)
-      : undefined;
-  };
-  const explicit = optionPath("tsBuildInfoFile");
-  if (explicit !== undefined) return explicit;
-  const outFile = optionPath("outFile");
-  if (outFile !== undefined)
-    return outFile.replace(/\.[^/.]+$/, "") + ".tsbuildinfo";
-  const configStem = path.replace(/\.[^/.]+$/, "");
-  const outDir = optionPath("outDir");
-  const rootDir = optionPath("rootDir");
-  const target =
-    outDir === undefined
-      ? configStem
-      : join(
-          outDir,
-          rootDir === undefined
-            ? basename(configStem)
-            : relative(rootDir, configStem),
-        );
-  return target + ".tsbuildinfo";
-};
-
-type PreserveBuildInfoOptions = {
-  paths: string[];
-  run: () => ReturnType<typeof timedCommand>;
-};
-const preserveBuildInfo = async ({ paths, run }: PreserveBuildInfoOptions) => {
-  const snapshots = await Promise.all(
-    paths.map(async (path) => {
-      try {
-        return { path, content: await readFile(path) };
-      } catch (error) {
-        if (
-          !(error instanceof Error) ||
-          !("code" in error) ||
-          error.code !== "ENOENT"
-        )
-          throw error;
-        return { path, content: undefined };
-      }
-    }),
-  );
-  try {
-    return run();
-  } finally {
-    for (const { path, content } of snapshots) {
-      if (content === undefined) await rm(path, { force: true });
-      else await writeFile(path, content);
-    }
-  }
-};
-
 export const bunCheckArgs = (project?: string, build = false) => [
   "check",
   "--no-pretty",
@@ -636,7 +631,7 @@ type FixtureCompilerOptionsArgs = {
   compilerOptions: unknown;
   configPath: string;
 };
-export const fixtureCompilerOptions = ({
+const resolvedCompilerOptions = ({
   compilerOptions,
   configPath,
 }: FixtureCompilerOptionsArgs) => {
@@ -647,9 +642,7 @@ export const fixtureCompilerOptions = ({
   )
     throw new Error(`Invalid compiler options: ${configPath}`);
   const options: Record<string, unknown> = Object.fromEntries(
-    Object.entries(compilerOptions).filter(
-      ([name]) => !EMIT_ONLY_OPTIONS.has(name),
-    ),
+    Object.entries(compilerOptions),
   );
   const directory = dirname(configPath);
   let resolutionDirectory = directory;
@@ -686,18 +679,62 @@ export const fixtureCompilerOptions = ({
     }
     options["typeRoots"] = roots;
   }
-  options["noEmit"] = true;
   return options;
 };
 
-type CompilerConfig = { path: string; compilerOptions: unknown };
+export const fixtureCompilerOptions = (args: FixtureCompilerOptionsArgs) => {
+  const options = Object.fromEntries(
+    Object.entries(resolvedCompilerOptions(args)).filter(
+      ([name]) => !EMIT_ONLY_OPTIONS.has(name),
+    ),
+  );
+  return { ...options, noEmit: true };
+};
+
+export const fixturePackageContext = (configPath: string) => {
+  for (let folder = dirname(configPath); ; folder = dirname(folder)) {
+    try {
+      const manifest: unknown = JSON.parse(
+        readFileSync(join(folder, "package.json"), "utf8"),
+      );
+      if (typeof manifest !== "object" || manifest === null)
+        throw new Error(`Invalid package.json: ${folder}`);
+      if (!("type" in manifest)) return {};
+      if (manifest.type !== "module" && manifest.type !== "commonjs")
+        throw new Error(`Invalid package type: ${folder}`);
+      return { type: manifest.type };
+    } catch (error) {
+      if (
+        !(error instanceof Error) ||
+        !("code" in error) ||
+        error.code !== "ENOENT"
+      )
+        throw error;
+    }
+    if (dirname(folder) === folder) return {};
+  }
+};
+
+type CompilerConfig = {
+  path: string;
+  compilerOptions: unknown;
+  packageContext?: unknown;
+};
 export const groupCompilerConfigs = (configs: CompilerConfig[]) => {
   const groups = new Map<
     string,
-    { path: string; projects: string[]; compilerOptions: unknown }
+    {
+      path: string;
+      projects: string[];
+      compilerOptions: unknown;
+      packageContext?: unknown;
+    }
   >();
   for (const config of configs) {
-    const key = canonicalOptions(config.compilerOptions);
+    const key = canonicalOptions({
+      compilerOptions: config.compilerOptions,
+      packageContext: config.packageContext ?? {},
+    });
     const existing = groups.get(key);
     if (existing) existing.projects.push(config.path);
     else
@@ -705,6 +742,9 @@ export const groupCompilerConfigs = (configs: CompilerConfig[]) => {
         path: config.path,
         projects: [config.path],
         compilerOptions: config.compilerOptions,
+        ...(config.packageContext === undefined
+          ? {}
+          : { packageContext: config.packageContext }),
       });
   }
   return [...groups.values()];
@@ -717,7 +757,12 @@ export const discoverConfigGroups = ({
 }: DiscoverConfigGroupsOptions) => {
   const configs: CompilerConfig[] = [];
   const visited = new Set<string>();
-  const buildInfoPaths = new Set<string>();
+  const projects: {
+    path: string;
+    compilerOptions: unknown;
+    files: string[];
+    references: string[];
+  }[] = [];
   let build = false;
   const visit = (project: string) => {
     const path = realpathSync(
@@ -742,28 +787,30 @@ export const discoverConfigGroups = ({
         ? config.references
         : [];
     build ||= references.length > 0;
-    buildInfoPaths.add(
-      buildInfoPath({
+    const compilerOptions =
+      "compilerOptions" in config ? config.compilerOptions : {};
+    if (
+      typeof compilerOptions !== "object" ||
+      compilerOptions === null ||
+      Array.isArray(compilerOptions)
+    )
+      throw new Error(`Invalid compiler options: ${path}`);
+    const rawFiles: unknown = "files" in config ? config.files : [];
+    if (!Array.isArray(rawFiles))
+      throw new Error(`Invalid project files: ${path}`);
+    const files = rawFiles.map((file: unknown) => {
+      if (typeof file !== "string")
+        throw new Error(`Invalid project file: ${path}`);
+      return resolve(dirname(path), file);
+    });
+    const referencePaths: string[] = [];
+    projects.push({ path, compilerOptions, files, references: referencePaths });
+    if (files.length > 0 || references.length === 0)
+      configs.push({
         path,
-        compilerOptions:
-          "compilerOptions" in config ? config.compilerOptions : {},
-      }),
-    );
-    const hasFiles =
-      "files" in config &&
-      Array.isArray(config.files) &&
-      config.files.length > 0;
-    if (hasFiles || references.length === 0) {
-      const compilerOptions =
-        "compilerOptions" in config ? config.compilerOptions : {};
-      if (
-        typeof compilerOptions !== "object" ||
-        compilerOptions === null ||
-        Array.isArray(compilerOptions)
-      )
-        throw new Error(`Invalid compiler options: ${path}`);
-      configs.push({ path, compilerOptions });
-    }
+        compilerOptions,
+        packageContext: fixturePackageContext(path),
+      });
     for (const reference of references) {
       if (
         typeof reference !== "object" ||
@@ -772,14 +819,21 @@ export const discoverConfigGroups = ({
         typeof reference.path !== "string"
       )
         throw new Error(`Invalid project reference: ${path}`);
-      visit(resolve(dirname(path), reference.path));
+      const project = resolve(dirname(path), reference.path);
+      const referencePath = realpathSync(
+        statSync(project).isDirectory()
+          ? join(project, "tsconfig.json")
+          : project,
+      );
+      referencePaths.push(referencePath);
+      visit(referencePath);
     }
   };
   visit(join(repo, "tsconfig.json"));
   const groups = groupCompilerConfigs(configs);
   if (groups.length === 0)
     throw new Error("No consumer compiler configurations to compare");
-  return { build, groups, buildInfoPaths: [...buildInfoPaths] };
+  return { build, groups, projects };
 };
 
 type TimedCommandOptions = { command: string; args: string[]; repo: string };
@@ -808,6 +862,143 @@ const timedCommand = ({ command, args, repo }: TimedCommandOptions) => {
 const NO_WORK_MAX_RSS_KIB = 16 * 1024;
 const NO_WORK_MAX_WALL_SECONDS = 0.25;
 
+type CompareRepositoryArgs = {
+  repo: string;
+  compiler: string;
+  bun: string;
+  graph: ReturnType<typeof discoverConfigGroups>;
+};
+export const compareRepository = async ({
+  repo,
+  compiler,
+  bun,
+  graph,
+}: CompareRepositoryArgs) => {
+  const scratch = await mkdtemp(join(tmpdir(), "parity-repository-"));
+  try {
+    const configPaths = new Map(
+      graph.projects.map((project, index) => [
+        project.path,
+        join(scratch, `project-${index}`, "tsconfig.json"),
+      ]),
+    );
+    for (const project of graph.projects) {
+      const configPath = configPaths.get(project.path);
+      if (configPath === undefined)
+        throw new Error(`Missing temporary project: ${project.path}`);
+      const folder = dirname(configPath);
+      await mkdir(folder);
+      const options = resolvedCompilerOptions({
+        configPath: project.path,
+        compilerOptions: project.compilerOptions,
+      });
+      const rootDir = options["rootDir"];
+      if (rootDir !== undefined && typeof rootDir !== "string")
+        throw new Error(`Invalid rootDir: ${project.path}`);
+      if (typeof rootDir === "string")
+        options["rootDir"] = resolve(dirname(project.path), rootDir);
+      else if (options["composite"] === true)
+        options["rootDir"] = dirname(project.path);
+      options["noEmit"] = !graph.build;
+      options["outDir"] = join(folder, "output");
+      const emitsDeclarations =
+        options["declaration"] === true ||
+        (options["composite"] === true && options["declaration"] !== false);
+      if ((graph.build && emitsDeclarations) || "declarationDir" in options)
+        options["declarationDir"] = join(folder, "declarations");
+      if (
+        graph.build ||
+        options["incremental"] === true ||
+        options["composite"] === true
+      )
+        options["tsBuildInfoFile"] = join(folder, "project.tsbuildinfo");
+      if (graph.build) {
+        options["declarationMap"] = false;
+        if (emitsDeclarations) options["emitDeclarationOnly"] = true;
+        options["noEmitOnError"] = false;
+      }
+      delete options["outFile"];
+      await writeFile(
+        configPath,
+        JSON.stringify({
+          compilerOptions: options,
+          files: project.files,
+          include: [],
+          references: project.references.map((path) => {
+            const temporary = configPaths.get(path);
+            if (temporary === undefined)
+              throw new Error(`Missing referenced temporary project: ${path}`);
+            return { path: temporary };
+          }),
+        }),
+      );
+    }
+    const root = configPaths.get(realpathSync(join(repo, "tsconfig.json")));
+    if (root === undefined) throw new Error("Missing temporary root config");
+    const baselineRaw = timedCommand({
+      command: process.execPath,
+      args: [
+        compiler,
+        ...(graph.build
+          ? ["--build", "--force", root]
+          : ["--noEmit", "--project", root]),
+        "--pretty",
+        "false",
+      ],
+      repo,
+    });
+    const candidate = timedCommand({
+      command: bun,
+      args: bunCheckArgs(root, graph.build),
+      repo,
+    });
+    const sourceDiagnostics = (output: string) =>
+      diagnosticSet(output, repo).filter((diagnostic) => {
+        if (diagnostic.startsWith("<config>:")) return true;
+        const match = /^(.*):[0-9]+:[0-9]+$/.exec(diagnostic);
+        const file = match?.at(1);
+        if (file === undefined || !/\.[cm]?[jt]sx?$/.test(file)) return false;
+        const path = resolve(repo, file);
+        return path !== scratch && !path.startsWith(scratch + "/");
+      });
+    const baselineDiagnostics = sourceDiagnostics(baselineRaw.output);
+    // TypeScript reports emitted-with-diagnostics as 2; Bun's checker reports diagnostics as 1.
+    const baseline = {
+      ...baselineRaw,
+      rawStatus: baselineRaw.status,
+      status:
+        graph.build &&
+        baselineRaw.status === 2 &&
+        baselineDiagnostics.length > 0 &&
+        configurationDiagnostics(baselineRaw.output, repo).length === 0
+          ? 1
+          : baselineRaw.status,
+      diagnostics: baselineDiagnostics,
+    };
+    const repository = compareDiagnosticSets(
+      {
+        status: baseline.status,
+        diagnostics: baselineDiagnostics,
+      },
+      {
+        status: candidate.status,
+        diagnostics: sourceDiagnostics(candidate.output),
+      },
+    );
+    return {
+      baseline,
+      candidate: {
+        ...candidate,
+        rawStatus: candidate.status,
+        diagnostics: sourceDiagnostics(candidate.output),
+      },
+      repository,
+    };
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+};
+
 type RunTypecheckParityOptions = {
   repo: string;
   policy: unknown;
@@ -821,49 +1012,23 @@ export const runTypecheckParity = async ({
   await assertUnshadowedCheck(repo);
   assertBunVersion(bun, policy);
   const compiler = await resolveCompiler(repo, policy);
-  const { build, groups, buildInfoPaths } = discoverConfigGroups({
+  const graph = discoverConfigGroups({ repo, compiler });
+  const { groups } = graph;
+  const { baseline, candidate, repository } = await compareRepository({
     repo,
     compiler,
+    bun,
+    graph,
   });
-  const baseline = await preserveBuildInfo({
-    paths: buildInfoPaths,
-    run: () =>
-      timedCommand({
-        command: process.execPath,
-        args: [
-          compiler,
-          ...(build ? ["--build", "--force"] : []),
-          "--noEmit",
-          "--pretty",
-          "false",
-        ],
-        repo,
-      }),
-  });
-  const candidate = timedCommand({
-    command: bun,
-    args: bunCheckArgs(undefined, build),
-    repo,
-  });
-  const repository = compareDiagnosticSets(
-    {
-      status: baseline.status,
-      diagnostics: diagnosticSet(baseline.output, repo),
-    },
-    {
-      status: candidate.status,
-      diagnostics: diagnosticSet(candidate.output, repo),
-    },
-  );
   console.log("Class | TypeScript diagnostics | Bun diagnostics | Result");
   console.log(
-    `repository | ${diagnosticSet(baseline.output, repo).join(",")} | ${diagnosticSet(candidate.output, repo).join(",")} | ${repository.passed ? "PASS" : "FAIL"}`,
+    `repository | ${baseline.diagnostics.join(",")} | ${candidate.diagnostics.join(",")} | ${repository.passed ? "PASS" : "FAIL"}`,
   );
   console.log(
-    `repository tsc: wall=${baseline.wall.toFixed(3)}s maxRSS=${baseline.maxRssKiB}KiB`,
+    `repository tsc: wall=${baseline.wall.toFixed(3)}s maxRSS=${baseline.maxRssKiB}KiB exit=${baseline.rawStatus}`,
   );
   console.log(
-    `repository bun: wall=${candidate.wall.toFixed(3)}s maxRSS=${candidate.maxRssKiB}KiB`,
+    `repository bun: wall=${candidate.wall.toFixed(3)}s maxRSS=${candidate.maxRssKiB}KiB exit=${candidate.rawStatus}`,
   );
   const scratch = await mkdtemp(join(tmpdir(), "typecheck-parity-"));
   const groupResults = [];
@@ -884,6 +1049,12 @@ export const runTypecheckParity = async ({
       let bunRss = 0;
       const groupFolder = join(scratch, `config-${index + 1}`);
       await mkdir(groupFolder);
+      await writeFile(
+        join(groupFolder, "package.json"),
+        JSON.stringify(
+          group.packageContext ?? fixturePackageContext(group.path),
+        ),
+      );
       for (const fixture of fixtures) {
         const folder = join(groupFolder, fixture.name);
         await mkdir(folder);
@@ -894,8 +1065,10 @@ export const runTypecheckParity = async ({
               compilerOptions: group.compilerOptions,
               configPath: group.path,
             }),
-            files: [],
-            include: ["*.ts", "*.js", "*.cts"],
+            files: Object.keys(fixture.files).filter((name) =>
+              /\.[cm]?[jt]sx?$/.test(name),
+            ),
+            include: [],
             exclude: [],
           }),
         );
@@ -904,16 +1077,17 @@ export const runTypecheckParity = async ({
         const tsc = timedCommand({
           command: process.execPath,
           args: [compiler, "--noEmit", "--pretty", "false", "-p", folder],
-          repo,
+          repo: folder,
         });
         const checked = timedCommand({
           command: bun,
           args: [...bunCheckArgs(folder), "--threads=1"],
-          repo,
+          repo: folder,
         });
         const result = fixtureParity({
           expected: fixture.codes,
           match: fixture.anyCode ? "any" : "all",
+          repo: folder,
           baseline: tsc,
           candidate: checked,
         });
@@ -922,6 +1096,15 @@ export const runTypecheckParity = async ({
         bunWall += checked.wall;
         tscRss = Math.max(tscRss, tsc.maxRssKiB);
         bunRss = Math.max(bunRss, checked.maxRssKiB);
+        if (result.configurationDiagnostics.length > 0) {
+          console.error(
+            `FAIL: invalid fixture configuration for ${fixture.name}: ${result.configurationDiagnostics.join("; ")}`,
+          );
+          console.log(
+            `${fixture.name} | configuration error | configuration error | FAIL`,
+          );
+          continue;
+        }
         let outcome = "INACTIVE";
         if (result.active) outcome = result.passed ? "PASS" : "FAIL";
         console.log(
@@ -929,7 +1112,7 @@ export const runTypecheckParity = async ({
         );
         if (!result.active && !result.passed)
           console.error(
-            `FAIL: diagnostic comparison differs for inactive class ${fixture.name}`,
+            `FAIL: diagnostic comparison differs for inactive class ${fixture.name}: TypeScript exit=${tsc.status}, Bun exit=${checked.status}; missing=${result.identityMissing.join(",")}; extra=${result.identityExtra.join(",")}`,
           );
         if (result.active && result.bunCodes.length === 0) {
           console.error(

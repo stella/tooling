@@ -29,6 +29,16 @@ import {
 
 const repo = resolve("/consumer-repo");
 
+const rejectedError = async (promise: Promise<unknown>) => {
+  try {
+    await promise;
+  } catch (error) {
+    if (error instanceof Error) return error;
+    throw new Error("Promise rejected without an Error");
+  }
+  throw new Error("Expected promise to reject");
+};
+
 test("compiler config grouping ignores property order but preserves option differences", () => {
   const entries = [
     {
@@ -240,9 +250,8 @@ test("compiler resolution prefers the split compiler to its compatibility depend
 test("compiler resolution rejects undeclared installed compilers", async () => {
   await compilerFixture(async (root) => {
     await writeFile(join(root, "package.json"), JSON.stringify({}));
-    expect(resolveCompiler(root, compilerPolicy)).rejects.toThrow(
-      "Repository must declare a compiler",
-    );
+    const error = await rejectedError(resolveCompiler(root, compilerPolicy));
+    expect(error.message).toContain("Repository must declare a compiler");
   });
 });
 
@@ -260,7 +269,8 @@ test("compiler resolution rejects installed version skew", async () => {
         bin: { tsc: "bin/tsc.js" },
       }),
     );
-    expect(resolveCompiler(root, compilerPolicy)).rejects.toThrow();
+    const error = await rejectedError(resolveCompiler(root, compilerPolicy));
+    expect(error.message).toContain("must install TypeScript 7.0.2");
   });
 });
 
@@ -274,9 +284,8 @@ test("compiler resolution rejects a selected package without a tsc bin", async (
       join(root, "node_modules/typescript/package.json"),
       JSON.stringify({ name: "typescript", version: "7.0.2", bin: {} }),
     );
-    expect(resolveCompiler(root, compilerPolicy)).rejects.toThrow(
-      "must expose a tsc binary",
-    );
+    const error = await rejectedError(resolveCompiler(root, compilerPolicy));
+    expect(error.message).toContain("must expose a tsc binary");
   });
 });
 
@@ -347,7 +356,90 @@ test("configuration diagnostics remain visible without a source location", () =>
       "error TS5083: Cannot read configuration file.\nerror TS18003: No inputs were found.\n",
       repo,
     ),
-  ).toEqual(["<config>:0:18003", "<config>:0:5083"]);
+  ).toEqual([
+    "<config>:0:18003:No inputs were found.",
+    "<config>:0:5083:Cannot read configuration file.",
+  ]);
+});
+
+test("standard library diagnostics share an identity across installed and bundled libraries", () => {
+  const expected = ["<lib>/lib.es5.d.ts:42:2322"];
+  const tsc = `${repo}/node_modules/typescript/lib/lib.es5.d.ts(42,7): error TS2322: library error`;
+  const bun = "bundled:///libs/lib.es5.d.ts:42:7: error TS2322: library error";
+  expect(diagnosticSet(tsc, repo)).toEqual(expected);
+  expect(diagnosticSet(bun, repo)).toEqual(expected);
+  expect(
+    diagnosticSet(
+      '<error file="bundled:///libs/lib.es5.d.ts" line="42" column="7" code="TS2322">library error</error>',
+      repo,
+    ),
+  ).toEqual(expected);
+  expect(
+    fixtureParity({
+      repo,
+      expected: [2322],
+      match: "all",
+      baseline: { status: 1, output: tsc },
+      candidate: { status: 1, output: bun },
+    }).passed,
+  ).toBe(true);
+});
+
+test("locationless diagnostics preserve distinct normalized messages and deduplicate repeats", () => {
+  expect(
+    diagnosticSet(
+      [
+        "error TS2318: Cannot find global type 'Array'.",
+        "error TS2318: Cannot find global type 'Boolean'.",
+        "error TS2318:   Cannot   find global type 'Array'.  ",
+      ].join("\n"),
+      repo,
+    ),
+  ).toEqual([
+    "<config>:0:2318:Cannot find global type 'Array'.",
+    "<config>:0:2318:Cannot find global type 'Boolean'.",
+  ]);
+});
+
+test("fixture parity rejects missing or extra locations sharing an active diagnostic code", () => {
+  const first = "input.ts(1,1): error TS2322: first mismatch";
+  const second = "input.ts(2,1): error TS2322: second mismatch";
+  const baseline = { status: 1, output: `${first}\n${second}` };
+  const candidate = { status: 1, output: first };
+  const options = { repo, expected: [2322], match: "all" } as const;
+  const matching = fixtureParity({ ...options, baseline, candidate: baseline });
+  expect(matching.active).toBe(true);
+  expect(matching.passed).toBe(true);
+  for (const [left, right] of [
+    [baseline, candidate],
+    [candidate, baseline],
+  ]) {
+    if (left === undefined || right === undefined)
+      throw new Error("Missing result");
+    const result = fixtureParity({
+      ...options,
+      baseline: left,
+      candidate: right,
+    });
+    expect(result.active).toBe(true);
+    expect(result.passed).toBe(false);
+  }
+});
+
+test("fixture parity rejects lost global diagnostics with the same code", () => {
+  const array = "error TS2318: Cannot find global type 'Array'.";
+  const boolean = "error TS2318: Cannot find global type 'Boolean'.";
+  const baseline = { status: 1, output: `${array}\n${boolean}` };
+  const candidate = { status: 1, output: array };
+  const options = { repo, expected: [2318], match: "all" } as const;
+  expect(
+    fixtureParity({ ...options, baseline, candidate: baseline }).passed,
+  ).toBe(true);
+  expect(fixtureParity({ ...options, baseline, candidate }).passed).toBe(false);
+  expect(
+    fixtureParity({ ...options, baseline: candidate, candidate: baseline })
+      .passed,
+  ).toBe(false);
 });
 
 test("repository parity rejects every removed or relocated diagnostic", () => {
@@ -736,4 +828,76 @@ test("equal diagnostic sets require equal exit statuses in both comparisons", ()
       ).passed,
     ).toBe(false);
   }
+});
+
+test("tagged locationless diagnostics preserve normalized primary messages", () => {
+  expect(
+    diagnosticSet(
+      "<error code=\"TS2318\">\nCannot find global type 'Array'.\n</error>\n<error code=\"TS2318\">Cannot find global type 'Boolean'.</error>",
+      repo,
+    ),
+  ).toEqual([
+    "<config>:0:2318:Cannot find global type 'Array'.",
+    "<config>:0:2318:Cannot find global type 'Boolean'.",
+  ]);
+});
+
+test("config grouping preserves distinct package module contexts", () => {
+  const configs = [
+    {
+      path: "/repo/esm/tsconfig.json",
+      compilerOptions: { module: "NodeNext" },
+      packageContext: { type: "module" },
+    },
+    {
+      path: "/repo/commonjs/tsconfig.json",
+      compilerOptions: { module: "NodeNext" },
+      packageContext: { type: "commonjs" },
+    },
+  ];
+  expect(groupCompilerConfigs(configs).map(({ projects }) => projects)).toEqual(
+    [["/repo/esm/tsconfig.json"], ["/repo/commonjs/tsconfig.json"]],
+  );
+});
+
+test("fixture configuration errors fail even when both compiler diagnostics and exits match", () => {
+  for (const output of [
+    "error TS18002: The files list is empty.",
+    "tsconfig.json(2,3): error TS5069: declarationDir requires declaration.",
+    "error TS6310: Referenced project may not disable emit.",
+  ]) {
+    const result = fixtureParity({
+      expected: [],
+      match: "all",
+      baseline: { status: 1, output },
+      candidate: { status: 1, output },
+    });
+    expect(result.active).toBe(false);
+    expect(result.configurationDiagnostics).toHaveLength(2);
+    expect(result.passed).toBe(false);
+  }
+});
+
+test("inactive fixture matching identities and exit statuses passes", () => {
+  const check = {
+    status: 1,
+    output: "input.ts(1,1): error TS6133: Unused under this configuration.",
+  };
+  const result = fixtureParity({
+    expected: [2322],
+    match: "all",
+    baseline: check,
+    candidate: check,
+  });
+  expect(result.active).toBe(false);
+  expect(result.configurationDiagnostics).toEqual([]);
+  expect(result.passed).toBe(true);
+  expect(
+    fixtureParity({
+      expected: [2322],
+      match: "all",
+      baseline: check,
+      candidate: { ...check, status: 2 },
+    }).passed,
+  ).toBe(false);
 });

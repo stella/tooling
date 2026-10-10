@@ -6,6 +6,7 @@ import {
   mkdtemp,
   mkdir,
   readFile,
+  readdir,
   rm,
   writeFile,
   access,
@@ -19,13 +20,27 @@ import { join, resolve } from "node:path";
 import {
   bunCheckArgs,
   compareDiagnosticSets,
+  compareRepository,
+  discoverConfigGroups,
   diagnosticSet,
+  fixtureCompilerOptions,
+  fixturePackageContext,
   fixtureParity,
   fixtureRunPassed,
   fixtures,
   resolveCompiler,
   runTypecheckParity,
 } from "./typecheck-parity";
+
+const rejectedError = async (promise: Promise<unknown>): Promise<Error> => {
+  try {
+    await promise;
+  } catch (error) {
+    if (error instanceof Error) return error;
+    throw new Error("Promise rejected without an Error", { cause: error });
+  }
+  throw new Error("Expected promise rejection");
+};
 
 // These checks launch real compilers; the repository CI owns that workload.
 test.skipIf(process.env["CI"] !== "true")(
@@ -157,7 +172,9 @@ test.skipIf(process.env["CI"] !== "true")(
       if (failure instanceof Error) {
         expect(failure.message).toContain('must not define a "check" script');
       }
-      expect(access(join(project, "script-ran"))).rejects.toThrow();
+      expect(
+        await rejectedError(access(join(project, "script-ran"))),
+      ).toBeInstanceOf(Error);
     } finally {
       await rm(project, { recursive: true, force: true });
     }
@@ -166,7 +183,7 @@ test.skipIf(process.env["CI"] !== "true")(
 );
 
 test.skipIf(process.env["CI"] !== "true")(
-  "solution references compare real diagnostic locations across both leaf projects",
+  "dependent composite projects compare original source diagnostics without consumer outputs",
   async () => {
     const repo = process.cwd();
     const policy: unknown = JSON.parse(
@@ -176,7 +193,9 @@ test.skipIf(process.env["CI"] !== "true")(
       ),
     );
     const compiler = await resolveCompiler(repo, policy);
-    const project = await mkdtemp(join(tmpdir(), "parity-solution-"));
+    const project = await realpath(
+      await mkdtemp(join(tmpdir(), "parity-dependent-solution-")),
+    );
     try {
       await writeFile(
         join(project, "tsconfig.json"),
@@ -197,63 +216,92 @@ test.skipIf(process.env["CI"] !== "true")(
               target: "ESNext",
               module: "ESNext",
               moduleResolution: "Bundler",
+              rootDir: ".",
+              outDir: "./dist",
+              tsBuildInfoFile: "./dist/tsconfig.tsbuildinfo",
             },
             files: ["input.ts"],
+            ...(leaf === "second"
+              ? { references: [{ path: "../first" }] }
+              : {}),
           }),
         );
         await writeFile(
           join(folder, "input.ts"),
-          'export const value: number = "wrong";',
+          leaf === "first"
+            ? "export const value: number = 1;"
+            : 'import { value } from "../first/input.js"; export const result: number = value;',
         );
       }
-      const tsc = spawnSync(
-        process.execPath,
-        [
-          compiler,
-          "--build",
-          project,
-          "--noEmit",
-          "--force",
-          "--pretty",
-          "false",
-        ],
-        { cwd: project, encoding: "utf8", timeout: 15_000 },
+      const existingOutput = join(project, "first/dist/input.js");
+      const existingBuildInfo = join(
+        project,
+        "first/dist/tsconfig.tsbuildinfo",
       );
-      const bun = spawnSync(process.execPath, bunCheckArgs(project, true), {
-        cwd: project,
-        encoding: "utf8",
-        timeout: 15_000,
-      });
-      if (tsc.error) throw tsc.error;
-      if (bun.error) throw bun.error;
-      const baseline = {
-        status: tsc.status,
-        diagnostics: diagnosticSet(tsc.stdout + tsc.stderr, project),
-      };
-      const candidate = {
-        status: bun.status,
-        diagnostics: diagnosticSet(bun.stdout + bun.stderr, project),
-      };
-      expect(baseline.diagnostics).toEqual([
-        "first/input.ts:1:2322",
-        "second/input.ts:1:2322",
-      ]);
-      expect(compareDiagnosticSets(baseline, candidate).passed).toBe(true);
-      for (const removed of baseline.diagnostics) {
+      await mkdir(join(project, "first/dist"));
+      const outputSentinel = "// consumer output must remain unchanged\n";
+      const buildSentinel = "consumer build cache must remain unchanged\n";
+      await writeFile(existingOutput, outputSentinel);
+      await writeFile(existingBuildInfo, buildSentinel);
+      const originalFiles = (
+        await readdir(project, { recursive: true })
+      ).sort();
+      for (const seeded of [false, true]) {
+        await writeFile(
+          join(project, "first/input.ts"),
+          seeded
+            ? 'export const value: number = "wrong";'
+            : "export const value: number = 1;",
+        );
+        const graph = discoverConfigGroups({ repo: project, compiler });
+        expect(graph.build).toBe(true);
+        const compared = await compareRepository({
+          repo: project,
+          compiler,
+          bun: process.execPath,
+          graph,
+        });
+        const baseline = {
+          status: compared.baseline.status,
+          diagnostics: diagnosticSet(compared.baseline.output, project),
+        };
+        const candidate = {
+          status: compared.candidate.status,
+          diagnostics: diagnosticSet(compared.candidate.output, project),
+        };
+        const expected = seeded ? ["first/input.ts:1:2322"] : [];
+        expect(baseline.diagnostics).toEqual(expected);
+        expect(candidate.diagnostics).toEqual(expected);
+        expect(compared.baseline.rawStatus).toBe(seeded ? 2 : 0);
+        expect(compared.candidate.rawStatus).toBe(seeded ? 1 : 0);
+        expect(baseline.status).toBe(candidate.status);
+        if (seeded) expect(baseline.status).not.toBe(0);
+        else expect(baseline.status).toBe(0);
+        expect(compared.repository.passed).toBe(true);
+        expect(compareDiagnosticSets(baseline, candidate).passed).toBe(true);
+        if (seeded) {
+          expect(
+            compareDiagnosticSets(baseline, { ...candidate, diagnostics: [] })
+              .passed,
+          ).toBe(false);
+          expect(
+            compareDiagnosticSets(baseline, { ...candidate, status: 0 }).passed,
+          ).toBe(false);
+        }
+        expect(await readFile(existingOutput, "utf8")).toBe(outputSentinel);
+        expect(await readFile(existingBuildInfo, "utf8")).toBe(buildSentinel);
+        expect((await readdir(project, { recursive: true })).sort()).toEqual(
+          originalFiles,
+        );
         expect(
-          compareDiagnosticSets(baseline, {
-            ...candidate,
-            diagnostics: candidate.diagnostics.filter(
-              (diagnostic) => diagnostic !== removed,
-            ),
-          }).passed,
-        ).toBe(false);
+          await rejectedError(access(join(project, "second/dist"))),
+        ).toBeInstanceOf(Error);
       }
     } finally {
       await rm(project, { recursive: true, force: true });
     }
   },
-  40_000,
+  60_000,
 );
 
 test.skipIf(process.env["CI"] !== "true")(
@@ -345,7 +393,7 @@ test.skipIf(process.env["CI"] !== "true")(
         );
       expect(passed).toBe(true);
       expect(await readFile(existingBuildInfo, "utf8")).toBe(originalBuildInfo);
-      expect(access(newBuildInfo)).rejects.toThrow();
+      expect(await rejectedError(access(newBuildInfo))).toBeInstanceOf(Error);
       const strictStart = logs.findIndex(
         (line) =>
           line.startsWith("Config group ") &&
@@ -385,7 +433,7 @@ test.skipIf(process.env["CI"] !== "true")(
         await runTypecheckParity({ repo: project, policy, bun: wrapper }),
       ).toBe(false);
       expect(await readFile(existingBuildInfo, "utf8")).toBe(originalBuildInfo);
-      expect(access(newBuildInfo)).rejects.toThrow();
+      expect(await rejectedError(access(newBuildInfo))).toBeInstanceOf(Error);
       expect(
         logs.some(
           (line) =>
@@ -423,4 +471,98 @@ test.skipIf(process.env["CI"] !== "true")(
     }
   },
   180_000,
+);
+
+test.skipIf(process.env["CI"] !== "true")(
+  "NodeNext fixtures preserve the nearest consumer package module context",
+  async () => {
+    const repo = process.cwd();
+    const policy: unknown = JSON.parse(
+      await readFile(
+        resolve(repo, "packages/oxlint-config/toolchain.json"),
+        "utf8",
+      ),
+    );
+    const compiler = await resolveCompiler(repo, policy);
+    const project = await realpath(
+      await mkdtemp(join(tmpdir(), "parity-package-context-")),
+    );
+    try {
+      const consumer = join(project, "consumer");
+      const configPath = join(consumer, "packages/app/tsconfig.json");
+      const fixtureFolder = join(project, "fixture");
+      await mkdir(join(consumer, "packages/app"), { recursive: true });
+      await mkdir(fixtureFolder);
+      await writeFile(
+        join(consumer, "package.json"),
+        JSON.stringify({ type: "module" }),
+      );
+      const compilerOptions = {
+        types: [],
+        target: "ESNext",
+        module: "NodeNext",
+        moduleResolution: "NodeNext",
+        moduleDetection: "auto",
+        noUnusedLocals: true,
+      };
+      await writeFile(configPath, JSON.stringify({ compilerOptions }));
+      const context = fixturePackageContext(configPath);
+      expect(context).toEqual({ type: "module" });
+      await writeFile(
+        join(fixtureFolder, "package.json"),
+        JSON.stringify(context),
+      );
+      await writeFile(
+        join(fixtureFolder, "tsconfig.json"),
+        JSON.stringify({
+          compilerOptions: fixtureCompilerOptions({
+            compilerOptions,
+            configPath,
+          }),
+          files: ["input.ts"],
+        }),
+      );
+      const fixture = fixtures.find(({ name }) => name === "module-detection");
+      if (fixture === undefined)
+        throw new Error("Missing module-detection fixture");
+      for (const [name, source] of Object.entries(fixture.files)) {
+        await writeFile(join(fixtureFolder, name), source);
+      }
+      for (const contextPresent of [true, false]) {
+        if (!contextPresent) await rm(join(fixtureFolder, "package.json"));
+        const tsc = spawnSync(
+          process.execPath,
+          [
+            compiler,
+            "--noEmit",
+            "--pretty",
+            "false",
+            "--project",
+            fixtureFolder,
+          ],
+          { cwd: repo, encoding: "utf8", timeout: 10_000 },
+        );
+        const bun = spawnSync(process.execPath, bunCheckArgs(fixtureFolder), {
+          cwd: repo,
+          encoding: "utf8",
+          timeout: 10_000,
+        });
+        if (tsc.error) throw tsc.error;
+        if (bun.error) throw bun.error;
+        const result = fixtureParity({
+          expected: fixture.codes,
+          match: "all",
+          baseline: { status: tsc.status, output: tsc.stdout + tsc.stderr },
+          candidate: { status: bun.status, output: bun.stdout + bun.stderr },
+        });
+        expect(result.tscCodes).toEqual(contextPresent ? [6133] : []);
+        expect(result.bunCodes).toEqual(result.tscCodes);
+        expect(result.active).toBe(contextPresent);
+        expect(result.passed).toBe(true);
+      }
+    } finally {
+      await rm(project, { recursive: true, force: true });
+    }
+  },
+  50_000,
 );

@@ -79,8 +79,14 @@ Each group copies its representative config's effective options, removes emit-on
 and build settings, and sets `noEmit` for the seeded projects. Type-checking options
 and consumer type/module resolution are preserved. Each group must
 activate at least one seeded class. The installed compiler and Bun runtime must match their selected toolchain policy versions.
-Consumer build-info files are restored after the TypeScript baseline; tagged agent diagnostics
-are normalized into the same comparison set.
+Both compilers check the same temporary project graph. TypeScript declarations
+and build metadata stay in that temporary tree; consumer files remain untouched.
+Build errors normalize TypeScript's emitted-with-diagnostics exit `2` to Bun's
+diagnostic exit `1`; the report retains both raw exit codes. Other exit statuses
+compare exactly. Comparisons retain source diagnostic locations, normalize bundled standard-library
+paths, and distinguish locationless messages. Fixtures preserve the consumer package
+module context and reject configuration errors. Tagged agent diagnostics are normalized
+into the same comparison set.
 
 Use the library TypeScript preset:
 
