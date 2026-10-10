@@ -1,6 +1,7 @@
 import { parse, type Options } from "acorn";
 import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { wrap } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -156,7 +157,11 @@ export const assertPackedArtifactSyntax = ({
     if (/\.mjs$/i.test(file)) mode = "module";
     if (/\.cjs$/i.test(file)) mode = "script";
     const parseMode = (sourceType: "script" | "module") => {
-      const tree = parse(source, {
+      const input =
+        sourceType === "script"
+          ? wrap(source.replace(/^\uFEFF/, "").replace(/^#![^\r\n]*/, ""))
+          : source;
+      const tree = parse(input, {
         ecmaVersion,
         sourceType,
         allowHashBang: true,

@@ -154,6 +154,40 @@ test("nested manifests and explicit extensions determine module grammar", () => 
   ).toThrow("ES5");
 });
 
+test("CommonJS wrapper syntax agrees with native Node and remains forbidden in ESM", async () => {
+  const executable = execFileSync("node", ["-p", "process.execPath"], {
+    encoding: "utf8",
+  }).trim();
+  const version = execFileSync(executable, ["--version"], { encoding: "utf8" })
+    .trim()
+    .slice(1);
+  for (const source of ["module.exports = new.target;", "return;"]) {
+    for (const file of ["index.cjs", "index.js"]) {
+      const content = files({ [file]: source }, "commonjs");
+      expect(() =>
+        assertPackedArtifactSyntax({ files: content, target, node: version }),
+      ).not.toThrow();
+      await checkPackedJavaScriptWithNode({
+        files: content,
+        target,
+        node: version,
+        executable,
+      });
+    }
+    const content = files({ "index.mjs": source });
+    expect(() =>
+      assertPackedArtifactSyntax({ files: content, target, node: version }),
+    ).toThrow("index.mjs");
+    expect(() =>
+      execFileSync(executable, ["--check", "--input-type=module"], {
+        input: source,
+        encoding: "utf8",
+        stdio: ["pipe", "pipe", "pipe"],
+      }),
+    ).toThrow();
+  }
+});
+
 test("unbounded targets still pass through native Node parsing without executing artifact code", async () => {
   const executable = execFileSync("node", ["-p", "process.execPath"], {
     encoding: "utf8",
