@@ -7,12 +7,17 @@ import {
   isMiseConfigPath,
   toolchainInputKind,
 } from "./toolchain-inputs";
+import {
+  nodePolicyValid,
+  nodeSelectorMatches,
+  nodeSupportRangeMatches,
+} from "./toolchain-node";
 import { checkRuntimeFile, runtimeRules } from "./toolchain-runtime";
 
 const sha = "a".repeat(40);
 const policy = {
   bun: "1.4.3",
-  node: "22.20.0",
+  node: "26.x",
   python: "3.13.7",
   rust: "1.90.0",
   rustCompilerDevelopment: "nightly-2026-04-16",
@@ -56,7 +61,7 @@ const cases = [
     ),
     fail: workflow(`      - uses: oven-sh/setup-bun@${sha} # v2`),
   },
-  { rule: "node-version", file: ".nvmrc", pass: "22.20.0", fail: "22" },
+  { rule: "node-version", file: ".nvmrc", pass: "26.0.0", fail: "22" },
   {
     rule: "python-version",
     file: "pyproject.toml",
@@ -72,13 +77,13 @@ const cases = [
   {
     rule: "runtime-manager",
     file: "mise.toml",
-    pass: '[tools]\nnode = "22.20.0"\noxlint = "1.87.0"',
-    fail: '[tools]\nnode = "22.20.0"\noxlint = "latest"',
+    pass: '[tools]\nnode = "26.0.0"\noxlint = "1.87.0"',
+    fail: '[tools]\nnode = "26.0.0"\noxlint = "latest"',
   },
   {
     rule: "runtime-docker",
     file: "Dockerfile",
-    pass: "FROM --platform=linux/arm64 node:22.20.0-alpine",
+    pass: "FROM --platform=linux/arm64 node:26.0.0-alpine",
     fail: "FROM --platform=linux/arm64 node:22-alpine",
   },
   {
@@ -88,7 +93,7 @@ const cases = [
       `      - uses: actions/setup-node@${sha} # v5\n        with: { node-version-file: .node-version }`,
     ),
     fail: workflow(
-      `      - uses: actions/setup-node@${sha} # v5\n        with: { node-version: '22.20.0' }`,
+      `      - uses: actions/setup-node@${sha} # v5\n        with: { node-version: '26.0.0' }`,
     ),
   },
   {
@@ -176,7 +181,7 @@ test("mise inline tools and npm backends share the same exact pins", () => {
   expect(
     check(
       "mise.toml",
-      '[tools]\n"npm:oxlint" = {version = "1.87.0"}\n"core:node" = "22.20.0"',
+      '[tools]\n"npm:oxlint" = {version = "1.87.0"}\n"core:node" = "26.0.0"',
     ),
   ).toEqual([]);
   expect(
@@ -1485,4 +1490,125 @@ test("Docker heredoc delimiter quote removal preserves ordinary backslashes and 
       ),
     ).toBe(true);
   }
+});
+
+test("Node major policy uses static selectors across every declared runtime surface", () => {
+  const surfaces = [
+    (version: string) => ({ file: ".node-version", text: version }),
+    (version: string) => ({ file: ".nvmrc", text: version }),
+    (version: string) => ({ file: "Dockerfile", text: `FROM node:${version}` }),
+    ...["node", "nodejs", "core:node"].flatMap((tool) => [
+      (version: string) => ({
+        file: "mise.toml",
+        text: `[tools]\n"${tool}" = "${version}"`,
+      }),
+      (version: string) => ({
+        file: ".tool-versions",
+        text: `${tool} ${version}`,
+      }),
+    ]),
+  ];
+  const accepted = [
+    "26",
+    "26.x",
+    "26.0",
+    "26.0.0",
+    "26.1",
+    "26.1.7",
+    "26.9999.9999",
+  ];
+  const rejected = [
+    "25",
+    "27.x",
+    "24.9.0",
+    "^26.0.0",
+    ">=26",
+    "latest",
+    "lts/*",
+    "26.0.0-rc.1",
+    "26.0.0+build",
+    "26.01",
+    "026",
+    "v26",
+    "26.1.x",
+    "26.${{ inputs.minor }}",
+    "26.9007199254740992.0",
+  ];
+  for (const version of accepted) {
+    expect(nodeSelectorMatches(version, policy.node)).toBe(true);
+    for (const surface of surfaces) {
+      const { file, text } = surface(version);
+      expect(check(file, text)).toEqual([]);
+    }
+    expect(
+      check(
+        ".github/workflows/ci.yml",
+        workflow(
+          `      - uses: actions/setup-node@${sha} # v5\n        with: {node-version-file: .node-version}`,
+        ),
+        { ".node-version": version },
+      ),
+    ).toEqual([]);
+  }
+  for (const version of rejected) {
+    expect(nodeSelectorMatches(version, policy.node)).toBe(false);
+    for (const surface of surfaces) {
+      const { file, text } = surface(version);
+      expect(check(file, text).length).toBeGreaterThan(0);
+    }
+    expect(
+      check(
+        ".github/workflows/ci.yml",
+        workflow(
+          `      - uses: actions/setup-node@${sha} # v5\n        with: {node-version-file: .node-version}`,
+        ),
+        { ".node-version": version },
+      ).some(({ rule }) => rule === "runtime-workflow"),
+    ).toBe(true);
+  }
+  for (const version of [
+    "26-alpine",
+    "26.1-bookworm-slim",
+    "26.0.0-alpine3.24",
+  ])
+    expect(check("Dockerfile", `FROM node:${version}`)).toEqual([]);
+  for (const version of ["26.0.0-rc.1-alpine", "26.1-alpha", "25-alpine"])
+    expect(
+      check("Dockerfile", `FROM node:${version}`).some(
+        ({ rule }) => rule === "runtime-docker",
+      ),
+    ).toBe(true);
+});
+
+test("Node support ranges cover the whole stable major series", () => {
+  expect(nodePolicyValid("26.x")).toBe(true);
+  for (const value of [
+    "26",
+    "26.0.0",
+    "26.1.x",
+    "v26.x",
+    "latest",
+    "026.x",
+    "9007199254740992.x",
+  ])
+    expect(nodePolicyValid(value)).toBe(false);
+  for (const range of [
+    "26.x",
+    ">=26",
+    ">=26 <27",
+    ">=25 <27",
+    "*",
+    ">=26.0.0 <27.0.0",
+  ])
+    expect(nodeSupportRangeMatches("26.x", range)).toBe(true);
+  for (const range of [
+    ">=26.0.1",
+    ">26.0.0",
+    "26.1.x",
+    "<26.9999.9999",
+    ">=27",
+    "25.x",
+    "invalid",
+  ])
+    expect(nodeSupportRangeMatches("26.x", range)).toBe(false);
 });

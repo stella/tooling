@@ -1,5 +1,7 @@
 import { valid } from "semver";
 
+import { nodePolicyValid } from "./toolchain-node";
+
 export const packagePinKeys = [
   "oxlint",
   "oxlint-tsgolint",
@@ -34,10 +36,11 @@ export const parseToolchainPolicy = (input: unknown) => {
     ...packages,
     bun,
     typescript,
-    node,
   }))
     if (valid(value) !== value)
       throw new Error(`toolchain.json ${name} must be an exact release`);
+  if (!nodePolicyValid(node))
+    throw new Error("Node must be a canonical major N.x series");
   if (!/^\d+\.\d+(?:\.\d+)?$/.test(python))
     throw new Error("Python must be an exact minor or patch release");
   if (!/^\d+\.\d+\.\d+$/.test(rust))

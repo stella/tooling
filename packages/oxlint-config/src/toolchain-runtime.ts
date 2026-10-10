@@ -8,6 +8,7 @@ import {
   isMiseConfigPath,
   isDockerDefinitionPath,
 } from "./toolchain-inputs";
+import { nodeSelectorMatches } from "./toolchain-node";
 
 export const runtimeRules = [
   "bun-pins",
@@ -214,6 +215,7 @@ export const checkRuntimeFile = ({
     expected: string;
     label: string;
     line?: number;
+    selector?: "node" | undefined;
   };
   const pin = ({
     rule,
@@ -221,11 +223,14 @@ export const checkRuntimeFile = ({
     expected,
     label,
     line = 1,
+    selector,
   }: RuntimePinOptions) => {
     if (
-      !(label.includes("python")
-        ? pythonSelectorMatches(value, expected)
-        : value === expected)
+      !(selector === "node"
+        ? nodeSelectorMatches(value, expected)
+        : label.includes("python")
+          ? pythonSelectorMatches(value, expected)
+          : value === expected)
     )
       add({
         rule,
@@ -263,6 +268,7 @@ export const checkRuntimeFile = ({
     "core:rust": policy.rust,
     "core:bun": policy.bun,
   };
+  const nodeTools = new Set(["node", "nodejs", "core:node"]);
   if (name === ".bun-version")
     pin({
       rule: "bun-pins",
@@ -273,6 +279,7 @@ export const checkRuntimeFile = ({
   if (name === ".node-version" || name === ".nvmrc")
     pin({
       rule: "node-version",
+      selector: "node",
       value: text.trim(),
       expected: policy.node,
       label: name,
@@ -354,6 +361,7 @@ export const checkRuntimeFile = ({
             rule: "runtime-manager",
             value: record(configured) ? configured["version"] : configured,
             expected,
+            selector: nodeTools.has(tool) ? "node" : undefined,
             label: `mise ${tool}`,
             line: lineOf(tool),
           });
@@ -373,6 +381,7 @@ export const checkRuntimeFile = ({
           rule: "runtime-manager",
           value: fields.slice(1).join(" "),
           expected,
+          selector: nodeTools.has(tool) ? "node" : undefined,
           label: `.tool-versions ${tool}`,
           line: index + 1,
         });
@@ -397,7 +406,14 @@ export const checkRuntimeFile = ({
     );
     if (runtime === null) return;
     const tool = runtime[1]?.toLowerCase();
-    const version = runtime[2]?.split("-").at(0);
+    const tag = runtime[2];
+    const version =
+      tool === "node"
+        ? tag?.replace(
+            /-(?:alpine(?:\d+(?:\.\d+)*)?|(?:bookworm|bullseye|trixie|buster)(?:-slim)?|slim)$/,
+            "",
+          )
+        : tag?.split("-").at(0);
     const expected =
       tool === "node"
         ? policy.node
@@ -408,6 +424,7 @@ export const checkRuntimeFile = ({
       rule: tool === "oven/bun" ? "bun-pins" : "runtime-docker",
       value: version,
       expected,
+      selector: tool === "node" ? "node" : undefined,
       label: `${label} ${tool}`,
       line,
     });
@@ -712,6 +729,7 @@ export const checkRuntimeFile = ({
       rule,
       value: content?.trim(),
       expected: policy[tool],
+      selector: tool === "node" ? "node" : undefined,
       label: `setup-${tool} version file`,
       line,
     });

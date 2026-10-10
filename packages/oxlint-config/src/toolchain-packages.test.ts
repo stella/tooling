@@ -12,7 +12,7 @@ const policy = {
     lefthook: "2.0.0",
     "@stll/oxlint-plugin": "0.7.0",
   },
-  node: "22.12.0",
+  node: "26.x",
   typescriptInstallLayouts: [
     {
       type: "direct",
@@ -864,28 +864,52 @@ describe("TypeScript install layouts", () => {
 });
 
 test("node engine support ranges must include the shared runtime", () => {
-  for (const value of [
-    policy.node,
-    ">=22.12.0",
-    "^22.12.0",
-    "22",
-    "^20.19.0 || >=22.12.0",
-    "*",
-  ])
+  for (const value of [policy.node, ">=26", "^26", "26", "^24 || >=26", "*"])
     expect(manifest({ engines: { node: value } })).toEqual([]);
   expect(manifest({ engines: { bun: ">=1" } })).toEqual([]);
-  for (const value of [
-    ">=22.13.0",
-    "^20.19.0",
-    "20",
-    "20.19.0",
-    "invalid",
-    null,
-    22,
-  ])
+  for (const value of [">=26.1.0", "^24", "24", "24.15.0", "invalid", null, 22])
     expect(manifest({ engines: { node: value } })).toMatchObject([
       { rule: "node-engine", line: 3 },
     ]);
+});
+
+test("node engine ranges must contain the entire selected major series", () => {
+  const selectedPolicy = { ...policy, node: "26.x" };
+  const engine = (node: unknown) =>
+    checkPackageFiles({
+      files: { "package.json": json({ engines: { node } }) },
+      policy: selectedPolicy,
+    });
+  for (const range of [
+    "26",
+    "26.x",
+    "^26",
+    ">=26",
+    "24 || 26",
+    "*",
+    ">=26 <27",
+  ])
+    expect(engine(range)).toEqual([]);
+  for (const range of [
+    "24",
+    "^24",
+    "<26",
+    ">=27",
+    "26.1",
+    "^26.1.0",
+    "26.0.0",
+    ">=26 <26.5 || >=26.6 <27",
+    "invalid",
+    null,
+    26,
+  ])
+    expect(engine(range)).toMatchObject([{ rule: "node-engine" }]);
+  expect(
+    checkPackageFiles({
+      files: { "package.json": json({}) },
+      policy: selectedPolicy,
+    }),
+  ).toEqual([]);
 });
 
 test("every exported rule has a failing hermetic fixture", () => {

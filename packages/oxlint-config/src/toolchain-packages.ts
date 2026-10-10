@@ -1,7 +1,8 @@
 import path from "node:path";
 import picomatch from "picomatch";
-import { satisfies } from "semver";
 import { isNode, LineCounter, parseDocument } from "yaml";
+
+import { nodeSupportRangeMatches } from "./toolchain-node";
 
 export const packageRules = [
   "bun-pins",
@@ -611,7 +612,7 @@ export const checkPackageFiles = ({
       record(json["engines"]) &&
       json["engines"]["node"] !== undefined &&
       (typeof json["engines"]["node"] !== "string" ||
-        !satisfies(policy.node, json["engines"]["node"]))
+        !nodeSupportRangeMatches(policy.node, json["engines"]["node"]))
     )
       add({
         file,

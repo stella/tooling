@@ -25,16 +25,18 @@
   "typescript6Compatibility": {
     "version": "6.0.3",
     "packageAlias": "typescript-compat",
-    "apiConsumers": ["TypeScript compiler API"],
+    "apiConsumers": [
+      "TypeScript compiler API"
+    ],
     "peerBlockers": [
       "@astrojs/check",
       "@typescript-eslint/utils",
       "dependency-cruiser"
     ]
   },
-  "@stll/oxlint-plugin": "0.2.0",
+  "@stll/oxlint-plugin": "0.2.1",
   "lefthook": "2.1.16",
-  "node": "24.15.0",
+  "node": "26.x",
   "python": "3.13",
   "rust": "1.96.0",
   "actions": {
@@ -91,8 +93,13 @@
     },
     "groups": {
       "dependencies": {
-        "patterns": ["*"],
-        "updateTypes": ["minor", "patch"]
+        "patterns": [
+          "*"
+        ],
+        "updateTypes": [
+          "minor",
+          "patch"
+        ]
       }
     }
   },

@@ -81,6 +81,15 @@ Direct `bun-version` inputs are forbidden. For snapshot-bound sources, the
 manifest referenced by `bun-version-file` must declare the shared
 `packageManager` value. Delegated commits own their version validation.
 
+The Node policy is `26.x`. Runtime selectors (`.node-version`, `.nvmrc`,
+setup-node's `node-version-file`, Node image tags and mise/asdf entries)
+must select major 26: bare major, major wildcard, minor and stable patch
+selectors within that major are allowed. Open ranges, floating aliases,
+other majors and prereleases fail. Use `node-version-file` for setup-node.
+`engines.node` remains a support range and must include every stable release
+in major 26; `>=26`, `^26` and `^24 || ^26` pass, while ranges that omit
+part of major 26 fail.
+
 Run the installed checker from the repository root in CI:
 
 ```sh
