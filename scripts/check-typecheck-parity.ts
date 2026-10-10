@@ -235,10 +235,11 @@ export const fixtures = [
     flags: ["forceConsistentCasingInFileNames"],
     files: {
       "named.ts": 'export const name = "value";',
+      "Named.ts": 'export const name = "value";',
       "input.ts":
         'import { name } from "./named.js"; import { name as other } from "./Named.js"; export const value = name + other;',
     },
-    codes: [1149, 1261, 2307],
+    codes: [1149, 1261],
     anyCode: true,
   },
 ];

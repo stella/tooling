@@ -55,3 +55,55 @@ for (const fixture of fixtures) {
     ).toBe(false);
   });
 }
+
+test("baseline must report the seeded error and fail the check", () => {
+  const expected = [2322];
+  const options = {
+    expected,
+    match: "all",
+    baseline: { status: 1, output: "error TS2322: seeded error" },
+    candidate: { status: 1, output: "error TS2322: seeded error" },
+  } as const;
+  for (const baseline of [
+    { status: 1, output: "" },
+    { status: 1, output: "error TS7006: unrelated error" },
+    { status: 0, output: "error TS2322: seeded error" },
+  ]) {
+    expect(diagnosticParity({ ...options, baseline }).passed).toBe(false);
+  }
+  expect(
+    diagnosticParity({
+      ...options,
+      candidate: { status: 1, output: "check: unsupported command" },
+    }).passed,
+  ).toBe(false);
+});
+
+test("alternative diagnostic classes accept each supported code and reject unrelated errors", () => {
+  const expected = [1149, 1261];
+  for (const code of expected) {
+    const result = {
+      status: 1,
+      output: `error TS${code}: casing or import error`,
+    };
+    expect(
+      diagnosticParity({
+        expected,
+        match: "any",
+        baseline: result,
+        candidate: result,
+      }).passed,
+    ).toBe(true);
+  }
+  for (const output of ["", "error TS7006: unrelated error"]) {
+    const result = { status: 1, output };
+    expect(
+      diagnosticParity({
+        expected,
+        match: "any",
+        baseline: result,
+        candidate: result,
+      }).passed,
+    ).toBe(false);
+  }
+});
