@@ -71,8 +71,10 @@ entries cannot substitute for the selected file.
 Other nonempty, nonconstant GitHub expression refs on same-repository checkouts
 (including `${{ job.workflow_repository }}`) delegate a safe static version-file selector
 to that checkout. The CLI reports delegation on stdout without validating the
-current source's version file. Literal refs and unpaired `${{ github.sha }}` /
-`${{ job.workflow_sha }}` remain rejected.
+current source's version file. Current-source checkouts also accept `${{ github.sha }}`, `${{ github.event.pull_request.head.sha }}`
+and the PR-head-or-`github.sha` fallback on the same repository. Local actions
+use these current-source bindings. Literal refs, foreign repositories and
+unpaired `${{ job.workflow_sha }}` remain rejected.
 For snapshot-bound sources, the guard maps the selector to its tracked source
 file. Literal commit SHAs,
 branches, tags, unpaired snapshot contexts, foreign repositories, and traversal
@@ -118,6 +120,44 @@ also apply. Other jobs and runtime files follow the shared Node series.
 Missing packages or jobs, private packages, absent setup-node selectors and
 floor mismatches fail configuration validation. `optOuts` is optional when
 only `engineFloors` is declared.
+
+A runtime image or Bun source selected by an expression can have a scoped,
+reviewed `dynamicSelectors` declaration instead of a whole-rule opt-out:
+
+```json
+{
+  "dynamicSelectors": [
+    {
+      "path": ".github/workflows/example.yml",
+      "at": "jobs.example.services.database",
+      "kind": "image",
+      "reason": "The scoped image producer validates the selected image."
+    },
+    {
+      "path": ".github/workflows/example.yml",
+      "at": "jobs.example.steps.setup",
+      "kind": "bun-source",
+      "reason": "The manifest producer selects the owned source snapshot."
+    }
+  ]
+}
+```
+
+`at` identifies a job container (`jobs.<job>.container`), job service
+(`jobs.<job>.services.<service>`), Compose image (`services.<service>.image`),
+or setup step ID (`jobs.<job>.steps.<id>`; `runs.steps.<id>` in a composite
+action). If a step has no ID, replace `at` with a positive `line` number
+pointing at its version-file selector. Images without an ID locator (including
+unresolved Dockerfile `FROM` arguments) can also use a line number. Prefer IDs so unrelated edits do not
+move the declaration. Each declaration requires an exact tracked path, one
+locator, a known kind and a nonempty reason. It must match exactly one unresolved
+selector; missing, static or ambiguous locations fail configuration validation.
+An image declaration applies only to an expression, never a literal runtime pin.
+A Bun declaration acknowledges an unresolved manifest expression or same-source
+dynamic checkout ambiguity; it does not verify the selected version. Foreign or
+literal-ref checkouts, incorrect action pins and conditional/error-tolerant
+checkouts still fail. Local-action provenance is independent of these declarations.
+Review the producer named in the reason whenever the selector changes.
 
 Run the installed checker from the repository root in CI:
 

@@ -15,6 +15,7 @@ import {
   isComposeDefinitionPath,
   isKubernetesDefinitionPath,
 } from "./toolchain-container-inputs";
+import type { DynamicSelector } from "./toolchain-dynamic-selectors";
 import {
   engineFloorSelectorMatches,
   type ResolvedEngineFloor,
@@ -74,6 +75,8 @@ type CheckRuntimeFileOptions = {
   readFile: (file: string) => string | undefined;
   repository?: string | undefined;
   onDelegated?: ((report: RuntimeDelegation) => void) | undefined;
+  dynamicSelectors?: readonly DynamicSelector[] | undefined;
+  onDynamicSelector?: ((entry: DynamicSelector) => void) | undefined;
   engineFloors?: readonly ResolvedEngineFloor[] | undefined;
   onEngineFloor?:
     | ((floor: ResolvedEngineFloor, status: "matched" | "mismatch") => void)
@@ -217,6 +220,8 @@ export const checkRuntimeFile = ({
   readFile,
   repository,
   onDelegated,
+  dynamicSelectors = [],
+  onDynamicSelector,
   engineFloors = [],
   onEngineFloor,
 }: CheckRuntimeFileOptions): RuntimeDiagnostic[] => {
@@ -229,6 +234,26 @@ export const checkRuntimeFile = ({
   >;
   const add = ({ rule, line, message }: RuntimeDiagnosticOptions) => {
     diagnostics.push({ rule, path: file, line, message });
+  };
+  let currentLocation: string | undefined;
+  const dynamic = (value: unknown) =>
+    typeof value === "string" && value.includes("$");
+  const authorizeDynamic = (
+    kind: DynamicSelector["kind"],
+    line: number,
+    at = currentLocation,
+  ) => {
+    const matches = dynamicSelectors.filter(
+      (entry) =>
+        entry.path === file &&
+        entry.kind === kind &&
+        (entry.at !== undefined ? entry.at === at : entry.line === line),
+    );
+    if (matches.length !== 1) return false;
+    const entry = matches.at(0);
+    if (entry === undefined) return false;
+    onDynamicSelector?.(entry);
+    return true;
   };
   const lineOf = (key: string) =>
     Math.max(1, lines.findIndex((line) => line.includes(key)) + 1);
@@ -521,13 +546,20 @@ export const checkRuntimeFile = ({
     image: unknown;
     line: number;
     label: string;
+    at?: string | undefined;
   };
-  const checkRuntimeImage = ({ image, line, label }: RuntimeImageOptions) => {
+  const checkRuntimeImage = ({
+    image,
+    line,
+    label,
+    at,
+  }: RuntimeImageOptions) => {
     if (typeof image !== "string" || image.includes("$")) {
+      if (dynamic(image) && authorizeDynamic("image", line, at)) return;
       add({
         rule: "runtime-docker",
         line,
-        message: `cannot determine ${label} runtime; use a static image or a reasoned runtime-docker opt-out`,
+        message: `cannot determine ${label} runtime; use a static image or a scoped dynamicSelectors declaration`,
       });
       return;
     }
@@ -684,19 +716,20 @@ export const checkRuntimeFile = ({
       if (from === null || from[1] === undefined) return;
       argumentScope = "stage";
       const image = expand(from[1]);
-      if (image.includes("$")) {
-        add({
-          rule: "runtime-docker",
-          line,
-          message:
-            "cannot determine FROM runtime; declare an image ARG default or a reasoned runtime-docker opt-out",
-        });
-        return;
-      }
       const stage = from[2]?.toLowerCase();
       const previousStage = stages.has(image.toLowerCase());
       if (stage !== undefined) stages.add(stage);
       if (previousStage) return;
+      if (image.includes("$")) {
+        if (authorizeDynamic("image", line)) return;
+        add({
+          rule: "runtime-docker",
+          line,
+          message:
+            "cannot determine FROM runtime; declare an image ARG default or a scoped dynamicSelectors declaration",
+        });
+        return;
+      }
       checkRuntimeImage({ image, line, label: "FROM" });
     };
     lines.forEach((line, index) => {
@@ -763,6 +796,7 @@ export const checkRuntimeFile = ({
           checkRuntimeImage({
             image: entry.image,
             line,
+            at: entry.path.join("."),
             label:
               classified?.ecosystem === "docker-compose"
                 ? "Compose image"
@@ -801,7 +835,11 @@ export const checkRuntimeFile = ({
     | { mode: "all" }
     | { mode: "files"; paths: ReadonlySet<string> }
     | { mode: "invalid" };
-  type CheckoutBinding = { path: string; sparse: SparseCheckout } & (
+  type CheckoutBinding = {
+    path: string;
+    sparse: SparseCheckout;
+    dynamicSource: boolean;
+  } & (
     | { source: "tracked" }
     | { source: "untrusted"; reason: string; line: number }
     | { source: "delegated"; ref: string }
@@ -809,6 +847,7 @@ export const checkRuntimeFile = ({
   let checkoutBindings: CheckoutBinding[] = [];
   let checkoutDestinations = new Map<string, number>();
   let unknownCheckoutDestination = false;
+  let unreviewableCheckoutSource = false;
   const staticRepositoryPath = (value: unknown): value is string =>
     typeof value === "string" &&
     value !== "" &&
@@ -844,7 +883,21 @@ export const checkRuntimeFile = ({
               selector === entry.path ||
               selector.startsWith(`${entry.path}/`),
           );
+    const dynamicSource = checkoutBindings.some(
+      (entry) =>
+        entry.dynamicSource &&
+        (entry.path === "." ||
+          selector === entry.path ||
+          selector?.startsWith(`${entry.path}/`)),
+    );
     if (selector === undefined) {
+      if (
+        tool === "bun" &&
+        dynamic(value) &&
+        !unreviewableCheckoutSource &&
+        authorizeDynamic("bun-source", line)
+      )
+        return;
       add({
         rule,
         line,
@@ -862,6 +915,13 @@ export const checkRuntimeFile = ({
             selector.startsWith(`${prefix}/`)),
       )
     ) {
+      if (
+        tool === "bun" &&
+        dynamicSource &&
+        !unreviewableCheckoutSource &&
+        authorizeDynamic("bun-source", line)
+      )
+        return;
       add({
         rule,
         line,
@@ -870,6 +930,13 @@ export const checkRuntimeFile = ({
       return;
     }
     if (binding?.source === "untrusted") {
+      if (
+        tool === "bun" &&
+        dynamicSource &&
+        !unreviewableCheckoutSource &&
+        authorizeDynamic("bun-source", line)
+      )
+        return;
       add({
         rule,
         line: binding.line,
@@ -897,6 +964,13 @@ export const checkRuntimeFile = ({
       (binding.sparse.mode === "invalid" ||
         (binding.sparse.mode === "files" && !binding.sparse.paths.has(target)))
     ) {
+      if (
+        tool === "bun" &&
+        binding.dynamicSource &&
+        !unreviewableCheckoutSource &&
+        authorizeDynamic("bun-source", line)
+      )
+        return;
       add({
         rule,
         line,
@@ -1257,10 +1331,19 @@ export const checkRuntimeFile = ({
         repo === "${{ job.workflow_repository }}" &&
         isScalar(checkoutRef) &&
         checkoutRef.value === "${{ job.workflow_sha }}";
-      const currentSource = self && checkoutRef === undefined;
       const refValue = isScalar(checkoutRef) ? checkoutRef.value : undefined;
+      const currentRef = dynamicRefBody(refValue);
+      const currentSource =
+        self &&
+        (checkoutRef === undefined ||
+          (currentRef !== undefined &&
+            /^(?:github\.sha|github\.event\.pull_request\.head\.sha(?:\s*\|\|\s*github\.sha)?)$/.test(
+              currentRef,
+            )));
+
       const dynamicRef = dynamicRefBody(refValue);
       const delegatedSource =
+        !currentSource &&
         (self || repo === "${{ job.workflow_repository }}") &&
         dynamicRef !== undefined &&
         dynamicRef !== "" &&
@@ -1271,10 +1354,17 @@ export const checkRuntimeFile = ({
           dynamicRef,
         );
 
+      const validSource =
+        ref === approved?.sha &&
+        sourceMap({ node, key: "if" }) === undefined &&
+        sourceMap({ node, key: "continue-on-error" }) === undefined &&
+        (currentSource || workflowSource || delegatedSource);
+      if (!validSource) unreviewableCheckoutSource = true;
       if (!staticRepositoryPath(prefix)) {
         // Unknown checkout destinations may shadow any tracked selector.
         checkoutBindings.push({
           path: ".",
+          dynamicSource: validSource && dynamic(prefix),
           source: "untrusted",
           reason: "checkout destination must be a static repository path",
           line,
@@ -1291,6 +1381,7 @@ export const checkRuntimeFile = ({
         if (trustedWriter && delegatedSource && typeof refValue === "string")
           checkoutBindings.push({
             path: destination,
+            dynamicSource: validSource && delegatedSource,
             sparse: sparseCheckoutOf(node),
             source: "delegated",
             ref: refValue,
@@ -1298,6 +1389,7 @@ export const checkRuntimeFile = ({
         else if (trustedWriter && (workflowSource || currentSource))
           checkoutBindings.push({
             path: destination,
+            dynamicSource: validSource && delegatedSource,
             sparse: sparseCheckoutOf(node),
             source: "tracked",
           });
@@ -1319,6 +1411,7 @@ export const checkRuntimeFile = ({
             reason = "checkout destination must have exactly one static writer";
           checkoutBindings.push({
             path: destination,
+            dynamicSource: validSource && delegatedSource,
             sparse: sparseCheckoutOf(node),
             source: "untrusted",
             reason,
@@ -1373,7 +1466,7 @@ export const checkRuntimeFile = ({
       line: reference === undefined ? line : nodeLine(reference),
     });
   };
-  const checkContainer = (node: unknown) => {
+  const checkContainer = (node: unknown, at: string) => {
     node = resolveNode(node);
     if (node === undefined) return;
     const image = isMap(node) ? getNode(node, "image") : node;
@@ -1381,13 +1474,19 @@ export const checkRuntimeFile = ({
       image: isScalar(image) ? image.value : undefined,
       line: nodeLine(image ?? node),
       label: "container image",
+      at,
     });
   };
-  const checkSteps = (node: unknown, floor?: ResolvedEngineFloor) => {
+  const checkSteps = (
+    node: unknown,
+    prefix: string,
+    floor?: ResolvedEngineFloor,
+  ) => {
     currentEngineFloor = undefined;
     checkoutBindings = [];
     checkoutDestinations = new Map();
     unknownCheckoutDestination = false;
+    unreviewableCheckoutSource = false;
     node = resolveNode(node);
     if (!isSeq(node)) return;
     for (const step of node.items) {
@@ -1411,9 +1510,17 @@ export const checkRuntimeFile = ({
     }
     currentEngineFloor = floor;
     try {
-      for (const step of node.items) checkAction(step);
+      for (const step of node.items) {
+        const id = getNode(step, "id");
+        currentLocation =
+          isScalar(id) && typeof id.value === "string"
+            ? `${prefix}.steps.${id.value}`
+            : undefined;
+        checkAction(step);
+      }
     } finally {
       currentEngineFloor = undefined;
+      currentLocation = undefined;
     }
   };
   try {
@@ -1429,13 +1536,17 @@ export const checkRuntimeFile = ({
           currentEngineFloor = undefined;
           const job = getNode(jobs, key);
           checkAction(job);
-          checkContainer(getNode(job, "container"));
+          checkContainer(getNode(job, "container"), `jobs.${key}.container`);
           const services = getNode(job, "services");
           if (isMap(services))
             for (const service of keysOf(services))
-              checkContainer(getNode(services, service));
+              checkContainer(
+                getNode(services, service),
+                `jobs.${key}.services.${service}`,
+              );
           checkSteps(
             getNode(job, "steps"),
+            `jobs.${key}`,
             engineFloors.find((entry) => entry.job === key),
           );
         }
@@ -1443,7 +1554,7 @@ export const checkRuntimeFile = ({
       const runs = getNode(document.contents, "runs");
       const using = getNode(runs, "using");
       if (isScalar(using) && using.value === "composite")
-        checkSteps(getNode(runs, "steps"));
+        checkSteps(getNode(runs, "steps"), "runs");
       if (isScalar(using) && using.value === "docker") {
         const image = getNode(runs, "image");
         const value = isScalar(image) ? image.value : undefined;
