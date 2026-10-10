@@ -450,7 +450,6 @@ exit 1
           cloud: {
             services: [],
             install: "bun install --frozen-lockfile",
-            envFile: "apps/api/.env.test",
           },
         }),
       );

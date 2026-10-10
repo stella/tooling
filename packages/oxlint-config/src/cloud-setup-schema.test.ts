@@ -9,7 +9,7 @@ import {
 } from "./cloud-setup-schema";
 
 const declaration = {
-  services: [],
+  services: ["postgres"],
   install: cloudInstallCommand,
   envFile: ".env",
 };
@@ -24,11 +24,14 @@ test("every service subset, including no services, round-trips without assuming 
       (_, index) => (mask & (1 << index)) !== 0,
     );
     for (const ordered of [services, services.toReversed()]) {
-      expect(parseCloudSetup({ ...declaration, services: ordered })).toEqual({
-        services: ordered,
-        install: cloudInstallCommand,
-        envFile: declaration.envFile,
-      });
+      const selected = { services: ordered, install: cloudInstallCommand };
+      if (ordered.length === 0) {
+        expect(parseCloudSetup(selected)).toEqual(selected);
+        expect(parseCloudSetup(selected)).not.toHaveProperty("envFile");
+      } else {
+        const configured = { ...selected, envFile: declaration.envFile };
+        expect(parseCloudSetup(configured)).toEqual(configured);
+      }
     }
   }
 });
@@ -42,10 +45,21 @@ test("nonobject declarations and unsupported keys fail closed", () => {
     );
 });
 
-test("services require an explicit array of distinct supported names", () => {
-  expect(() => parseCloudSetup({ install: cloudInstallCommand })).toThrow(
-    "cloud.services",
-  );
+test("omitted services are install-only and env files require actual services", () => {
+  const installOnly = { install: cloudInstallCommand };
+  expect(parseCloudSetup(installOnly)).toEqual({
+    ...installOnly,
+    services: [],
+  });
+  expect(parseCloudSetup(installOnly)).not.toHaveProperty("envFile");
+  for (const envFile of [".env", undefined, null, false, ""])
+    for (const configuration of [installOnly, { ...installOnly, services: [] }])
+      expect(() => parseCloudSetup({ ...configuration, envFile })).toThrow(
+        "not allowed without services",
+      );
+});
+
+test("provided services require an array of distinct supported names", () => {
   for (const services of [null, false, 1, "postgres", {}])
     expect(() => parseCloudSetup({ ...declaration, services })).toThrow(
       "cloud.services",
@@ -111,7 +125,7 @@ test("environment files require canonical safe repository-relative paths", () =>
   ])
     expect(parseCloudSetup({ ...declaration, envFile })?.envFile).toBe(envFile);
   expect(() =>
-    parseCloudSetup({ services: [], install: cloudInstallCommand }),
+    parseCloudSetup({ services: ["postgres"], install: cloudInstallCommand }),
   ).toThrow("cloud.envFile");
   for (const envFile of [
     undefined,

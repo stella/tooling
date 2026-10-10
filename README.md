@@ -393,9 +393,11 @@ versioned `stella/.github` contract. Package tags use the immutable
 
 Declare `cloud` in tracked root `stll-toolchain.json`, then run
 `bunx --no-install stll-cloud-setup` to generate `.agents/cloud-setup.sh`.
-The declaration requires `services` (any subset of `postgres` and `valkey`,
-including `[]`), `install` exactly `bun install --frozen-lockfile`, and a
-canonical repository-relative `envFile`, such as `.env.cloud`. A tracked root
+The declaration requires `install` exactly `bun install --frozen-lockfile`.
+`services` is any subset of `postgres` and `valkey`; omit it or use `[]` for
+runtimes and dependencies only. A canonical repository-relative `envFile`, such
+as `.env.cloud`, is required with services and rejected without services.
+Runtime-only scripts emit no environment file code. A tracked root
 `.node-version` must select an exact stable patch within the shared Node series.
 The mandatory `cloud-setup-drift` rule compares the committed script with the
 same generator and rejects missing, changed, or undeclared scripts.

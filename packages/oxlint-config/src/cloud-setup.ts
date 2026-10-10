@@ -53,8 +53,7 @@ NODE_DIR="/opt/stll-cloud/node/$NODE_VERSION"
 BUN_DIR="/opt/stll-cloud/bun/$BUN_VERSION"
 export PATH="$NODE_DIR/bin:$BUN_DIR:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 BUN_CACHE="/var/cache/stll-cloud/bun/$OUTPUT_UID"
-ENV_FILE=@ENV_FILE@
-ENV_MARKER='@ENV_MARKER@'
+@ENV_ASSIGNMENTS@
 [[ -f "$REPO_ROOT/.node-version" && ! -L "$REPO_ROOT/.node-version" ]] || fail 'A regular root .node-version is required'
 [[ "$(awk 'NF { if (++count > 1 || NF != 1) exit 1; value=$1 } END { if (count != 1) exit 1; print value }' "$REPO_ROOT/.node-version")" == "$NODE_VERSION" ]] || fail 'Node selector changed; regenerate cloud-setup.sh'
 cd -- "$REPO_ROOT"
@@ -123,6 +122,22 @@ dependency_install() {
 @SERVICE_INSTALL@
 @SERVICE_START@
 
+@ENV_FUNCTIONS@
+
+if [[ "$MODE" == install ]]; then
+  install_runtimes
+  install_services
+  dependency_install
+  exit 0
+fi
+runtime_ready
+@ENV_VALIDATE@
+prepare_state
+start_services
+@ENV_WRITE@
+`;
+
+const environmentFunctions = String.raw`
 validate_environment() {
   local part target="$REPO_ROOT" env_path="$REPO_ROOT/$ENV_FILE" first_line temporary
   while IFS= read -r part; do
@@ -149,20 +164,6 @@ write_environment() {
   chown "$OUTPUT_UID:$OUTPUT_GID" "$temporary"
   mv -f -- "$temporary" "$env_path"
 }
-
-if [[ "$MODE" == install ]]; then
-  install_runtimes
-  install_services
-  dependency_install
-  exit 0
-fi
-runtime_ready
-DATABASE_URL=''
-REDIS_URL=''
-validate_environment
-prepare_state
-start_services
-write_environment
 `;
 
 const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
@@ -188,8 +189,23 @@ export const generateCloudSetup = ({
   const replacements = new Map([
     ["@BUN@", policy.bun],
     ["@NODE@", exactNode],
-    ["@ENV_FILE@", shellQuote(selected.envFile)],
-    ["@ENV_MARKER@", cloudEnvironmentMarker],
+    [
+      "@ENV_ASSIGNMENTS@",
+      selected.envFile === undefined
+        ? ""
+        : `ENV_FILE=${shellQuote(selected.envFile)}\nENV_MARKER=${shellQuote(cloudEnvironmentMarker)}`,
+    ],
+    [
+      "@ENV_FUNCTIONS@",
+      selected.envFile === undefined ? "" : environmentFunctions,
+    ],
+    [
+      "@ENV_VALIDATE@",
+      selected.envFile === undefined
+        ? ""
+        : "DATABASE_URL=''\nREDIS_URL=''\nvalidate_environment",
+    ],
+    ["@ENV_WRITE@", selected.envFile === undefined ? "" : "write_environment"],
     [
       "@SERVICE_INSTALL@",
       renderCloudServiceInstall({

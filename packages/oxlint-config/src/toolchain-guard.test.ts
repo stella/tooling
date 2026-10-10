@@ -401,7 +401,7 @@ test("repository configuration accepts an explicit cloud declaration without cha
   expect(
     parseToolchainConfiguration({
       optOuts: [],
-      cloud: { ...cloud, services: [] },
+      cloud: { install: cloud.install, services: [] },
     }).cloud?.services,
   ).toEqual([]);
 });
@@ -442,7 +442,6 @@ test("unknown root keys and malformed cloud declarations fail through the tracke
 const cloudDeclaration = {
   services: [],
   install: "bun install --frozen-lockfile",
-  envFile: ".env.cloud",
 } as const;
 const cloudFixtureFiles = () => ({
   "stll-toolchain.json": JSON.stringify({

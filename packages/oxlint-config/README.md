@@ -198,10 +198,11 @@ Add an explicit declaration to tracked root `stll-toolchain.json`:
 }
 ```
 
-Services are optional within the declared list: use `[]` for runtimes and
-dependencies only. No `cloud` declaration means no cloud setup script.
-`envFile` must be a canonical repository-relative path; its existing parent
-must be safe at runtime. Track an exact stable Node patch in root
+Services are optional: omit `services` or use `[]` for runtimes and dependencies
+only. No `cloud` declaration means no cloud setup script. `envFile` is required
+with services and rejected without services; runtime-only scripts emit no
+environment file code. With services, `envFile` must be a canonical
+repository-relative path; its existing parent must be safe at runtime. Track an exact stable Node patch in root
 `.node-version` within the shared Node series. Generate and commit the script:
 
 ```sh
