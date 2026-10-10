@@ -90,7 +90,8 @@ export const checkToolchain = ({
     const lines = text.split(/\r?\n/);
     const reportedLines = new Map<string, number>();
     const propertyLine = (key: string, value?: unknown) => {
-      const serialized = JSON.stringify(value);
+      const serialized =
+        value === undefined ? undefined : JSON.stringify(value);
       const matchKey = `${key}:${serialized ?? ""}`;
       const previous = reportedLines.get(matchKey) ?? -1;
       const index = lines.findIndex(
@@ -167,7 +168,8 @@ export const checkToolchain = ({
     const workflow =
       /^\.github\/workflows\/[^/]+\.ya?ml$/.test(file) ||
       /^\.github\/actions\/.+\/action\.ya?ml$/.test(file);
-    const dockerfile = /^Dockerfile/.test(name) || name === "Containerfile";
+    const dockerfile =
+      name.startsWith("Dockerfile") || name === "Containerfile";
     const versionFile = name === ".bun-version" || name === ".tool-versions";
     const mise = name === "mise.toml" || name === ".mise.toml";
     if (!workflow && !dockerfile && !versionFile && !mise) continue;
