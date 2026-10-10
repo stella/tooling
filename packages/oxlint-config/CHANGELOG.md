@@ -1,5 +1,11 @@
 # @stll/oxlint-config
 
+## 0.12.2
+
+### Patch Changes
+
+- [#80](https://github.com/stella/tooling/pull/80) [`6873cc9`](https://github.com/stella/tooling/commit/6873cc9cb58937d9db1f9933ed7506a47674b9ef) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Support scoped dynamic runtime selectors and current-source checkout refs.
+
 ## 0.12.1
 
 ### Patch Changes
