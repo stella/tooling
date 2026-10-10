@@ -1119,7 +1119,8 @@ export const compareRepository = async ({
         if (emitsDeclarations) options["emitDeclarationOnly"] = true;
         options["noEmitOnError"] = false;
       }
-      delete options["outFile"];
+      if ("outFile" in options)
+        options["outFile"] = join(outputFolder, "bundle.js");
       await writeFile(
         configPath,
         JSON.stringify({

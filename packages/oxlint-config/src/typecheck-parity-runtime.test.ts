@@ -939,6 +939,15 @@ test.skipIf(process.env["CI"] !== "true")(
         {},
         { outDir: "./dist" },
         { declaration: true, declarationDir: "./types" },
+        { outFile: "./dist.js" },
+        { incremental: true, tsBuildInfoFile: "./cache.tsbuildinfo" },
+        { composite: true, tsBuildInfoFile: "./cache.tsbuildinfo" },
+        {
+          declaration: true,
+          declarationDir: "./types",
+          incremental: true,
+          tsBuildInfoFile: "./cache.tsbuildinfo",
+        },
         { composite: true },
       ]) {
         for (const outside of [false, true]) {
@@ -985,6 +994,19 @@ test.skipIf(process.env["CI"] !== "true")(
             });
             const expected = diagnosticSet(originalOutput, consumer);
             const actual = diagnosticSet(compared.baseline.output, consumer);
+            // TS7 removed outFile; the temporary config must retain its rejection.
+            if ("outFile" in configuration) {
+              expect(original.status).toBe(1);
+              expect(compared.baseline.rawStatus).toBe(1);
+              expect([...new Set(originalOutput.match(/TS\d+/g))]).toEqual([
+                "TS5102",
+              ]);
+              expect([
+                ...new Set(compared.baseline.output.match(/TS\d+/g)),
+              ]).toEqual(["TS5102"]);
+              expect(compared.repository.passed).toBe(false);
+              continue;
+            }
             if (JSON.stringify(actual) !== JSON.stringify(expected))
               throw new Error(
                 `Configuration: ${JSON.stringify({ configuration, outside, seeded })}\nOriginal diagnostics:\n${originalOutput}\nTemporary diagnostics:\n${compared.baseline.output}`,
