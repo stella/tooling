@@ -32,7 +32,7 @@ export const parseDynamicSelectors = (input: unknown): DynamicSelector[] => {
       ) ||
       typeof entry["path"] !== "string" ||
       entry["path"] === "" ||
-      /[\\\s:$*?]/.test(entry["path"]) ||
+      /[\\:$*?]|[^\S ]/.test(entry["path"]) ||
       entry["path"]
         .split("/")
         .some((part) => part === "" || part === "." || part === "..") ||

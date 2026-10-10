@@ -1182,7 +1182,7 @@ export const checkRuntimeFile = ({
     while (position < entry.length) {
       const start = entry.indexOf("${{", position);
       const literal = entry.slice(position, start < 0 ? entry.length : start);
-      if (/[!$*?\[\]\\:]/.test(literal) || literal.split("/").includes(".."))
+      if (/[!$*?[\]\\:]/.test(literal) || literal.split("/").includes(".."))
         return false;
       literalPath += literal;
       if (start < 0) break;
@@ -1386,15 +1386,10 @@ export const checkRuntimeFile = ({
       if (callerContext && self && checkoutRef === undefined)
         refValue = "${{ github.sha }}";
       const currentRef = dynamicRefBody(refValue);
-      const branchRefIsCurrent =
-        events.length > 0 &&
-        events.every((event) => event === "push" || event === "merge_group");
       const currentSource =
         self &&
         !callerContext &&
-        (checkoutRef === undefined ||
-          currentRef === "github.sha" ||
-          (currentRef === "github.ref" && branchRefIsCurrent));
+        (checkoutRef === undefined || currentRef === "github.sha");
 
       const dynamicRef = dynamicRefBody(refValue);
       const delegatedSource =

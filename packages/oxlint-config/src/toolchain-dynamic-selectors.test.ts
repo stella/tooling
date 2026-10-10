@@ -39,6 +39,29 @@ const bunDecision = {
   reason: "Manifest selected from the owned source snapshot",
 };
 
+test("exact selector paths permit spaces without accepting control characters", () => {
+  const path = ".github/workflows/release candidate.yml";
+  const declaration = { ...imageDecision, path };
+  expect(parseDynamicSelectors([declaration])).toEqual([declaration]);
+  const matched: unknown[] = [];
+  expect(
+    checkRuntimeFile({
+      file: path,
+      text: "jobs:\n  example:\n    container: '${{ inputs.image }}'\n",
+      policy,
+      trackedFiles: new Set(),
+      readFile: () => undefined,
+      dynamicSelectors: parseDynamicSelectors([declaration]),
+      onDynamicSelector: (entry) => matched.push(entry),
+    }),
+  ).toEqual([]);
+  expect(matched).toEqual([declaration]);
+  for (const control of ["\t", "\r", "\n", "\v", "\f"])
+    expect(() =>
+      parseDynamicSelectors([{ ...declaration, path: path + control }]),
+    ).toThrow();
+});
+
 test("dynamic image decisions apply to one job and never to literal pins", () => {
   const source =
     "jobs:\n  example:\n    container: '${{ needs.build.outputs.image }}'\n  other:\n    container: '${{ vars.IMAGE }}'\n";
@@ -229,9 +252,9 @@ test("event-specific source refs never classify a PR head as inspected source", 
     const source = (ref: string) =>
       `on: ${event}\njobs:\n  example:\n    steps:\n      - uses: ${action("actions/checkout")}\n        with: {ref: '${ref}'}\n      - uses: ./.github/actions/example\n`;
     expect(check(source("${{ github.sha }}")).diagnostics).toEqual([]);
-    expect(check(source("${{ github.ref }}")).diagnostics.length === 0).toBe(
-      event === "push" || event === "merge_group",
-    );
+    expect(check(source("${{ github.ref }}")).diagnostics).toMatchObject([
+      { rule: "action-pins" },
+    ]);
     for (const ref of [
       "${{ github.event.pull_request.head.sha }}",
       "${{ github.event.pull_request.head.ref }}",
