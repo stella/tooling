@@ -87,16 +87,18 @@ test.skipIf(process.env["CI"] !== "true")(
         const tsc = spawnSync(
           process.execPath,
           [compiler, "--noEmit", "--pretty", "false", "-p", project],
-          { cwd: repo, encoding: "utf8", timeout: 10_000 },
+          { cwd: project, encoding: "utf8", timeout: 10_000 },
         );
         const bun = spawnSync(process.execPath, bunCheckArgs(project), {
-          cwd: repo,
+          cwd: project,
           encoding: "utf8",
           timeout: 10_000,
         });
         if (tsc.error) throw tsc.error;
         if (bun.error) throw bun.error;
         const result = fixtureParity({
+          repo: project,
+          seedFiles: Object.keys(fixture.files),
           expected: fixture.codes,
           match: "all",
           baseline: { status: tsc.status, output: tsc.stdout + tsc.stderr },
@@ -121,6 +123,8 @@ test.skipIf(process.env["CI"] !== "true")(
         if (result.active) {
           expect(
             fixtureParity({
+              repo: project,
+              seedFiles: Object.keys(fixture.files),
               expected: fixture.codes,
               match: "all",
               baseline: { status: tsc.status, output: tsc.stdout + tsc.stderr },
@@ -542,16 +546,18 @@ test.skipIf(process.env["CI"] !== "true")(
             "--project",
             fixtureFolder,
           ],
-          { cwd: repo, encoding: "utf8", timeout: 10_000 },
+          { cwd: fixtureFolder, encoding: "utf8", timeout: 10_000 },
         );
         const bun = spawnSync(process.execPath, bunCheckArgs(fixtureFolder), {
-          cwd: repo,
+          cwd: fixtureFolder,
           encoding: "utf8",
           timeout: 10_000,
         });
         if (tsc.error) throw tsc.error;
         if (bun.error) throw bun.error;
         const result = fixtureParity({
+          repo: fixtureFolder,
+          seedFiles: Object.keys(fixture.files),
           expected: fixture.codes,
           match: "all",
           baseline: { status: tsc.status, output: tsc.stdout + tsc.stderr },
@@ -828,6 +834,81 @@ test.skipIf(process.env["CI"] !== "true")(
           expect(compared.baseline.diagnostics).toEqual(expected);
           expect(compared.candidate.diagnostics).toEqual(expected);
         }
+      }
+    } finally {
+      await rm(project, { recursive: true, force: true });
+    }
+  },
+  60_000,
+);
+
+test.skipIf(process.env["CI"] !== "true")(
+  "solution root preserves noEmit and TypeScript extension imports while referenced leaves emit declarations",
+  async () => {
+    const repo = process.cwd();
+    const policy: unknown = JSON.parse(
+      await readFile(
+        resolve(repo, "packages/oxlint-config/toolchain.json"),
+        "utf8",
+      ),
+    );
+    const compiler = await resolveCompiler(repo, policy);
+    const project = await realpath(
+      await mkdtemp(join(tmpdir(), "parity-noemit-root-")),
+    );
+    try {
+      await mkdir(join(project, "leaf"));
+      const options = {
+        types: [],
+        target: "ESNext",
+        module: "ESNext",
+        moduleResolution: "Bundler",
+      };
+      await writeFile(
+        join(project, "tsconfig.json"),
+        JSON.stringify({
+          compilerOptions: {
+            ...options,
+            noEmit: true,
+            allowImportingTsExtensions: true,
+          },
+          files: ["input.ts"],
+          references: [{ path: "./leaf" }],
+        }),
+      );
+      await writeFile(
+        join(project, "leaf/tsconfig.json"),
+        JSON.stringify({
+          compilerOptions: { ...options, composite: true },
+          files: ["input.ts"],
+        }),
+      );
+      await writeFile(
+        join(project, "leaf/input.ts"),
+        "export const value: number = 1;",
+      );
+      for (const seeded of [false, true]) {
+        await writeFile(
+          join(project, "input.ts"),
+          seeded
+            ? 'import { value } from "./leaf/input.ts"; export const result: string = value;'
+            : 'import { value } from "./leaf/input.ts"; export const result: number = value;',
+        );
+        const compared = await compareRepository({
+          repo: project,
+          compiler,
+          bun: process.execPath,
+          graph: discoverConfigGroups({ repo: project, compiler }),
+        });
+        if (!compared.repository.passed)
+          throw new Error(
+            compared.baseline.output + "\n" + compared.candidate.output,
+          );
+        expect(compared.repository.passed).toBe(true);
+        expect(compared.repository.configurationDiagnostics).toEqual([]);
+        const expected = seeded ? ["input.ts:1:2322"] : [];
+        expect(compared.baseline.diagnostics).toEqual(expected);
+        expect(compared.candidate.diagnostics).toEqual(expected);
       }
     } finally {
       await rm(project, { recursive: true, force: true });

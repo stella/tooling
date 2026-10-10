@@ -317,7 +317,10 @@ const configurationDiagnostics = (output: string, repo: string) =>
       ) || /:1800[23](?::|$)/.test(diagnostic),
   );
 
-export const fixtureParity = (options: DiagnosticParityOptions) => {
+type FixtureParityOptions = DiagnosticParityOptions & {
+  seedFiles: readonly string[];
+};
+export const fixtureParity = (options: FixtureParityOptions) => {
   const result = diagnosticParity(options);
   const { baseline, candidate, expected, match } = options;
   const identityParity = compareDiagnosticSets(
@@ -346,11 +349,29 @@ export const fixtureParity = (options: DiagnosticParityOptions) => {
       options.repo ?? process.cwd(),
     ).map((diagnostic) => `Bun: ${diagnostic}`),
   ];
+  const seedFiles = new Set(
+    options.seedFiles.map((file) =>
+      resolve(options.repo ?? process.cwd(), file),
+    ),
+  );
+  const seededCodes = diagnosticSet(
+    baseline.output,
+    options.repo ?? process.cwd(),
+  ).flatMap((diagnostic) => {
+    const match = /^(.*):[0-9]+:([0-9]+)$/.exec(diagnostic);
+    const file = match?.at(1);
+    const code = match?.at(2);
+    return file !== undefined &&
+      code !== undefined &&
+      seedFiles.has(resolve(options.repo ?? process.cwd(), file))
+      ? [Number(code)]
+      : [];
+  });
   const active =
     expected.length > 0 &&
     (match === "any"
-      ? expected.some((code) => result.tscCodes.includes(code))
-      : expected.every((code) => result.tscCodes.includes(code)));
+      ? expected.some((code) => seededCodes.includes(code))
+      : expected.every((code) => seededCodes.includes(code)));
   const validExits =
     baseline.status !== null &&
     candidate.status !== null &&
@@ -1055,6 +1076,9 @@ export const compareRepository = async ({
     const configPaths = new Map(
       [...contexts].map(([original, context]) => [original, context.path]),
     );
+    const requiredOutputs = new Set(
+      graph.projects.flatMap(({ references }) => references),
+    );
     for (const project of graph.projects) {
       const context = contexts.get(project.path);
       if (context === undefined)
@@ -1064,7 +1088,12 @@ export const compareRepository = async ({
         configPath: project.path,
         compilerOptions: project.compilerOptions,
       });
-      options["noEmit"] = !graph.build;
+      const declarationsRequired =
+        graph.build &&
+        requiredOutputs.has(project.path) &&
+        options["composite"] === true;
+      options["noEmit"] =
+        !graph.build || (options["noEmit"] === true && !declarationsRequired);
       options["outDir"] = join(outputFolder, "output");
       const emitsDeclarations =
         options["declaration"] === true ||
@@ -1258,6 +1287,7 @@ export const runTypecheckParity = async ({
           repo: folder,
         });
         const result = fixtureParity({
+          seedFiles: inputs.files,
           expected: fixture.codes,
           match: fixture.anyCode ? "any" : "all",
           repo: folder,

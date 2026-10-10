@@ -18,7 +18,7 @@ import {
   compareDiagnosticSets,
   diagnosticCodes,
   diagnosticSet,
-  fixtureParity,
+  fixtureParity as compareFixtureParity,
   fixtureCompilerOptions,
   fixtureInputs,
   fixtureRunPassed,
@@ -32,6 +32,46 @@ import {
 } from "./typecheck-parity";
 
 const repo = resolve("/consumer-repo");
+
+const fixtureParity = (
+  options: Omit<Parameters<typeof compareFixtureParity>[0], "seedFiles">,
+) => compareFixtureParity({ ...options, seedFiles: ["input.ts"] });
+
+test("ambient diagnostics cannot activate a disabled seed or defeat the vacuous guard", () => {
+  const ambient =
+    "node_modules/ambient/index.d.ts(1,1): error TS2322: Ambient mismatch.";
+  const seed = "input.ts(1,1): error TS2322: Seeded mismatch.";
+  const check = { status: 1, output: ambient };
+  const inactive = fixtureParity({
+    repo,
+    expected: [2322],
+    match: "all",
+    baseline: check,
+    candidate: check,
+  });
+  expect(inactive.passed).toBe(true);
+  expect(inactive.active).toBe(false);
+  expect(fixtureRunPassed([inactive])).toBe(false);
+  const baseline = { status: 1, output: ambient + "\n" + seed };
+  const active = fixtureParity({
+    repo,
+    expected: [2322],
+    match: "all",
+    baseline,
+    candidate: baseline,
+  });
+  expect(active.active).toBe(true);
+  expect(active.passed).toBe(true);
+  expect(
+    fixtureParity({
+      repo,
+      expected: [2322],
+      match: "all",
+      baseline,
+      candidate: check,
+    }).passed,
+  ).toBe(false);
+});
 
 test("temporary options preserve implicit package type resolution", () => {
   const options = fixtureCompilerOptions({
