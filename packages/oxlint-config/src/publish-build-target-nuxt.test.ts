@@ -413,7 +413,7 @@ test("freshly loaded foreign branded hooks are replaced by the installed canonic
     );
     write(
       "node_modules/unbuild/dist/index.mjs",
-      `import{createJiti}from'jiti';export const build=async(root,stub,input)=>{const config=await createJiti(root).import('./build.config');const callbacks={};const hooks={hook(name,callback){(callbacks[name]??=[]).push(callback)},removeHook(name,callback){const index=(callbacks[name]??=[]).indexOf(callback);if(index!==-1)callbacks[name].splice(index,1)}};const context={options:{...input,hooks:{...input.hooks,...config.hooks}},hooks};for(const source of [input.hooks,config.hooks])for(const[name,callback]of Object.entries(source))hooks.hook(name,callback);for(const callback of callbacks['build:prepare']??[])await callback(context);for(const callback of callbacks['build:before']??[]){await callback(context);if(context.options.rollup.esbuild.jsx!=='preserve'||context.options.entries[1].esbuild.jsx!=='automatic'||context.options.entries[1].ext!=='js')throw new Error('Unrelated build options changed')}throw new Error('Unexpected output write boundary');};`,
+      `import{createJiti}from'jiti';export const build=async(root,stub,input)=>{const config=await createJiti(root).import('./build.config');const callbacks={};const hooks={hook(name,callback){(callbacks[name]??=[]).push(callback)},removeHook(name,callback){const index=(callbacks[name]??=[]).indexOf(callback);if(index!==-1)callbacks[name].splice(index,1)}};const context={options:{...input,hooks:{...input.hooks,...config.hooks}},hooks};for(const source of [input.hooks,config.hooks])for(const[name,callback]of Object.entries(source??{}))hooks.hook(name,callback);for(const callback of callbacks['build:prepare']??[])await callback(context);for(const callback of callbacks['build:before']??[]){await callback(context);if(context.options.rollup.esbuild.jsx!=='preserve'||context.options.entries[1].esbuild.jsx!=='automatic'||context.options.entries[1].ext!=='js')throw new Error('Unrelated build options changed')}throw new Error('Unexpected output write boundary');};`,
     );
     const foreignExecution = path.join(directory, "foreign-executed");
     const foreignConfig = `import{writeFileSync}from'node:fs';const foreign=context=>{writeFileSync(${JSON.stringify(foreignExecution)},'executed');context.options.rollup.esbuild.jsx='changed'};Object.defineProperty(foreign,Symbol.for('@stll/oxlint-config.build-target.nuxt'),{value:Object.freeze({version:1,targets:Object.freeze(['es2022'])})});export default{hooks:{'build:before':foreign}};`;
@@ -423,6 +423,36 @@ test("freshly loaded foreign branded hooks are replaced by the installed canonic
       targets: ["es2022"],
     });
     expect(existsSync(foreignExecution)).toBe(false);
+    write("build.config.mjs", "export default {};\n");
+    expect(resolveNuxtPublishTarget(directory)).toEqual({
+      type: "javascript",
+      targets: ["esnext"],
+    });
+    for (const name of ["build:before", "build:prepare", "build:done"]) {
+      write(
+        "build.config.mjs",
+        `import{writeFileSync}from'node:fs';globalThis.__fixtureLoads=(globalThis.__fixtureLoads||0)+1;export default globalThis.__fixtureLoads===1?{}:{hooks:{${JSON.stringify(name)}:()=>writeFileSync(${JSON.stringify(foreignExecution)},'executed')}};`,
+      );
+      expect(() => resolveNuxtPublishTarget(directory)).toThrow(
+        "Nuxt target configuration changed during loading",
+      );
+      expect(existsSync(foreignExecution)).toBe(false);
+    }
+    for (const later of [
+      "{}",
+      "{hooks:{'build:before':hook}}",
+      "{hooks:{'build:before':hook,'build:done':()=>{}}}",
+      "{hooks:{'build:before':foreign,'build:prepare':()=>{}}}",
+    ]) {
+      write(
+        "build.config.mjs",
+        `globalThis.__fixtureLoads=(globalThis.__fixtureLoads||0)+1;const hook=()=>{};Object.defineProperty(hook,Symbol.for('@stll/oxlint-config.build-target.nuxt'),{value:Object.freeze({version:1,targets:Object.freeze(['es2021'])})});${foreignConfig.replace("export default{hooks:{'build:before':foreign}};", `export default globalThis.__fixtureLoads===1?{hooks:{'build:before':foreign}}:${later};`)}`,
+      );
+      expect(() => resolveNuxtPublishTarget(directory)).toThrow(
+        "Nuxt target configuration changed during loading",
+      );
+      expect(existsSync(foreignExecution)).toBe(false);
+    }
     write(
       "build.config.mjs",
       foreignConfig.replace(

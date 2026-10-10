@@ -130,14 +130,24 @@ console.log('__STLL_NUXT_TARGET__' + JSON.stringify(globalThis.__stllNuxtCapture
 
 const captureShim = (unbuild: string) => `
 import {build as actualBuild} from ${JSON.stringify(unbuild)};
-export const build = (root, stub, input) => actualBuild(root, stub, {
-  ...input,
-  hooks: {
-    ...input.hooks,
-    'build:prepare': context => {
+export const build = (root, stub, input) => {
+  const expectedHooks = {...input.hooks};
+  const helper = globalThis.__stllNuxtTargetHelper;
+  if (helper) expectedHooks['build:before'] = helper.nuxtModuleTarget(globalThis.__stllNuxtTargetData);
+  const prepare = context => {
       const helper = globalThis.__stllNuxtTargetHelper;
-      const declared = context.options.hooks?.['build:before'];
-      if (!helper && typeof declared === 'function' && Object.getOwnPropertyDescriptor(declared, Symbol.for('@stll/oxlint-config.build-target.nuxt'))) throw new Error('Nuxt target configuration changed during loading');
+      const loadedHooks = context.options.hooks;
+      if (!loadedHooks || typeof loadedHooks !== 'object' || Array.isArray(loadedHooks)) throw new Error('Nuxt target configuration changed during loading');
+      const expectedKeys = Reflect.ownKeys(expectedHooks);
+      const loadedKeys = Reflect.ownKeys(loadedHooks);
+      if (loadedKeys.length !== expectedKeys.length || loadedKeys.some(key => !expectedKeys.includes(key))) throw new Error('Nuxt target configuration changed during loading');
+      for (const key of loadedKeys) {
+        const descriptor = Object.getOwnPropertyDescriptor(loadedHooks, key);
+        if (!descriptor || !('value' in descriptor)) throw new Error('Nuxt target configuration changed during loading');
+        if (key === 'build:before' && helper) continue;
+        if (descriptor.value !== expectedHooks[key]) throw new Error('Nuxt target configuration changed during loading');
+      }
+      const declared = loadedHooks['build:before'];
       if (helper) {
         const targets = helper.nuxtModuleTargetTargets(declared);
         if (!targets || JSON.stringify(targets) !== JSON.stringify(globalThis.__stllNuxtTargetData)) throw new Error('Nuxt target configuration changed during loading');
@@ -160,9 +170,10 @@ export const build = (root, stub, input) => actualBuild(root, stub, {
         };
         throw globalThis.__stllNuxtAbort;
       });
-    }
-  }
-});
+  };
+  expectedHooks['build:prepare'] = prepare;
+  return actualBuild(root, stub, {...input, hooks: {...input.hooks, 'build:prepare': prepare}});
+};
 `;
 
 export const resolveNuxtPublishTarget = (directory: string): PublishTarget => {
