@@ -38,7 +38,13 @@ import {
   type ConsumerFixture,
   type ConsumerPackage,
 } from "./consumer-compat-config";
+import { assertConsumerInstalledToolBins } from "./consumer-installed-bins";
 import { selectConsumerReactVersions } from "./consumer-react";
+import {
+  resolveConsumerReleasePack,
+  consumerReleasePackArguments,
+  type ConsumerReleasePack,
+} from "./consumer-release-pack";
 import { parseToolchainPolicy } from "./toolchain-schema";
 
 type CommandOptions = { cwd: string; env?: NodeJS.ProcessEnv };
@@ -258,6 +264,8 @@ const trackedManifests = async (root: string) => {
       "**/package.json",
       "pnpm-workspace.yaml",
       "**/pnpm-workspace.yaml",
+      ".github/workflows/*.yml",
+      ".github/workflows/*.yaml",
     ],
     { cwd: root },
   );
@@ -397,23 +405,10 @@ export const stageConsumerWorkspace = async ({
   return directories;
 };
 
-export const consumerReservedToolBins = ["node", "npm", "npx", "pnpm"] as const;
-
-export const assertConsumerInstalledToolBins = async (directory: string) => {
-  for (const name of consumerReservedToolBins) {
-    const file = path.join(directory, "node_modules/.bin", name);
-    try {
-      await lstat(file);
-    } catch (error) {
-      if (error instanceof Error && "code" in error && error.code === "ENOENT")
-        continue;
-      throw error;
-    }
-    throw new Error(
-      `installed consumer binary ${name} conflicts with the pinned tool before lifecycle scripts`,
-    );
-  }
-};
+export {
+  assertConsumerInstalledToolBins,
+  consumerReservedToolBins,
+} from "./consumer-installed-bins";
 
 export const assertConsumerFixtureFiles = async (directory: string) => {
   const visit = async (location: string) => {
@@ -436,6 +431,52 @@ export const assertConsumerFixtureFiles = async (directory: string) => {
   );
 };
 
+type ProvisionConsumerReleasePackerOptions = {
+  tools: ConsumerTools;
+  scratch: string;
+  release: ConsumerReleasePack;
+};
+const provisionConsumerReleasePacker = async ({
+  tools,
+  scratch,
+  release,
+}: ProvisionConsumerReleasePackerOptions) => {
+  const prefix = path.join(scratch, "release-packer");
+  const home = path.join(scratch, "release-packer-home");
+  await mkdir(home);
+  await writeFile(path.join(home, "npmrc"), "");
+  const env = consumerCommandEnvironment({ tools, directory: scratch, home });
+  await execute(
+    tools.node,
+    [
+      tools.npm,
+      "install",
+      "--prefix",
+      prefix,
+      "--ignore-scripts",
+      "--no-audit",
+      "--no-fund",
+      "--package-lock=false",
+      `${release.manager}@${release.version}`,
+    ],
+    { cwd: scratch, env },
+  );
+  const cli = path.join(
+    prefix,
+    "node_modules",
+    release.manager,
+    release.manager === "npm" ? "bin/npm-cli.js" : "pnpm",
+  );
+  const actual = (
+    await execute(tools.node, [cli, "--version"], { cwd: scratch, env })
+  ).trim();
+  if (actual !== release.version)
+    throw new Error(
+      `release packer version mismatch: expected ${release.version}, got ${actual}`,
+    );
+  return cli;
+};
+
 type PackOptions = {
   files: Record<string, string>;
   root: string;
@@ -444,7 +485,7 @@ type PackOptions = {
   packages: Map<string, ConsumerPackage>;
   workspacePackages: Map<string, ConsumerPackage>;
 };
-const packConsumerArtifacts = async ({
+export const packConsumerArtifacts = async ({
   files,
   root,
   scratch,
@@ -452,6 +493,12 @@ const packConsumerArtifacts = async ({
   packages,
   workspacePackages,
 }: PackOptions) => {
+  const release = resolveConsumerReleasePack(files);
+  const releaseCli = await provisionConsumerReleasePacker({
+    tools,
+    scratch,
+    release,
+  });
   const artifacts = new Map<string, string>();
   const staging = path.join(scratch, "pack-workspace");
   await mkdir(staging);
@@ -466,49 +513,22 @@ const packConsumerArtifacts = async ({
   await writeFile(path.join(packHome, "npmrc"), "");
   for (const [index, pkg] of [...packages.values()].entries()) {
     const packed = path.join(scratch, `packed-${index}`);
-    const final = path.join(scratch, `artifact-${index}`);
     await mkdir(packed);
-    await mkdir(final);
     const directory = stagedDirectories.get(pkg.name);
     if (!directory)
       throw new Error(`missing pack workspace member: ${pkg.name}`);
     await execute(
       tools.node,
       [
-        tools.pnpm,
-        "--config.ignore-scripts=true",
-        "--config.package-manager-strict=false",
-        "--config.manage-package-manager-versions=false",
-        "pack",
-        "--pack-destination",
-        packed,
+        releaseCli,
+        ...consumerReleasePackArguments({ packer: release, directory: packed }),
       ],
       {
         cwd: directory,
         env: consumerCommandEnvironment({ tools, directory, home: packHome }),
       },
     );
-    const archive = await packFilename(packed);
-    const extracted = path.join(packed, "published");
-    await mkdir(extracted);
-    await execute(
-      "tar",
-      ["-xzf", archive, "-C", extracted, "--no-same-owner"],
-      { cwd: packed },
-    );
-    await execute(
-      tools.node,
-      [tools.npm, "pack", "--ignore-scripts", "--pack-destination", final],
-      {
-        cwd: path.join(extracted, "package"),
-        env: consumerCommandEnvironment({
-          tools,
-          directory: path.join(extracted, "package"),
-          home: packHome,
-        }),
-      },
-    );
-    const artifact = await packFilename(final);
+    const artifact = await packFilename(packed);
     artifacts.set(pkg.name, artifact);
   }
   return artifacts;
@@ -892,6 +912,7 @@ export const runConsumerCompat = async ({
     for (const [name, member] of closure) all.set(name, member);
     selections.push({ pkg, fixture, closure });
   }
+  resolveConsumerReleasePack(files);
   const scratch = await mkdtemp(path.join(tmpdir(), "stll-consumer-compat-"));
   try {
     const tools = await provisionConsumerTools(scratch, policy);

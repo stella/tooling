@@ -542,3 +542,77 @@ test("consumer declarations reject unpublishable versions and unsupported bundle
       }),
     ).not.toEqual([]);
 });
+
+test("static consumer checks validate the runner's full transitive workspace closure", () => {
+  const closureFiles = {
+    ...files,
+    "packages/library/package.json": JSON.stringify({
+      name: "@example/library",
+      version: "1.0.0",
+      dependencies: { "@example/core": "workspace:*" },
+    }),
+    "packages/core/package.json": JSON.stringify({
+      name: "@example/core",
+      version: "1.0.0",
+      optionalDependencies: { "@example/shared": "workspace:*" },
+    }),
+    "packages/shared/package.json": JSON.stringify({
+      name: "@example/shared",
+      version: "1.0.0",
+    }),
+  };
+  expect(check(closureFiles)).toEqual([]);
+  for (const mutation of [
+    {
+      fields: { version: "latest" },
+      message:
+        "public consumer package requires a semver-valid version: packages/shared",
+    },
+    {
+      fields: { bundleDependencies: [] },
+      message:
+        "consumer packaging does not support bundleDependencies: packages/shared",
+    },
+    {
+      fields: { bundledDependencies: false },
+      message:
+        "consumer packaging does not support bundledDependencies: packages/shared",
+    },
+    {
+      fields: { private: true },
+      message:
+        "published package depends on private workspace package: @example/core -> @example/shared",
+    },
+  ])
+    expect(
+      check({
+        ...closureFiles,
+        "packages/shared/package.json": JSON.stringify({
+          name: "@example/shared",
+          version: "1.0.0",
+          ...mutation.fields,
+        }),
+      }),
+    ).toContainEqual(expect.objectContaining({ message: mutation.message }));
+  const unresolved = Object.fromEntries(
+    Object.entries(closureFiles).filter(
+      ([file]) => file !== "packages/shared/package.json",
+    ),
+  );
+  for (const snapshot of [
+    unresolved,
+    {
+      ...closureFiles,
+      "package.json": JSON.stringify({
+        private: true,
+        workspaces: ["packages/*", "!packages/shared"],
+      }),
+    },
+  ])
+    expect(check(snapshot)).toContainEqual(
+      expect.objectContaining({
+        message:
+          "unresolved workspace dependency: @example/core -> @example/shared",
+      }),
+    );
+});

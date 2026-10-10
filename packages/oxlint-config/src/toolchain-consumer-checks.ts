@@ -4,7 +4,7 @@ import { parseDocument } from "yaml";
 import packageMetadata from "../package.json";
 import {
   assertConsumerFixtureSelection,
-  assertConsumerPublishableManifest,
+  consumerPackageClosure,
   parseConsumerFixtures,
   discoverConsumerPackages,
 } from "./consumer-compat-config";
@@ -354,10 +354,11 @@ export const checkConsumerChecks = ({
           throw new Error(
             `${workflow}:${jobName} packages must exactly match consumerChecks`,
           );
-        const workspacePackages = new Map(
-          [...discoverConsumerPackages(files).values()].map((entry) => [
+        const workspacePackages = discoverConsumerPackages(files);
+        const packagesByDirectory = new Map(
+          [...workspacePackages.values()].map((entry) => [
             entry.directory,
-            entry.manifest,
+            entry,
           ]),
         );
         for (const directory of declaration.packages) {
@@ -367,11 +368,12 @@ export const checkConsumerChecks = ({
             throw new Error(
               `consumerChecks package manifest must be tracked: ${manifestPath}`,
             );
-          const manifest = workspacePackages.get(directory);
-          if (manifest === undefined)
+          const selectedPackage = packagesByDirectory.get(directory);
+          if (selectedPackage === undefined)
             throw new Error(
               `consumerChecks package must be a discovered workspace member: ${manifestPath}`,
             );
+          const manifest = selectedPackage.manifest;
           if (
             manifest["private"] === true ||
             typeof manifest["name"] !== "string" ||
@@ -380,7 +382,11 @@ export const checkConsumerChecks = ({
             throw new Error(
               `consumerChecks requires a named published package: ${manifestPath}`,
             );
-          assertConsumerPublishableManifest({ manifest, directory });
+          consumerPackageClosure({
+            selected: selectedPackage,
+            packages: workspacePackages,
+            files,
+          });
           const engines = manifest["engines"];
           if (
             (engines !== undefined && !record(engines)) ||

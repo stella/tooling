@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import {
   mkdtemp,
   mkdir,
@@ -9,14 +10,15 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { stringify } from "yaml";
 
 import {
   installConsumerFixtureDependencies,
+  assertConsumerInstalledToolBins,
   provisionConsumerTools,
 } from "../packages/oxlint-config/src/consumer-compat";
 import { parseToolchainPolicy } from "../packages/oxlint-config/src/toolchain-schema";
 import policyData from "../packages/oxlint-config/toolchain.json";
+import { assertConsumerReleasePackParity } from "./check-consumer-release-pack";
 
 const scratch = await mkdtemp(path.join(tmpdir(), "consumer-lifecycle-"));
 try {
@@ -95,6 +97,37 @@ try {
     process.stdout.write(
       `${manager}: dependency runtime collision rejected before lifecycle execution\n`,
     );
+    const nested = path.join(scratch, `${manager}-nested-bin`);
+    const nestedBin = path.join(
+      nested,
+      manager === "npm"
+        ? "node_modules/outer/node_modules/.bin"
+        : "node_modules/.pnpm/inner@1.0.0/node_modules/.bin",
+    );
+    await mkdir(nestedBin, { recursive: true });
+    await writeFile(
+      path.join(nestedBin, "node"),
+      "#!/bin/sh\nprintf yes > nested-runtime-ran\n",
+      { mode: 0o755 },
+    );
+    await assert.rejects(async () => {
+      await assertConsumerInstalledToolBins(nested);
+      const result = spawnSync("node", ["--version"], {
+        cwd: nested,
+        env: {
+          ...process.env,
+          PATH: `${nestedBin}${path.delimiter}${tools.bin}`,
+        },
+      });
+      if (result.error) throw result.error;
+      assert.equal(result.status, 0);
+    }, /installed consumer binary node conflicts/);
+    await assert.rejects(access(path.join(nested, "nested-runtime-ran")), {
+      code: "ENOENT",
+    });
+    process.stdout.write(
+      `${manager}: nested lifecycle runtime collision rejected\n`,
+    );
     const success = path.join(scratch, `${manager}-success`);
     const native = path.join(success, "dependency");
     const successHome = path.join(success, "home");
@@ -130,7 +163,7 @@ try {
     if (manager === "pnpm")
       await writeFile(
         path.join(success, "pnpm-workspace.yaml"),
-        stringify({ packages: ["."] }),
+        "packages:\n  - .\n",
       );
     await installConsumerFixtureDependencies({
       manager,
@@ -159,6 +192,7 @@ try {
       `${manager}: approved dependency install ran through the built-in rebuild\n`,
     );
   }
+  await assertConsumerReleasePackParity({ tools, scratch });
 } finally {
   await rm(scratch, { recursive: true, force: true });
 }

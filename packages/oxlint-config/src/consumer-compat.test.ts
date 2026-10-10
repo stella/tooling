@@ -903,14 +903,8 @@ describe("consumer compatibility declarations", () => {
             private: true,
             workspaces: ["packages/*"],
           }),
-          "packages/parent/package.json": JSON.stringify({
-            name: parent.name,
-            ...parent.manifest,
-          }),
-          "packages/core/package.json": JSON.stringify({
-            name: core.name,
-            ...core.manifest,
-          }),
+          "packages/parent/package.json": JSON.stringify(parent.manifest),
+          "packages/core/package.json": JSON.stringify(core.manifest),
         };
         expect(() =>
           consumerPackageClosure({

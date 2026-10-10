@@ -479,7 +479,8 @@ pin. Required `tooling-version` and `fixture-path` inputs equal the declared exa
 `toolingVersion` and repository-relative `fixturePath`; its `consumer-compat.json` must
 be tracked, parse with the runner’s fixture schema, and select exactly the declared package set. Replace `<installed tooling version>` with the exact installed
 `@stll/oxlint-config` release that provides the consumer runner; the guard binds the
-declaration to that package version. Every named package must be tracked, published, and support that Node version.
+declaration to that package version. Every named package and its transitive workspace closure must be tracked,
+published, and have valid manifests. Each selected package must support that Node version.
 Unknown jobs, stale entries, undeclared consumer calls, and inconsistent inputs fail.
 This declaration applies to consumer checks; `engineFloors` retains its separate
 minimum-supported-major contract.
@@ -487,10 +488,13 @@ minimum-supported-major contract.
 `stll-consumer-compat --packages '["packages/library"]' --consumer-node 22.23.3
 --fixture-path tests/consumer` tests final tarballs in isolated projects with both
 npm and pnpm. The repository builds once with its development toolchain first.
-Workspace protocols are resolved by the package manager before `npm pack` creates
-the final artifact; both consumers install those artifacts. Fixture installs disable scripts, reject reserved runtime/manager bins, then approve only directly declared dependencies at their resolved lock identities. npm rebuilds those identities; pnpm runs its built-in pending rebuild. Both use the pinned consumer runtime before typecheck, build and smoke. Undeclared transitive build scripts receive no approval. Catalog entries that resolve to a local workspace
-package are unsupported: use `workspace:` for that dependency. Registry catalog
-dependencies remain supported. pnpm workspace owners require an adjacent tracked
+The runner reads the exact packer version and pack flags from a single tracked
+release workflow and packs directly with that manager. Missing, ambiguous, or
+unsupported pack configuration fails. Both consumers install the same release
+artifacts; the runner does not rewrite workspace or catalog protocols through a
+different manager. Fixture installs disable scripts, reject reserved runtime/manager bins throughout nested lifecycle paths, then approve only directly declared dependencies at their resolved lock identities. npm rebuilds those identities; pnpm runs its built-in pending rebuild. Both use the pinned consumer runtime before typecheck, build and smoke. Undeclared transitive build scripts receive no approval. Catalog entries that resolve to a local workspace
+package are unsupported: use `workspace:` for that dependency. Registry catalog declarations are staged intact; the release packer must resolve
+publication protocols. pnpm workspace owners require an adjacent tracked
 `package.json`; manifestless owners are unsupported. Public package names must be
 canonical lowercase, URL-safe npm names (at most 214 characters), with no traversal components. Workspace alias
 specifiers are unsupported: use the package name as the dependency key. The runner verifies
