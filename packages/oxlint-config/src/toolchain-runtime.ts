@@ -418,7 +418,8 @@ export const checkRuntimeFile = ({
     const continuation = new RegExp(`${escape === "`" ? "`" : "\\\\"}\\s*$`);
     const stages = new Set<string>();
     let argumentScope: "global" | "stage" = "global";
-    const heredocs: { delimiter: string; stripTabs: boolean }[] = [];
+    const heredocs: { delimiter: string; stripTabs: boolean; line: number }[] =
+      [];
     let instruction = "";
     let startLine = 1;
     const expand = (value: string) => {
@@ -433,6 +434,82 @@ export const checkRuntimeFile = ({
       }
       return value;
     };
+    const collectHeredocs = (content: string, line: number) => {
+      let quote: "'" | '"' | undefined;
+      for (let index = 0; index < content.length; index++) {
+        const character = content.at(index);
+        if (quote !== undefined) {
+          if (character === quote) quote = undefined;
+          else if (quote === '"' && character === "\\") index++;
+          continue;
+        }
+        if (character === "\\") {
+          index++;
+          continue;
+        }
+        if (character === "'" || character === '"') {
+          quote = character;
+          continue;
+        }
+        if (
+          character === "#" &&
+          (index === 0 || /[\s;&|()]/.test(content.at(index - 1) ?? ""))
+        )
+          break;
+        if (character !== "<" || content.at(index + 1) !== "<") continue;
+        if (content.at(index + 2) === "<") {
+          index += 2;
+          continue;
+        }
+        index += 2;
+        const stripTabs = content.at(index) === "-";
+        if (stripTabs) index++;
+        while (/\s/.test(content.at(index) ?? "")) index++;
+        if (content.at(index) === "#") {
+          add({
+            rule: "runtime-docker",
+            line,
+            message: "invalid Docker heredoc delimiter",
+          });
+          break;
+        }
+        let delimiter = "";
+        let delimiterQuote: "'" | '"' | undefined;
+        for (; index < content.length; index++) {
+          const part = content.at(index);
+          if (delimiterQuote !== undefined) {
+            if (part === delimiterQuote) delimiterQuote = undefined;
+            else if (
+              delimiterQuote === '"' &&
+              part === "\\" &&
+              /[$"\\]/.test(content.at(index + 1) ?? "")
+            )
+              delimiter += content.at(++index);
+            else delimiter += part;
+            continue;
+          }
+          if (part === "'" || part === '"') {
+            delimiterQuote = part;
+            continue;
+          }
+          if (part === "\\" && content.at(index + 1) !== undefined) {
+            delimiter += content.at(++index);
+            continue;
+          }
+          if (/[\s;&|<>()]/.test(part ?? "")) break;
+          delimiter += part;
+        }
+        if (delimiter !== "" && delimiterQuote === undefined)
+          heredocs.push({ delimiter, stripTabs, line });
+        else
+          add({
+            rule: "runtime-docker",
+            line,
+            message: "invalid Docker heredoc delimiter",
+          });
+        index--;
+      }
+    };
     const checkInstruction = (content: string, line: number) => {
       const argument = /^\s*ARG\s+([A-Za-z_][A-Za-z_\d]*)(?:=(.*))?$/i.exec(
         content,
@@ -446,13 +523,7 @@ export const checkRuntimeFile = ({
         return;
       }
       if (/^\s*(?:RUN|COPY)\s+/i.test(content)) {
-        for (const match of content.matchAll(
-          /(?:^|\s)<<(-?)(?:"([^"]+)"|'([^']+)'|([A-Za-z_][A-Za-z_\d]*))/g,
-        )) {
-          const delimiter = match[2] ?? match[3] ?? match[4];
-          if (delimiter !== undefined)
-            heredocs.push({ delimiter, stripTabs: match[1] === "-" });
-        }
+        collectHeredocs(content, line);
         return;
       }
       const from =
@@ -495,6 +566,12 @@ export const checkRuntimeFile = ({
       instruction = "";
     });
     if (instruction !== "") checkInstruction(instruction, startLine);
+    for (const heredoc of heredocs)
+      add({
+        rule: "runtime-docker",
+        line: heredoc.line,
+        message: `unterminated Docker heredoc ${heredoc.delimiter}`,
+      });
   }
   const automationKind = githubAutomationFileKind(file);
   if (automationKind === undefined) return diagnostics;

@@ -1390,3 +1390,99 @@ test("sparse checkouts must explicitly include each selected repository file", (
     }
   }
 });
+
+test("only unquoted unescaped heredoc operators can consume Docker source lines", () => {
+  for (const instruction of [
+    "RUN printf '<<EOF'",
+    "RUN printf 'text \\ <<EOF'",
+    'RUN printf "<<EOF"',
+    'RUN printf "text \\\" <<EOF"',
+    "RUN echo \\<<EOF",
+    "RUN echo \\<\\<EOF",
+    "RUN cat <<<EOF",
+    "RUN echo ok # <<EOF",
+    "RUN echo ok; # <<EOF",
+    'COPY ["<<EOF", "/tmp/file"]',
+  ]) {
+    const diagnostics = check("Dockerfile", `${instruction}\nFROM node:latest`);
+    expect(
+      diagnostics.some(
+        ({ rule, line }) => rule === "runtime-docker" && line === 2,
+      ),
+    ).toBe(true);
+    expect(
+      diagnostics.some(({ message }) => message.includes("unterminated")),
+    ).toBe(false);
+  }
+});
+
+test("real Docker heredocs close in order and retain an EOF failure origin", () => {
+  for (const operator of [
+    "<<EOF",
+    "<< EOF",
+    "2<<EOF",
+    "<<'EOF'",
+    '<<"EOF"',
+    '<<E"OF"',
+    "<<\\EOF",
+  ]) {
+    expect(
+      check(
+        "Dockerfile",
+        `RUN cat ${operator}\nFROM node:latest\nEOF\nFROM node:latest`,
+      ).map(({ rule, line }) => ({ rule, line })),
+    ).toEqual([{ rule: "runtime-docker", line: 4 }]);
+    expect(
+      check("Dockerfile", `RUN cat ${operator}\nFROM node:latest`).map(
+        ({ rule, line, message }) => ({ rule, line, message }),
+      ),
+    ).toEqual([
+      {
+        rule: "runtime-docker",
+        line: 1,
+        message: "unterminated Docker heredoc EOF",
+      },
+    ]);
+  }
+  expect(
+    check(
+      "Dockerfile",
+      "COPY <<-'FIRST' <<SECOND /tmp/\nFROM node:latest\n\tFIRST\nFROM python:latest\nSECOND\nFROM node:latest",
+    ).map(({ line }) => line),
+  ).toEqual([6]);
+});
+
+test("Docker heredoc delimiter quote removal preserves ordinary backslashes and rejects malformed words", () => {
+  expect(
+    check(
+      "Dockerfile",
+      'RUN cat <<"E\\OF"\nFROM node:latest\nE\\OF\nFROM node:latest',
+    ).map(({ rule, line }) => ({ rule, line })),
+  ).toEqual([{ rule: "runtime-docker", line: 4 }]);
+  expect(
+    check(
+      "Dockerfile",
+      'RUN cat <<"E\\`OF"\nFROM node:latest\nE\\`OF\nFROM node:latest',
+    ).map(({ rule, line }) => ({ rule, line })),
+  ).toEqual([{ rule: "runtime-docker", line: 4 }]);
+  for (const instruction of [
+    "RUN cat <<",
+    "RUN cat <<'EOF",
+    "RUN cat << # comment",
+  ]) {
+    const diagnostics = check("Dockerfile", `${instruction}\nFROM node:latest`);
+    expect(
+      diagnostics.some(
+        ({ rule, line, message }) =>
+          rule === "runtime-docker" &&
+          line === 1 &&
+          message === "invalid Docker heredoc delimiter",
+      ),
+    ).toBe(true);
+    expect(
+      diagnostics.some(
+        ({ rule, line }) => rule === "runtime-docker" && line === 2,
+      ),
+    ).toBe(true);
+  }
+});
