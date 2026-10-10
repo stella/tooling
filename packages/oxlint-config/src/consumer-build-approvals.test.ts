@@ -13,7 +13,7 @@ test("only declared dependencies receive installed build approvals, including al
   try {
     for (const [key, name, version] of [
       ["addon", "real-addon", "1.2.0"],
-      ["local", "local", "1.0.0"],
+      ["local", "real-local", "1.0.0"],
       ["typescript", "typescript", "6.0.3"],
     ] as const) {
       await mkdir(path.join(directory, "node_modules", key), {
@@ -79,7 +79,7 @@ test("only declared dependencies receive installed build approvals, including al
     ).toEqual({
       approvals: {
         "real-addon@1.2.0": true,
-        "local@1.0.0": true,
+        "real-local@file:local": true,
         "typescript@6.0.3": true,
       },
       rebuildTargets: ["addon", "local", "typescript"].map((key) =>

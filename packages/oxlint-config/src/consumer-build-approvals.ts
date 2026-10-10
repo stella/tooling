@@ -87,7 +87,19 @@ export const consumerBuildApprovals = async ({
         approvals[
           resolved.startsWith("file:") ? resolved : `file:${resolved}`
         ] = true;
-      else approvals[identity] = true;
+      else {
+        const version = dependency["version"];
+        // pnpm matches local artifact builds by resolved source, using the installed real name.
+        const source =
+          manager === "pnpm" &&
+          typeof version === "string" &&
+          version.startsWith("file:")
+            ? version.replace(/\([^)]*\)/g, "")
+            : undefined;
+        approvals[
+          source === undefined ? identity : `${installed["name"]}@${source}`
+        ] = true;
+      }
     }
   }
   return { approvals, rebuildTargets: [...rebuildTargets] };
