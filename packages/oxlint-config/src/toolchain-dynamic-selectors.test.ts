@@ -646,3 +646,24 @@ test("ancestor checkout cleaning invalidates earlier descendant provenance in or
       expect(check(source(nested + root(clean))).diagnostics).toEqual([]);
   }
 });
+
+test("runtime family and digest rules retain scoped selector decisions", () => {
+  const source = (image: string) =>
+    `jobs:\n  example:\n    container: '${image}'\n`;
+  const digest = `sha256:${"a".repeat(64)}`;
+  const valid = check(source(`oven/bun:${policy.bun}@${digest}`), [
+    imageDecision,
+  ]);
+  expect(valid).toEqual({ diagnostics: [], matched: [] });
+  const literal = check(source(`oven/bun:0.1.0@${digest}`), [imageDecision]);
+  expect(literal.diagnostics).toMatchObject([{ rule: "bun-pins" }]);
+  expect(literal.matched).toEqual([]);
+  expect(check(source("oven/bun:${{ inputs.tag }}"), [imageDecision])).toEqual({
+    diagnostics: [],
+    matched: [imageDecision],
+  });
+  expect(check(source("example/custom:${{ inputs.tag }}"))).toEqual({
+    diagnostics: [],
+    matched: [],
+  });
+});

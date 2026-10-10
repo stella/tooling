@@ -554,29 +554,66 @@ export const checkRuntimeFile = ({
     label,
     at,
   }: RuntimeImageOptions) => {
-    if (typeof image !== "string" || image.includes("$")) {
+    const unknownRuntime = () => {
       if (dynamic(image) && authorizeDynamic("image", line, at)) return;
       add({
         rule: "runtime-docker",
         line,
         message: `cannot determine ${label} runtime; use a static image or a scoped dynamicSelectors declaration`,
       });
+    };
+    if (typeof image !== "string") {
+      unknownRuntime();
       return;
     }
-    const runtime = /^(node|python|oven\/bun)(?::([^@]+))?(?:@.*)?$/i.exec(
-      canonicalDockerRuntime(image),
+    const canonical = canonicalDockerRuntime(image);
+    // Variable defaults may contain reference delimiters; preserve offsets while classifying.
+    const structuralImage = canonical.replace(
+      /\$\{[^}]*\}|\$[A-Za-z_][A-Za-z_\d]*/g,
+      (variable) => "x".repeat(variable.length),
     );
-    if (runtime === null) return;
-    const tool = runtime[1]?.toLowerCase();
-    if (image.includes("@")) {
+    const digestSeparator = structuralImage.indexOf("@");
+    const reference =
+      digestSeparator < 0 ? canonical : canonical.slice(0, digestSeparator);
+    const structuralReference =
+      digestSeparator < 0
+        ? structuralImage
+        : structuralImage.slice(0, digestSeparator);
+    const managedFamily = /^(node|python|oven\/bun)(?=:|$)/i.exec(
+      structuralReference,
+    )?.[1];
+    const tagSeparator =
+      managedFamily === undefined
+        ? structuralReference.lastIndexOf(":")
+        : structuralReference.indexOf(":", managedFamily.length);
+    const hasTag =
+      managedFamily === undefined
+        ? tagSeparator > structuralReference.lastIndexOf("/")
+        : tagSeparator !== -1;
+    const imageRepository = hasTag
+      ? reference.slice(0, tagSeparator)
+      : reference;
+    if (imageRepository.length === 0 || imageRepository.includes("$")) {
+      unknownRuntime();
+      return;
+    }
+    if (!/^(node|python|oven\/bun)$/i.test(imageRepository)) return;
+    const tool = imageRepository.toLowerCase();
+    if (image.includes("$")) {
+      unknownRuntime();
+      return;
+    }
+    const digest =
+      digestSeparator < 0 ? undefined : canonical.slice(digestSeparator + 1);
+    if (digest !== undefined && !/^sha256:[a-fA-F\d]{64}$/.test(digest)) {
       add({
         rule: tool === "oven/bun" ? "bun-pins" : "runtime-docker",
         line,
-        message: `${label} ${tool} digest requires an approved digest policy; use a tag-only runtime image`,
+        message: `${label} ${tool} digest must be sha256 followed by 64 hexadecimal characters`,
       });
       return;
     }
-    const tag = runtime[2];
+    const tag = hasTag ? reference.slice(tagSeparator + 1) : undefined;
     const variantSuffix =
       tool === "oven/bun"
         ? /-(?:alpine|slim|debian)$/
@@ -586,6 +623,30 @@ export const checkRuntimeFile = ({
     let expected = policy.bun;
     if (tool === "node") expected = policy.node;
     else if (tool === "python") expected = policy.python;
+    if (digest !== undefined) {
+      if (
+        version === undefined ||
+        !/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/.test(version)
+      ) {
+        add({
+          rule: tool === "oven/bun" ? "bun-pins" : "runtime-docker",
+          line,
+          message: `${label} ${tool} digest requires an exact stable patch tag matching ${expected}`,
+        });
+        return;
+      }
+      if (tool === "node" && trackedFiles.has(".node-version")) {
+        const trackedNode = readFile(".node-version")?.trim();
+        if (trackedNode !== version) {
+          add({
+            rule: "runtime-docker",
+            line,
+            message: `${label} node digest tag must match tracked .node-version, found ${version}`,
+          });
+          return;
+        }
+      }
+    }
     pin({
       rule: tool === "oven/bun" ? "bun-pins" : "runtime-docker",
       value: version,
