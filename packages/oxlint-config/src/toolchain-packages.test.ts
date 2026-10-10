@@ -95,9 +95,17 @@ describe("shared package pins", () => {
         resolutions: { "**/unrelated": "0.0.1" },
       }),
     ).toEqual([]);
-    expect(manifest({ overrides: { "oxlint>": "0.0.1" } })).toMatchObject([
-      { rule: "package-pins" },
-    ]);
+    for (const name of Object.keys(owned))
+      for (const suffix of [">", "> "])
+        for (const field of ["overrides", "resolutions", "pnpm"])
+          expect(
+            manifest({
+              [field]:
+                field === "pnpm"
+                  ? { overrides: { [name + suffix]: "0.0.1" } }
+                  : { [name + suffix]: "0.0.1" },
+            }),
+          ).toMatchObject([{ rule: "package-pins" }]);
   });
   test("pnpm workspace overrides validate references, catalogs and source lines", () => {
     for (const replacement of [

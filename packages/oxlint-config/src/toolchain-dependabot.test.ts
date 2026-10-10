@@ -69,9 +69,36 @@ const ignoreDeclaration = (name: string) =>
   stringify({ "dependency-name": name }).trim();
 
 const config = (updates: unknown[] = [update()]) =>
-  stringify({ version: 2, updates });
+  stringify({ version: 2, updates }, { version: "1.1" });
 
 describe("Dependabot policy", () => {
+  test("fixture schedules preserve clock strings under both YAML schemas", () => {
+    for (const time of ["00:00", "07:00", "17:00", "23:59"]) {
+      const entries = [];
+      for (const ecosystem of ["npm", "bun", "cargo", "pip", "uv"])
+        entries.push({
+          ...update(ecosystem),
+          schedule: { ...policy.schedule, time },
+        });
+      const text = config(entries);
+      for (const schema of ["yaml-1.1", "core"])
+        for (const index of entries.keys())
+          expect(
+            parseDocument(text, { schema }).getIn([
+              "updates",
+              index,
+              "schedule",
+              "time",
+            ]),
+          ).toBe(time);
+      expect(
+        checkDependabot({
+          files: { ".github/dependabot.yml": text },
+          policy: { ...policy, schedule: { ...policy.schedule, time } },
+        }),
+      ).toEqual([]);
+    }
+  });
   test("generated ecosystem entries omit empty ignore arrays", () => {
     const files = {
       "package.json": "{}",

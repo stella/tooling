@@ -1,7 +1,11 @@
 /// <reference types="bun-types" />
 
 import { expect, test } from "bun:test";
+import { parseDocument } from "yaml";
 
+import toolchain from "../toolchain.json";
+import { containerDocumentImages } from "./toolchain-container-inputs";
+import { generateDependabotConfig } from "./toolchain-dependabot";
 import {
   githubAutomationFileKind,
   isDependabotGithubActionsPath,
@@ -10,6 +14,7 @@ import {
   isPythonDependencyManifest,
   toolchainInputKind,
 } from "./toolchain-inputs";
+import { parseToolchainPolicy } from "./toolchain-schema";
 
 test("both input readers exclude dependency trees for every accepted input kind", () => {
   const inputs = ["package.json", "bun.lock", "uv.lock", "pyproject.toml"];
@@ -132,7 +137,44 @@ test("all Docker definition suffixes remain in the shared reader and runtime cla
 test("pnpm workspace inputs use the producer's YAML filename", () => {
   expect(toolchainInputKind("pnpm-workspace.yaml")).toBe("config");
   expect(toolchainInputKind("nested/pnpm-workspace.yaml")).toBe("config");
-  expect(toolchainInputKind("pnpm-workspace.yml")).toBeUndefined();
+  const policy = parseToolchainPolicy(toolchain).dependabot;
+  for (const prefix of ["", "nested/"]) {
+    const member = `${prefix}packages/app/package.json`;
+    const directory = prefix === "" ? "/" : "/nested";
+    const memberDirectory = `/${prefix}packages/app`;
+    for (const extension of ["yaml", "yml"]) {
+      const file = `${prefix}pnpm-workspace.${extension}`;
+      // Generic YAML must be read before deciding whether it is a container artifact.
+      expect(toolchainInputKind(file)).toBe("config");
+      expect(
+        containerDocumentImages({ packages: ["packages/*"] }, file),
+      ).toBeUndefined();
+      const generated = generateDependabotConfig({
+        files: { [file]: 'packages: ["packages/*"]', [member]: "{}" },
+        policy,
+      });
+      expect(parseDocument(generated).getIn(["updates", 0, "directory"])).toBe(
+        extension === "yaml" ? directory : memberDirectory,
+      );
+    }
+    const file = `${prefix}pnpm-workspace.yml`;
+    const pod = {
+      apiVersion: "v1",
+      kind: "Pod",
+      spec: { containers: [{ image: "node:26" }] },
+    };
+    expect(containerDocumentImages(pod, file)?.ecosystem).toBe("docker");
+    const generated = generateDependabotConfig({
+      files: { [file]: JSON.stringify(pod) },
+      policy,
+    });
+    expect(
+      parseDocument(generated).getIn(["updates", 0, "package-ecosystem"]),
+    ).toBe("docker");
+    expect(parseDocument(generated).getIn(["updates", 0, "directory"])).toBe(
+      directory,
+    );
+  }
   for (const prefix of ["vendor", "node_modules", "nested/vendor"])
     expect(toolchainInputKind(`${prefix}/pnpm-workspace.yaml`)).toBeUndefined();
 });

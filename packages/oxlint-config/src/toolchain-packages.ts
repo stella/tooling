@@ -701,7 +701,7 @@ export const checkPackageFiles = ({
         if (target === undefined) continue;
         let pattern =
           target
-            .split(/>\s*(?=[@A-Za-z_*])/)
+            .split(/>\s*(?=[@A-Za-z_*]|$)/)
             .at(-1)
             ?.trim() ?? "";
         const version = pattern.lastIndexOf("@");
