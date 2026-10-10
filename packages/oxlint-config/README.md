@@ -80,7 +80,7 @@ its clean input. Checkout may clear a destination without a matching Git reposit
 even when clean is false. Unresolved clean values remain untrusted. Unknown
 selectors remain fail closed. Mixed literal/expression sparse
 configurations retain their literal paths: those paths must explicitly include a
-static selected manifest. A declaration acknowledges only expression additions;
+static selected manifest. A declaration acknowledges only expression additions.
 For every static manifest selector from the inspected source, the manifest pin
 is validated after sparse acknowledgement, including fully dynamic sparse inputs.
 Other nonempty, nonconstant GitHub expression refs on same-repository checkouts
@@ -353,9 +353,37 @@ launchers, directory changes, workspace filters, CLI overrides, and pre/post bui
 lifecycle scripts fail.
 Vite accepts its version-bound default plugin pipeline and the default
 `@vitejs/plugin-vue` 6.0.8 factory; custom Vue compiler, template, script, and feature
-options are unsupported. Nuxt accepts the version-bound builder and owned target
-hook. Unapproved plugins, output transforms, and execution-order changes fail. The static guard validates the supported configuration, without parsing the
-emitted JavaScript syntax. Add a reviewed adapter when adopting another build tool.
+options are unsupported. Nuxt accepts the version-bound builder and immutable target
+marker; foreign branded callbacks are replaced with the installed canonical hook before execution. Unapproved plugins, output transforms, and execution-order changes fail. The static guard validates the supported configuration; the nightly runner validates the actual packed JavaScript. Add a reviewed adapter when adopting another build tool.
+
+Vite libraries can generate declarations through the reviewed helper:
+
+```ts
+import { declarationOnlyDts } from "@stll/oxlint-config/declaration-only-dts";
+
+export default {
+  plugins: [
+    declarationOnlyDts({
+      directory: import.meta.dirname,
+      include: ["src/**/*"],
+      entryRoot: "src",
+    }),
+  ],
+  build: { target: "es2022", lib: { entry: "src/index.ts", formats: ["es"] } },
+};
+```
+
+This adapter requires consumer-installed `vite-plugin-dts` 5.0.3 and its
+`unplugin-dts` 1.0.3 implementation. Its dependency scope must provide TypeScript
+6.0.3 as `typescript` or the plugin's `@typescript/typescript6` fallback.
+Unsupported versions fail explicitly.
+The resolver proves a direct helper import and call in a literal plugin array;
+raw declaration plugins, opaque plugin arrays, and additional emitters fail.
+Options are closed and static: include/exclude, entryRoot, pathsToAliases,
+compilerOptions.declarationMap=false, strictOutput=true, and declarationOnly=false. Hooks may
+emit only `.d.ts`, `.d.mts`, and their maps. Bundle and on-disk non-declaration
+bytes must remain unchanged across each declaration hook; this is checked during
+the actual build, without a comparison build.
 
 Nuxt modules can set both emitted targets without replacing the builder's entries:
 
@@ -365,12 +393,22 @@ import { nuxtModuleTarget } from "@stll/oxlint-config/build-target";
 export default { hooks: { "build:before": nuxtModuleTarget("es2022") } };
 ```
 
-The Nuxt adapter accepts this owned hook from the same package version as the CLI;
-it captures the normalized configuration before cleanup or output writes. The built
+The Nuxt adapter recognizes the immutable marker across module formats without executing a foreign callback. It captures the normalized configuration before cleanup or output writes. The built
 publish-contract CLI is also checked against a TypeScript configuration and relative
 TypeScript import on the package's minimum supported Node release.
 
 Packed-artifact checks run nightly, while the static contract check runs per PR.
+Every packed `.js`, `.mjs`, and `.cjs` file is checked, including non-entry chunks
+and executables. The actual packed manifest must match the committed contract.
+Acorn 8.15.0 applies the strictest declared ECMAScript target (`es5`, `es2015`
+through `es2025`); the provisioned consumer Node also parses every file with
+`--check`, without executing artifact code. `esnext` and supported Node targets use the native consumer Node bound.
+Node target identifiers follow the same grammar and compatibility rule as the
+static contract; no older Node-to-ECMAScript mapping is inferred. Browser targets
+are unsupported here: declare an explicit ECMAScript year. Types-only contracts reject any packed JavaScript. Nested
+package manifests and explicit module extensions determine parsing mode.
+Linked syntax inputs and unsafe archive paths fail before staging.
+
 The reusable consumer job declares its exact scope in `stll-toolchain.json`:
 
 ```json

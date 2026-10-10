@@ -9,6 +9,7 @@ export default defineConfig({
     "src/cloud-setup-cli.ts",
     "src/publish-contract-cli.ts",
     "src/publish-build-target-nuxt-helper.ts",
+    "src/publish-build-target-vite-dts-helper.ts",
     "src/consumer-compat-cli.ts",
     "src/typecheck-parity-cli.ts",
   ],

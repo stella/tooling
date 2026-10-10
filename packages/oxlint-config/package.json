@@ -68,6 +68,17 @@
         "default": "./dist/publish-build-target-nuxt-helper.cjs"
       },
       "default": "./dist/publish-build-target-nuxt-helper.mjs"
+    },
+    "./declaration-only-dts": {
+      "import": {
+        "types": "./dist/publish-build-target-vite-dts-helper.d.mts",
+        "default": "./dist/publish-build-target-vite-dts-helper.mjs"
+      },
+      "require": {
+        "types": "./dist/publish-build-target-vite-dts-helper.d.cts",
+        "default": "./dist/publish-build-target-vite-dts-helper.cjs"
+      },
+      "default": "./dist/publish-build-target-vite-dts-helper.mjs"
     }
   },
   "publishConfig": {
@@ -80,6 +91,8 @@
     "format": "oxfmt ."
   },
   "dependencies": {
+    "acorn": "8.15.0",
+    "esbuild": "0.28.2",
     "picomatch": "4.0.5",
     "semver": "7.8.5",
     "smol-toml": "1.9.0",
@@ -92,11 +105,20 @@
     "@types/semver": "7.8.0",
     "oxfmt": "0.72.0",
     "oxlint": "1.87.0",
-    "typescript": "7.0.2"
+    "typescript": "7.0.2",
+    "unplugin-dts": "1.0.3",
+    "vite": "8.1.5",
+    "vite-plugin-dts": "5.0.3"
   },
   "peerDependencies": {
     "oxlint": ">=1.87.0 <2",
-    "oxlint-tsgolint": ">=7.0.2003 <8"
+    "oxlint-tsgolint": ">=7.0.2003 <8",
+    "vite": "8.1.5"
+  },
+  "peerDependenciesMeta": {
+    "vite": {
+      "optional": true
+    }
   },
   "engines": {
     "node": "^20.19.0 || >=22.12.0"

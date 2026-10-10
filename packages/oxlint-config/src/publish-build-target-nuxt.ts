@@ -104,11 +104,17 @@ const jiti = createJiti(payload.directory);
 const config = await jiti.import('./build.config', {try: true, default: true}) || {};
 const record = value => typeof value === 'object' && value !== null && !Array.isArray(value);
 if (!record(config) || Object.keys(config).some(key => key !== 'hooks')) throw new Error('Nuxt build configuration only supports the declared target hook');
+globalThis.__stllNuxtTargetHelper = undefined;
+globalThis.__stllNuxtTargetData = undefined;
 if (config.hooks !== undefined) {
   if (!record(config.hooks) || Object.keys(config.hooks).length !== 1 || !('build:before' in config.hooks)) throw new Error('Nuxt build configuration only supports the declared target hook');
   if (!payload.helper) throw new Error('Nuxt target helper must be installed at the same tooling version');
   const helper = await jiti.import(payload.helper, {default: false});
-  if (!helper.isNuxtModuleTargetHook(config.hooks['build:before'])) throw new Error('Nuxt build configuration requires nuxtModuleTarget');
+  const targets = helper.nuxtModuleTargetTargets(config.hooks['build:before']);
+  if (!targets) throw new Error('Nuxt build configuration requires immutable nuxtModuleTarget data');
+  config.hooks['build:before'] = helper.nuxtModuleTarget(targets);
+  globalThis.__stllNuxtTargetHelper = helper;
+  globalThis.__stllNuxtTargetData = targets;
 }
 globalThis.__stllNuxtAbort = new Error('Nuxt target captured');
 globalThis.__stllNuxtCapture = undefined;
@@ -129,6 +135,19 @@ export const build = (root, stub, input) => actualBuild(root, stub, {
   hooks: {
     ...input.hooks,
     'build:prepare': context => {
+      const helper = globalThis.__stllNuxtTargetHelper;
+      const declared = context.options.hooks?.['build:before'];
+      if (!helper && typeof declared === 'function' && Object.getOwnPropertyDescriptor(declared, Symbol.for('@stll/oxlint-config.build-target.nuxt'))) throw new Error('Nuxt target configuration changed during loading');
+      if (helper) {
+        const targets = helper.nuxtModuleTargetTargets(declared);
+        if (!targets || JSON.stringify(targets) !== JSON.stringify(globalThis.__stllNuxtTargetData)) throw new Error('Nuxt target configuration changed during loading');
+        if (typeof context.hooks.removeHook !== 'function') throw new Error('Unsupported Nuxt hook registration interface');
+        // unbuild registers config hooks before build:prepare; remove that exact callback.
+        context.hooks.removeHook('build:before', declared);
+        const canonical = helper.nuxtModuleTarget(targets);
+        context.options.hooks['build:before'] = canonical;
+        context.hooks.hook('build:before', canonical);
+      }
       // unbuild 3.6.1 normalizes entries before build:before, then cleans output.
       // Append after all registered config hooks so the target helper runs first.
       context.hooks.hook('build:before', final => {

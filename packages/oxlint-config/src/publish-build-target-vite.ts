@@ -1,13 +1,278 @@
+import { parse } from "acorn";
+import { transformSync } from "esbuild";
 import { readFileSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { reviewedViteDtsOptions } from "./publish-build-target-vite-dts";
+import { declarationOnlyDts } from "./publish-build-target-vite-dts-helper";
 import type { PublishTarget } from "./publish-contract";
 
 const supportedViteVersion = "8.1.5";
+const declarationHelperImport = "@stll/oxlint-config/declaration-only-dts";
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+type WalkAstOptions = {
+  value: unknown;
+  visit: (
+    node: Record<string, unknown>,
+    parent: Record<string, unknown> | undefined,
+  ) => void;
+  parent?: Record<string, unknown>;
+};
+const walkAst = ({ value, visit, parent }: WalkAstOptions) => {
+  if (Array.isArray(value)) {
+    for (const entry of value)
+      walkAst({
+        value: entry,
+        visit,
+        ...(parent === undefined ? {} : { parent }),
+      });
+    return;
+  }
+  if (!record(value)) return;
+  visit(value, parent);
+  for (const entry of Object.values(value))
+    if (typeof entry === "object" && entry !== null)
+      walkAst({ value: entry, visit, parent: value });
+};
+const astName = (value: unknown) =>
+  record(value) && value["type"] === "Identifier" ? value["name"] : undefined;
+const astLiteral = (value: unknown): unknown => {
+  if (!record(value))
+    throw new Error("Declaration helper options must be literal");
+  if (
+    value["type"] === "Literal" &&
+    (typeof value["value"] === "string" || typeof value["value"] === "boolean")
+  )
+    return value["value"];
+  if (value["type"] === "ArrayExpression" && Array.isArray(value["elements"]))
+    return value["elements"].map(astLiteral);
+  if (
+    value["type"] === "ObjectExpression" &&
+    Array.isArray(value["properties"])
+  ) {
+    const entries: [string, unknown][] = [];
+    for (const property of value["properties"]) {
+      if (
+        !record(property) ||
+        property["type"] !== "Property" ||
+        property["kind"] !== "init" ||
+        property["computed"] === true ||
+        property["method"] === true ||
+        property["shorthand"] === true
+      )
+        throw new Error(
+          "Declaration helper options must be plain literal properties",
+        );
+      const key =
+        astName(property["key"]) ??
+        (record(property["key"]) ? property["key"]["value"] : undefined);
+      if (
+        typeof key !== "string" ||
+        entries.some(([previous]) => previous === key)
+      )
+        throw new Error("Invalid declaration helper option key");
+      entries.push([key, astLiteral(property["value"])]);
+    }
+    return Object.fromEntries(entries);
+  }
+  throw new Error("Declaration helper options must be literal");
+};
+type ReviewedDtsConfigurationOptions = {
+  source: string;
+  directory: string;
+  loader: "ts" | "js";
+};
+/** Prove the helper owns the directly declared plugin; closure brands alone are insufficient. */
+export const reviewedDtsConfiguration = ({
+  source,
+  directory,
+  loader,
+}: ReviewedDtsConfigurationOptions) => {
+  const ast: unknown = parse(
+    transformSync(source, { loader, format: "esm", target: "esnext" }).code,
+    { ecmaVersion: "latest", sourceType: "module" },
+  );
+  if (!record(ast) || !Array.isArray(ast["body"]))
+    throw new Error("Invalid Vite configuration AST");
+  const bindings = new Set<string>();
+  const defineConfigBindings = new Set<string>();
+  const initializers = new Map<unknown, unknown>();
+  let exported: unknown;
+  for (const statement of ast["body"]) {
+    if (!record(statement)) continue;
+    if (
+      statement["type"] === "ImportDeclaration" &&
+      record(statement["source"])
+    ) {
+      const imported = statement["source"]["value"];
+      if (
+        typeof imported === "string" &&
+        /^(?:vite-plugin-dts|unplugin-dts)(?:\/|$)/.test(imported)
+      )
+        throw new Error(
+          "Raw declaration emitters cannot accompany the reviewed helper",
+        );
+      if (Array.isArray(statement["specifiers"]))
+        for (const specifier of statement["specifiers"]) {
+          if (!record(specifier)) continue;
+          const local = astName(specifier["local"]);
+          const name = astName(specifier["imported"]);
+          if (imported === declarationHelperImport) {
+            if (
+              specifier["type"] !== "ImportSpecifier" ||
+              name !== "declarationOnlyDts" ||
+              typeof local !== "string"
+            )
+              throw new Error("Use the named declarationOnlyDts helper import");
+            bindings.add(local);
+          }
+          if (
+            imported === "vite" &&
+            name === "defineConfig" &&
+            typeof local === "string"
+          )
+            defineConfigBindings.add(local);
+        }
+    }
+    if (
+      statement["type"] === "VariableDeclaration" &&
+      Array.isArray(statement["declarations"])
+    )
+      for (const declaration of statement["declarations"])
+        if (record(declaration))
+          initializers.set(astName(declaration["id"]), declaration["init"]);
+    if (statement["type"] === "ExportDefaultDeclaration")
+      exported = statement["declaration"];
+    if (
+      statement["type"] === "ExportNamedDeclaration" &&
+      Array.isArray(statement["specifiers"])
+    )
+      for (const specifier of statement["specifiers"])
+        if (record(specifier) && astName(specifier["exported"]) === "default")
+          exported = specifier["local"];
+  }
+  if (bindings.size !== 1)
+    throw new Error(
+      "Vite declaration plugins require one statically imported helper",
+    );
+  if (record(exported) && exported["type"] === "Identifier")
+    exported = initializers.get(astName(exported));
+  if (
+    record(exported) &&
+    exported["type"] === "CallExpression" &&
+    defineConfigBindings.has(String(astName(exported["callee"]))) &&
+    Array.isArray(exported["arguments"]) &&
+    exported["arguments"].length === 1
+  )
+    exported = exported["arguments"].at(0);
+  if (
+    !record(exported) ||
+    exported["type"] !== "ObjectExpression" ||
+    !Array.isArray(exported["properties"])
+  )
+    throw new Error(
+      "Declaration helper requires a directly exported static Vite configuration",
+    );
+  const pluginProperties = exported["properties"].filter(
+    (property) =>
+      record(property) &&
+      (astName(property["key"]) === "plugins" ||
+        (record(property["key"]) && property["key"]["value"] === "plugins")),
+  );
+  const property = pluginProperties.at(0);
+  if (
+    pluginProperties.length !== 1 ||
+    !record(property) ||
+    property["computed"] === true ||
+    property["kind"] !== "init" ||
+    !record(property["value"]) ||
+    property["value"]["type"] !== "ArrayExpression" ||
+    !Array.isArray(property["value"]["elements"])
+  )
+    throw new Error("Declaration helper requires a literal plugins array");
+  const calls = property["value"]["elements"]
+    .map((element) =>
+      record(element) && element["type"] === "AwaitExpression"
+        ? element["argument"]
+        : element,
+    )
+    .filter(
+      (element) =>
+        record(element) &&
+        element["type"] === "CallExpression" &&
+        bindings.has(String(astName(element["callee"]))),
+    );
+  const call = calls.at(0);
+  if (
+    calls.length !== 1 ||
+    !record(call) ||
+    !Array.isArray(call["arguments"]) ||
+    call["arguments"].length !== 1
+  )
+    throw new Error("Declare exactly one direct declaration helper call");
+  walkAst({
+    value: ast,
+    visit: (node, parent) => {
+      if (node["type"] === "ImportDeclaration") return;
+      const name = astName(node);
+      if (typeof name !== "string" || !bindings.has(name)) return;
+      if (parent?.["type"] === "ImportSpecifier") return;
+      if (parent !== call || call["callee"] !== node)
+        throw new Error(
+          "Declaration helper binding cannot be aliased or invoked indirectly",
+        );
+    },
+  });
+  const argument = call["arguments"].at(0);
+  if (
+    !record(argument) ||
+    argument["type"] !== "ObjectExpression" ||
+    !Array.isArray(argument["properties"])
+  )
+    throw new Error("Declaration helper options must be a literal object");
+  const directoryProperties = argument["properties"].filter(
+    (entry) => record(entry) && astName(entry["key"]) === "directory",
+  );
+  const directoryProperty = directoryProperties.at(0);
+  if (
+    directoryProperties.length !== 1 ||
+    !record(directoryProperty) ||
+    directoryProperty["computed"] === true ||
+    directoryProperty["kind"] !== "init"
+  )
+    throw new Error("Declaration helper requires its package directory");
+  const value = directoryProperty["value"];
+  const meta = record(value) ? value["object"] : undefined;
+  const importDirectory =
+    record(value) &&
+    value["type"] === "MemberExpression" &&
+    value["computed"] === false &&
+    astName(value["property"]) === "dirname" &&
+    record(meta) &&
+    meta["type"] === "MetaProperty" &&
+    astName(meta["meta"]) === "import" &&
+    astName(meta["property"]) === "meta";
+  const exactDirectory =
+    record(value) &&
+    value["type"] === "Literal" &&
+    value["value"] === directory;
+  if (!importDirectory && !exactDirectory)
+    throw new Error(
+      "Declaration helper directory must be import.meta.dirname or the exact package directory",
+    );
+  return reviewedViteDtsOptions(
+    astLiteral({
+      ...argument,
+      properties: argument["properties"].filter(
+        (entry) => entry !== directoryProperty,
+      ),
+    }),
+  );
+};
 
 const ownEntries = (value: object): [string, unknown][] =>
   Reflect.ownKeys(value).map((key) => {
@@ -280,6 +545,27 @@ export const assertReviewedVitePlugins = ({
         );
     }
   }
+  const pipelineIdentity = (plugin: unknown) => {
+    if (!record(plugin) || typeof plugin["name"] !== "string")
+      throw new Error("Invalid reviewed Vite pipeline entry");
+    return JSON.stringify([
+      plugin["name"],
+      [...pluginSources(plugin)].sort(([a], [b]) => a.localeCompare(b)),
+    ]);
+  };
+  const actualPipeline = resolved.filter(
+    (plugin) => plugin !== undefined && plugin !== null && plugin !== false,
+  );
+  if (
+    actualPipeline.length !== reviewed.length ||
+    reviewed.some(
+      (plugin, index) =>
+        pipelineIdentity(plugin) !== pipelineIdentity(actualPipeline[index]),
+    )
+  )
+    throw new Error(
+      "Vite plugin pipeline must match the complete reviewed order",
+    );
 };
 
 /** Vite 8 spreads transform overrides after its resolved build target. */
@@ -452,6 +738,29 @@ export const resolveVitePublishTarget = async (
         assertReviewedVueOptions({ plugin: resolved, reviewed: plugin });
     }
     canonicalVuePlugins.push(plugin);
+  }
+  if (
+    resolvedPlugins.some(
+      (plugin) =>
+        record(plugin) && plugin["name"] === "stll:declaration-only-dts",
+    )
+  ) {
+    const configFile = config["configFile"];
+    if (
+      typeof configFile !== "string" ||
+      path.dirname(realpathSync(configFile)) !== canonicalDirectory
+    )
+      throw new Error(
+        "Declaration helper requires a package-local Vite config file",
+      );
+    const options = reviewedDtsConfiguration({
+      source: readFileSync(configFile, "utf8"),
+      directory: canonicalDirectory,
+      loader: /\.[cm]?ts$/.test(configFile) ? "ts" : "js",
+    });
+    canonicalVuePlugins.push(
+      declarationOnlyDts({ directory: canonicalDirectory, ...options }),
+    );
   }
   const canonicalBuild = reviewedViteBuild(config["build"]);
   const canonical: unknown = await tool["resolveConfig"](
