@@ -21,6 +21,7 @@ import {
 import {
   checkToolchain,
   parseToolchainConfiguration,
+  readToolchainInputs,
   toolchainRules,
 } from "./toolchain-guard";
 import { toolchainInputKind } from "./toolchain-inputs";
@@ -241,6 +242,12 @@ test("Docker action policy opt-outs require a tracked explicit reason", () => {
 test("permitted named rules have reasoned opt-outs; mandatory and malformed choices fail", () => {
   expect(new Set(toolchainRules).size).toBe(toolchainRules.length);
   for (const rule of toolchainRules) {
+    if (rule === "rust-version") {
+      expect(() =>
+        parseToolchainConfiguration({ optOuts: [{ rule, reason: "skip" }] }),
+      ).toThrow("rust-version requires expiring");
+      continue;
+    }
     if (rule === "node-engine" || rule === "cloud-setup-drift") {
       expect(() =>
         parseToolchainConfiguration({
@@ -307,7 +314,6 @@ test("policy rejects schema drift, missing pins, inconsistent TS layouts and inv
     "node",
     "python",
     "rust",
-    "rustCompilerDevelopment",
   ])
     expect(() => parseToolchainPolicy({ ...toolchain, [key]: null })).toThrow();
   for (const key of packagePinKeys)
@@ -822,4 +828,140 @@ test("dynamic selector declarations fail when absent, stale, duplicated by alias
     "stll-toolchain.json": JSON.stringify({ dynamicSelectors: [composeEntry] }),
   });
   expect(multi.some(({ rule }) => rule === "configuration")).toBe(true);
+});
+
+test("tracked shell and service image declarations share the strict Rust exception boundary", () => {
+  const sources = {
+    "scripts/rust.sh": `cargo +${policy.rust} hawk`,
+    "scripts/ci-service-images.json": JSON.stringify({
+      rust: `rust:${policy.rust}`,
+    }),
+  };
+  expect(fixture(sources)).toEqual([]);
+  for (const [file, source] of Object.entries(sources)) {
+    const changed = {
+      ...sources,
+      [file]: source.replaceAll(policy.rust, "1.97.1"),
+    };
+    expect(
+      fixture(changed).filter(({ rule }) => rule === "rust-version"),
+    ).toHaveLength(1);
+    expect(
+      fixture({
+        ...changed,
+        "stll-toolchain.json": JSON.stringify({
+          rustExceptions: [
+            {
+              pin: "1.97.1",
+              reason: "Compiler support tracked upstream",
+              tracking: "https://github.com/stella/tooling/issues/123",
+              expires: "2099-01-01",
+            },
+          ],
+        }),
+      }),
+    ).toEqual([]);
+  }
+});
+
+test("tracked extensionless shell shebangs enter Rust policy discovery", () => {
+  for (const interpreter of [
+    "/bin/sh",
+    "/usr/bin/bash",
+    "/usr/bin/env bash",
+    "/usr/bin/env -S bash -eu",
+  ]) {
+    const file = "scripts/rust-check";
+    const source = `#!${interpreter}\ncargo +${policy.rust} test\n`;
+    expect(fixture({ [file]: source })).toEqual([]);
+    expect(
+      fixture({ [file]: source.replace(policy.rust, "nightly") }),
+    ).toMatchObject([{ rule: "rust-version", path: file }]);
+  }
+  expect(
+    fixture({
+      "scripts/rust-check": "#!/usr/bin/env python3\n# cargo +nightly test",
+      README: "cargo +nightly test",
+    }),
+  ).toEqual([]);
+  expect(
+    fixture({
+      "vendor/rust-check": "#!/bin/sh\ncargo +nightly test",
+      "node_modules/rust-check": "#!/bin/sh\ncargo +nightly test",
+    }),
+  ).toEqual([]);
+});
+
+test("shell discovery skips initialized and absent tracked submodules", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "stll-gitlink-"));
+  try {
+    execFileSync("git", ["init", "-q", root]);
+    execFileSync(
+      "git",
+      [
+        "update-index",
+        "--add",
+        "--cacheinfo",
+        `160000,${"a".repeat(40)},.ai/shared`,
+      ],
+      { cwd: root },
+    );
+    expect(readToolchainInputs(root).diagnostics).toEqual([]);
+    mkdirSync(path.join(root, ".ai/shared"), { recursive: true });
+    expect(readToolchainInputs(root).diagnostics).toEqual([]);
+    expect(readToolchainInputs(root).files).toEqual({});
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("optional shebang discovery skips symlinks without tracked regular targets", () => {
+  for (const target of [
+    "directory",
+    "untracked",
+    "missing",
+    "absolute",
+    "tracked",
+  ]) {
+    const workspace = mkdtempSync(path.join(tmpdir(), "stll-shebang-links-"));
+    const root = path.join(workspace, "repository");
+    mkdirSync(root);
+    try {
+      execFileSync("git", ["init", "-q", root]);
+      const source = `#!/bin/sh\ncargo +${policy.rust} test\n`;
+      let destination = "missing";
+      if (target === "directory") {
+        mkdirSync(path.join(root, ".ai"));
+        writeFileSync(path.join(root, ".ai/README.md"), "Instructions");
+        execFileSync("git", ["add", ".ai"], { cwd: root });
+        destination = ".ai";
+      }
+      if (target === "untracked" || target === "tracked") {
+        destination = "program";
+        writeFileSync(path.join(root, destination), source);
+        if (target === "tracked")
+          execFileSync("git", ["add", destination], { cwd: root });
+      }
+      if (target === "absolute") {
+        destination = path.join(workspace, "external-script");
+        writeFileSync(destination, "#!/bin/sh\ncargo +nightly test\n");
+      }
+      symlinkSync(destination, path.join(root, "script"));
+      execFileSync("git", ["add", "script"], { cwd: root });
+      expect(checkToolchain({ root, policy })).toEqual([]);
+      if (target === "tracked") {
+        expect(readToolchainInputs(root).files["script"]).toBe(source);
+        writeFileSync(
+          path.join(root, destination),
+          source.replace(policy.rust, "nightly"),
+        );
+        expect(checkToolchain({ root, policy })).toMatchObject([
+          { rule: "rust-version", path: "program" },
+          { rule: "rust-version", path: "script" },
+        ]);
+      }
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  }
 });

@@ -752,20 +752,10 @@ const stableVersion = (value: unknown) => {
     throw new Error("Runtime selector is not an exact stable version");
   return version;
 };
-type SetupRuntimeVersionOptions = { value: unknown; runtime: string };
-const setupRuntimeVersion = ({
-  value,
-  runtime,
-}: SetupRuntimeVersionOptions) => {
+const setupRuntimeVersion = (value: unknown) => {
   if (typeof value !== "string" && typeof value !== "number")
     throw new Error("Unclassifiable setup runtime selector");
   const selector = String(value).trim();
-  if (runtime === "rust" && /^nightly-\d{4}-\d{2}-\d{2}$/.test(selector)) {
-    const date = selector.slice("nightly-".length);
-    if (new Date(date).toISOString().slice(0, 10) !== date)
-      throw new Error("Invalid dated Rust toolchain");
-    return selector;
-  }
   return stableVersion(selector);
 };
 type SetupRuntimeFileOptions = {
@@ -816,15 +806,12 @@ const setupRuntimeFileVersion = ({
     if (!changedRecord(value))
       throw new Error("Unclassifiable setup runtime TOML");
     if (runtime === "rust" && changedRecord(value["toolchain"]))
-      return setupRuntimeVersion({
-        value: value["toolchain"]["channel"],
-        runtime,
-      });
+      return setupRuntimeVersion(value["toolchain"]["channel"]);
     if (runtime === "python")
-      return setupRuntimeVersion({ value: value["python-version"], runtime });
+      return setupRuntimeVersion(value["python-version"]);
     throw new Error("Unclassifiable setup runtime TOML");
   }
-  return setupRuntimeVersion({ value: text, runtime });
+  return setupRuntimeVersion(text);
 };
 
 const setupRuntimeVersions = (snapshot: GitSnapshot) => {
@@ -890,8 +877,7 @@ const setupRuntimeVersions = (snapshot: GitSnapshot) => {
           file: path.posix.normalize(input),
           runtime: inputRuntime,
         });
-      } else
-        version = setupRuntimeVersion({ value: input, runtime: inputRuntime });
+      } else version = setupRuntimeVersion(input);
       versions.push({ file, runtime: inputRuntime, version });
     }
     if (!selected)

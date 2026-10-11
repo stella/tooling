@@ -28,7 +28,7 @@ updates:
       - dependency-name: typescript-compat
       - dependency-name: bun-types
   - package-ecosystem: cargo
-    directory: /rust-lints/stella_lints
+    directory: /rust-lints/stella_source_lint
     schedule:
       interval: weekly
       day: saturday

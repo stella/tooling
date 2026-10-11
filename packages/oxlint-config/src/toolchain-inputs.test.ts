@@ -24,6 +24,8 @@ test("both input readers exclude dependency trees for every accepted input kind"
     ...javascriptDependencyLockfiles,
     "uv.lock",
     "pyproject.toml",
+    "scripts/rust.sh",
+    "scripts/ci-service-images.json",
   ];
   for (const file of inputs) {
     expect(toolchainInputKind(file)).toBeDefined();
@@ -244,13 +246,35 @@ test("pnpm workspace inputs use the producer's YAML filename", () => {
     expect(toolchainInputKind(`${prefix}/pnpm-workspace.yaml`)).toBeUndefined();
 });
 
-test("cloud script discovery reads only the canonical root script", () => {
-  expect(toolchainInputKind(".agents/cloud-setup.sh")).toBe("config");
+test("shell discovery includes cloud setup scripts but excludes backups and installed dependencies", () => {
   for (const file of [
+    ".agents/cloud-setup.sh",
     "cloud-setup.sh",
     "tools/.agents/cloud-setup.sh",
+  ])
+    expect(toolchainInputKind(file)).toBe("config");
+  for (const file of [
     ".agents/cloud-setup.sh.backup",
     "node_modules/.agents/cloud-setup.sh",
   ])
     expect(toolchainInputKind(file)).toBeUndefined();
+});
+
+test("shell shebangs identify extensionless executable inputs without selecting ordinary text", () => {
+  for (const shebang of [
+    "#!/bin/sh",
+    "#!/usr/bin/bash",
+    "#!/usr/bin/env bash",
+    "#!/usr/bin/env -S bash -eu",
+  ]) {
+    expect(
+      toolchainInputKind("scripts/check", shebang + "\ncargo +stable test"),
+    ).toBe("config");
+    expect(toolchainInputKind("vendor/check", shebang)).toBeUndefined();
+    expect(toolchainInputKind("node_modules/check", shebang)).toBeUndefined();
+  }
+  expect(
+    toolchainInputKind("scripts/check", "#!/usr/bin/env python3"),
+  ).toBeUndefined();
+  expect(toolchainInputKind("README", "cargo +stable test")).toBeUndefined();
 });

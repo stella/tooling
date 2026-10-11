@@ -1,5 +1,12 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync, realpathSync } from "node:fs";
+import {
+  closeSync,
+  lstatSync,
+  openSync,
+  readSync,
+  readFileSync,
+  realpathSync,
+} from "node:fs";
 import path from "node:path";
 
 import { cloudSetupPath, generateCloudSetup } from "./cloud-setup";
@@ -25,6 +32,7 @@ import {
   runtimeRules,
   type RuntimeDelegation,
 } from "./toolchain-runtime";
+import { parseRustExceptions } from "./toolchain-rust";
 import { parseToolchainPolicy } from "./toolchain-schema";
 
 export const toolchainRules = [
@@ -59,12 +67,13 @@ export const parseToolchainConfiguration = (input: unknown) => {
         key !== "cloud" &&
         key !== "engineFloors" &&
         key !== "dynamicSelectors" &&
-        key !== "consumerChecks",
+        key !== "consumerChecks" &&
+        key !== "rustExceptions",
     ) ||
     (input["optOuts"] !== undefined && !array(input["optOuts"]))
   )
     throw new Error(
-      "stll-toolchain.json accepts only optOuts, cloud, engineFloors, dynamicSelectors and consumerChecks declarations",
+      "stll-toolchain.json accepts only optOuts, cloud, engineFloors, dynamicSelectors consumerChecks and rustExceptions declarations",
     );
   const disabled = new Set<string>();
   const optOuts = input["optOuts"] ?? [];
@@ -82,6 +91,10 @@ export const parseToolchainConfiguration = (input: unknown) => {
       throw new Error(
         "each opt-out requires a unique known rule and a nonempty reason",
       );
+    if (entry["rule"] === "rust-version")
+      throw new Error(
+        "rust-version requires expiring exact-pin rustExceptions, not an opt-out",
+      );
     if (entry["rule"] === "node-engine")
       throw new Error(
         "node-engine cannot be opted out; engines.node must support the shared Node series",
@@ -94,6 +107,7 @@ export const parseToolchainConfiguration = (input: unknown) => {
   }
   return {
     disabled,
+    rustExceptions: parseRustExceptions(input["rustExceptions"]),
     cloud: parseCloudSetup(input["cloud"]),
     engineFloors: parseEngineFloors(input["engineFloors"]),
     dynamicSelectors: parseDynamicSelectors(input["dynamicSelectors"]),
@@ -104,25 +118,42 @@ export const parseToolchainConfiguration = (input: unknown) => {
 /** Read one tracked configuration snapshot for guards and policy generation. */
 export const readToolchainInputs = (root: string) => {
   const diagnostics: SharedToolchainDiagnostic[] = [];
-  const tracked = execFileSync("git", ["ls-files", "-z", "--cached"], {
-    cwd: root,
-    encoding: "utf8",
-  })
+  const tracked = execFileSync(
+    "git",
+    ["ls-files", "-z", "--cached", "--stage"],
+    {
+      cwd: root,
+      encoding: "utf8",
+    },
+  )
     .split("\0")
-    .filter((file) => file !== "");
+    // Gitlinks identify submodule directories, never executable script files.
+    .filter((entry) => entry !== "" && !entry.startsWith("160000 "))
+    .map((entry) => entry.slice(entry.indexOf("\t") + 1));
   const files: Record<string, string> = {};
   const trackedFiles = new Set(tracked);
   const resolvedRoot = realpathSync(root);
   for (const file of tracked) {
     // Only configuration inputs are read; source files can contain arbitrary examples.
     const kind = toolchainInputKind(file);
-    if (kind === undefined) continue;
+    const shebangCandidate =
+      kind === undefined &&
+      path.posix.extname(file) === "" &&
+      !file
+        .split("/")
+        .some((part) => part === "vendor" || part === "node_modules");
+    if (kind === undefined && !shebangCandidate) continue;
     if (kind === "presence") {
       files[file] = "";
       continue;
     }
     try {
-      const resolvedFile = realpathSync(path.join(resolvedRoot, file));
+      const inputPath = path.join(resolvedRoot, file);
+      if (shebangCandidate) {
+        const input = lstatSync(inputPath);
+        if (!input.isFile() && !input.isSymbolicLink()) continue;
+      }
+      const resolvedFile = realpathSync(inputPath);
       const relative = path.relative(resolvedRoot, resolvedFile);
       if (
         path.isAbsolute(relative) ||
@@ -130,8 +161,26 @@ export const readToolchainInputs = (root: string) => {
         !trackedFiles.has(relative.split(path.sep).join("/"))
       )
         throw new Error("Configuration target is outside the tracked tree");
+      if (shebangCandidate) {
+        if (!lstatSync(resolvedFile).isFile()) continue;
+        // Bound discovery reads: extensionless files may be large binary artifacts.
+        const descriptor = openSync(resolvedFile, "r");
+        const prefix = Buffer.alloc(512);
+        let count: number;
+        try {
+          count = readSync(descriptor, prefix, 0, prefix.length, 0);
+        } finally {
+          closeSync(descriptor);
+        }
+        if (
+          toolchainInputKind(file, prefix.toString("utf8", 0, count)) ===
+          undefined
+        )
+          continue;
+      }
       files[file] = readFileSync(resolvedFile, "utf8");
     } catch {
+      if (shebangCandidate) continue;
       diagnostics.push({
         rule: "configuration",
         path: file,
@@ -251,6 +300,7 @@ export const checkToolchain = ({
           packages: { ...policy.packages, typescript: policy.typescript },
         },
         trackedFiles,
+        rustExceptions: configuration.rustExceptions,
         dynamicSelectors: dynamicSelectors.filter(
           (entry) => entry.path === file,
         ),

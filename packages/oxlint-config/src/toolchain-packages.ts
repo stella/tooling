@@ -112,53 +112,431 @@ const shellSubstitutions = (command: string) => {
   return bodies;
 };
 
-// Preserve quoted assignment values when separating direct shell commands.
-export const compilerCommandSegments = (command: string) => {
-  const segments: string[][] = [[]];
-  for (const source of [command, ...shellSubstitutions(command)]) {
-    segments.push([]);
-    const shellWords = source.match(
-      /(?:[^\s"'\\;&|()]|\\[\s\S]|"(?:[^"\\]|\\[\s\S])*"|'[^']*')+|&&|\|\||[();&|\n]/g,
-    );
-    for (const word of shellWords ?? []) {
-      if (/^(?:&&|\|\||[;&|\n])$/.test(word)) segments.push([]);
-      else segments.at(-1)?.push(word);
+const shellValueOptions = new Set([
+  "--rcfile",
+  "--init-file",
+  "-o",
+  "+o",
+  "-O",
+  "+O",
+]);
+const shellExecutable = /^(?:\/(?:[^/]+\/)*)?(?:bash|dash|ksh|zsh|sh)$/;
+
+type ShellToken = {
+  kind: "word" | "boundary" | "redirect" | "comment";
+  value: string;
+  index: number;
+};
+
+// Keep expansion bodies in their word: substitutions are inspected separately as executable sources.
+const shellTokens = (source: string) => {
+  const tokens: ShellToken[] = [];
+  for (let index = 0; index < source.length;) {
+    const character = source.at(index);
+    if (character === undefined) break;
+    if (character === "\n") {
+      tokens.push({ kind: "boundary", value: character, index: index++ });
+      continue;
     }
-  }
-  return segments.map((words) => {
-    let start = 0;
-    const skipAssignments = () => {
-      while (/^[A-Za-z_][A-Za-z\d_]*=/.test(words.at(start) ?? "")) start += 1;
+    if (/\s/.test(character)) {
+      index++;
+      continue;
+    }
+    if (character === "#") {
+      const end = source.indexOf("\n", index);
+      const stop = end < 0 ? source.length : end;
+      tokens.push({ kind: "comment", value: source.slice(index, stop), index });
+      index = stop;
+      continue;
+    }
+    const redirect = /^(?:\d*)(?:&>>|&>|<<<|<<-|<<|>>|>\||>&|<&|<>|>|<)/.exec(
+      source.slice(index),
+    );
+    if (redirect !== null) {
+      tokens.push({ kind: "redirect", value: redirect[0], index });
+      index += redirect[0].length;
+      continue;
+    }
+    const boundary = /^(?:&&|\|\||[();&|])/.exec(source.slice(index));
+    if (boundary !== null) {
+      tokens.push({ kind: "boundary", value: boundary[0], index });
+      index += boundary[0].length;
+      continue;
+    }
+    const start = index;
+    type Frame = {
+      kind: "word" | "parentheses" | "backticks";
+      quote: "'" | '"' | undefined;
+      depth: number;
     };
-    skipAssignments();
-    while (/^(?:\/usr\/bin\/|\/bin\/)?env$/.test(words.at(start) ?? "")) {
-      start += 1;
-      while (start < words.length) {
-        const option = words.at(start);
-        if (option === "--") {
-          start += 1;
-          break;
-        }
-        if (option === "-u" || option === "--unset") {
-          start += 2;
-          continue;
-        }
+    const frames: Frame[] = [{ kind: "word", quote: undefined, depth: 0 }];
+    while (index < source.length) {
+      const frame = frames.at(-1);
+      const current = source.at(index);
+      if (frame === undefined || current === undefined) break;
+      if (current === "\\" && frame.quote !== "'") {
+        index += 2;
+        continue;
+      }
+      if (current === "`" && frame.kind === "backticks") {
+        frames.pop();
+        index++;
+        continue;
+      }
+      if (current === frame.quote) {
+        frame.quote = undefined;
+        index++;
+        continue;
+      }
+      if (frame.quote === "'") {
+        index++;
+        continue;
+      }
+      if (current === "$" && source.at(index + 1) === "(") {
+        frames.push({ kind: "parentheses", quote: undefined, depth: 1 });
+        index += 2;
+        continue;
+      }
+      if (current === "`") {
+        frames.push({ kind: "backticks", quote: undefined, depth: 0 });
+        index++;
+        continue;
+      }
+      if (frame.quote !== undefined) {
+        index++;
+        continue;
+      }
+      if (current === "'" || current === '"') {
+        frame.quote = current;
+        index++;
+        continue;
+      }
+      if (frame.kind === "parentheses") {
+        if (current === "(") frame.depth++;
+        if (current === ")" && --frame.depth === 0) frames.pop();
+        index++;
+        continue;
+      }
+      if (frame.kind === "word" && /[\s<>;&|()]/.test(current)) break;
+      index++;
+    }
+    const value = source.slice(start, index);
+    tokens.push({
+      kind: "word",
+      value,
+      index: start,
+    });
+  }
+  // Braces are reserved words only where a command or function body can begin.
+  let groupDepth = 0;
+  let redirectTarget = false;
+  const commandWords: string[] = [];
+  for (const token of tokens) {
+    if (token.kind === "comment") continue;
+    if (token.kind === "redirect") {
+      redirectTarget = true;
+      continue;
+    }
+    if (redirectTarget) {
+      redirectTarget = false;
+      if (token.kind === "word") continue;
+    }
+    if (token.kind === "boundary") {
+      commandWords.length = 0;
+      continue;
+    }
+    const functionBody =
+      commandWords.length === 2 && commandWords.at(0) === "function";
+    const opensGroup =
+      token.value === "{" && (commandWords.length === 0 || functionBody);
+    const closesGroup =
+      token.value === "}" && groupDepth > 0 && commandWords.length === 0;
+    if (opensGroup || closesGroup) {
+      token.kind = "boundary";
+      groupDepth += opensGroup ? 1 : -1;
+      commandWords.length = 0;
+      continue;
+    }
+    if (
+      commandWords.length === 0 &&
+      ["if", "then", "elif", "else", "do", "!", "time"].includes(token.value)
+    )
+      continue;
+    commandWords.push(token.value);
+  }
+  return tokens;
+};
+
+const shellArgumentTokens = (tokens: readonly ShellToken[]) => {
+  const arguments_: ShellToken[] = [];
+  let redirectTarget = false;
+  for (const token of tokens) {
+    if (token.kind === "comment") continue;
+    if (token.kind === "redirect") {
+      redirectTarget = true;
+      continue;
+    }
+    if (redirectTarget) {
+      redirectTarget = false;
+      if (token.kind === "word") continue;
+    }
+    arguments_.push(token);
+  }
+  return arguments_;
+};
+
+const shellReadsProgramStdin = (tokens: readonly ShellToken[]) => {
+  const words = executableShellWords(
+    shellArgumentTokens(tokens).map(({ value }) => value),
+  ).map(decodeShellWord);
+  if (!shellExecutable.test(words.at(0) ?? "")) return false;
+  let stdin = false;
+  let script = false;
+  for (let index = 1; index < words.length; index++) {
+    const option = words.at(index) ?? "";
+    if (option === "--" || option === "-") {
+      script = index + 1 < words.length;
+      break;
+    }
+    if (!/^[+-]/.test(option)) {
+      script = true;
+      break;
+    }
+    if (shellValueOptions.has(option)) {
+      index++;
+      continue;
+    }
+    if (/^-[^-]*c/.test(option)) return false;
+    if (/^-[^-]*s/.test(option)) stdin = true;
+  }
+  return stdin || !script;
+};
+
+// Descriptor copies retain their source; later redirections replace only their destination.
+const shellStdinHeredoc = (tokens: readonly ShellToken[]) => {
+  const descriptors = new Map<string, ShellToken>();
+  for (let index = 0; index < tokens.length; index++) {
+    const token = tokens.at(index);
+    if (token?.kind !== "redirect") continue;
+    const declaration = /^(\d*)(.+)$/.exec(token.value);
+    const operator = declaration?.[2];
+    if (operator === undefined) continue;
+    const descriptor = String(
+      Number(declaration?.[1] || (operator.startsWith("<") ? "0" : "1")),
+    );
+    const target = tokens.at(++index);
+    if (operator === "<<" || operator === "<<-") {
+      descriptors.set(descriptor, token);
+      continue;
+    }
+    if (operator === "<&" || operator === ">&") {
+      const copy = /^(\d+)(-?)$/.exec(decodeShellWord(target?.value ?? ""));
+      const sourceDescriptor =
+        copy?.[1] === undefined ? undefined : String(Number(copy[1]));
+      const source =
+        sourceDescriptor === undefined
+          ? undefined
+          : descriptors.get(sourceDescriptor);
+      if (source === undefined) descriptors.delete(descriptor);
+      else descriptors.set(descriptor, source);
+      if (copy?.[2] === "-" && sourceDescriptor !== undefined)
+        descriptors.delete(sourceDescriptor);
+      continue;
+    }
+    descriptors.delete(descriptor);
+    if (operator === "&>" || operator === "&>>") descriptors.delete("2");
+  }
+  return descriptors.get("0");
+};
+
+// Literal heredoc bodies are data, not direct shell command invocations.
+const shellExecutableSource = (command: string) => {
+  const pending: {
+    delimiter: string;
+    stripTabs: boolean;
+    literal: boolean;
+    execute: boolean;
+  }[] = [];
+  return command
+    .split(/\r?\n/)
+    .map((line) => {
+      const here = pending.at(0);
+      if (here !== undefined) {
         if (
-          option === "-" ||
-          option === "-i" ||
-          option === "--ignore-environment" ||
-          /^--unset=.+|^-u.+/.test(option ?? "")
+          (here.stripTabs ? line.replace(/^\t+/, "") : line) === here.delimiter
         ) {
-          start += 1;
+          pending.shift();
+          return "";
+        }
+        if (here.execute) return line;
+        if (here.literal) return "";
+        return shellSubstitutions(line).join("\n");
+      }
+      const words = shellTokens(line);
+      let commandStart = 0;
+      for (let index = 0; index < words.length; index++) {
+        const match = words.at(index);
+        const word = match?.value;
+        if (word === undefined) continue;
+        if (match?.kind === "comment") return line.slice(0, match.index);
+        if (match?.kind === "boundary") {
+          commandStart = index + 1;
           continue;
         }
+        const declaration =
+          match?.kind === "redirect" ? /^(?:\d*)<<(-?)(.*)$/.exec(word) : null;
+        let delimiter = declaration?.[2];
+        if (delimiter === "") delimiter = words.at(++index)?.value;
+        if (
+          declaration !== null &&
+          delimiter !== undefined &&
+          !delimiter.startsWith("<")
+        ) {
+          const commandEnd = words.findIndex(
+            (entry, position) =>
+              position > index &&
+              (entry.kind === "boundary" || entry.kind === "comment"),
+          );
+          const invocation = words.slice(
+            commandStart,
+            commandEnd < 0 ? undefined : commandEnd,
+          );
+          pending.push({
+            delimiter: decodeShellWord(delimiter),
+            stripTabs: declaration[1] === "-",
+            literal: /['"\\]/.test(delimiter),
+            execute:
+              shellReadsProgramStdin(invocation) &&
+              shellStdinHeredoc(invocation) === match,
+          });
+        }
+      }
+      return line;
+    })
+    .join("\n");
+};
+
+const executableShellWords = (words: readonly string[]) => {
+  let start = 0;
+  const skipAssignments = () => {
+    while (
+      /^[A-Za-z_][A-Za-z\d_]*=/.test(decodeShellWord(words.at(start) ?? ""))
+    )
+      start += 1;
+  };
+  skipAssignments();
+  while (
+    /^(?:\/usr\/bin\/|\/bin\/)?env$/.test(
+      decodeShellWord(words.at(start) ?? ""),
+    )
+  ) {
+    start += 1;
+    while (start < words.length) {
+      const option = decodeShellWord(words.at(start) ?? "");
+      if (option === "--") {
+        start += 1;
         break;
       }
-      skipAssignments();
+      if (["-u", "--unset", "-C", "--chdir"].includes(option)) {
+        start += 2;
+        continue;
+      }
+      if (
+        option === "-S" ||
+        option === "--split-string" ||
+        option.startsWith("--split-string=") ||
+        (option.startsWith("-S") && option.length > 2)
+      ) {
+        let source: string;
+        if (option === "-S" || option === "--split-string") {
+          source = decodeShellWord(words.at(start + 1) ?? "");
+          start += 2;
+        } else {
+          source = option.startsWith("-S")
+            ? option.slice(2)
+            : option.slice("--split-string=".length);
+          start++;
+        }
+        return executableShellWords([
+          "env",
+          ...shellTokens(source).map(({ value }) => value),
+          ...words.slice(start),
+        ]);
+      }
+      if (
+        option === "-" ||
+        option === "-i" ||
+        option === "--ignore-environment" ||
+        /^--(?:unset|chdir)=.+|^-[uC].+/.test(option)
+      ) {
+        start += 1;
+        continue;
+      }
+      break;
     }
-    return words.slice(start);
-  });
+    skipAssignments();
+  }
+  return words.slice(start);
 };
+
+// A quoted argument is executable only when the command itself is a shell with -c.
+const shellCommandBody = (rawWords: readonly string[]) => {
+  const words = executableShellWords(
+    rawWords.filter((word) => word !== "(" && word !== ")"),
+  ).map(decodeShellWord);
+  if (!shellExecutable.test(words.at(0) ?? "")) return undefined;
+  for (let index = 1; index < words.length; index++) {
+    const option = words.at(index);
+    if (option === undefined || option === "--" || !/^[+-]/.test(option))
+      return undefined;
+    if (shellValueOptions.has(option)) {
+      index++;
+      continue;
+    }
+    if (/^-[^-]*c/.test(option)) return words.at(index + 1);
+  }
+  return undefined;
+};
+
+/** Shared executable shell words preserve assignments for runtime selectors. */
+export const shellCommandSegments = (
+  command: string,
+  grouping: "boundaries" | "tokens" = "boundaries",
+) => {
+  const segments: string[][] = [[]];
+  const executableSource = shellExecutableSource(command);
+  const sources = new Set([
+    executableSource,
+    ...shellSubstitutions(executableSource),
+  ]);
+  for (const source of sources) {
+    const firstSegment = segments.length;
+    segments.push([]);
+    for (const { kind, value: word } of shellArgumentTokens(
+      shellTokens(source),
+    )) {
+      if (kind === "boundary") {
+        if (["(", ")", "{", "}"].includes(word) && grouping === "tokens")
+          segments.at(-1)?.push(word);
+        else segments.push([]);
+      } else segments.at(-1)?.push(word);
+    }
+    for (const words of segments.slice(firstSegment)) {
+      const body = shellCommandBody(words);
+      if (body === undefined) continue;
+      const executableBody = shellExecutableSource(body);
+      sources.add(executableBody);
+      for (const substitution of shellSubstitutions(executableBody))
+        sources.add(substitution);
+    }
+  }
+  return segments;
+};
+
+// Inspect direct compiler commands after removing environment launcher assignments.
+export const compilerCommandSegments = (command: string) =>
+  // Compiler policy compares raw invocations; retaining grouping prevents widening its allowlist.
+  shellCommandSegments(command, "tokens").map(executableShellWords);
 
 const launcherValueOptions = new Map(
   Object.entries({

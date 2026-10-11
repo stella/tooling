@@ -682,8 +682,8 @@ test("Docker FROM uses the shared runtime family classification before scoped de
     });
     return { diagnostics, matched };
   };
-  expect(docker("rust:${RUST_VERSION}-bookworm")).toEqual({
-    diagnostics: [],
+  expect(docker("rust:${RUST_VERSION}-bookworm")).toMatchObject({
+    diagnostics: [{ rule: "rust-version" }],
     matched: [],
   });
   expect(docker("oven/bun:${BUN_VERSION}")).toEqual({

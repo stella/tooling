@@ -95,7 +95,6 @@ export const parseToolchainPolicy = (input: unknown) => {
   const postgres = string(input, "postgres");
   const valkey = string(input, "valkey");
   const rust = string(input, "rust");
-  const rustCompilerDevelopment = string(input, "rustCompilerDevelopment");
   for (const [name, value] of Object.entries({
     ...packages,
     bun,
@@ -127,8 +126,6 @@ export const parseToolchainPolicy = (input: unknown) => {
     throw new Error("Python must be an exact minor or patch release");
   if (!/^\d+\.\d+\.\d+$/.test(rust))
     throw new Error("Rust must be an exact stable release");
-  if (!/^nightly-\d{4}-\d{2}-\d{2}$/.test(rustCompilerDevelopment))
-    throw new Error("Rust compiler development must be a dated nightly");
   if (
     !consumerTypescript.startsWith("6.") ||
     consumerTypescript.includes("-") ||
@@ -254,7 +251,6 @@ export const parseToolchainPolicy = (input: unknown) => {
     consumerTypescript,
     python,
     rust,
-    rustCompilerDevelopment,
     packages,
     actions,
     typescriptInstallLayouts,

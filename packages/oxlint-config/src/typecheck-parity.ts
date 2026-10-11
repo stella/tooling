@@ -257,9 +257,11 @@ export const fixtures = [
 export const diagnosticCodes = (text: string) =>
   [
     ...new Set(
-      [...text.matchAll(/(?:TS|(?:error|warning)\s+)(\d{4,5})/g)].map((match) =>
-        Number(match.at(1)),
-      ),
+      [
+        ...text.matchAll(
+          /(?:\b(?:error|warning)\s+(?:TS)?|<error\b[^>]*\bcode="TS)(\d{4,5})(?=:|")/g,
+        ),
+      ].map((match) => Number(match.at(1))),
     ),
   ].sort((a, b) => a - b);
 

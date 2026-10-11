@@ -33,15 +33,15 @@ introduce requirements.
 
 Schema version 1 contains these fields:
 
-| Fields                                                                                     | Contract                                                                                                                                                                                                                                                                                                                                                                                                                |
-| ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schemaVersion`                                                                            | Supported policy schema version (`1`).                                                                                                                                                                                                                                                                                                                                                                                  |
-| `bun`                                                                                      | Exact `packageManager`, `bun-types`, image and manager pin.                                                                                                                                                                                                                                                                                                                                                             |
-| `oxlint`, `oxlint-tsgolint`, `@oxlint/plugins`, `@stll/oxlint-plugin`, `oxfmt`, `lefthook` | Exact dependency and catalog pins. Declared local workspace packages must resolve to the same version.                                                                                                                                                                                                                                                                                                                  |
-| `typescript`, `typescriptInstallLayouts`, `typescript6Compatibility`                       | Exact compiler pins and complete direct or split install layouts; the optional compatibility alias is exact too.                                                                                                                                                                                                                                                                                                        |
-| `node`, `python`, `rust`, `rustCompilerDevelopment`                                        | Runtime selectors and version-manager pins. Node selects the policy major (`26.x`); static minor and patch selectors within that major are allowed. A Python minor pin preserves existing patch selectors within that release series; a patch policy requires the exact patch. Rust selects the stable release unless a toolchain file declares the `rustc-dev` component; compiler development uses its dated nightly. |
-| `actions`                                                                                  | Approved action names mapped to full `sha` and `version` comment.                                                                                                                                                                                                                                                                                                                                                       |
-| `dependabot`                                                                               | Shared schedule, cooldown and groups. Package and action ignores derive from the owned pins.                                                                                                                                                                                                                                                                                                                            |
+| Fields                                                                                     | Contract                                                                                                                                                                                                                                                                                                                                                                              |
+| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schemaVersion`                                                                            | Supported policy schema version (`1`).                                                                                                                                                                                                                                                                                                                                                |
+| `bun`                                                                                      | Exact `packageManager`, `bun-types`, image and manager pin.                                                                                                                                                                                                                                                                                                                           |
+| `oxlint`, `oxlint-tsgolint`, `@oxlint/plugins`, `@stll/oxlint-plugin`, `oxfmt`, `lefthook` | Exact dependency and catalog pins. Declared local workspace packages must resolve to the same version.                                                                                                                                                                                                                                                                                |
+| `typescript`, `typescriptInstallLayouts`, `typescript6Compatibility`                       | Exact compiler pins and complete direct or split install layouts; the optional compatibility alias is exact too.                                                                                                                                                                                                                                                                      |
+| `node`, `python`, `rust`                                                                   | Runtime selectors and version-manager pins. Node selects the policy major (`26.x`); static minor and patch selectors within that major are allowed. A Python minor pin preserves existing patch selectors within that release series; a patch policy requires the exact patch. Rust selects one exact stable release across toolchain files, commands, workflow selectors and images. |
+| `actions`                                                                                  | Approved action names mapped to full `sha` and `version` comment.                                                                                                                                                                                                                                                                                                                     |
+| `dependabot`                                                                               | Shared schedule, cooldown and groups. Package and action ignores derive from the owned pins.                                                                                                                                                                                                                                                                                          |
 
 Configure `oven-sh/setup-bun` with `bun-version-file: package.json` and a
 matching `packageManager`. Configure setup-node/setup-python with
@@ -92,9 +92,40 @@ Missing packages or jobs, private packages, absent setup-node selectors and
 floor mismatches fail configuration validation. `optOuts` is optional when
 only `engineFloors` is declared.
 
-The Rust stable pin is `1.96.0`; `rustCompilerDevelopment` is
-`nightly-2026-04-16`. Only a `rustc-dev` component declaration selects that
-nightly. A nightly without that component fails.
+The Rust stable pin is `1.99.0`. Floating channels and off-pin Rust references
+fail the shared check. Cargo `rust-version` declarations remain minimum support
+versions and may be lower than the shared pin. Rust setup actions
+(`dtolnay/rust-toolchain` and `actions-rust-lang/setup-rust-toolchain`) require
+explicit exact toolchain inputs; every release in a comma-separated setup list
+must satisfy the pin or its declared exception.
+
+Rust exceptions use one closed declaration in root `stll-toolchain.json`:
+
+```json
+{
+  "rustExceptions": [
+    {
+      "pin": "1.97.1",
+      "reason": "Awaiting upstream support for the shared compiler",
+      "tracking": "https://github.com/owner/repository/issues/123",
+      "expires": "2026-11-11"
+    }
+  ]
+}
+```
+
+Replace the example with a verified compatibility constraint and its tracking
+issue. Each exception permits only that exact release and must expire in the
+future. Floating channels, duplicate pins, extra fields and `rust-version`
+opt-outs fail validation. The same exception applies to toolchain files,
+workflow Rust inputs and environments, Cargo/rustup commands and Rust images.
+
+Hawk 0.1.11 is the current temporary Rust exception: its driver fails to build
+with 1.99.0 due to compiler-private API changes (E0061 and E0308). It uses
+1.97.1 until [tracking issue #99](https://github.com/stella/tooling/issues/99) is
+resolved, with the exception expiring on 2026-11-11. The stable source checker
+and all ordinary Rust work use the shared 1.99.0 pin. Consumer repositories that
+run Hawk need the same exact, tracked exception declaration.
 
 `engines.node` and `requires-python` are support ranges: they must include the
 shared runtime. The Node support range must include every stable release in
@@ -126,8 +157,8 @@ rule opt-outs; literal pins and local-action provenance remain enforced.
 The named rules are `bun-pins`, `package-pins`, `typescript-layout`,
 `node-engine`, `node-version`, `python-version`, `rust-version`,
 `runtime-manager`, `runtime-docker`, `runtime-workflow`, `action-pins`,
-`dependabot-policy`, and `cloud-setup-drift`. An exception requires a tracked root
-`stll-toolchain.json` listing the rule and its reason:
+`dependabot-policy`, and `cloud-setup-drift`. Non-Rust rule exceptions require a
+tracked root `stll-toolchain.json` listing the rule and its reason:
 
 ```json
 {
@@ -148,7 +179,7 @@ and directories with their own `bun.lock`, `package-lock.json`, `yarn.lock`, or
 `pnpm-lock.yaml`. Other package manifests do not create update roots; directory names
 have no special meaning. Workspace members share their owner's update entry.
 
-`node-engine` and `cloud-setup-drift` are mandatory: opt-outs cannot bypass the
+`rust-version`, `node-engine` and `cloud-setup-drift` are mandatory: opt-outs cannot bypass the
 shared Node support range or generated cloud setup requirements.
 
 Unknown rules, empty reasons, duplicate rules, and malformed configurations
@@ -377,7 +408,7 @@ Use the Rust templates by copying them into a Rust repository:
 ```bash
 cp rust/rustfmt.toml /path/to/repo/rustfmt.toml
 cp rust/clippy.toml /path/to/repo/clippy.toml
-cp rust/dylint.toml /path/to/repo/dylint.toml
+cp rust/cargo-config.toml /path/to/repo/.cargo/config.toml
 ```
 
 Then copy either `rust/cargo-root.toml` or `rust/cargo-workspace.toml` into the
@@ -385,12 +416,13 @@ repository's root `Cargo.toml`. Cargo does not support extending these settings
 from another package, so the templates are kept here as the canonical source and
 synced into consumers.
 
-Pin the `rev` in `dylint.toml` to the exact tooling commit being adopted. Then
-run Clippy first and Dylint second:
+Install the stable source lint using an exact tooling commit, then run it after
+Clippy. Replace `<sha>` with the commit containing the adopted checker:
 
 ```bash
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo dylint --workspace --all -- --all-targets --all-features -- -D warnings
+cargo install --git https://github.com/stella/tooling --rev <sha> --locked stella_source_lint
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+cargo ci-stella-lint
 ```
 
 ## Releasing packages
@@ -577,7 +609,7 @@ cannot be compared without executing Bun.
 Workflow/action and Docker definition edits conservatively force full CI.
 Unrelated application dependency changes do not force compiler parity.
 Setup-action runtime selectors and their tracked version-file contents must
-identify an exact stable release (or a dated Rust nightly). Floating selectors,
+identify an exact stable release. Floating selectors,
 ranges, expressions, empty
 values, or omitted runtime versions report an unreadable snapshot and run parity
 even when their committed text is unchanged.

@@ -5,5 +5,13 @@
       "workflow": ".github/workflows/ci.yml",
       "job": "engine-floor"
     }
+  ],
+  "rustExceptions": [
+    {
+      "pin": "1.97.1",
+      "reason": "cargo-hawk 0.1.11 compiler-private APIs fail to compile with Rust 1.99.0 (E0061/E0308).",
+      "tracking": "https://github.com/stella/tooling/issues/99",
+      "expires": "2026-11-11"
+    }
   ]
 }

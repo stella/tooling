@@ -20,7 +20,6 @@ const policy = {
   node: "26.x",
   python: "3.13.7",
   rust: "1.90.0",
-  rustCompilerDevelopment: "nightly-2026-04-16",
   packages: { oxlint: "1.87.0", oxfmt: "0.72.0", lefthook: "1.13.0" },
   actions: {
     "actions/checkout": { sha, version: "v5" },
@@ -340,10 +339,15 @@ test("runtime image families are classified before unresolved tag variables", ()
     "rust:${RUST_VERSION:-1.96.0}-bookworm",
     "rust:${RUST_VERSION:-1.96.0@sha256:example}",
     "docker.io/library/rust:${RUST_VERSION}-bookworm",
-    "ghcr.io/example/rust:${RUST_VERSION}",
   ])
     for (const { file, text } of runtimeImageSurfaces(image))
-      expect(runtimeImageDiagnostics(file, check(file, text))).toEqual([]);
+      expect(
+        check(file, text).some(({ rule }) => rule === "rust-version"),
+      ).toBe(true);
+  for (const { file, text } of runtimeImageSurfaces(
+    "ghcr.io/example/rust:${RUST_VERSION}",
+  ))
+    expect(runtimeImageDiagnostics(file, check(file, text))).toEqual([]);
   for (const image of [
     "node:${NODE_VERSION}-bookworm",
     "python:${PYTHON_VERSION}-slim",
@@ -1379,31 +1383,14 @@ test("Rust TOML uses the same channel rule under either supported filename", () 
   }
 });
 
-test("Rust compiler development selects its explicit pin only with rustc-dev", () => {
+test("Rust compiler components never select a second compiler pin", () => {
   for (const file of ["rust-toolchain", "rust-toolchain.toml"]) {
-    const declaration = `[toolchain]\nchannel = '${policy.rustCompilerDevelopment}'\ncomponents = ['rustc-dev', 'rust-src']`;
-    expect(check(file, declaration)).toEqual([]);
-    for (const mutation of [
-      declaration.replace(policy.rustCompilerDevelopment, "nightly-2026-04-15"),
-      declaration.replace("'rustc-dev', ", ""),
-      declaration.replace(policy.rustCompilerDevelopment, policy.rust),
-    ])
-      expect(
-        check(file, mutation).some(({ rule }) => rule === "rust-version"),
-      ).toBe(true);
+    const source = `[toolchain]\nchannel = '${policy.rust}'\ncomponents = ['rustc-dev', 'rust-src']`;
+    expect(check(file, source)).toEqual([]);
+    expect(
+      check(file, source.replace(policy.rust, "nightly-2026-04-16")),
+    ).toMatchObject([{ rule: "rust-version" }]);
   }
-  expect(
-    check("rust-toolchain", policy.rustCompilerDevelopment).some(
-      ({ rule }) => rule === "rust-version",
-    ),
-  ).toBe(true);
-  expect(check("mise.toml", `[tools]\nrust = '${policy.rust}'`)).toEqual([]);
-  expect(
-    check(
-      "mise.toml",
-      `[tools]\nrust = '${policy.rustCompilerDevelopment}'`,
-    ).some(({ rule }) => rule === "runtime-manager"),
-  ).toBe(true);
 });
 
 test("action metadata is checked at the root and in arbitrary directories", () => {

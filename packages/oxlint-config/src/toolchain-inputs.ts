@@ -69,8 +69,16 @@ export const isDockerDefinitionPath = (file: string) => {
   return /^(?:[^./]+\.)*(?:dockerfile|containerfile)(?:\.[^./]+)*$/i.test(name);
 };
 
+/** Executable shell files may have no suffix; the interpreter is then their discriminator. */
+export const isShellScript = (file: string, text = "") =>
+  !excludedInputPath(file) &&
+  (/\.(?:sh|bash|zsh)$/.test(file) ||
+    /^#![ \t]*(?:\/(?:[^ \t\r\n]+\/)*(?:bash|dash|ksh|zsh|sh)|\/usr\/bin\/env[ \t]+(?:-S[ \t]+)?(?:bash|dash|ksh|zsh|sh))(?=[ \t\r\n]|$)/.test(
+      text,
+    ));
+
 /** Lockfiles establish ecosystem presence without reading their dependency graphs. */
-export const toolchainInputKind = (file: string) => {
+export const toolchainInputKind = (file: string, text = "") => {
   if (file === cloudSetupPath) return "config";
   if (githubAutomationFileKind(file) !== undefined) return "config";
   if (excludedInputPath(file)) return undefined;
@@ -84,6 +92,8 @@ export const toolchainInputKind = (file: string) => {
     return "presence";
   if (
     githubAutomationFileKind(file) !== undefined ||
+    isShellScript(file, text) ||
+    /(?:^|\/)ci-service-images\.json$/.test(file) ||
     isMiseConfigPath(file) ||
     isPythonDependencyManifest(file) ||
     isDockerDefinitionPath(file) ||

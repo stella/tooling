@@ -262,7 +262,7 @@ test("Go file selection validates an overriding toolchain directive", async () =
   }
 });
 
-test("Rust setup toolchains require an immutable stable or dated nightly release", async () => {
+test("Rust setup toolchains require an immutable stable release", async () => {
   for (const selector of ["1.96.0", "nightly-2026-04-16", "nightly"]) {
     const { repo, write, commit } = fixture();
     write("package.json", { private: true, packageManager: "bun@1.4.3" });
@@ -274,7 +274,7 @@ test("Rust setup toolchains require an immutable stable or dated nightly release
       }),
     );
     const since = commit();
-    const stable = selector !== "nightly";
+    const stable = selector === "1.96.0";
     expect(await detectToolchainChanges({ repo, since })).toMatchObject({
       status: stable ? "compared" : "unreadable",
       changed: !stable,

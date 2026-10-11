@@ -20,13 +20,14 @@ import {
   engineFloorSelectorMatches,
   type ResolvedEngineFloor,
 } from "./toolchain-engine-floors";
-import { canonicalDockerRuntime } from "./toolchain-images";
+import { canonicalDockerRuntime, rustImageVersion } from "./toolchain-images";
 import {
   githubAutomationFileKind,
   isMiseConfigPath,
   isDockerDefinitionPath,
 } from "./toolchain-inputs";
 import { nodeSelectorMatches } from "./toolchain-node";
+import { checkRustReferences, type RustException } from "./toolchain-rust";
 
 export const runtimeRules = [
   "bun-pins",
@@ -45,7 +46,6 @@ type RuntimePolicy = {
   node: string;
   python: string;
   rust: string;
-  rustCompilerDevelopment: string;
   bun: string;
   packages: Record<string, string>;
   actions: Record<string, { sha: string; version: string }>;
@@ -77,6 +77,7 @@ type CheckRuntimeFileOptions = {
   onDelegated?: ((report: RuntimeDelegation) => void) | undefined;
   dynamicSelectors?: readonly DynamicSelector[] | undefined;
   onDynamicSelector?: ((entry: DynamicSelector) => void) | undefined;
+  rustExceptions?: readonly RustException[] | undefined;
   engineFloors?: readonly ResolvedEngineFloor[] | undefined;
   onEngineFloor?:
     | ((floor: ResolvedEngineFloor, status: "matched" | "mismatch") => void)
@@ -85,6 +86,82 @@ type CheckRuntimeFileOptions = {
 
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+type DockerEnvironmentOptions = { source: string; escape: string };
+
+// ENV uses whitespace-delimited assignments, not shell operators or command substitution.
+const dockerEnvironmentAssignments = ({
+  source,
+  escape,
+}: DockerEnvironmentOptions) => {
+  const words: string[] = [];
+  let word = "";
+  let quote: "'" | '"' | undefined;
+  for (let index = 0; index < source.length; index++) {
+    const character = source.at(index) ?? "";
+    if (character === escape && quote !== "'") {
+      word += character + (source.at(++index) ?? "");
+      continue;
+    }
+    if (character === quote) quote = undefined;
+    else if (quote === undefined && (character === "'" || character === '"'))
+      quote = character;
+    else if (quote === undefined && /\s/.test(character)) {
+      if (word !== "") words.push(word);
+      word = "";
+      continue;
+    }
+    word += character;
+  }
+  if (quote !== undefined) return undefined;
+  if (word !== "") words.push(word);
+  const decode = (raw: string) => {
+    let value = "";
+    let quoted: "'" | '"' | undefined;
+    for (let index = 0; index < raw.length; index++) {
+      const character = raw.at(index) ?? "";
+      if (character === quoted) {
+        quoted = undefined;
+        continue;
+      }
+      if (quoted === undefined && (character === "'" || character === '"')) {
+        quoted = character;
+        continue;
+      }
+      const next = raw.at(index + 1);
+      if (
+        character === escape &&
+        quoted !== "'" &&
+        next !== undefined &&
+        (quoted === undefined ||
+          next === '"' ||
+          next === "$" ||
+          next === escape)
+      ) {
+        value += next;
+        index++;
+      } else value += character;
+    }
+    return value;
+  };
+  const first = words.at(0);
+  if (first === undefined) return undefined;
+  if (!first.includes("=")) {
+    const legacy = /^(\S+)\s+([\s\S]*)$/.exec(source);
+    if (legacy === null) return undefined;
+    return [{ key: decode(legacy[1] ?? ""), value: decode(legacy[2] ?? "") }];
+  }
+  const assignments: { key: string; value: string }[] = [];
+  for (const raw of words) {
+    const separator = raw.indexOf("=");
+    if (separator < 1) return undefined;
+    assignments.push({
+      key: decode(raw.slice(0, separator)),
+      value: decode(raw.slice(separator + 1)),
+    });
+  }
+  return assignments;
+};
 
 const pythonSelectorMatches = (value: unknown, expected: string) =>
   value === expected ||
@@ -222,10 +299,17 @@ export const checkRuntimeFile = ({
   onDelegated,
   dynamicSelectors = [],
   onDynamicSelector,
+  rustExceptions = [],
   engineFloors = [],
   onEngineFloor,
 }: CheckRuntimeFileOptions): RuntimeDiagnostic[] => {
-  const diagnostics: RuntimeDiagnostic[] = [];
+  const diagnostics: RuntimeDiagnostic[] = checkRustReferences({
+    type: "file",
+    file,
+    text,
+    rust: policy.rust,
+    exceptions: rustExceptions,
+  });
   const name = path.posix.basename(file);
   const lines = text.split(/\r?\n/);
   type RuntimeDiagnosticOptions = Pick<
@@ -273,7 +357,10 @@ export const checkRuntimeFile = ({
     line = 1,
     selector,
   }: RuntimePinOptions) => {
-    let matches = value === expected;
+    let matches =
+      value === expected ||
+      (rule === "rust-version" &&
+        rustExceptions.some((entry) => entry.pin === value));
     if (selector === "node") matches = nodeSelectorMatches(value, expected);
     else if (label.includes("python"))
       matches = pythonSelectorMatches(value, expected);
@@ -354,17 +441,10 @@ export const checkRuntimeFile = ({
     const parsed = toml("rust-version");
     if (parsed !== undefined) {
       const toolchain = parsed["toolchain"];
-      const components = record(toolchain)
-        ? toolchain["components"]
-        : undefined;
-      const expected =
-        Array.isArray(components) && components.includes("rustc-dev")
-          ? policy.rustCompilerDevelopment
-          : policy.rust;
       pin({
         rule: "rust-version",
         value: record(toolchain) ? toolchain["channel"] : undefined,
-        expected,
+        expected: policy.rust,
         label: "Rust channel",
         line: lineOf("channel"),
       });
@@ -513,7 +593,10 @@ export const checkRuntimeFile = ({
         const configured = tools[tool];
         if (configured !== undefined)
           pin({
-            rule: "runtime-manager",
+            rule:
+              tool === "rust" || tool === "core:rust"
+                ? "rust-version"
+                : "runtime-manager",
             value: record(configured) ? configured["version"] : configured,
             expected,
             selector: nodeTools.has(tool) ? "node" : undefined,
@@ -533,7 +616,10 @@ export const checkRuntimeFile = ({
       )?.[1];
       if (expected !== undefined)
         pin({
-          rule: "runtime-manager",
+          rule:
+            tool === "rust" || tool === "core:rust"
+              ? "rust-version"
+              : "runtime-manager",
           value: fields.slice(1).join(" "),
           expected,
           selector: nodeTools.has(tool) ? "node" : undefined,
@@ -555,11 +641,17 @@ export const checkRuntimeFile = ({
     at,
   }: RuntimeImageOptions) => {
     const unknownRuntime = () => {
-      if (dynamic(image) && authorizeDynamic("image", line, at)) return;
+      const rustImage =
+        typeof image === "string" &&
+        /^rust(?=:|@|$)/i.test(canonicalDockerRuntime(image));
+      if (!rustImage && dynamic(image) && authorizeDynamic("image", line, at))
+        return;
       add({
-        rule: "runtime-docker",
+        rule: rustImage ? "rust-version" : "runtime-docker",
         line,
-        message: `cannot determine ${label} runtime; use a static image or a scoped dynamicSelectors declaration`,
+        message: rustImage
+          ? `cannot determine ${label} Rust release; use a static exact pin`
+          : `cannot determine ${label} runtime; use a static image or a scoped dynamicSelectors declaration`,
       });
     };
     if (typeof image !== "string") {
@@ -579,7 +671,7 @@ export const checkRuntimeFile = ({
       digestSeparator < 0
         ? structuralImage
         : structuralImage.slice(0, digestSeparator);
-    const managedFamily = /^(node|python|oven\/bun)(?=:|$)/i.exec(
+    const managedFamily = /^(node|python|rust|oven\/bun)(?=:|$)/i.exec(
       structuralReference,
     )?.[1];
     const tagSeparator =
@@ -597,8 +689,11 @@ export const checkRuntimeFile = ({
       unknownRuntime();
       return;
     }
-    if (!/^(node|python|oven\/bun)$/i.test(imageRepository)) return;
+    if (!/^(node|python|rust|oven\/bun)$/i.test(imageRepository)) return;
     const tool = imageRepository.toLowerCase();
+    let imageRule: RuntimeRule = "runtime-docker";
+    if (tool === "rust") imageRule = "rust-version";
+    else if (tool === "oven/bun") imageRule = "bun-pins";
     if (image.includes("$")) {
       unknownRuntime();
       return;
@@ -607,7 +702,7 @@ export const checkRuntimeFile = ({
       digestSeparator < 0 ? undefined : canonical.slice(digestSeparator + 1);
     if (digest !== undefined && !/^sha256:[a-fA-F\d]{64}$/.test(digest)) {
       add({
-        rule: tool === "oven/bun" ? "bun-pins" : "runtime-docker",
+        rule: imageRule,
         line,
         message: `${label} ${tool} digest must be sha256 followed by 64 hexadecimal characters`,
       });
@@ -619,17 +714,21 @@ export const checkRuntimeFile = ({
         ? /-(?:alpine|slim|debian)$/
         : /-(?:alpine(?:\d+(?:\.\d+)*)?|(?:bookworm|bullseye|trixie|buster)(?:-slim)?|slim)$/;
     // Strip only supported image variants; prerelease qualifiers remain invalid pins.
-    const version = tag?.replace(variantSuffix, "");
+    const version =
+      tool === "rust" && tag !== undefined
+        ? rustImageVersion(tag)
+        : tag?.replace(variantSuffix, "");
     let expected = policy.bun;
     if (tool === "node") expected = policy.node;
     else if (tool === "python") expected = policy.python;
+    else if (tool === "rust") expected = policy.rust;
     if (digest !== undefined) {
       if (
         version === undefined ||
         !/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/.test(version)
       ) {
         add({
-          rule: tool === "oven/bun" ? "bun-pins" : "runtime-docker",
+          rule: imageRule,
           line,
           message: `${label} ${tool} digest requires an exact stable patch tag matching ${expected}`,
         });
@@ -648,7 +747,7 @@ export const checkRuntimeFile = ({
       }
     }
     pin({
-      rule: tool === "oven/bun" ? "bun-pins" : "runtime-docker",
+      rule: imageRule,
       value: version,
       expected,
       selector: tool === "node" ? "node" : undefined,
@@ -666,6 +765,19 @@ export const checkRuntimeFile = ({
       [];
     let instruction = "";
     let startLine = 1;
+    let pendingRustRun: { source: string; line: number } | undefined;
+    const checkRustCommand = (source: string, line: number) => {
+      diagnostics.push(
+        ...checkRustReferences({
+          type: "command",
+          file,
+          source,
+          line,
+          rust: policy.rust,
+          exceptions: rustExceptions,
+        }),
+      );
+    };
     const expand = (value: string) => {
       for (let count = 0; count <= variables.size; count++) {
         const next = value.replace(
@@ -766,7 +878,63 @@ export const checkRuntimeFile = ({
           variables.set(key, expand(value.replace(/^(["'])(.*)\1$/, "$2")));
         return;
       }
-      if (/^\s*(?:RUN|COPY)\s+/i.test(content)) {
+      const run = /^\s*RUN\s+(.+)$/i.exec(content);
+      if (run !== null) {
+        let source = run[1] ?? "";
+        source = source.replace(/^(?:--\S+\s+)*/, "");
+        if (source.startsWith("[")) {
+          try {
+            const words: unknown = JSON.parse(source);
+            if (
+              Array.isArray(words) &&
+              words.every((word: unknown) => typeof word === "string")
+            ) {
+              // Exec-form arguments are literal; only an explicit shell -c evaluates their contents.
+              source = words
+                .map((word) => `'${word.replaceAll("'", "'\\''")}'`)
+                .join(" ");
+            }
+          } catch {
+            // A leading bracket also starts a shell test; preserve shell form unless JSON proves exec form.
+          }
+        }
+        const implicit = /^(<<-?(?:'[^']+'|"[^"]+"|\S+))(?:\s+(.+))?$/.exec(
+          source,
+        );
+        if (implicit !== null && implicit[2] === undefined)
+          source = `sh ${source}`;
+        collectHeredocs(content, line);
+        if (heredocs.length > 0) pendingRustRun = { source, line };
+        else checkRustCommand(source, line);
+        return;
+      }
+      const environment = /^\s*ENV\s+(.+)$/i.exec(content);
+      if (environment !== null) {
+        const assignments = dockerEnvironmentAssignments({
+          source: environment[1] ?? "",
+          escape,
+        });
+        if (assignments === undefined) {
+          add({
+            rule: "runtime-docker",
+            line,
+            message: "invalid Docker ENV assignments",
+          });
+          return;
+        }
+        diagnostics.push(
+          ...checkRustReferences({
+            type: "environment",
+            file,
+            assignments,
+            line,
+            rust: policy.rust,
+            exceptions: rustExceptions,
+          }),
+        );
+        return;
+      }
+      if (/^\s*COPY\s+/i.test(content)) {
         collectHeredocs(content, line);
         return;
       }
@@ -786,11 +954,16 @@ export const checkRuntimeFile = ({
     lines.forEach((line, index) => {
       const heredoc = heredocs.at(0);
       if (heredoc !== undefined) {
+        if (pendingRustRun !== undefined) pendingRustRun.source += `\n${line}`;
         if (
           (heredoc.stripTabs ? line.replace(/^\t+/, "") : line) ===
           heredoc.delimiter
         )
           heredocs.shift();
+        if (heredocs.length === 0 && pendingRustRun !== undefined) {
+          checkRustCommand(pendingRustRun.source, pendingRustRun.line);
+          pendingRustRun = undefined;
+        }
         return;
       }
       if (line.trimStart().startsWith("#")) return;

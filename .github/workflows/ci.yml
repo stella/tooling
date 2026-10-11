@@ -153,14 +153,16 @@ jobs:
 
   checks:
     if: always()
-    needs: [build-checks, engine-floor]
+    needs: [build-checks, engine-floor, rust-lints, hawk-compatibility]
     runs-on: ubuntu-latest
     steps:
-      - name: Require shared checks and Node floor success
+      - name: Require every validation job to succeed
         env:
           BUILD_RESULT: ${{ needs.build-checks.result }}
           FLOOR_RESULT: ${{ needs.engine-floor.result }}
-        run: test "$BUILD_RESULT" = success && test "$FLOOR_RESULT" = success
+          RUST_RESULT: ${{ needs.rust-lints.result }}
+          HAWK_RESULT: ${{ needs.hawk-compatibility.result }}
+        run: test "$BUILD_RESULT" = success && test "$FLOOR_RESULT" = success && test "$RUST_RESULT" = success && test "$HAWK_RESULT" = success
 
   rust-lints:
     runs-on: ubuntu-latest
@@ -170,12 +172,45 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Rust lint toolchain
-        run: |
-          rustup toolchain install nightly-2026-04-16 --profile minimal \
-            --component rustc-dev \
-            --component llvm-tools-preview
-          cargo install dylint-link --version 6.0.1 --locked
+      - name: Install stable Rust toolchain
+        run: rustup toolchain install 1.99.0 --profile minimal
 
-      - name: Test Rust lints
-        run: cd rust-lints/stella_lints && cargo test
+      - name: Test stable source lint
+        env:
+          RUSTUP_TOOLCHAIN: "1.99.0"
+        run: cargo test --manifest-path rust-lints/stella_source_lint/Cargo.toml --locked
+
+  hawk-compatibility:
+    name: Hawk compiler compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out consumer crate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: stella/regex-set
+          ref: ae63e774bca2a22878c88e165bb60f2d9a12027e
+          persist-credentials: false
+
+      - name: Install documented Hawk compiler exception
+        run: rustup toolchain install 1.97.1 --profile minimal --component rustc-dev
+
+      - name: Build pinned Hawk
+        # Hawk's documented source install requires rustc_private opt-in.
+        env:
+          RUSTC_BOOTSTRAP: "1"
+        run: cargo +1.97.1 install cargo-hawk --version 0.1.11 --locked --root "$RUNNER_TEMP/hawk"
+
+      - name: Check consumer crate with the Hawk compiler
+        env:
+          CARGO_BUILD_RUSTC_WRAPPER: ""
+        run: |
+          unset RUSTC_WRAPPER RUSTC_WORKSPACE_WRAPPER
+          export PATH="$RUNNER_TEMP/hawk/bin:$PATH"
+          cat > hawk.toml <<'HAWK_CONFIG'
+          [[production]]
+          package = "stella-regex-set"
+          lib = "stella_regex_set"
+          reason = "Shared native library compatibility probe"
+          HAWK_CONFIG
+          cargo +1.97.1 hawk check --target-dir "$RUNNER_TEMP/hawk-target" -A hawk::dead_public -A hawk::unnecessary_public
