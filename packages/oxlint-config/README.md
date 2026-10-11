@@ -70,6 +70,12 @@ Bun, TypeScript install layouts, Node, Python, Rust, GitHub Actions, and
 Dependabot. Inherit the fields for tools your repository uses. The checker
 does not require tools absent from the repository.
 
+Shared-pin Dependabot ignores must contain only `dependency-name` and
+`update-types`, listing `version-update:semver-major`,
+`version-update:semver-minor`, and `version-update:semver-patch`. This ignores
+version updates while preserving security update pull requests. Name-only
+ignores are rejected because they also suppress security updates.
+
 Set `packageManager` to `bun@` followed by the policy's `bun` value, and pin
 `bun-types` to that same value. Dependency pins can live in default or named
 catalogs, including Bun's `workspaces` catalogs. Bun image tags, version

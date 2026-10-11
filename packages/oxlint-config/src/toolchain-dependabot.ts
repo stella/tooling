@@ -61,6 +61,18 @@ const sameStrings = (value: unknown, expected: readonly string[]) => {
     .every((entry, index) => entry === sortedExpected[index]);
 };
 
+const pinnedVersionUpdateTypes = [
+  "version-update:semver-major",
+  "version-update:semver-minor",
+  "version-update:semver-patch",
+];
+
+const versionOnlyIgnore = (entry: unknown) =>
+  record(entry) &&
+  Object.keys(entry).length === 2 &&
+  typeof entry["dependency-name"] === "string" &&
+  sameStrings(entry["update-types"], pinnedVersionUpdateTypes);
+
 const directoryOf = (file: string) => {
   const directory = path.posix.dirname(file);
   return directory === "." ? "/" : `/${directory}`;
@@ -478,7 +490,10 @@ export const generateDependabotConfig = ({
         ),
         ignore:
           ignored.length > 0
-            ? ignored.map((name) => ({ "dependency-name": name }))
+            ? ignored.map((name) => ({
+                "dependency-name": name,
+                "update-types": pinnedVersionUpdateTypes,
+              }))
             : undefined,
       };
     });
@@ -700,6 +715,14 @@ export const checkDependabot = ({
         "ignore",
         `${ecosystem}: ignore only packages owned by the shared policy`,
       );
+    if (
+      Array.isArray(ignore) &&
+      ignore.some((entry: unknown) => !versionOnlyIgnore(entry))
+    )
+      report(
+        "ignore",
+        `${ecosystem}: each shared-pin ignore must contain only dependency-name and update-types for semver-major, semver-minor, and semver-patch version updates; security updates must remain enabled`,
+      );
     for (const name of ignored) {
       if (
         !Array.isArray(ignore) ||
@@ -707,12 +730,12 @@ export const checkDependabot = ({
           (entry: unknown) =>
             record(entry) &&
             entry["dependency-name"] === name &&
-            Object.keys(entry).length === 1,
+            versionOnlyIgnore(entry),
         )
       )
         report(
           "ignore",
-          `${ecosystem}: ignore all updates for shared pin ${name}`,
+          `${ecosystem}: ignore all version updates for shared pin ${name}`,
         );
     }
   }
