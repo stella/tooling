@@ -21,6 +21,7 @@ import {
 import {
   checkToolchain,
   parseToolchainConfiguration,
+  readToolchainInputs,
   toolchainRules,
 } from "./toolchain-guard";
 import { toolchainInputKind } from "./toolchain-inputs";
@@ -889,4 +890,27 @@ test("tracked extensionless shell shebangs enter Rust policy discovery", () => {
       "node_modules/rust-check": "#!/bin/sh\ncargo +nightly test",
     }),
   ).toEqual([]);
+});
+
+test("shell discovery skips initialized and absent tracked submodules", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "stll-gitlink-"));
+  try {
+    execFileSync("git", ["init", "-q", root]);
+    execFileSync(
+      "git",
+      [
+        "update-index",
+        "--add",
+        "--cacheinfo",
+        `160000,${"a".repeat(40)},.ai/shared`,
+      ],
+      { cwd: root },
+    );
+    expect(readToolchainInputs(root).diagnostics).toEqual([]);
+    mkdirSync(path.join(root, ".ai/shared"), { recursive: true });
+    expect(readToolchainInputs(root).diagnostics).toEqual([]);
+    expect(readToolchainInputs(root).files).toEqual({});
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

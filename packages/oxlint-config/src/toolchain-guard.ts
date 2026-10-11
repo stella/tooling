@@ -117,12 +117,18 @@ export const parseToolchainConfiguration = (input: unknown) => {
 /** Read one tracked configuration snapshot for guards and policy generation. */
 export const readToolchainInputs = (root: string) => {
   const diagnostics: SharedToolchainDiagnostic[] = [];
-  const tracked = execFileSync("git", ["ls-files", "-z", "--cached"], {
-    cwd: root,
-    encoding: "utf8",
-  })
+  const tracked = execFileSync(
+    "git",
+    ["ls-files", "-z", "--cached", "--stage"],
+    {
+      cwd: root,
+      encoding: "utf8",
+    },
+  )
     .split("\0")
-    .filter((file) => file !== "");
+    // Gitlinks identify submodule directories, never executable script files.
+    .filter((entry) => entry !== "" && !entry.startsWith("160000 "))
+    .map((entry) => entry.slice(entry.indexOf("\t") + 1));
   const files: Record<string, string> = {};
   const trackedFiles = new Set(tracked);
   const resolvedRoot = realpathSync(root);
