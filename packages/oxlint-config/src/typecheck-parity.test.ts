@@ -631,6 +631,23 @@ test("diagnostic parsing retains codes independent of ordering, location and dup
   ).toEqual([2322, 7006]);
 });
 
+test("diagnostic codes ignore path lookalikes and retain compiler output formats", () => {
+  expect(
+    diagnosticCodes(
+      "/tmp/parity-TS0-TS99999/config.json(1,1): error TS5102: removed option",
+    ),
+  ).toEqual([5102]);
+  expect(diagnosticCodes("input.ts:1:1: error 2322: wrong type")).toEqual([
+    2322,
+  ]);
+  expect(
+    diagnosticCodes(
+      '<error file="/tmp/TS99999/input.ts" code="TS7006">implicit any</error>',
+    ),
+  ).toEqual([7006]);
+  expect(diagnosticCodes("/tmp/TS99999/input.ts: tool failed")).toEqual([]);
+});
+
 for (const fixture of fixtures) {
   test(`${fixture.name} runtime fixture comparison rejects every lost diagnostic`, () => {
     const output = fixture.codes

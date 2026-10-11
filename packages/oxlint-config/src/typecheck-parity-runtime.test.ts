@@ -23,6 +23,7 @@ import {
   compareRepository,
   discoverConfigGroups,
   diagnosticSet,
+  diagnosticCodes,
   fixtureCompilerOptions,
   fixturePackageContext,
   fixtureParity,
@@ -31,6 +32,16 @@ import {
   resolveCompiler,
   runTypecheckParity,
 } from "./typecheck-parity";
+
+const compilerDiagnosticCodes = (output: string) =>
+  diagnosticCodes(output).map((code) => `TS${code}`);
+
+test("compiler diagnostic codes ignore diagnostic-like temporary path segments", () => {
+  const config = join(tmpdir(), "parity-TS0-TS99999", "tsconfig.json");
+  const output = `${config}(3,5): error TS5102: Option 'outFile' has been removed.\n`;
+  expect(output).toContain("TS0");
+  expect(compilerDiagnosticCodes(output)).toEqual(["TS5102"]);
+});
 
 const rejectedError = async (promise: Promise<unknown>): Promise<Error> => {
   try {
@@ -931,7 +942,7 @@ test.skipIf(process.env["CI"] !== "true")(
     const project = await realpath(
       await mkdtemp(join(tmpdir(), "parity-rootdir-equivalence-")),
     );
-    const consumer = join(project, "app");
+    const consumer = join(project, "app-TS0");
     try {
       await mkdir(consumer);
       await writeFile(join(project, "shared.ts"), "export const shared = 1;");
@@ -998,12 +1009,13 @@ test.skipIf(process.env["CI"] !== "true")(
             if ("outFile" in configuration) {
               expect(original.status).toBe(1);
               expect(compared.baseline.rawStatus).toBe(1);
-              expect([...new Set(originalOutput.match(/TS\d+/g))]).toEqual([
+              expect(originalOutput).toContain("TS0");
+              expect(compilerDiagnosticCodes(originalOutput)).toEqual([
                 "TS5102",
               ]);
-              expect([
-                ...new Set(compared.baseline.output.match(/TS\d+/g)),
-              ]).toEqual(["TS5102"]);
+              expect(compilerDiagnosticCodes(compared.baseline.output)).toEqual(
+                ["TS5102"],
+              );
               expect(compared.repository.passed).toBe(false);
               continue;
             }

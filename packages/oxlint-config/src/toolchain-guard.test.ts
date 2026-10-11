@@ -914,3 +914,54 @@ test("shell discovery skips initialized and absent tracked submodules", () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("optional shebang discovery skips symlinks without tracked regular targets", () => {
+  for (const target of [
+    "directory",
+    "untracked",
+    "missing",
+    "absolute",
+    "tracked",
+  ]) {
+    const workspace = mkdtempSync(path.join(tmpdir(), "stll-shebang-links-"));
+    const root = path.join(workspace, "repository");
+    mkdirSync(root);
+    try {
+      execFileSync("git", ["init", "-q", root]);
+      const source = `#!/bin/sh\ncargo +${policy.rust} test\n`;
+      let destination = "missing";
+      if (target === "directory") {
+        mkdirSync(path.join(root, ".ai"));
+        writeFileSync(path.join(root, ".ai/README.md"), "Instructions");
+        execFileSync("git", ["add", ".ai"], { cwd: root });
+        destination = ".ai";
+      }
+      if (target === "untracked" || target === "tracked") {
+        destination = "program";
+        writeFileSync(path.join(root, destination), source);
+        if (target === "tracked")
+          execFileSync("git", ["add", destination], { cwd: root });
+      }
+      if (target === "absolute") {
+        destination = path.join(workspace, "external-script");
+        writeFileSync(destination, "#!/bin/sh\ncargo +nightly test\n");
+      }
+      symlinkSync(destination, path.join(root, "script"));
+      execFileSync("git", ["add", "script"], { cwd: root });
+      expect(checkToolchain({ root, policy })).toEqual([]);
+      if (target === "tracked") {
+        expect(readToolchainInputs(root).files["script"]).toBe(source);
+        writeFileSync(
+          path.join(root, destination),
+          source.replace(policy.rust, "nightly"),
+        );
+        expect(checkToolchain({ root, policy })).toMatchObject([
+          { rule: "rust-version", path: "program" },
+          { rule: "rust-version", path: "script" },
+        ]);
+      }
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  }
+});

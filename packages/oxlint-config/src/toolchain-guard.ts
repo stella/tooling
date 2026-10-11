@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import {
   closeSync,
+  lstatSync,
   openSync,
   readSync,
   readFileSync,
@@ -147,7 +148,12 @@ export const readToolchainInputs = (root: string) => {
       continue;
     }
     try {
-      const resolvedFile = realpathSync(path.join(resolvedRoot, file));
+      const inputPath = path.join(resolvedRoot, file);
+      if (shebangCandidate) {
+        const input = lstatSync(inputPath);
+        if (!input.isFile() && !input.isSymbolicLink()) continue;
+      }
+      const resolvedFile = realpathSync(inputPath);
       const relative = path.relative(resolvedRoot, resolvedFile);
       if (
         path.isAbsolute(relative) ||
@@ -156,6 +162,7 @@ export const readToolchainInputs = (root: string) => {
       )
         throw new Error("Configuration target is outside the tracked tree");
       if (shebangCandidate) {
+        if (!lstatSync(resolvedFile).isFile()) continue;
         // Bound discovery reads: extensionless files may be large binary artifacts.
         const descriptor = openSync(resolvedFile, "r");
         const prefix = Buffer.alloc(512);
@@ -173,6 +180,7 @@ export const readToolchainInputs = (root: string) => {
       }
       files[file] = readFileSync(resolvedFile, "utf8");
     } catch {
+      if (shebangCandidate) continue;
       diagnostics.push({
         rule: "configuration",
         path: file,
