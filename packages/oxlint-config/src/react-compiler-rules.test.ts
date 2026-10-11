@@ -143,6 +143,12 @@ test("React diagnostics stay inside consumer-selected files", async () => {
         }),
       ]),
     );
+    expect(
+      await lint({
+        react: { files: ["react-hook.ts"] },
+        overrides: [{ files: ["*.ts"], rules: { "react/hooks": "off" } }],
+      }),
+    ).toEqual([]);
     await writeFile(
       join(directory, "consumer.test.ts"),
       "console.log('consumer');\n",
@@ -169,10 +175,7 @@ test("React scoping retains consumer plugins and permits later rule overrides", 
     react: { files: ["react/**"] },
     overrides: [{ files: ["react/**"], rules: { "react/hooks": "warn" } }],
   });
-  expect(config.overrides?.at(-2)?.plugins).toEqual([
-    ...(config.plugins ?? []),
-    "react",
-  ]);
+  expect(config.plugins).toEqual(expect.arrayContaining(["jsx-a11y", "react"]));
   expect(config.overrides?.at(-1)?.rules).toEqual({ "react/hooks": "warn" });
 });
 
@@ -205,4 +208,28 @@ test("consumer plugin lists remain authoritative when overriding scoped rules", 
     ],
   });
   expect(config.overrides?.at(-1)?.plugins).toEqual(["eslint"]);
+});
+
+test("broad disabling overrides keep React defaults off outside the selected files", () => {
+  const disabledSettings = [
+    "off",
+    "allow",
+    0,
+    ["off"],
+    ["allow"],
+    [0],
+  ] satisfies NonNullable<LibraryOptions["rules"]>["react/hooks"][];
+  for (const setting of disabledSettings) {
+    const config = library({
+      react: { files: ["react/**"] },
+      overrides: [
+        { files: ["**/*.test.ts"], rules: { "react/hooks": setting } },
+      ],
+    });
+    for (const name of Object.keys(reactRules)) {
+      expect(config.rules?.[name]).toBe("off");
+    }
+    expect(config.overrides?.at(-1)?.plugins).toBeUndefined();
+    expect(config.overrides?.at(-1)?.rules).toEqual({ "react/hooks": setting });
+  }
 });

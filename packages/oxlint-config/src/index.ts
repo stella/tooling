@@ -202,9 +202,8 @@ export const libraryOverrides = [
 ] satisfies OxlintOverride[];
 
 export const library = (options: LibraryOptions = {}): OxlintConfig => {
-  const plugins = Array.from(
-    new Set([...libraryPlugins, ...(options.plugins ?? [])]),
-  );
+  const plugins = new Set([...libraryPlugins, ...(options.plugins ?? [])]);
+  if (options.react !== undefined) plugins.add("react");
   const presetOverrides = [
     ...libraryOverrides,
     ...(options.react === undefined
@@ -212,31 +211,18 @@ export const library = (options: LibraryOptions = {}): OxlintConfig => {
       : [
           {
             files: options.react.files,
-            plugins: [...plugins, "react"],
             rules: reactRules,
           } satisfies OxlintOverride,
         ]),
   ];
-  const scopedPlugins = Array.from(
-    new Set(
-      presetOverrides.flatMap((override) =>
-        "plugins" in override
-          ? override.plugins.filter((plugin) => !plugins.includes(plugin))
-          : [],
-      ),
-    ),
-  );
-  const consumerOverrides = (options.overrides ?? []).map((override) => {
-    if (override.plugins !== undefined) return override;
-    // Oxlint starts each override from the base plugin list. Explicit scoped
-    // rule choices must activate their plugin even after an earlier override.
-    const ruleNames = Object.keys(override.rules ?? {});
-    const requiredPlugins = scopedPlugins.filter((plugin) =>
-      ruleNames.some((name) => name.startsWith(`${plugin}/`)),
-    );
-    if (requiredPlugins.length === 0) return override;
-    return { ...override, plugins: [...plugins, ...requiredPlugins] };
-  });
+  // Oxlint resolves each consumer override against the base plugin list.
+  // Register scoped plugins here so later overrides can disable their rules;
+  // all React defaults remain off outside the consumer-selected files.
+  const scopedRuleDefaults: Rules = {};
+  if (options.react !== undefined) {
+    for (const name of Object.keys(reactRules))
+      scopedRuleDefaults[name] = "off";
+  }
   return defineConfig({
     options: {
       denyWarnings: true,
@@ -244,7 +230,7 @@ export const library = (options: LibraryOptions = {}): OxlintConfig => {
       typeAware: true,
       ...options.options,
     },
-    plugins,
+    plugins: Array.from(plugins),
     jsPlugins: [
       stellaLowercasePluginSpecifier,
       noRawColorsPluginSpecifier,
@@ -256,15 +242,17 @@ export const library = (options: LibraryOptions = {}): OxlintConfig => {
     ],
     rules: {
       ...libraryRules,
+      ...scopedRuleDefaults,
       ...options.rules,
     },
     overrides: [
       // Consumer rules take precedence over every preset, including scoped ones.
-      ...presetOverrides.map((override) => ({
-        ...override,
-        rules: { ...override.rules, ...options.rules },
-      })),
-      ...consumerOverrides,
+      ...presetOverrides.map((override) =>
+        Object.assign({}, override, {
+          rules: Object.assign({}, override.rules, options.rules),
+        }),
+      ),
+      ...(options.overrides ?? []),
     ],
   });
 };
