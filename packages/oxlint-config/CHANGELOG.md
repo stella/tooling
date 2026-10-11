@@ -1,5 +1,11 @@
 # @stll/oxlint-config
 
+## 0.14.0
+
+### Minor Changes
+
+- [#83](https://github.com/stella/tooling/pull/83) [`75193e8`](https://github.com/stella/tooling/commit/75193e893de562390ab70221c0c4db2309368b96) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Add a shared resolved-toolchain change detector, conditional compiler parity, and a reusable seeded typecheck probe.
+
 ## 0.13.0
 
 ### Minor Changes

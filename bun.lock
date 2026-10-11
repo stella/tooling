@@ -21,7 +21,7 @@
     },
     "packages/oxlint-config": {
       "name": "@stll/oxlint-config",
-      "version": "0.13.0",
+      "version": "0.14.0",
       "bin": {
         "stll-cloud-setup": "./dist/cloud-setup-cli.mjs",
         "stll-toolchain-check": "./dist/toolchain-check-cli.mjs",
