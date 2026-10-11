@@ -1,5 +1,11 @@
 # @stll/oxlint-config
 
+## 1.0.1
+
+### Patch Changes
+
+- [#106](https://github.com/stella/tooling/pull/106) [`1b15868`](https://github.com/stella/tooling/commit/1b15868d2e039c7916ee2c1aad70af86db770e99) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Require shared-pin Dependabot ignores to name the dependency and list major, minor, and patch version updates explicitly. Generate and validate this configuration while preserving security update pull requests.
+
 ## 1.0.0
 
 ### Major Changes
