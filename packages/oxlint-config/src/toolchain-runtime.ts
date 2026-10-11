@@ -893,21 +893,9 @@ export const checkRuntimeFile = ({
               source = words
                 .map((word) => `'${word.replaceAll("'", "'\\''")}'`)
                 .join(" ");
-            } else {
-              add({
-                rule: "runtime-docker",
-                line,
-                message: "invalid Docker RUN exec form",
-              });
-              return;
             }
           } catch {
-            add({
-              rule: "runtime-docker",
-              line,
-              message: "invalid Docker RUN exec form",
-            });
-            return;
+            // A leading bracket also starts a shell test; preserve shell form unless JSON proves exec form.
           }
         }
         const implicit = /^(<<-?(?:'[^']+'|"[^"]+"|\S+))(?:\s+(.+))?$/.exec(

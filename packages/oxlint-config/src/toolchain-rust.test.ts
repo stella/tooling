@@ -526,6 +526,8 @@ test("Docker RUN and ENV instructions retain Rust pin enforcement", () => {
     (pin: string) => ["RUN rustup toolchain add " + "\\", pin].join("\n"),
     (pin: string) => `RUN ["rustup", "default", "${pin}"]`,
     (pin: string) => `RUN ["sh", "-c", "rustup default ${pin}"]`,
+    (pin: string) => `RUN [ -f Cargo.toml ] && cargo +${pin} test`,
+    (pin: string) => `RUN [ -f Cargo.toml ] && rustup default ${pin}`,
     (pin: string) => `RUN <<'SCRIPT'\ncargo +${pin} test\nSCRIPT`,
     (pin: string) => `RUN <<SCRIPT bash\nrustup default ${pin}\nSCRIPT`,
     (pin: string) => `ENV RUSTUP_TOOLCHAIN=${pin}`,
