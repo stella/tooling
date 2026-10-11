@@ -87,6 +87,82 @@ type CheckRuntimeFileOptions = {
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+type DockerEnvironmentOptions = { source: string; escape: string };
+
+// ENV uses whitespace-delimited assignments, not shell operators or command substitution.
+const dockerEnvironmentAssignments = ({
+  source,
+  escape,
+}: DockerEnvironmentOptions) => {
+  const words: string[] = [];
+  let word = "";
+  let quote: "'" | '"' | undefined;
+  for (let index = 0; index < source.length; index++) {
+    const character = source.at(index) ?? "";
+    if (character === escape && quote !== "'") {
+      word += character + (source.at(++index) ?? "");
+      continue;
+    }
+    if (character === quote) quote = undefined;
+    else if (quote === undefined && (character === "'" || character === '"'))
+      quote = character;
+    else if (quote === undefined && /\s/.test(character)) {
+      if (word !== "") words.push(word);
+      word = "";
+      continue;
+    }
+    word += character;
+  }
+  if (quote !== undefined) return undefined;
+  if (word !== "") words.push(word);
+  const decode = (raw: string) => {
+    let value = "";
+    let quoted: "'" | '"' | undefined;
+    for (let index = 0; index < raw.length; index++) {
+      const character = raw.at(index) ?? "";
+      if (character === quoted) {
+        quoted = undefined;
+        continue;
+      }
+      if (quoted === undefined && (character === "'" || character === '"')) {
+        quoted = character;
+        continue;
+      }
+      const next = raw.at(index + 1);
+      if (
+        character === escape &&
+        quoted !== "'" &&
+        next !== undefined &&
+        (quoted === undefined ||
+          next === '"' ||
+          next === "$" ||
+          next === escape)
+      ) {
+        value += next;
+        index++;
+      } else value += character;
+    }
+    return value;
+  };
+  const first = words.at(0);
+  if (first === undefined) return undefined;
+  if (!first.includes("=")) {
+    const legacy = /^(\S+)\s+([\s\S]*)$/.exec(source);
+    if (legacy === null) return undefined;
+    return [{ key: decode(legacy[1] ?? ""), value: decode(legacy[2] ?? "") }];
+  }
+  const assignments: { key: string; value: string }[] = [];
+  for (const raw of words) {
+    const separator = raw.indexOf("=");
+    if (separator < 1) return undefined;
+    assignments.push({
+      key: decode(raw.slice(0, separator)),
+      value: decode(raw.slice(separator + 1)),
+    });
+  }
+  return assignments;
+};
+
 const pythonSelectorMatches = (value: unknown, expected: string) =>
   value === expected ||
   (typeof value === "string" &&
@@ -857,13 +933,23 @@ export const checkRuntimeFile = ({
       }
       const environment = /^\s*ENV\s+(.+)$/i.exec(content);
       if (environment !== null) {
-        const value = environment[1] ?? "";
-        const legacy = /^([A-Za-z_][A-Za-z_\d]*)\s+(.+)$/.exec(value);
+        const assignments = dockerEnvironmentAssignments({
+          source: environment[1] ?? "",
+          escape,
+        });
+        if (assignments === undefined) {
+          add({
+            rule: "runtime-docker",
+            line,
+            message: "invalid Docker ENV assignments",
+          });
+          return;
+        }
         diagnostics.push(
           ...checkRustReferences({
             type: "environment",
             file,
-            source: legacy === null ? value : `${legacy[1]}=${legacy[2]}`,
+            assignments,
             line,
             rust: policy.rust,
             exceptions: rustExceptions,

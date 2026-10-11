@@ -277,5 +277,60 @@ test("trailing heredoc comments end the receiver invocation", () => {
         { rule: "rust-version" },
       ]);
     }
-  expect(check("cat <<EOF # data comment\ncargo +nightly test\nEOF")).toEqual([]);
+  expect(check("cat <<EOF # data comment\ncargo +nightly test\nEOF")).toEqual(
+    [],
+  );
+});
+
+test("only the effective stdin heredoc is a shell program", () => {
+  const dataHeaders = [
+    "bash 3<<'DATA' </dev/null",
+    "bash <<'DATA' </dev/null",
+    "bash <<'DATA' 0<&1",
+    "bash <<'DATA' 0<&-",
+  ];
+  for (const header of dataHeaders) {
+    expect(check(`${header}\ncargo +${rust} test\nDATA`)).toEqual([]);
+    expect(check(`${header}\ncargo +nightly test\nDATA`)).toEqual([]);
+  }
+  for (const header of ["bash </dev/null <<'DATA'", "bash 0<<'DATA'"]) {
+    expect(check(`${header}\ncargo +${rust} test\nDATA`)).toEqual([]);
+    expect(check(`${header}\ncargo +nightly test\nDATA`)).toMatchObject([
+      { rule: "rust-version" },
+    ]);
+  }
+});
+
+test("multiple stdin heredocs check the last effective program rather than earlier data", () => {
+  const source = (first: string, last: string) =>
+    `bash <<'FIRST' <<'LAST'\ncargo +${first} test\nFIRST\nrustup default ${last}\nLAST`;
+  expect(check(source("nightly", rust))).toEqual([]);
+  expect(check(source(rust, rust))).toEqual([]);
+  expect(check(source("nightly", "nightly"))).toMatchObject([
+    { rule: "rust-version" },
+  ]);
+  expect(check(source(rust, "nightly"))).toMatchObject([
+    { rule: "rust-version" },
+  ]);
+});
+
+test("descriptor copies route heredocs to stdin in redirection order", () => {
+  for (const header of [
+    "bash 3<<'DATA' 0<&3",
+    "bash 3<<'DATA' </dev/null 0<&3",
+    "bash 3<<'DATA' 0<&3 3<&-",
+    "bash 3<<'DATA' 0<&3-",
+  ]) {
+    expect(check(`${header}\ncargo +${rust} test\nDATA`)).toEqual([]);
+    expect(check(`${header}\ncargo +nightly test\nDATA`)).toMatchObject([
+      { rule: "rust-version" },
+    ]);
+  }
+  expect(
+    check("bash 3<<'DATA' 0<&3 </dev/null\ncargo +nightly test\nDATA"),
+  ).toEqual([]);
+  const restored = (pin: string) =>
+    `bash <<'FIRST' 3<&0 <<'LAST' 0<&3\ncargo +${pin} test\nFIRST\ncargo +nightly test\nLAST`;
+  expect(check(restored(rust))).toEqual([]);
+  expect(check(restored("nightly"))).toMatchObject([{ rule: "rust-version" }]);
 });

@@ -416,7 +416,13 @@ test("rustup update and install spellings validate every explicit release", () =
 });
 
 test("rustup global options and selected toolchains preserve subcommand validation", () => {
-  for (const prefix of ["--quiet", "-v", `--quiet +${rust}`, `+${rust}`, "--"]) {
+  for (const prefix of [
+    "--quiet",
+    "-v",
+    `--quiet +${rust}`,
+    `+${rust}`,
+    "--",
+  ]) {
     for (const command of [
       "component add rustfmt --toolchain",
       "target add wasm32-unknown-unknown --toolchain",
@@ -432,7 +438,9 @@ test("rustup global options and selected toolchains preserve subcommand validati
     }
   }
   expect(check("scripts/rust.sh", `rustup --quiet +${rust} show`)).toEqual([]);
-  expect(check("scripts/rust.sh", "rustup --quiet +nightly show")).toHaveLength(1);
+  expect(check("scripts/rust.sh", "rustup --quiet +nightly show")).toHaveLength(
+    1,
+  );
 });
 
 test("rustup target and component options select exact releases while defaults remain valid", () => {
@@ -551,4 +559,52 @@ test("Docker RUN and ENV instructions retain Rust pin enforcement", () => {
       `FROM rust:${rust}\nRUN echo okay\n\nENV RUSTUP_TOOLCHAIN=nightly`,
     ),
   ).toMatchObject([{ rule: "rust-version", line: 4 }]);
+});
+
+test("Docker ENV parses every assignment without shell command boundaries", () => {
+  const instructions = [
+    (pin: string) => `ENV OTHER=value; RUSTUP_TOOLCHAIN=${pin}`,
+    (pin: string) => `ENV OTHER=value& RUSTUP_TOOLCHAIN=${pin}`,
+    (pin: string) => `ENV OTHER=value| RUSTUP_TOOLCHAIN=${pin}`,
+    (pin: string) => `ENV OTHER=#literal RUSTUP_TOOLCHAIN=${pin}`,
+    (pin: string) => `ENV OTHER="spaces ; & | #" RUSTUP_TOOLCHAIN='${pin}'`,
+    (pin: string) => `ENV OTHER=escaped\\ space RUSTUP_TOOLCHAIN="${pin}"`,
+    (pin: string) => `ENV RUSTUP_TOOLCHAIN=${rust} RUSTUP_TOOLCHAIN=${pin}`,
+    (pin: string) => `ENV RUSTUP_TOOLCHAIN "${pin}"`,
+    (pin: string) => `ENV RUSTUP_TOOLCHAIN '${pin}'`,
+    (pin: string) => `ENV RUSTUP_TOOLCHAIN=${pin.slice(0, 2)}"${pin.slice(2)}"`,
+  ];
+  for (const instruction of instructions) {
+    const positive = `FROM rust:${rust}\n${instruction(rust)}`;
+    const mutation = `FROM rust:${rust}\n${instruction("nightly")}`;
+    expect(positive).not.toBe(mutation);
+    expect(check("Dockerfile", positive)).toEqual([]);
+    expect(check("Dockerfile", mutation)).toMatchObject([
+      { rule: "rust-version", line: 2 },
+    ]);
+  }
+  for (const value of [
+    "ENV OTHER value; RUSTUP_TOOLCHAIN=nightly",
+    'ENV OTHER="RUSTUP_TOOLCHAIN=nightly; $(rustup default nightly)"',
+    "ENV OTHER='quote \\\" and ;' RUSTUP_TOOLCHAIN=1.99.0",
+  ])
+    expect(check("Dockerfile", `FROM rust:${rust}\n${value}`)).toEqual([]);
+  expect(
+    check(
+      "Dockerfile",
+      "# escape=`\nFROM rust:1.99.0\nENV OTHER=escaped` space RUSTUP_TOOLCHAIN=1.99.0",
+    ),
+  ).toEqual([]);
+  expect(
+    check(
+      "Dockerfile",
+      "# escape=`\nFROM rust:1.99.0\nENV OTHER=escaped` space RUSTUP_TOOLCHAIN=nightly",
+    ),
+  ).toHaveLength(1);
+  expect(
+    check(
+      "Dockerfile",
+      `FROM rust:${rust}\nENV RUSTUP_TOOLCHAIN ${rust} extra`,
+    ),
+  ).toHaveLength(1);
 });

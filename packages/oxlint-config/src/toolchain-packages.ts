@@ -312,6 +312,43 @@ const shellReadsProgramStdin = (tokens: readonly ShellToken[]) => {
   return stdin || !script;
 };
 
+// Descriptor copies retain their source; later redirections replace only their destination.
+const shellStdinHeredoc = (tokens: readonly ShellToken[]) => {
+  const descriptors = new Map<string, ShellToken>();
+  for (let index = 0; index < tokens.length; index++) {
+    const token = tokens.at(index);
+    if (token?.kind !== "redirect") continue;
+    const declaration = /^(\d*)(.+)$/.exec(token.value);
+    const operator = declaration?.[2];
+    if (operator === undefined) continue;
+    const descriptor = String(
+      Number(declaration?.[1] || (operator.startsWith("<") ? "0" : "1")),
+    );
+    const target = tokens.at(++index);
+    if (operator === "<<" || operator === "<<-") {
+      descriptors.set(descriptor, token);
+      continue;
+    }
+    if (operator === "<&" || operator === ">&") {
+      const copy = /^(\d+)(-?)$/.exec(decodeShellWord(target?.value ?? ""));
+      const sourceDescriptor =
+        copy?.[1] === undefined ? undefined : String(Number(copy[1]));
+      const source =
+        sourceDescriptor === undefined
+          ? undefined
+          : descriptors.get(sourceDescriptor);
+      if (source === undefined) descriptors.delete(descriptor);
+      else descriptors.set(descriptor, source);
+      if (copy?.[2] === "-" && sourceDescriptor !== undefined)
+        descriptors.delete(sourceDescriptor);
+      continue;
+    }
+    descriptors.delete(descriptor);
+    if (operator === "&>" || operator === "&>>") descriptors.delete("2");
+  }
+  return descriptors.get("0");
+};
+
 // Literal heredoc bodies are data, not direct shell command invocations.
 const shellExecutableSource = (command: string) => {
   const pending: {
@@ -368,7 +405,9 @@ const shellExecutableSource = (command: string) => {
             delimiter: decodeShellWord(delimiter),
             stripTabs: declaration[1] === "-",
             literal: /['"\\]/.test(delimiter),
-            execute: shellReadsProgramStdin(invocation),
+            execute:
+              shellReadsProgramStdin(invocation) &&
+              shellStdinHeredoc(invocation) === match,
           });
         }
       }

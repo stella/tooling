@@ -65,7 +65,11 @@ type RustReferenceOptions = {
 } & (
   | { type: "file"; text: string }
   | { type: "command"; source: string; line: number }
-  | { type: "environment"; source: string; line: number }
+  | {
+      type: "environment";
+      assignments: readonly { key: string; value: string }[];
+      line: number;
+    }
 );
 
 /** Only executable fields are inspected: unrelated action inputs are not Rust selectors. */
@@ -231,17 +235,8 @@ export const checkRustReferences = (options: RustReferenceOptions) => {
     }
   };
   if (options.type === "environment") {
-    // Docker ENV values are data; command substitutions do not execute here.
-    const assignments =
-      shellCommandSegments(options.source).find((words) => words.length > 0) ?? [];
-    for (const word of assignments) {
-      const value = decodeShellWord(word);
-      if (value.startsWith("RUSTUP_TOOLCHAIN="))
-        select(
-          value.slice("RUSTUP_TOOLCHAIN=".length),
-          "RUSTUP_TOOLCHAIN",
-          options.line,
-        );
+    for (const { key, value } of options.assignments) {
+      if (key === "RUSTUP_TOOLCHAIN") select(value, key, options.line);
     }
     return diagnostics;
   }
