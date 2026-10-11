@@ -306,12 +306,33 @@ the portable rule permits static and provably sanitized HTML while rejecting
 untrusted values.
 
 Oxlint 1.80 replaced `react/react-compiler` with category-specific React
-Compiler rules. The actionable categories are part of the default rule set;
+Compiler rules. Enable the actionable categories explicitly with
+`library({ react: { files: ["src/**/*.{ts,tsx}"] } })`; select only React-owned
+paths, including `.ts` hooks. The base `library()` preset is framework-neutral;
 `react/invariant` and `react/todo` remain off because they report compiler
 internals rather than source defects. Consumers can suppress one precise
 category without hiding unrelated compiler diagnostics. A repo adopting these
 rules against an existing findings backlog should carve out temporary
-`overrides` entries per legacy path and fix forward.
+`overrides` entries per React-owned legacy path and fix forward. Each consumer
+React override must include the React plugin: oxlint resolves its rules against
+its own plugin list or the framework-neutral base list, not an earlier override.
+
+```ts
+import { library, libraryPlugins } from "@stll/oxlint-config";
+
+export default library({
+  react: { files: ["src/**/*.{ts,tsx}"] },
+  overrides: [
+    {
+      files: ["src/legacy/**/*.{ts,tsx}"],
+      plugins: [...libraryPlugins, "react"],
+      rules: { "react/hooks": "off" },
+    },
+  ],
+});
+```
+
+Include any additional consumer plugins in that override's `plugins` list too.
 
 Use the helper directly as the root config when possible. That keeps root-level
 options, shared JS plugins, shared ignores, and local exceptions in one merged
