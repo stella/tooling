@@ -189,3 +189,52 @@ fn cli_does_not_succeed_on_a_parse_error() {
             .contains("main.rs:1:")
     );
 }
+
+#[test]
+fn documented_cargo_alias_runs_the_installed_subcommand_and_rejects_a_source_mutation() {
+    let directory = ScratchDirectory::new();
+    directory.write(
+        ".cargo/config.toml",
+        include_str!("../../../rust/cargo-config.toml"),
+    );
+    directory.write(
+        "Cargo.toml",
+        "[package]\nname = \"lint-consumer\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+    );
+    let positive = include_str!("fixtures/main.rs").replace("Stella tooling", "stella tooling");
+    directory.write("src/main.rs", &positive);
+
+    let binary_directory = Path::new(env!("CARGO_BIN_EXE_cargo-stella-lint"))
+        .parent()
+        .unwrap();
+    let mut paths = vec![binary_directory.to_path_buf()];
+    paths.extend(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
+    let executable_path = std::env::join_paths(paths).unwrap();
+    let run_alias = || {
+        Command::new(env!("CARGO"))
+            .arg("ci-stella-lint")
+            .current_dir(&directory.0)
+            .env("PATH", &executable_path)
+            .output()
+            .unwrap()
+    };
+    let output = run_alias();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let mutation = positive.replace("stella tooling", "Stella tooling");
+    assert_ne!(positive, mutation);
+    directory.write("src/main.rs", &mutation);
+    let output = run_alias();
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("main.rs:2:20: stella_lowercase:"),
+        "{stderr}"
+    );
+}

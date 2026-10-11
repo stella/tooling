@@ -189,7 +189,7 @@ export const shellCommandSegments = (command: string) => {
         comment = true;
         continue;
       }
-      if (/^(?:&&|\|\||[;&|\n])$/.test(word)) segments.push([]);
+      if (/^(?:&&|\|\||[();&|\n])$/.test(word)) segments.push([]);
       else segments.at(-1)?.push(word);
     }
   }

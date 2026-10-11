@@ -117,6 +117,13 @@ future. Floating channels, duplicate pins, extra fields and `rust-version`
 opt-outs fail validation. The same exception applies to toolchain files,
 workflow Rust inputs and environments, Cargo/rustup commands and Rust images.
 
+Hawk 0.1.11 is the current temporary Rust exception: its driver fails to build
+with 1.99.0 due to compiler-private API changes (E0061 and E0308). It uses
+1.97.1 until [tracking issue #99](https://github.com/stella/tooling/issues/99) is
+resolved, with the exception expiring on 2026-11-11. The stable source checker
+and all ordinary Rust work use the shared 1.99.0 pin. Consumer repositories that
+run Hawk need the same exact, tracked exception declaration.
+
 `engines.node` and `requires-python` are support ranges: they must include the
 shared runtime. The Node support range must include every stable release in
 the policy major, so `>=26`, `^26` and `^24 || ^26` pass; `^24`, `<26`,

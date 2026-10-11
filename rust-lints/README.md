@@ -9,8 +9,12 @@ Pin the tooling commit used by the consuming repository:
 
 ```bash
 cargo install --git https://github.com/stella/tooling --rev <sha> --locked stella_source_lint
-stella_source_lint .
+cargo stella-lint .
 ```
+
+Installation provides both `cargo-stella-lint` (invoked as `cargo stella-lint`)
+and `stella_source_lint` (invoked directly). To use `cargo ci-stella-lint`, copy
+[the Cargo alias template](../rust/cargo-config.toml) into `.cargo/config.toml`.
 
 The command recursively checks `.rs` files under its paths (the current directory
 by default). Findings print `file:line:column` diagnostics and exit with status 1.

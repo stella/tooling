@@ -265,3 +265,40 @@ test("environment assignments are checked only where shell execution sets them",
     ).toHaveLength(1);
   }
 });
+
+test("subshells and substitutions cannot hide Rust selectors", () => {
+  const commands = [
+    (pin: string) => `(cargo +${pin} test)`,
+    (pin: string) => `(rustup default ${pin})`,
+    (pin: string) => `echo $(cargo +${pin} test)`,
+    (pin: string) => `echo $(rustup default ${pin})`,
+    (pin: string) => `echo \`cargo +${pin} test\``,
+    (pin: string) => `echo \`rustup default ${pin}\``,
+  ];
+  for (const command of commands) {
+    expect(check("scripts/rust.sh", command(rust))).toEqual([]);
+    expect(command("nightly")).not.toBe(command(rust));
+    expect(check("scripts/rust.sh", command("nightly")).length).toBeGreaterThan(
+      0,
+    );
+  }
+});
+
+test("rustup run and override set require an exact selected release", () => {
+  for (const command of [
+    (pin: string) => `rustup run ${pin} cargo test`,
+    (pin: string) => `rustup run --install ${pin} cargo test`,
+    (pin: string) => `rustup override set ${pin}`,
+    (pin: string) => `rustup override set --path ./crate ${pin}`,
+  ]) {
+    expect(check("scripts/rust.sh", command(rust))).toEqual([]);
+    expect(check("scripts/rust.sh", command("stable"))).toHaveLength(1);
+    expect(check("scripts/rust.sh", command("1.97.1"))).toHaveLength(1);
+  }
+  for (const command of [
+    "rustup run",
+    "rustup override set",
+    "rustup override set --path ./crate",
+  ])
+    expect(check("scripts/rust.sh", command)).toHaveLength(1);
+});

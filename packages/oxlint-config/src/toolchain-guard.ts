@@ -1,5 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync, realpathSync } from "node:fs";
+import {
+  closeSync,
+  openSync,
+  readSync,
+  readFileSync,
+  realpathSync,
+} from "node:fs";
 import path from "node:path";
 
 import { cloudSetupPath, generateCloudSetup } from "./cloud-setup";
@@ -123,7 +129,13 @@ export const readToolchainInputs = (root: string) => {
   for (const file of tracked) {
     // Only configuration inputs are read; source files can contain arbitrary examples.
     const kind = toolchainInputKind(file);
-    if (kind === undefined) continue;
+    const shebangCandidate =
+      kind === undefined &&
+      path.posix.extname(file) === "" &&
+      !file
+        .split("/")
+        .some((part) => part === "vendor" || part === "node_modules");
+    if (kind === undefined && !shebangCandidate) continue;
     if (kind === "presence") {
       files[file] = "";
       continue;
@@ -137,6 +149,22 @@ export const readToolchainInputs = (root: string) => {
         !trackedFiles.has(relative.split(path.sep).join("/"))
       )
         throw new Error("Configuration target is outside the tracked tree");
+      if (shebangCandidate) {
+        // Bound discovery reads: extensionless files may be large binary artifacts.
+        const descriptor = openSync(resolvedFile, "r");
+        const prefix = Buffer.alloc(512);
+        let count: number;
+        try {
+          count = readSync(descriptor, prefix, 0, prefix.length, 0);
+        } finally {
+          closeSync(descriptor);
+        }
+        if (
+          toolchainInputKind(file, prefix.toString("utf8", 0, count)) ===
+          undefined
+        )
+          continue;
+      }
       files[file] = readFileSync(resolvedFile, "utf8");
     } catch {
       diagnostics.push({

@@ -256,3 +256,22 @@ test("cloud script discovery reads only the canonical root script", () => {
   ])
     expect(toolchainInputKind(file)).toBeUndefined();
 });
+
+test("shell shebangs identify extensionless executable inputs without selecting ordinary text", () => {
+  for (const shebang of [
+    "#!/bin/sh",
+    "#!/usr/bin/bash",
+    "#!/usr/bin/env bash",
+    "#!/usr/bin/env -S bash -eu",
+  ]) {
+    expect(
+      toolchainInputKind("scripts/check", shebang + "\ncargo +stable test"),
+    ).toBe("config");
+    expect(toolchainInputKind("vendor/check", shebang)).toBeUndefined();
+    expect(toolchainInputKind("node_modules/check", shebang)).toBeUndefined();
+  }
+  expect(
+    toolchainInputKind("scripts/check", "#!/usr/bin/env python3"),
+  ).toBeUndefined();
+  expect(toolchainInputKind("README", "cargo +stable test")).toBeUndefined();
+});

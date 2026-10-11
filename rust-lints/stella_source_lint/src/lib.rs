@@ -1,3 +1,5 @@
+pub mod cli;
+
 use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};

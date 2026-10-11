@@ -1,7 +1,7 @@
 import { parseDocument } from "yaml";
 
 import { canonicalDockerRuntime } from "./toolchain-images";
-import { githubAutomationFileKind } from "./toolchain-inputs";
+import { githubAutomationFileKind, isShellScript } from "./toolchain-inputs";
 import { decodeShellWord, shellCommandSegments } from "./toolchain-packages";
 
 const record = (value: unknown): value is Record<string, unknown> =>
@@ -144,6 +144,7 @@ export const checkRustReferences = ({
       }
       if (executable !== "rustup") continue;
       let selectors = arguments_;
+      let firstSelectorOnly = false;
       if (arguments_.at(0)?.value === "default")
         selectors = arguments_.slice(1);
       else if (
@@ -151,9 +152,19 @@ export const checkRustReferences = ({
         arguments_.at(1)?.value === "install"
       )
         selectors = arguments_.slice(2);
-      else continue;
+      else if (arguments_.at(0)?.value === "run") {
+        selectors = arguments_.slice(1);
+        firstSelectorOnly = true;
+      } else if (
+        arguments_.at(0)?.value === "override" &&
+        arguments_.at(1)?.value === "set"
+      ) {
+        selectors = arguments_.slice(2);
+        firstSelectorOnly = true;
+      } else continue;
       let selected = 0;
       const optionArguments = new Set([
+        "--path",
         "--profile",
         "--component",
         "-c",
@@ -170,6 +181,7 @@ export const checkRustReferences = ({
         if (token.value.startsWith("-")) continue;
         selected++;
         select(token.value, "rustup toolchain", token.line);
+        if (firstSelectorOnly) break;
       }
       if (selected === 0) select(undefined, "rustup toolchain", firstLine);
     }
@@ -178,7 +190,7 @@ export const checkRustReferences = ({
     const index = text.split(/\r?\n/).findIndex((line) => line.includes(token));
     return index < 0 ? 1 : index + 1;
   };
-  if (/\.(?:sh|bash|zsh)$/.test(file)) shell(text);
+  if (isShellScript(file, text)) shell(text);
   if (/(?:^|\/)package\.json$/.test(file)) {
     try {
       const object: unknown = JSON.parse(text);

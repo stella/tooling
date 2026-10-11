@@ -153,15 +153,16 @@ jobs:
 
   checks:
     if: always()
-    needs: [build-checks, engine-floor, rust-lints]
+    needs: [build-checks, engine-floor, rust-lints, hawk-compatibility]
     runs-on: ubuntu-latest
     steps:
-      - name: Require shared checks, Rust lint and Node floor success
+      - name: Require every validation job to succeed
         env:
           BUILD_RESULT: ${{ needs.build-checks.result }}
           FLOOR_RESULT: ${{ needs.engine-floor.result }}
           RUST_RESULT: ${{ needs.rust-lints.result }}
-        run: test "$BUILD_RESULT" = success && test "$FLOOR_RESULT" = success && test "$RUST_RESULT" = success
+          HAWK_RESULT: ${{ needs.hawk-compatibility.result }}
+        run: test "$BUILD_RESULT" = success && test "$FLOOR_RESULT" = success && test "$RUST_RESULT" = success && test "$HAWK_RESULT" = success
 
   rust-lints:
     runs-on: ubuntu-latest
@@ -180,7 +181,7 @@ jobs:
         run: cargo test --manifest-path rust-lints/stella_source_lint/Cargo.toml --locked
 
   hawk-compatibility:
-    name: Hawk stable compiler compatibility
+    name: Hawk compiler compatibility
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -191,16 +192,16 @@ jobs:
           ref: ae63e774bca2a22878c88e165bb60f2d9a12027e
           persist-credentials: false
 
-      - name: Install stable compiler development libraries
-        run: rustup toolchain install 1.99.0 --profile minimal --component rustc-dev
+      - name: Install documented Hawk compiler exception
+        run: rustup toolchain install 1.97.1 --profile minimal --component rustc-dev
 
-      - name: Build pinned Hawk on stable
+      - name: Build pinned Hawk
         # Hawk's documented source install requires rustc_private opt-in.
         env:
           RUSTC_BOOTSTRAP: "1"
-        run: cargo +1.99.0 install cargo-hawk --version 0.1.11 --locked --root "$RUNNER_TEMP/hawk"
+        run: cargo +1.97.1 install cargo-hawk --version 0.1.11 --locked --root "$RUNNER_TEMP/hawk"
 
-      - name: Check consumer crate with the stable compiler
+      - name: Check consumer crate with the Hawk compiler
         env:
           CARGO_BUILD_RUSTC_WRAPPER: ""
         run: |
@@ -212,4 +213,4 @@ jobs:
           lib = "stella_regex_set"
           reason = "Shared native library compatibility probe"
           HAWK_CONFIG
-          cargo +1.99.0 hawk check --target-dir "$RUNNER_TEMP/hawk-target" -A hawk::dead_public -A hawk::unnecessary_public
+          cargo +1.97.1 hawk check --target-dir "$RUNNER_TEMP/hawk-target" -A hawk::dead_public -A hawk::unnecessary_public

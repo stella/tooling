@@ -837,10 +837,10 @@ test("tracked shell and service image declarations share the strict Rust excepti
     }),
   };
   expect(fixture(sources)).toEqual([]);
-  for (const file of Object.keys(sources)) {
+  for (const [file, source] of Object.entries(sources)) {
     const changed = {
       ...sources,
-      [file]: sources[file]?.replaceAll(policy.rust, "1.97.1") ?? "",
+      [file]: source.replaceAll(policy.rust, "1.97.1"),
     };
     expect(
       fixture(changed).filter(({ rule }) => rule === "rust-version"),
@@ -861,4 +861,32 @@ test("tracked shell and service image declarations share the strict Rust excepti
       }),
     ).toEqual([]);
   }
+});
+
+test("tracked extensionless shell shebangs enter Rust policy discovery", () => {
+  for (const interpreter of [
+    "/bin/sh",
+    "/usr/bin/bash",
+    "/usr/bin/env bash",
+    "/usr/bin/env -S bash -eu",
+  ]) {
+    const file = "scripts/rust-check";
+    const source = `#!${interpreter}\ncargo +${policy.rust} test\n`;
+    expect(fixture({ [file]: source })).toEqual([]);
+    expect(
+      fixture({ [file]: source.replace(policy.rust, "nightly") }),
+    ).toMatchObject([{ rule: "rust-version", path: file }]);
+  }
+  expect(
+    fixture({
+      "scripts/rust-check": "#!/usr/bin/env python3\n# cargo +nightly test",
+      README: "cargo +nightly test",
+    }),
+  ).toEqual([]);
+  expect(
+    fixture({
+      "vendor/rust-check": "#!/bin/sh\ncargo +nightly test",
+      "node_modules/rust-check": "#!/bin/sh\ncargo +nightly test",
+    }),
+  ).toEqual([]);
 });
