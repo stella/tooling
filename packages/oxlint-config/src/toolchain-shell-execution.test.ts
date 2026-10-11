@@ -151,7 +151,7 @@ test("parameter braces stay literal tokens and compiler policy retains raw group
 });
 
 test("redirection destinations and descriptor duplication are not Rust toolchain arguments", () => {
-  const programs = [
+  const redirectedPrograms = [
     (pin: string) => `cargo +${pin} test`,
     (pin: string) => `rustup toolchain install ${pin}`,
     (pin: string) => `rustup default ${pin}`,
@@ -171,7 +171,7 @@ test("redirection destinations and descriptor duplication are not Rust toolchain
     "2>&-",
     "<&0",
   ];
-  for (const program of programs)
+  for (const program of redirectedPrograms)
     for (const redirect of redirects) {
       const positive = `${program(rust)} ${redirect}`;
       const mutation = `${program("nightly")} ${redirect}`;

@@ -182,7 +182,7 @@ export const checkRustReferences = (options: RustReferenceOptions) => {
         }
         continue;
       }
-      let selectors = invocation;
+      let selectors: typeof invocation;
       let requiresSelector = true;
       let firstSelectorOnly = false;
       if (
