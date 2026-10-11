@@ -12,6 +12,7 @@ export type LibraryOptions = {
   overrides?: OxlintOverride[];
   plugins?: Plugins;
   rules?: Rules;
+  react?: { files: [string, ...string[]] };
 };
 
 export const stellaLowercasePluginSpecifier = "@stll/oxlint-config/plugin";
@@ -23,9 +24,7 @@ export const libraryIgnorePatterns = ["node_modules/", "dist/", "coverage/"];
 // than appending to it. This must stay in sync with every plugin-prefixed
 // rule below: `import/*` and `promise/*` rules are configured further down,
 // but oxlint disables both plugins unless they are listed here, which left
-// `import/no-cycle` and every `promise/*` rule silently unenforced. `react`
-// is enabled for the React Compiler category rules; see the comment on that
-// ruleset for why every other `react/*` rule is explicitly turned back off.
+// `import/no-cycle` and every `promise/*` rule silently unenforced.
 export const libraryPlugins = [
   "eslint",
   "typescript",
@@ -33,7 +32,6 @@ export const libraryPlugins = [
   "oxc",
   "import",
   "promise",
-  "react",
 ] satisfies Plugins;
 
 // Oxlint 1.80 replaced react/react-compiler with category-specific rules.
@@ -144,7 +142,28 @@ export const libraryRules = {
   "promise/prefer-await-to-callbacks": "off",
   "promise/avoid-new": "off",
 
-  // Enabling the `react` plugin (above) turns on its whole correctness-category
+  "sort-keys": "off",
+  "no-plusplus": "off",
+  "no-inline-comments": "off",
+  "max-statements": "off",
+  "prefer-destructuring": "off",
+  "no-negated-condition": "off",
+  "no-use-before-define": "off",
+  "no-useless-return": "off",
+  "no-warning-comments": "off",
+  "no-unexpected-multiline": "off",
+  "max-classes-per-file": "off",
+  "class-methods-use-this": "off",
+  "no-unmodified-loop-condition": "off",
+  complexity: "off",
+  "func-style": "off",
+  "func-names": "off",
+  "default-case": "off",
+} satisfies Rules;
+
+// Applied only to the consumer-selected React files.
+export const reactRules = {
+  // Enabling the `react` plugin turns on its whole correctness-category
   // rule set at "warn" by default, not just the React Compiler categories.
   // Only the compiler categories are deliberate additions here, so the rest
   // are turned off to keep this package's blast radius scoped; lift any of
@@ -169,24 +188,6 @@ export const libraryRules = {
   "react/no-will-update-set-state": "off",
   "react/void-dom-elements-no-children": "off",
   ...reactCompilerRules,
-
-  "sort-keys": "off",
-  "no-plusplus": "off",
-  "no-inline-comments": "off",
-  "max-statements": "off",
-  "prefer-destructuring": "off",
-  "no-negated-condition": "off",
-  "no-use-before-define": "off",
-  "no-useless-return": "off",
-  "no-warning-comments": "off",
-  "no-unexpected-multiline": "off",
-  "max-classes-per-file": "off",
-  "class-methods-use-this": "off",
-  "no-unmodified-loop-condition": "off",
-  complexity: "off",
-  "func-style": "off",
-  "func-names": "off",
-  "default-case": "off",
 } satisfies Rules;
 
 export const libraryOverrides = [
@@ -200,17 +201,18 @@ export const libraryOverrides = [
   },
 ] satisfies OxlintOverride[];
 
-export const library = (options: LibraryOptions = {}): OxlintConfig =>
-  defineConfig({
+export const library = (options: LibraryOptions = {}): OxlintConfig => {
+  const plugins = Array.from(
+    new Set([...libraryPlugins, ...(options.plugins ?? [])]),
+  );
+  return defineConfig({
     options: {
       denyWarnings: true,
       reportUnusedDisableDirectives: "error",
       typeAware: true,
       ...options.options,
     },
-    plugins: Array.from(
-      new Set([...libraryPlugins, ...(options.plugins ?? [])]),
-    ),
+    plugins,
     jsPlugins: [
       stellaLowercasePluginSpecifier,
       noRawColorsPluginSpecifier,
@@ -224,7 +226,20 @@ export const library = (options: LibraryOptions = {}): OxlintConfig =>
       ...libraryRules,
       ...options.rules,
     },
-    overrides: [...libraryOverrides, ...(options.overrides ?? [])],
+    overrides: [
+      ...libraryOverrides,
+      ...(options.react === undefined
+        ? []
+        : [
+            {
+              files: options.react.files,
+              plugins: [...plugins, "react"],
+              rules: reactRules,
+            } satisfies OxlintOverride,
+          ]),
+      ...(options.overrides ?? []),
+    ],
   });
+};
 
 export default library();

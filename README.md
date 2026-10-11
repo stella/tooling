@@ -306,7 +306,9 @@ the portable rule permits static and provably sanitized HTML while rejecting
 untrusted values.
 
 Oxlint 1.80 replaced `react/react-compiler` with category-specific React
-Compiler rules. The actionable categories are part of the default rule set;
+Compiler rules. Enable the actionable categories explicitly with
+`library({ react: { files: ["src/**/*.{ts,tsx}"] } })`; select only React-owned
+paths, including `.ts` hooks. The base `library()` preset is framework-neutral;
 `react/invariant` and `react/todo` remain off because they report compiler
 internals rather than source defects. Consumers can suppress one precise
 category without hiding unrelated compiler diagnostics. A repo adopting these
