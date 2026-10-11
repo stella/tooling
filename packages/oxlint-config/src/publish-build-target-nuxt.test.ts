@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import packageMetadata from "../package.json";
 import {
   resolvedNuxtTarget,
   resolveNuxtPublishTarget,
@@ -21,6 +22,7 @@ import {
 import {
   isNuxtModuleTargetHook,
   nuxtModuleTarget,
+  nuxtModuleTargetTargets,
 } from "./publish-build-target-nuxt-helper";
 
 test("Nuxt module and runtime targets are resolved independently", () => {
@@ -319,4 +321,150 @@ test("Nuxt helper rejects unsupported entry builders and transform shapes", () =
       options: { entries: [{ builder: "mkdist", esbuild: [] }], rollup: {} },
     }),
   ).toThrow("transform");
+});
+
+test("Nuxt target markers contain frozen data and never invoke callback or property accessors", () => {
+  const observation = { invocations: 0 };
+  const foreign = () => {
+    observation.invocations++;
+  };
+  const brand = Symbol.for("@stll/oxlint-config.build-target.nuxt");
+  Object.defineProperty(foreign, brand, {
+    value: Object.freeze({ version: 1, targets: Object.freeze(["es2022"]) }),
+  });
+  expect(nuxtModuleTargetTargets(foreign)).toEqual(["es2022"]);
+  expect(isNuxtModuleTargetHook(foreign)).toBe(true);
+  expect(observation.invocations).toBe(0);
+  for (const marker of [
+    { version: 1, targets: ["es2022"] },
+    Object.freeze({ version: 1, targets: ["es2022"] }),
+    Object.freeze({ version: 2, targets: Object.freeze(["es2022"]) }),
+    Object.freeze({ version: 1, targets: Object.freeze([]) }),
+    Object.freeze({
+      version: 1,
+      targets: Object.freeze(["es2022"]),
+      extra: true,
+    }),
+    Object.freeze({
+      version: 1,
+      get targets() {
+        observation.invocations++;
+        return Object.freeze(["es2022"]);
+      },
+    }),
+  ]) {
+    const hook = () => {
+      observation.invocations++;
+    };
+    Object.defineProperty(hook, brand, { value: marker });
+    expect(nuxtModuleTargetTargets(hook)).toBeUndefined();
+    expect(isNuxtModuleTargetHook(hook)).toBe(false);
+  }
+  expect(observation.invocations).toBe(0);
+});
+
+test("freshly loaded foreign branded hooks are replaced by the installed canonical target hook", () => {
+  const directory = mkdtempSync(path.join(tmpdir(), "nuxt-canonical-target-"));
+  const write = (file: string, content: string) => {
+    mkdirSync(path.dirname(path.join(directory, file)), { recursive: true });
+    writeFileSync(path.join(directory, file), content);
+  };
+  try {
+    write(
+      "package.json",
+      JSON.stringify({ name: "example-nuxt", type: "module" }),
+    );
+    for (const [name, version, entry] of [
+      ["@nuxt/module-builder", "1.0.3", "dist/index.mjs"],
+      ["unbuild", "3.6.1", "dist/index.mjs"],
+      ["mkdist", "2.4.1", "dist/index.mjs"],
+      ["jiti", "2.7.0", "index.cjs"],
+    ])
+      write(
+        `node_modules/${name}/package.json`,
+        JSON.stringify({
+          name,
+          version,
+          type: "module",
+          exports: `./${entry}`,
+        }),
+      );
+    write(
+      "node_modules/@stll/oxlint-config/package.json",
+      JSON.stringify({
+        name: "@stll/oxlint-config",
+        version: packageMetadata.version,
+        type: "module",
+        exports: { "./build-target": "./dist/helper.mjs" },
+      }),
+    );
+    write(
+      "node_modules/@stll/oxlint-config/dist/helper.mjs",
+      `const record=value=>typeof value==='object'&&value!==null&&!Array.isArray(value);const targetHookBrand=Symbol.for('@stll/oxlint-config.build-target.nuxt');const targetHookVersion=1;export const nuxtModuleTarget=${nuxtModuleTarget.toString()};export const nuxtModuleTargetTargets=${nuxtModuleTargetTargets.toString()};`,
+    );
+    write("node_modules/mkdist/dist/index.mjs", "export {};\n");
+    write(
+      "node_modules/jiti/index.cjs",
+      `const path=require('node:path');const {pathToFileURL}=require('node:url');let loads=0;module.exports=root=>({import:async(file)=>file==='./build.config'?(await import(pathToFileURL(path.join(root,'build.config.mjs')).href+'?load='+loads++)).default:import(file)});module.exports.createJiti=module.exports;`,
+    );
+    write(
+      "node_modules/@nuxt/module-builder/dist/index.mjs",
+      `export const build={async run(context){const{build}=await import('unbuild');await build(context.args.cwd,false,{entries:[{builder:'rollup'},{builder:'mkdist',ext:'js',esbuild:{jsx:'automatic'}}],rollup:{esbuild:{target:'esnext',jsx:'preserve'}},hooks:{'build:before':context=>{context.options.rollup.esbuild.constructorOption='keep'}}})}};`,
+    );
+    write(
+      "node_modules/unbuild/dist/index.mjs",
+      `import{createJiti}from'jiti';export const build=async(root,stub,input)=>{const config=await createJiti(root).import('./build.config');const callbacks={};const hooks={hook(name,callback){(callbacks[name]??=[]).push(callback)},removeHook(name,callback){const index=(callbacks[name]??=[]).indexOf(callback);if(index!==-1)callbacks[name].splice(index,1)}};const context={options:{...input,hooks:{...input.hooks,...config.hooks}},hooks};for(const source of [input.hooks,config.hooks])for(const[name,callback]of Object.entries(source??{}))hooks.hook(name,callback);for(const callback of callbacks['build:prepare']??[])await callback(context);for(const callback of callbacks['build:before']??[]){await callback(context);if(context.options.rollup.esbuild.jsx!=='preserve'||context.options.entries[1].esbuild.jsx!=='automatic'||context.options.entries[1].ext!=='js')throw new Error('Unrelated build options changed')}throw new Error('Unexpected output write boundary');};`,
+    );
+    const foreignExecution = path.join(directory, "foreign-executed");
+    const foreignConfig = `import{writeFileSync}from'node:fs';const foreign=context=>{writeFileSync(${JSON.stringify(foreignExecution)},'executed');context.options.rollup.esbuild.jsx='changed'};Object.defineProperty(foreign,Symbol.for('@stll/oxlint-config.build-target.nuxt'),{value:Object.freeze({version:1,targets:Object.freeze(['es2022'])})});export default{hooks:{'build:before':foreign}};`;
+    write("build.config.mjs", foreignConfig);
+    expect(resolveNuxtPublishTarget(directory)).toEqual({
+      type: "javascript",
+      targets: ["es2022"],
+    });
+    expect(existsSync(foreignExecution)).toBe(false);
+    write("build.config.mjs", "export default {};\n");
+    expect(resolveNuxtPublishTarget(directory)).toEqual({
+      type: "javascript",
+      targets: ["esnext"],
+    });
+    for (const name of ["build:before", "build:prepare", "build:done"]) {
+      write(
+        "build.config.mjs",
+        `import{writeFileSync}from'node:fs';globalThis.__fixtureLoads=(globalThis.__fixtureLoads||0)+1;export default globalThis.__fixtureLoads===1?{}:{hooks:{${JSON.stringify(name)}:()=>writeFileSync(${JSON.stringify(foreignExecution)},'executed')}};`,
+      );
+      expect(() => resolveNuxtPublishTarget(directory)).toThrow(
+        "Nuxt target configuration changed during loading",
+      );
+      expect(existsSync(foreignExecution)).toBe(false);
+    }
+    for (const later of [
+      "{}",
+      "{hooks:{'build:before':hook}}",
+      "{hooks:{'build:before':hook,'build:done':()=>{}}}",
+      "{hooks:{'build:before':foreign,'build:prepare':()=>{}}}",
+    ]) {
+      write(
+        "build.config.mjs",
+        `globalThis.__fixtureLoads=(globalThis.__fixtureLoads||0)+1;const hook=()=>{};Object.defineProperty(hook,Symbol.for('@stll/oxlint-config.build-target.nuxt'),{value:Object.freeze({version:1,targets:Object.freeze(['es2021'])})});${foreignConfig.replace("export default{hooks:{'build:before':foreign}};", `export default globalThis.__fixtureLoads===1?{hooks:{'build:before':foreign}}:${later};`)}`,
+      );
+      expect(() => resolveNuxtPublishTarget(directory)).toThrow(
+        "Nuxt target configuration changed during loading",
+      );
+      expect(existsSync(foreignExecution)).toBe(false);
+    }
+    write(
+      "build.config.mjs",
+      foreignConfig.replace(
+        "export default{hooks:",
+        "globalThis.__fixtureLoads=(globalThis.__fixtureLoads||0)+1;export default globalThis.__fixtureLoads===1?{}:{hooks:",
+      ),
+    );
+    expect(() => resolveNuxtPublishTarget(directory)).toThrow(
+      "Nuxt target configuration changed during loading",
+    );
+    expect(existsSync(foreignExecution)).toBe(false);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

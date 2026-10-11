@@ -5,7 +5,56 @@ import {
   assertReviewedVueOptions,
   resolvedViteTarget,
   reviewedViteBuild,
+  reviewedDtsConfiguration,
 } from "./publish-build-target-vite";
+
+test("declaration helper configuration proves its import, call and closed options without executing TS", () => {
+  const source = `import { defineConfig } from 'vite';
+import { declarationOnlyDts as declarations } from '@stll/oxlint-config/declaration-only-dts';
+export default defineConfig({ plugins: [declarations({ directory: import.meta.dirname, include: ['src/**/*'], entryRoot: 'src', compilerOptions: { declarationMap: false } })] });`;
+  expect(
+    reviewedDtsConfiguration({ source, directory: "/package", loader: "ts" }),
+  ).toEqual({
+    include: ["src/**/*"],
+    entryRoot: "src",
+    compilerOptions: { declarationMap: false },
+  });
+  for (const mutation of [
+    source.replace(
+      "@stll/oxlint-config/declaration-only-dts",
+      "./foreign-helper.js",
+    ),
+    source.replace(
+      "directory: import.meta.dirname",
+      "directory: process.cwd()",
+    ),
+    source.replace(
+      "entryRoot: 'src'",
+      "beforeWriteFile: () => ({ content: 'changed' })",
+    ),
+    source.replace(
+      "plugins: [declarations(",
+      "plugins: [(() => declarations)(",
+    ),
+    source.replace(
+      "plugins: [declarations(",
+      "plugins: [declarations({directory: import.meta.dirname}), declarations(",
+    ),
+    source
+      .replace(
+        "export default",
+        "import raw from 'vite-plugin-dts'; export default",
+      )
+      .replace("plugins: [", "plugins: [raw(), "),
+  ])
+    expect(() =>
+      reviewedDtsConfiguration({
+        source: mutation,
+        directory: "/package",
+        loader: "ts",
+      }),
+    ).toThrow();
+});
 
 test("Vite native callbacks are version-profile-bound at their exact option paths", () => {
   const callback = () => undefined;
@@ -305,4 +354,23 @@ test("Vite late output plugins are rejected for single and multiple output confi
       },
     }),
   ).toEqual({ type: "javascript", targets: ["node20.19"] });
+});
+
+test("Vite pipeline preserves every reviewed entry exactly once in order", () => {
+  const reviewed = [
+    { name: "first", transform: () => "first" },
+    { name: "second", transform: () => "second" },
+  ];
+  expect(() =>
+    assertReviewedVitePlugins({ reviewed, resolved: reviewed }),
+  ).not.toThrow();
+  for (const resolved of [
+    [],
+    reviewed.slice(1),
+    reviewed.toReversed(),
+    [...reviewed, ...reviewed],
+  ])
+    expect(() => assertReviewedVitePlugins({ reviewed, resolved })).toThrow(
+      "complete reviewed order",
+    );
 });

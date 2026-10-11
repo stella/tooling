@@ -46,9 +46,9 @@ export const nuxtModuleTarget = (target: string | string[]) => {
   return before;
 };
 
-/** Recognize the same declared target hook across ESM and CommonJS modules. */
-export const isNuxtModuleTargetHook = (value: unknown) => {
-  if (typeof value !== "function") return false;
+/** Read immutable target data across ESM and CommonJS without executing the callback. */
+export const nuxtModuleTargetTargets = (value: unknown) => {
+  if (typeof value !== "function") return undefined;
   const descriptor = Object.getOwnPropertyDescriptor(value, targetHookBrand);
   if (
     descriptor === undefined ||
@@ -56,15 +56,46 @@ export const isNuxtModuleTargetHook = (value: unknown) => {
     descriptor.writable !== false ||
     descriptor.configurable !== false
   )
-    return false;
+    return undefined;
   const marker: unknown = descriptor.value;
-  return (
-    record(marker) &&
-    marker["version"] === targetHookVersion &&
-    Array.isArray(marker["targets"]) &&
-    marker["targets"].length > 0 &&
-    marker["targets"].every(
-      (target: unknown) => typeof target === "string" && target.length > 0,
-    )
-  );
+  if (!record(marker) || !Object.isFrozen(marker)) return undefined;
+  const keys = Reflect.ownKeys(marker);
+  if (
+    keys.length !== 2 ||
+    !keys.includes("version") ||
+    !keys.includes("targets")
+  )
+    return undefined;
+  const version = Object.getOwnPropertyDescriptor(marker, "version");
+  const targetData = Object.getOwnPropertyDescriptor(marker, "targets");
+  if (
+    !version ||
+    !("value" in version) ||
+    !targetData ||
+    !("value" in targetData)
+  )
+    return undefined;
+  const markerVersion: unknown = version.value;
+  if (markerVersion !== targetHookVersion) return undefined;
+  const targets: unknown = targetData.value;
+  if (
+    !Array.isArray(targets) ||
+    !Object.isFrozen(targets) ||
+    targets.length === 0
+  )
+    return undefined;
+  if (Reflect.ownKeys(targets).length !== targets.length + 1) return undefined;
+  const result: string[] = [];
+  for (let index = 0; index < targets.length; index++) {
+    const entry = Object.getOwnPropertyDescriptor(targets, String(index));
+    if (!entry || !("value" in entry)) return undefined;
+    const target: unknown = entry.value;
+    if (typeof target !== "string" || target.length === 0) return undefined;
+    result.push(target);
+  }
+  return result;
 };
+
+/** Recognize the same declared target data across ESM and CommonJS modules. */
+export const isNuxtModuleTargetHook = (value: unknown) =>
+  nuxtModuleTargetTargets(value) !== undefined;

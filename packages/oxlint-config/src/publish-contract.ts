@@ -274,6 +274,24 @@ type CheckPublishContractOptions = ResolveManifestContractOptions & {
   policy: ConsumerPolicy;
 };
 
+/** Share the accepted Node target grammar between static and packed checks. */
+export const publishedNodeTargetSupportsConsumer = ({
+  target,
+  node,
+}: {
+  target: string;
+  node: string;
+}) => {
+  const match = /^node([1-9]\d*)(?:\.(0|[1-9]\d*))?(?:\.(0|[1-9]\d*))?$/i.exec(
+    target,
+  );
+  const version =
+    match === null
+      ? null
+      : parse(`${match[1]}.${match[2] ?? "0"}.${match[3] ?? "0"}`);
+  return version !== null && lte(version, node);
+};
+
 export const checkPublishContract = ({
   packer,
   manifest,
@@ -358,15 +376,12 @@ export const checkPublishContract = ({
         continue;
       }
       if (!/^node/i.test(selected)) continue;
-      const match =
-        /^node([1-9]\d*)(?:\.(0|[1-9]\d*))?(?:\.(0|[1-9]\d*))?$/i.exec(
-          selected,
-        );
-      const version =
-        match === null
-          ? null
-          : parse(`${match[1]}.${match[2] ?? "0"}.${match[3] ?? "0"}`);
-      if (version === null || !lte(version, policy.node))
+      if (
+        !publishedNodeTargetSupportsConsumer({
+          target: selected,
+          node: policy.node,
+        })
+      )
         add(
           "target",
           `JavaScript target ${selected} must support consumer Node ${policy.node}`,

@@ -18,6 +18,7 @@ import {
 } from "../packages/oxlint-config/src/consumer-compat";
 import { parseToolchainPolicy } from "../packages/oxlint-config/src/toolchain-schema";
 import policyData from "../packages/oxlint-config/toolchain.json";
+import { assertConsumerPackedSyntaxIntegration } from "./check-consumer-packed-syntax";
 import {
   assertConsumerReleasePackParity,
   assertPinnedPnpmReleasePack,
@@ -251,6 +252,7 @@ assert.equal(execFileSync(binary, ["--version"], {encoding:"utf8"}).trim(), "0.2
       `${manager}: direct npm alias install generated the smoke executable\n`,
     );
   }
+  await assertConsumerPackedSyntaxIntegration({ tools, scratch });
   await assertConsumerReleasePackParity({ tools, scratch });
   await assertPinnedPnpmReleasePack({ tools, scratch });
 } finally {
