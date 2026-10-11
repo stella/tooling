@@ -1,5 +1,15 @@
 # @stll/oxlint-config
 
+## 0.15.0
+
+### Minor Changes
+
+- [#92](https://github.com/stella/tooling/pull/92) [`4542d79`](https://github.com/stella/tooling/commit/4542d79809acbbcf5594e84d7a43ddd0de342107) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Make `library()` framework-neutral and add `react: { files: [...] }` to enable React and React Compiler rules only for consumer-selected files. Consumers upgrading from global React enforcement should explicitly select their React components and hooks.
+
+  Breaking change for direct export users: `libraryRules` no longer contains React or React Compiler rules, and `libraryPlugins` no longer contains `react`. These exports are now framework-neutral. Migrate to `library({ react: { files: [...] } })`, or compose a file-scoped override with `plugins: [...libraryPlugins, "react"]` and `rules: { ...reactRules, ...consumerRules }`. Preserve any additional consumer plugins in that scoped list. No compatibility aliases are provided.
+
+  Later consumer overrides that configure React rules must explicitly include the React plugin in their own file-scoped `plugins` list, because oxlint resolves each override against the framework-neutral base plugin list.
+
 ## 0.14.1
 
 ### Patch Changes
