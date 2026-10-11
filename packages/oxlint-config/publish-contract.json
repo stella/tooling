@@ -4,7 +4,8 @@
   },
   "peerDependencies": {
     "oxlint": ">=1.87.0 <2",
-    "oxlint-tsgolint": ">=7.0.2003 <8"
+    "oxlint-tsgolint": ">=7.0.2003 <8",
+    "vite": "8.1.5"
   },
   "target": {
     "type": "javascript",
@@ -59,6 +60,17 @@
           "default": "./dist/publish-build-target-nuxt-helper.cjs"
         },
         "default": "./dist/publish-build-target-nuxt-helper.mjs"
+      },
+      "./declaration-only-dts": {
+        "import": {
+          "types": "./dist/publish-build-target-vite-dts-helper.d.mts",
+          "default": "./dist/publish-build-target-vite-dts-helper.mjs"
+        },
+        "require": {
+          "types": "./dist/publish-build-target-vite-dts-helper.d.cts",
+          "default": "./dist/publish-build-target-vite-dts-helper.cjs"
+        },
+        "default": "./dist/publish-build-target-vite-dts-helper.mjs"
       }
     },
     "main": "dist/index.mjs",

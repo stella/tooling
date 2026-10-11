@@ -46,6 +46,11 @@ import {
   consumerReleasePackArguments,
   type ConsumerReleasePack,
 } from "./consumer-release-pack";
+import {
+  checkPackedJavaScriptWithNode,
+  readPackedSyntaxFiles,
+} from "./publish-artifact-syntax";
+import { checkPublishContract, parsePublishContract } from "./publish-contract";
 import { parseToolchainPolicy } from "./toolchain-schema";
 
 type CommandOptions = { cwd: string; env?: NodeJS.ProcessEnv };
@@ -305,6 +310,8 @@ const trackedManifests = async (root: string) => {
       "**/package.json",
       "pnpm-workspace.yaml",
       "**/pnpm-workspace.yaml",
+      "publish-contract.json",
+      "**/publish-contract.json",
       ".github/workflows/*.yml",
       ".github/workflows/*.yaml",
     ],
@@ -910,6 +917,55 @@ export const assertConsumerPackedNodeSupport = async ({
   }
 };
 
+type ConsumerPackedSyntaxOptions = {
+  artifacts: Map<string, string>;
+  packages: Map<string, ConsumerPackage>;
+  files: Record<string, string>;
+  node: string;
+  typescript: string;
+  executable: string;
+};
+export const assertConsumerPackedSyntax = async ({
+  artifacts,
+  packages,
+  files,
+  node,
+  typescript,
+  executable,
+}: ConsumerPackedSyntaxOptions) => {
+  const packer = resolveConsumerReleasePack(files).manager;
+  for (const [name, archive] of artifacts) {
+    const pkg = packages.get(name);
+    if (pkg === undefined) throw new Error(`Missing packed package: ${name}`);
+    const declaration = path.posix.join(pkg.directory, "publish-contract.json");
+    const source = files[declaration];
+    if (source === undefined)
+      throw new Error(`Missing tracked publish contract: ${declaration}`);
+    const contract = parsePublishContract(JSON.parse(source));
+    const packed = await readPackedSyntaxFiles(archive);
+    const manifest = packed.get("package/package.json");
+    if (manifest === undefined)
+      throw new Error(`Missing packed manifest: ${name}`);
+    const diagnostics = checkPublishContract({
+      manifest: JSON.parse(manifest),
+      target: contract.target,
+      contract,
+      packer,
+      policy: { node, typescript },
+    });
+    if (diagnostics.length > 0)
+      throw new Error(
+        `Packed publish contract differs for ${name}: ${diagnostics.map((entry) => entry.message).join("; ")}`,
+      );
+    await checkPackedJavaScriptWithNode({
+      files: packed,
+      target: contract.target,
+      node,
+      executable,
+    });
+  }
+};
+
 export type ConsumerCompatOptions = {
   root: string;
   packages: string[];
@@ -1007,6 +1063,14 @@ export const runConsumerCompat = async ({
       artifacts,
       node: policy.consumerNode,
       directory: scratch,
+    });
+    await assertConsumerPackedSyntax({
+      artifacts,
+      packages: all,
+      files,
+      node: policy.consumerNode,
+      typescript: policy.consumerTypescript,
+      executable: tools.node,
     });
     for (const selection of selections)
       for (const manager of ["npm", "pnpm"] as const)

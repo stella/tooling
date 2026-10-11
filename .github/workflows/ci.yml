@@ -91,6 +91,9 @@ jobs:
       - name: Test
         run: bun run test
 
+      - name: Validate actual declaration-only build profile
+        run: bun scripts/check-publish-artifact-profiles.ts
+
       - name: Validate consumer install lifecycle isolation
         run: bun scripts/check-consumer-install-lifecycle.ts
 
