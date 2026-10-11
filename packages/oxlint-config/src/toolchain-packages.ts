@@ -112,6 +112,53 @@ const shellSubstitutions = (command: string) => {
   return bodies;
 };
 
+const shellValueOptions = new Set([
+  "--rcfile",
+  "--init-file",
+  "-o",
+  "+o",
+  "-O",
+  "+O",
+]);
+const shellExecutable = /^(?:\/(?:[^/]+\/)*)?(?:bash|dash|ksh|zsh|sh)$/;
+
+const shellReadsProgramStdin = (rawWords: readonly string[]) => {
+  const argumentsWithoutHeredocs: string[] = [];
+  for (let index = 0; index < rawWords.length; index++) {
+    const word = rawWords.at(index) ?? "";
+    const heredoc = /^<<-?(.*)$/.exec(word);
+    if (heredoc !== null) {
+      if (heredoc[1] === "") index++;
+      continue;
+    }
+    argumentsWithoutHeredocs.push(word);
+  }
+  const words = executableShellWords(argumentsWithoutHeredocs).map(
+    decodeShellWord,
+  );
+  if (!shellExecutable.test(words.at(0) ?? "")) return false;
+  let stdin = false;
+  let script = false;
+  for (let index = 1; index < words.length; index++) {
+    const option = words.at(index) ?? "";
+    if (option === "--" || option === "-") {
+      script = index + 1 < words.length;
+      break;
+    }
+    if (!/^[+-]/.test(option)) {
+      script = true;
+      break;
+    }
+    if (shellValueOptions.has(option)) {
+      index++;
+      continue;
+    }
+    if (/^-[^-]*c/.test(option)) return false;
+    if (/^-[^-]*s/.test(option)) stdin = true;
+  }
+  return stdin || !script;
+};
+
 // Literal heredoc bodies are data, not direct shell command invocations.
 const shellExecutableSource = (command: string) => {
   const pending: {
@@ -139,14 +186,19 @@ const shellExecutableSource = (command: string) => {
       }
       const words = [
         ...line.matchAll(
-          /(?:[^\s"'\\;&|()]|\\[\s\S]|"(?:[^"\\]|\\[\s\S])*"|'[^']*')+/g,
+          /(?:[^\s"'\\;&|()]|\\[\s\S]|"(?:[^"\\]|\\[\s\S])*"|'[^']*')+|&&|\|\||[();&|]/g,
         ),
       ];
+      let commandStart = 0;
       for (let index = 0; index < words.length; index++) {
         const match = words.at(index);
         const word = match?.[0];
         if (word === undefined) continue;
         if (word.startsWith("#")) return line.slice(0, match?.index);
+        if (/^(?:&&|\|\||[();&|]|[{}])$/.test(word)) {
+          commandStart = index + 1;
+          continue;
+        }
         const here = /^<<(-?)(.*)$/.exec(word);
         let delimiter = here?.[2];
         if (delimiter === "") delimiter = words.at(++index)?.[0];
@@ -154,15 +206,21 @@ const shellExecutableSource = (command: string) => {
           here !== null &&
           delimiter !== undefined &&
           !delimiter.startsWith("<")
-        )
+        ) {
+          const commandEnd = words.findIndex(
+            (entry, position) =>
+              position > index && /^(?:&&|\|\||[();&|]|[{}])$/.test(entry[0]),
+          );
+          const invocation = words
+            .slice(commandStart, commandEnd < 0 ? undefined : commandEnd)
+            .map((entry) => entry[0]);
           pending.push({
             delimiter: decodeShellWord(delimiter),
             stripTabs: here[1] === "-",
             literal: /['"\\]/.test(delimiter),
-            execute: /^(?:\/bin\/)?(?:bash|sh|zsh)$/.test(
-              decodeShellWord(words.at(0)?.[0] ?? ""),
-            ),
+            execute: shellReadsProgramStdin(invocation),
           });
+        }
       }
       return line;
     })
@@ -215,21 +273,12 @@ const shellCommandBody = (rawWords: readonly string[]) => {
   const words = executableShellWords(
     rawWords.filter((word) => word !== "(" && word !== ")"),
   ).map(decodeShellWord);
-  if (!/^(?:\/(?:[^/]+\/)*)?(?:bash|dash|ksh|zsh|sh)$/.test(words.at(0) ?? ""))
-    return undefined;
-  const valueOptions = new Set([
-    "--rcfile",
-    "--init-file",
-    "-o",
-    "+o",
-    "-O",
-    "+O",
-  ]);
+  if (!shellExecutable.test(words.at(0) ?? "")) return undefined;
   for (let index = 1; index < words.length; index++) {
     const option = words.at(index);
     if (option === undefined || option === "--" || !/^[+-]/.test(option))
       return undefined;
-    if (valueOptions.has(option)) {
+    if (shellValueOptions.has(option)) {
       index++;
       continue;
     }
@@ -263,9 +312,9 @@ export const shellCommandSegments = (
         comment = true;
         continue;
       }
-      if ((word === "(" || word === ")") && grouping === "tokens")
+      if (["(", ")", "{", "}"].includes(word) && grouping === "tokens")
         segments.at(-1)?.push(word);
-      else if (/^(?:&&|\|\||[();&|\n])$/.test(word)) segments.push([]);
+      else if (/^(?:&&|\|\||[();&|\n]|[{}])$/.test(word)) segments.push([]);
       else segments.at(-1)?.push(word);
     }
     for (const words of segments.slice(firstSegment)) {

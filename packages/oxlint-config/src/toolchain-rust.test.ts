@@ -388,3 +388,91 @@ test("both Rust slim tag orderings retain exact pins on every image surface", ()
           ).toBeGreaterThan(0);
       }
 });
+
+test("rustup update and install spellings validate every explicit release", () => {
+  for (const command of [
+    "rustup update",
+    "rustup toolchain update",
+    "rustup install",
+    "rustup toolchain install",
+  ]) {
+    expect(check("scripts/rust.sh", `${command} ${rust}`)).toEqual([]);
+    expect(
+      check("scripts/rust.sh", `${command} --profile minimal ${rust}`),
+    ).toEqual([]);
+    for (const mutation of ["nightly", "stable", "1.97.1", "''"]) {
+      expect(`${command} ${mutation}`).not.toBe(`${command} ${rust}`);
+      expect(check("scripts/rust.sh", `${command} ${mutation}`)).toHaveLength(
+        1,
+      );
+    }
+    expect(check("scripts/rust.sh", `${command} ${rust} nightly`)).toHaveLength(
+      1,
+    );
+  }
+  expect(check("scripts/rust.sh", "rustup update")).toEqual([]);
+  expect(check("scripts/rust.sh", "rustup toolchain update")).toEqual([]);
+});
+
+test("rustup target and component options select exact releases while defaults remain valid", () => {
+  const commands = [
+    "rustup target add wasm32-unknown-unknown",
+    "rustup component add rustfmt",
+  ];
+  const surfaces = [
+    { file: "scripts/rust.sh", source: (command: string) => command },
+    {
+      file: "package.json",
+      source: (command: string) =>
+        JSON.stringify({ scripts: { prepare: command } }),
+    },
+    {
+      file: ".github/workflows/ci.yml",
+      source: (command: string) =>
+        workflow(`    steps:\n      - run: ${command}`),
+    },
+  ];
+  for (const command of commands)
+    for (const option of [
+      (pin: string) => `--toolchain ${pin}`,
+      (pin: string) => `--toolchain=${pin}`,
+    ])
+      for (const { file, source } of surfaces) {
+        expect(check(file, source(`${command} ${option(rust)}`))).toEqual([]);
+        for (const mutation of ["nightly", "stable", "1.97.1", "''"]) {
+          expect(option(mutation)).not.toBe(option(rust));
+          expect(
+            check(file, source(`${command} ${option(mutation)}`)),
+          ).toHaveLength(1);
+        }
+        expect(check(file, source(command))).toEqual([]);
+      }
+  for (const command of commands) {
+    expect(check("scripts/rust.sh", `${command} --toolchain`)).toHaveLength(1);
+    expect(check("scripts/rust.sh", `${command} --toolchain=`)).toHaveLength(1);
+    expect(
+      check(
+        "scripts/rust.sh",
+        `${command} --toolchain=${rust} --toolchain=nightly`,
+      ),
+    ).toHaveLength(1);
+  }
+  expect(
+    check(
+      "scripts/rust.sh",
+      `rustup target add --toolchain ${rust} wasm32-unknown-unknown`,
+    ),
+  ).toEqual([]);
+  expect(
+    check(
+      "scripts/rust.sh",
+      "rustup target add --toolchain nightly wasm32-unknown-unknown",
+    ),
+  ).toHaveLength(1);
+  expect(
+    check(
+      "scripts/rust.sh",
+      "echo 'rustup component add rustfmt --toolchain=nightly'",
+    ),
+  ).toEqual([]);
+});
