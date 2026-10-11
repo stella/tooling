@@ -73,8 +73,7 @@ does not require tools absent from the repository.
 Shared-pin Dependabot ignores must contain only `dependency-name` and
 `update-types`, listing `version-update:semver-major`,
 `version-update:semver-minor`, and `version-update:semver-patch`. This ignores
-version updates while preserving security update pull requests. Name-only
-ignores are rejected because they also suppress security updates.
+version updates while preserving security update pull requests.
 
 Set `packageManager` to `bun@` followed by the policy's `bun` value, and pin
 `bun-types` to that same value. Dependency pins can live in default or named
