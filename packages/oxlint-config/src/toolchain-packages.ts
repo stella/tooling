@@ -122,20 +122,173 @@ const shellValueOptions = new Set([
 ]);
 const shellExecutable = /^(?:\/(?:[^/]+\/)*)?(?:bash|dash|ksh|zsh|sh)$/;
 
-const shellReadsProgramStdin = (rawWords: readonly string[]) => {
-  const argumentsWithoutHeredocs: string[] = [];
-  for (let index = 0; index < rawWords.length; index++) {
-    const word = rawWords.at(index) ?? "";
-    const heredoc = /^<<-?(.*)$/.exec(word);
-    if (heredoc !== null) {
-      if (heredoc[1] === "") index++;
+type ShellToken = {
+  kind: "word" | "boundary" | "redirect" | "comment";
+  value: string;
+  index: number;
+};
+
+// Keep expansion bodies in their word: substitutions are inspected separately as executable sources.
+const shellTokens = (source: string) => {
+  const tokens: ShellToken[] = [];
+  for (let index = 0; index < source.length;) {
+    const character = source.at(index);
+    if (character === undefined) break;
+    if (character === "\n") {
+      tokens.push({ kind: "boundary", value: character, index: index++ });
       continue;
     }
-    argumentsWithoutHeredocs.push(word);
+    if (/\s/.test(character)) {
+      index++;
+      continue;
+    }
+    if (character === "#") {
+      const end = source.indexOf("\n", index);
+      const stop = end < 0 ? source.length : end;
+      tokens.push({ kind: "comment", value: source.slice(index, stop), index });
+      index = stop;
+      continue;
+    }
+    const redirect = /^(?:\d*)(?:&>>|&>|<<<|<<-|<<|>>|>\||>&|<&|<>|>|<)/.exec(
+      source.slice(index),
+    );
+    if (redirect !== null) {
+      tokens.push({ kind: "redirect", value: redirect[0], index });
+      index += redirect[0].length;
+      continue;
+    }
+    const boundary = /^(?:&&|\|\||[();&|])/.exec(source.slice(index));
+    if (boundary !== null) {
+      tokens.push({ kind: "boundary", value: boundary[0], index });
+      index += boundary[0].length;
+      continue;
+    }
+    const start = index;
+    type Frame = {
+      kind: "word" | "parentheses" | "backticks";
+      quote: "'" | '"' | undefined;
+      depth: number;
+    };
+    const frames: Frame[] = [{ kind: "word", quote: undefined, depth: 0 }];
+    while (index < source.length) {
+      const frame = frames.at(-1);
+      const current = source.at(index);
+      if (frame === undefined || current === undefined) break;
+      if (current === "\\" && frame.quote !== "'") {
+        index += 2;
+        continue;
+      }
+      if (current === "`" && frame.kind === "backticks") {
+        frames.pop();
+        index++;
+        continue;
+      }
+      if (current === frame.quote) {
+        frame.quote = undefined;
+        index++;
+        continue;
+      }
+      if (frame.quote === "'") {
+        index++;
+        continue;
+      }
+      if (current === "$" && source.at(index + 1) === "(") {
+        frames.push({ kind: "parentheses", quote: undefined, depth: 1 });
+        index += 2;
+        continue;
+      }
+      if (current === "`") {
+        frames.push({ kind: "backticks", quote: undefined, depth: 0 });
+        index++;
+        continue;
+      }
+      if (frame.quote !== undefined) {
+        index++;
+        continue;
+      }
+      if (current === "'" || current === '"') {
+        frame.quote = current;
+        index++;
+        continue;
+      }
+      if (frame.kind === "parentheses") {
+        if (current === "(") frame.depth++;
+        if (current === ")" && --frame.depth === 0) frames.pop();
+        index++;
+        continue;
+      }
+      if (frame.kind === "word" && /[\s<>;&|()]/.test(current)) break;
+      index++;
+    }
+    const value = source.slice(start, index);
+    tokens.push({
+      kind: "word",
+      value,
+      index: start,
+    });
   }
-  const words = executableShellWords(argumentsWithoutHeredocs).map(
-    decodeShellWord,
-  );
+  // Braces are reserved words only where a command or function body can begin.
+  let groupDepth = 0;
+  let redirectTarget = false;
+  const commandWords: string[] = [];
+  for (const token of tokens) {
+    if (token.kind === "comment") continue;
+    if (token.kind === "redirect") {
+      redirectTarget = true;
+      continue;
+    }
+    if (redirectTarget) {
+      redirectTarget = false;
+      if (token.kind === "word") continue;
+    }
+    if (token.kind === "boundary") {
+      commandWords.length = 0;
+      continue;
+    }
+    const functionBody =
+      commandWords.length === 2 && commandWords.at(0) === "function";
+    const opensGroup =
+      token.value === "{" && (commandWords.length === 0 || functionBody);
+    const closesGroup =
+      token.value === "}" && groupDepth > 0 && commandWords.length === 0;
+    if (opensGroup || closesGroup) {
+      token.kind = "boundary";
+      groupDepth += opensGroup ? 1 : -1;
+      commandWords.length = 0;
+      continue;
+    }
+    if (
+      commandWords.length === 0 &&
+      ["if", "then", "elif", "else", "do", "!", "time"].includes(token.value)
+    )
+      continue;
+    commandWords.push(token.value);
+  }
+  return tokens;
+};
+
+const shellArgumentTokens = (tokens: readonly ShellToken[]) => {
+  const arguments_: ShellToken[] = [];
+  let redirectTarget = false;
+  for (const token of tokens) {
+    if (token.kind === "comment") continue;
+    if (token.kind === "redirect") {
+      redirectTarget = true;
+      continue;
+    }
+    if (redirectTarget) {
+      redirectTarget = false;
+      if (token.kind === "word") continue;
+    }
+    arguments_.push(token);
+  }
+  return arguments_;
+};
+
+const shellReadsProgramStdin = (tokens: readonly ShellToken[]) => {
+  const words = executableShellWords(
+    shellArgumentTokens(tokens).map(({ value }) => value),
+  ).map(decodeShellWord);
   if (!shellExecutable.test(words.at(0) ?? "")) return false;
   let stdin = false;
   let script = false;
@@ -178,45 +331,42 @@ const shellExecutableSource = (command: string) => {
           pending.shift();
           return "";
         }
-        return here.execute
-          ? line
-          : here.literal
-            ? ""
-            : shellSubstitutions(line).join("\n");
+        if (here.execute) return line;
+        if (here.literal) return "";
+        return shellSubstitutions(line).join("\n");
       }
-      const words = [
-        ...line.matchAll(
-          /(?:[^\s"'\\;&|()]|\\[\s\S]|"(?:[^"\\]|\\[\s\S])*"|'[^']*')+|&&|\|\||[();&|]/g,
-        ),
-      ];
+      const words = shellTokens(line);
       let commandStart = 0;
       for (let index = 0; index < words.length; index++) {
         const match = words.at(index);
-        const word = match?.[0];
+        const word = match?.value;
         if (word === undefined) continue;
-        if (word.startsWith("#")) return line.slice(0, match?.index);
-        if (/^(?:&&|\|\||[();&|]|[{}])$/.test(word)) {
+        if (match?.kind === "comment") return line.slice(0, match.index);
+        if (match?.kind === "boundary") {
           commandStart = index + 1;
           continue;
         }
-        const here = /^<<(-?)(.*)$/.exec(word);
-        let delimiter = here?.[2];
-        if (delimiter === "") delimiter = words.at(++index)?.[0];
+        const declaration =
+          match?.kind === "redirect" ? /^(?:\d*)<<(-?)(.*)$/.exec(word) : null;
+        let delimiter = declaration?.[2];
+        if (delimiter === "") delimiter = words.at(++index)?.value;
         if (
-          here !== null &&
+          declaration !== null &&
           delimiter !== undefined &&
           !delimiter.startsWith("<")
         ) {
           const commandEnd = words.findIndex(
             (entry, position) =>
-              position > index && /^(?:&&|\|\||[();&|]|[{}])$/.test(entry[0]),
+              position > index &&
+              (entry.kind === "boundary" || entry.kind === "comment"),
           );
-          const invocation = words
-            .slice(commandStart, commandEnd < 0 ? undefined : commandEnd)
-            .map((entry) => entry[0]);
+          const invocation = words.slice(
+            commandStart,
+            commandEnd < 0 ? undefined : commandEnd,
+          );
           pending.push({
             delimiter: decodeShellWord(delimiter),
-            stripTabs: here[1] === "-",
+            stripTabs: declaration[1] === "-",
             literal: /['"\\]/.test(delimiter),
             execute: shellReadsProgramStdin(invocation),
           });
@@ -301,21 +451,14 @@ export const shellCommandSegments = (
   for (const source of sources) {
     const firstSegment = segments.length;
     segments.push([]);
-    const shellWords = source.match(
-      /(?:[^\s"'\\;&|()]|\\[\s\S]|"(?:[^"\\]|\\[\s\S])*"|'[^']*')+|&&|\|\||[();&|\n]/g,
-    );
-    let comment = false;
-    for (const word of shellWords ?? []) {
-      if (word === "\n") comment = false;
-      else if (comment) continue;
-      if (word.startsWith("#")) {
-        comment = true;
-        continue;
-      }
-      if (["(", ")", "{", "}"].includes(word) && grouping === "tokens")
-        segments.at(-1)?.push(word);
-      else if (/^(?:&&|\|\||[();&|\n]|[{}])$/.test(word)) segments.push([]);
-      else segments.at(-1)?.push(word);
+    for (const { kind, value: word } of shellArgumentTokens(
+      shellTokens(source),
+    )) {
+      if (kind === "boundary") {
+        if (["(", ")", "{", "}"].includes(word) && grouping === "tokens")
+          segments.at(-1)?.push(word);
+        else segments.push([]);
+      } else segments.at(-1)?.push(word);
     }
     for (const words of segments.slice(firstSegment)) {
       const body = shellCommandBody(words);

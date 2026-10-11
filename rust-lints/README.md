@@ -39,6 +39,32 @@ Directories named `fuzz`, `target`, `generated`, or `.git`, and files named
 followed. Exclusions apply at every path depth, including explicitly supplied
 paths.
 
+## Explicit fixture configuration
+
+Tests are checked by default. To opt out known fixture files, pass a JSON
+configuration explicitly; paths are relative to the configuration file's parent:
+
+```json
+{
+  "fixturePaths": ["tests/fixtures", "tests/source_lint.rs"]
+}
+```
+
+```bash
+cargo stella-lint --config stella-source-lint.json .
+```
+
+`fixturePaths` is the only configuration field. Entries must exist and name
+exact Rust files under `tests/`, or directories at or below `tests/fixtures/`.
+A listed file exempts only that file; a listed fixture directory exempts its
+descendants. Globs, absolute paths, traversal, symlinks, production paths, and
+a blanket `tests` directory are rejected. Unlisted test files remain checked;
+there are no inline suppressions. Invalid configuration exits with status 2.
+
+The checker declares its own test fixtures in
+[`stella-source-lint.json`](stella_source_lint/stella-source-lint.json). Its
+integration tests lint its production sources with that configuration.
+
 ## Development
 
 ```bash

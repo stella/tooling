@@ -1,7 +1,10 @@
 /// <reference types="bun-types" />
 import { expect, test } from "bun:test";
 
-import { compilerCommandSegments } from "./toolchain-packages";
+import {
+  compilerCommandSegments,
+  shellCommandSegments,
+} from "./toolchain-packages";
 import { checkRuntimeFile } from "./toolchain-runtime";
 
 const rust = "1.99.0";
@@ -138,4 +141,141 @@ test("parameter braces stay literal tokens and compiler policy retains raw group
       approved.split(" "),
     );
   }
+});
+
+test("redirection destinations and descriptor duplication are not Rust toolchain arguments", () => {
+  const programs = [
+    (pin: string) => `cargo +${pin} test`,
+    (pin: string) => `rustup toolchain install ${pin}`,
+    (pin: string) => `rustup default ${pin}`,
+  ];
+  const redirects = [
+    ">/dev/null",
+    "> /dev/null",
+    "2>/dev/null",
+    "2> /dev/null",
+    "2>&1",
+    "2>& 1",
+    "<file",
+    "< file",
+    ">/dev/null 2>&1 <file",
+    "2>/dev/null >> output.log",
+    "&>/dev/null",
+    "2>&-",
+    "<&0",
+  ];
+  for (const program of programs)
+    for (const redirect of redirects) {
+      const positive = `${program(rust)} ${redirect}`;
+      const mutation = `${program("nightly")} ${redirect}`;
+      expect(positive).not.toBe(mutation);
+      expect(check(positive)).toEqual([]);
+      expect(check(mutation)).toMatchObject([{ rule: "rust-version" }]);
+    }
+  expect(check(`<file rustup default ${rust} >/dev/null 2>&1`)).toEqual([]);
+  expect(check("<file rustup default nightly >/dev/null 2>&1")).toMatchObject([
+    { rule: "rust-version" },
+  ]);
+  expect(
+    check(
+      `cargo +${rust} test >/dev/null 2>&1 && rustup default ${rust} <file`,
+    ),
+  ).toEqual([]);
+  expect(
+    check(
+      `cargo +${rust} test >/dev/null 2>&1 && rustup default nightly <file`,
+    ),
+  ).toMatchObject([{ rule: "rust-version" }]);
+  expect(check(`bash 2>&1 -c 'rustup default ${rust} >/dev/null'`)).toEqual([]);
+  expect(
+    check("bash 2>&1 -c 'rustup default nightly >/dev/null'"),
+  ).toMatchObject([{ rule: "rust-version" }]);
+});
+
+test("quoted and escaped redirection-shaped arguments stay literal words", () => {
+  const source = String.raw`echo '<file' '>' \> \<file`;
+  expect(shellCommandSegments(source)).toContainEqual([
+    "echo",
+    "'<file'",
+    "'>'",
+    "\\>",
+    "\\<file",
+  ]);
+  expect(check(`cargo +${rust} test '<file' '>'`)).toEqual([]);
+  expect(check("cargo +nightly test '<file' '>'")).toMatchObject([
+    { rule: "rust-version" },
+  ]);
+  expect(check("echo 'rustup default nightly >file'")).toEqual([]);
+});
+
+test("redirection target substitutions retain executable Rust selectors", () => {
+  for (const target of [
+    (pin: string) => `$(cargo +${pin} test)`,
+    (pin: string) => `"$(rustup default ${pin})"`,
+    (pin: string) => `\`cargo +${pin} test\``,
+    (pin: string) => `$(echo $(rustup default ${pin}))`,
+  ]) {
+    expect(check(`rustup default ${rust} >${target(rust)}`)).toEqual([]);
+    expect(
+      check(`rustup default ${rust} >${target("nightly")}`).length,
+    ).toBeGreaterThan(0);
+  }
+  expect(check(`rustup default ${rust} >'$(cargo +nightly test)'`)).toEqual([]);
+});
+
+test("heredoc receiver classification survives other redirections", () => {
+  for (const receiver of [
+    "bash >/dev/null",
+    "bash 2>&1 -s",
+    "env CHECK=1 bash <input >output",
+  ]) {
+    expect(check(`${receiver} <<'EOF'\ncargo +${rust} test\nEOF`)).toEqual([]);
+    expect(
+      check(`${receiver} <<'EOF'\ncargo +nightly test\nEOF`),
+    ).toMatchObject([{ rule: "rust-version" }]);
+  }
+  for (const header of ["bash 2>/dev/null <<EOF", "bash <<EOF >out"]) {
+    expect(check(`${header}\ncargo +${rust} test\nEOF`)).toEqual([]);
+    expect(check(`${header}\ncargo +nightly test\nEOF`)).toMatchObject([
+      { rule: "rust-version" },
+    ]);
+  }
+  expect(check("cat >/dev/null <<'EOF'\ncargo +nightly test\nEOF")).toEqual([]);
+});
+
+test("brace-shaped echo arguments stay data while command-position groups execute", () => {
+  for (const command of [
+    (pin: string) => `cargo +${pin} test`,
+    (pin: string) => `rustup default ${pin}`,
+  ]) {
+    expect(check(`echo { ${command("nightly")} }`)).toEqual([]);
+    expect(
+      shellCommandSegments(`echo { ${command("nightly")} }`),
+    ).toContainEqual(["echo", "{", ...command("nightly").split(" "), "}"]);
+    for (const group of [
+      (program: string) => `{ ${program}; }`,
+      (program: string) => `check() { ${program}; }; check`,
+      (program: string) => `function check { ${program}; }; check`,
+      (program: string) => `if { ${program}; }; then echo ok; fi`,
+    ]) {
+      expect(check(group(command(rust)))).toEqual([]);
+      expect(check(group(command("nightly")))).toMatchObject([
+        { rule: "rust-version" },
+      ]);
+    }
+  }
+});
+
+test("trailing heredoc comments end the receiver invocation", () => {
+  for (const receiver of ["bash", "bash -s", "bash >/dev/null 2>&1"])
+    for (const delimiter of ["EOF", "'EOF'"]) {
+      const source = (pin: string) =>
+        `${receiver} <<${delimiter} # receiver comment\ncargo +${pin} test\nEOF`;
+      expect(source(rust)).not.toBe(source("nightly"));
+      expect(check(source(rust))).toEqual([]);
+      expect(check(source("nightly"))).toMatchObject([
+        { rule: "rust-version" },
+      ]);
+    }
+  expect(check("cat <<EOF # data comment\ncargo +nightly test\nEOF")).toEqual([]);
 });

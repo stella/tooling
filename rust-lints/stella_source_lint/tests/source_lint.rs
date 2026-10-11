@@ -260,3 +260,151 @@ fn documented_cargo_alias_runs_the_installed_subcommand_and_rejects_a_source_mut
         "{stderr}"
     );
 }
+
+impl ScratchDirectory {
+    fn run_configured(&self) -> std::process::Output {
+        Command::new(env!("CARGO_BIN_EXE_stella_source_lint"))
+            .arg("--config")
+            .arg(self.0.join("stella-source-lint.json"))
+            .arg(&self.0)
+            .output()
+            .unwrap()
+    }
+
+    fn configure(&self, paths: &[&str]) {
+        self.write(
+            "stella-source-lint.json",
+            &serde_json::json!({ "fixturePaths": paths }).to_string(),
+        );
+    }
+}
+
+#[test]
+fn configured_fixture_paths_do_not_exempt_unlisted_files_with_identical_content() {
+    let source = include_str!("fixtures/main.rs");
+    for fixture in ["tests/fixtures/listed.rs", "tests/fixtures/listed"] {
+        let directory = ScratchDirectory::new();
+        let listed = if fixture.ends_with(".rs") {
+            fixture.to_string()
+        } else {
+            format!("{fixture}/main.rs")
+        };
+        directory.write(&listed, source);
+        directory.write("tests/source_lint.rs", source);
+        directory.configure(&[fixture, "tests/source_lint.rs"]);
+        let positive = directory.run_configured();
+        assert!(
+            positive.status.success(),
+            "{}",
+            String::from_utf8_lossy(&positive.stderr)
+        );
+        assert_eq!(directory.run().status.code(), Some(1));
+
+        directory.write("tests/fixtures/unlisted.rs", source);
+        let mutation = directory.run_configured();
+        assert_eq!(mutation.status.code(), Some(1));
+        let stderr = String::from_utf8(mutation.stderr).unwrap();
+        assert!(
+            stderr.contains("unlisted.rs:2:20: stella_lowercase:"),
+            "{stderr}"
+        );
+        assert!(!stderr.contains(&format!("{}:2:20:", directory.0.join(&listed).display())));
+    }
+}
+
+#[test]
+fn fixture_configuration_cannot_exclude_production_sources_or_all_tests() {
+    let directory = ScratchDirectory::new();
+    directory.write("src/main.rs", include_str!("fixtures/main.rs"));
+    directory.write(
+        "tests/fixtures/example.rs",
+        include_str!("fixtures/main.rs"),
+    );
+    directory.write("tests/support/example.rs", include_str!("fixtures/main.rs"));
+    for path in [
+        "src/main.rs",
+        "tests",
+        ".",
+        "tests/support",
+        "tests/fixtures/../support/example.rs",
+        "tests/fixtures/missing.rs",
+        "tests/fixtures/*.rs",
+    ] {
+        directory.configure(&[path]);
+        let output = directory.run_configured();
+        assert_eq!(output.status.code(), Some(2), "{path}");
+        assert!(String::from_utf8_lossy(&output.stderr).contains("invalid fixture configuration:"));
+    }
+    directory.configure(&[directory
+        .0
+        .join("tests/fixtures/example.rs")
+        .to_str()
+        .unwrap()]);
+    assert_eq!(directory.run_configured().status.code(), Some(2));
+}
+
+#[test]
+fn fixture_configuration_is_closed_and_rejects_duplicate_paths() {
+    let directory = ScratchDirectory::new();
+    directory.write(
+        "tests/fixtures/example.rs",
+        include_str!("fixtures/main.rs"),
+    );
+    for source in [
+        r#"{"fixturePaths":[],"exclude":["src"]}"#,
+        r#"{"fixturePaths": [3]}"#,
+        r#"{"fixturePaths": [], "fixturePaths": ["tests/fixtures/example.rs"]}"#,
+        r#"{"fixturePaths": ["tests/fixtures/example.rs", "tests/fixtures/example.rs"]}"#,
+    ] {
+        directory.write("stella-source-lint.json", source);
+        assert_eq!(
+            directory.run_configured().status.code(),
+            Some(2),
+            "{source}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn fixture_configuration_rejects_symlink_files_and_directories() {
+    let directory = ScratchDirectory::new();
+    directory.write("src/main.rs", include_str!("fixtures/main.rs"));
+    directory.write("tests/fixtures/keep.rs", "fn main() {}");
+    std::os::unix::fs::symlink(
+        directory.0.join("src/main.rs"),
+        directory.0.join("tests/fixtures/linked.rs"),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(
+        directory.0.join("src"),
+        directory.0.join("tests/fixtures/linked"),
+    )
+    .unwrap();
+    for path in [
+        "tests/fixtures/linked.rs",
+        "tests/fixtures/linked",
+        "tests/fixtures/linked/main.rs",
+    ] {
+        directory.configure(&[path]);
+        let output = directory.run_configured();
+        assert_eq!(output.status.code(), Some(2));
+        assert!(String::from_utf8_lossy(&output.stderr).contains("must not follow symlinks"));
+    }
+}
+
+#[test]
+fn the_checker_lints_its_own_production_sources_with_only_its_declared_fixtures_exempted() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let output = Command::new(env!("CARGO_BIN_EXE_stella_source_lint"))
+        .arg("--config")
+        .arg(root.join("stella-source-lint.json"))
+        .arg(root)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

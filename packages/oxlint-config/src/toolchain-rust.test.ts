@@ -394,6 +394,7 @@ test("rustup update and install spellings validate every explicit release", () =
     "rustup update",
     "rustup toolchain update",
     "rustup install",
+    "rustup add",
     "rustup toolchain install",
   ]) {
     expect(check("scripts/rust.sh", `${command} ${rust}`)).toEqual([]);
@@ -412,6 +413,26 @@ test("rustup update and install spellings validate every explicit release", () =
   }
   expect(check("scripts/rust.sh", "rustup update")).toEqual([]);
   expect(check("scripts/rust.sh", "rustup toolchain update")).toEqual([]);
+});
+
+test("rustup global options and selected toolchains preserve subcommand validation", () => {
+  for (const prefix of ["--quiet", "-v", `--quiet +${rust}`, `+${rust}`, "--"]) {
+    for (const command of [
+      "component add rustfmt --toolchain",
+      "target add wasm32-unknown-unknown --toolchain",
+      "add",
+      "toolchain add",
+      "default",
+    ]) {
+      const positive = `rustup ${prefix} ${command} ${rust}`;
+      const mutation = `rustup ${prefix} ${command} nightly`;
+      expect(positive).not.toBe(mutation);
+      expect(check("scripts/rust.sh", positive)).toEqual([]);
+      expect(check("scripts/rust.sh", mutation)).toHaveLength(1);
+    }
+  }
+  expect(check("scripts/rust.sh", `rustup --quiet +${rust} show`)).toEqual([]);
+  expect(check("scripts/rust.sh", "rustup --quiet +nightly show")).toHaveLength(1);
 });
 
 test("rustup target and component options select exact releases while defaults remain valid", () => {
@@ -475,4 +496,59 @@ test("rustup target and component options select exact releases while defaults r
       "echo 'rustup component add rustfmt --toolchain=nightly'",
     ),
   ).toEqual([]);
+});
+
+test("rustup installation aliases enforce the same exact selector policy", () => {
+  for (const command of [
+    "rustup toolchain install",
+    "rustup toolchain add",
+    "rustup install",
+  ]) {
+    expect(check("scripts/rust.sh", `${command} ${rust}`)).toEqual([]);
+    expect(check("scripts/rust.sh", `${command} nightly`)).toMatchObject([
+      { rule: "rust-version" },
+    ]);
+  }
+});
+
+test("Docker RUN and ENV instructions retain Rust pin enforcement", () => {
+  const instructions = [
+    (pin: string) => `RUN rustup default ${pin}`,
+    (pin: string) => `RUN --mount=type=cache,target=/cache cargo +${pin} test`,
+    (pin: string) => ["RUN rustup toolchain add " + "\\", pin].join("\n"),
+    (pin: string) => `RUN ["rustup", "default", "${pin}"]`,
+    (pin: string) => `RUN ["sh", "-c", "rustup default ${pin}"]`,
+    (pin: string) => `RUN <<'SCRIPT'\ncargo +${pin} test\nSCRIPT`,
+    (pin: string) => `RUN <<SCRIPT bash\nrustup default ${pin}\nSCRIPT`,
+    (pin: string) => `ENV RUSTUP_TOOLCHAIN=${pin}`,
+    (pin: string) => `ENV OTHER=value RUSTUP_TOOLCHAIN="${pin}"`,
+    (pin: string) => `ENV RUSTUP_TOOLCHAIN ${pin}`,
+  ];
+  for (const instruction of instructions) {
+    const positive = `FROM rust:${rust}\n${instruction(rust)}`;
+    const mutation = `FROM rust:${rust}\n${instruction("nightly")}`;
+    expect(positive).not.toBe(mutation);
+    expect(check("Dockerfile", positive)).toEqual([]);
+    expect(check("Dockerfile", mutation)).toMatchObject([
+      { rule: "rust-version", line: 2 },
+    ]);
+  }
+  expect(
+    check(
+      "Dockerfile",
+      `FROM rust:${rust}\nRUN echo 'cargo +nightly test'\nRUN cat <<'DATA'\ncargo +nightly test\nDATA`,
+    ),
+  ).toEqual([]);
+  expect(
+    check(
+      "Dockerfile",
+      `FROM rust:${rust}\nRUN ["echo", "$(rustup default nightly)", "apostrophe's"]\nENV NOTES="$(rustup default nightly)" RUSTUP_TOOLCHAIN=${rust}`,
+    ),
+  ).toEqual([]);
+  expect(
+    check(
+      "Dockerfile",
+      `FROM rust:${rust}\nRUN echo okay\n\nENV RUSTUP_TOOLCHAIN=nightly`,
+    ),
+  ).toMatchObject([{ rule: "rust-version", line: 4 }]);
 });

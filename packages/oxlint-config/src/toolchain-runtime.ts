@@ -228,6 +228,7 @@ export const checkRuntimeFile = ({
   onEngineFloor,
 }: CheckRuntimeFileOptions): RuntimeDiagnostic[] => {
   const diagnostics: RuntimeDiagnostic[] = checkRustReferences({
+    type: "file",
     file,
     text,
     rust: policy.rust,
@@ -700,6 +701,19 @@ export const checkRuntimeFile = ({
       [];
     let instruction = "";
     let startLine = 1;
+    let pendingRustRun: { source: string; line: number } | undefined;
+    const checkRustCommand = (source: string, line: number) => {
+      diagnostics.push(
+        ...checkRustReferences({
+          type: "command",
+          file,
+          source,
+          line,
+          rust: policy.rust,
+          exceptions: rustExceptions,
+        }),
+      );
+    };
     const expand = (value: string) => {
       for (let count = 0; count <= variables.size; count++) {
         const next = value.replace(
@@ -800,7 +814,64 @@ export const checkRuntimeFile = ({
           variables.set(key, expand(value.replace(/^(["'])(.*)\1$/, "$2")));
         return;
       }
-      if (/^\s*(?:RUN|COPY)\s+/i.test(content)) {
+      const run = /^\s*RUN\s+(.+)$/i.exec(content);
+      if (run !== null) {
+        let source = run[1] ?? "";
+        source = source.replace(/^(?:--\S+\s+)*/, "");
+        if (source.startsWith("[")) {
+          try {
+            const words: unknown = JSON.parse(source);
+            if (
+              Array.isArray(words) &&
+              words.every((word: unknown) => typeof word === "string")
+            ) {
+              // Exec-form arguments are literal; only an explicit shell -c evaluates their contents.
+              source = words
+                .map((word) => `'${word.replaceAll("'", "'\\''")}'`)
+                .join(" ");
+            } else {
+              add({
+                rule: "runtime-docker",
+                line,
+                message: "invalid Docker RUN exec form",
+              });
+              return;
+            }
+          } catch {
+            add({
+              rule: "runtime-docker",
+              line,
+              message: "invalid Docker RUN exec form",
+            });
+            return;
+          }
+        }
+        const implicit = /^(<<-?(?:'[^']+'|"[^"]+"|\S+))(?:\s+(.+))?$/.exec(
+          source,
+        );
+        if (implicit !== null) source = `${implicit[2] ?? "sh"} ${implicit[1]}`;
+        collectHeredocs(content, line);
+        if (heredocs.length > 0) pendingRustRun = { source, line };
+        else checkRustCommand(source, line);
+        return;
+      }
+      const environment = /^\s*ENV\s+(.+)$/i.exec(content);
+      if (environment !== null) {
+        const value = environment[1] ?? "";
+        const legacy = /^([A-Za-z_][A-Za-z_\d]*)\s+(.+)$/.exec(value);
+        diagnostics.push(
+          ...checkRustReferences({
+            type: "environment",
+            file,
+            source: legacy === null ? value : `${legacy[1]}=${legacy[2]}`,
+            line,
+            rust: policy.rust,
+            exceptions: rustExceptions,
+          }),
+        );
+        return;
+      }
+      if (/^\s*COPY\s+/i.test(content)) {
         collectHeredocs(content, line);
         return;
       }
@@ -820,11 +891,16 @@ export const checkRuntimeFile = ({
     lines.forEach((line, index) => {
       const heredoc = heredocs.at(0);
       if (heredoc !== undefined) {
+        if (pendingRustRun !== undefined) pendingRustRun.source += `\n${line}`;
         if (
           (heredoc.stripTabs ? line.replace(/^\t+/, "") : line) ===
           heredoc.delimiter
         )
           heredocs.shift();
+        if (heredocs.length === 0 && pendingRustRun !== undefined) {
+          checkRustCommand(pendingRustRun.source, pendingRustRun.line);
+          pendingRustRun = undefined;
+        }
         return;
       }
       if (line.trimStart().startsWith("#")) return;
