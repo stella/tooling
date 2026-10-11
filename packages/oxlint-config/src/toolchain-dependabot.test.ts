@@ -1043,7 +1043,7 @@ describe("Dependabot policy", () => {
             {
               ...base,
               ignore: validIgnore.map((entry) => ({
-                ...entry,
+                "dependency-name": entry["dependency-name"],
                 "update-types": [...entry["update-types"]].reverse(),
               })),
             },
