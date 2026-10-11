@@ -14,7 +14,7 @@
     "check:registry-versions": "bun scripts/check-registry-versions.ts",
     "typecheck": "bun check -p packages/oxlint-config && bun check -p packages/oxlint-plugin",
     "test": "bun test",
-    "test:rust-lints": "cd rust-lints/stella_lints && cargo test",
+    "test:rust-lints": "cargo test --manifest-path rust-lints/stella_source_lint/Cargo.toml --locked",
     "lint": "bun run build && bun --bun oxlint -c oxlint.config.ts --report-unused-disable-directives-severity=error --deny-warnings --type-aware .",
     "lint:fix": "bun --bun oxlint -c oxlint.config.ts --type-aware --fix .",
     "format": "oxfmt . \"!.ai/**\" \"!.agents/**\" \"!.claude/**\" \"!AGENTS.md\" \"!GEMINI.md\"",

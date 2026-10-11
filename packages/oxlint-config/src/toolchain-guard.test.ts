@@ -241,6 +241,12 @@ test("Docker action policy opt-outs require a tracked explicit reason", () => {
 test("permitted named rules have reasoned opt-outs; mandatory and malformed choices fail", () => {
   expect(new Set(toolchainRules).size).toBe(toolchainRules.length);
   for (const rule of toolchainRules) {
+    if (rule === "rust-version") {
+      expect(() =>
+        parseToolchainConfiguration({ optOuts: [{ rule, reason: "skip" }] }),
+      ).toThrow("rust-version requires expiring");
+      continue;
+    }
     if (rule === "node-engine" || rule === "cloud-setup-drift") {
       expect(() =>
         parseToolchainConfiguration({
@@ -307,7 +313,6 @@ test("policy rejects schema drift, missing pins, inconsistent TS layouts and inv
     "node",
     "python",
     "rust",
-    "rustCompilerDevelopment",
   ])
     expect(() => parseToolchainPolicy({ ...toolchain, [key]: null })).toThrow();
   for (const key of packagePinKeys)
@@ -822,4 +827,38 @@ test("dynamic selector declarations fail when absent, stale, duplicated by alias
     "stll-toolchain.json": JSON.stringify({ dynamicSelectors: [composeEntry] }),
   });
   expect(multi.some(({ rule }) => rule === "configuration")).toBe(true);
+});
+
+test("tracked shell and service image declarations share the strict Rust exception boundary", () => {
+  const sources = {
+    "scripts/rust.sh": `cargo +${policy.rust} hawk`,
+    "scripts/ci-service-images.json": JSON.stringify({
+      rust: `rust:${policy.rust}`,
+    }),
+  };
+  expect(fixture(sources)).toEqual([]);
+  for (const file of Object.keys(sources)) {
+    const changed = {
+      ...sources,
+      [file]: sources[file]?.replaceAll(policy.rust, "1.97.1") ?? "",
+    };
+    expect(
+      fixture(changed).filter(({ rule }) => rule === "rust-version"),
+    ).toHaveLength(1);
+    expect(
+      fixture({
+        ...changed,
+        "stll-toolchain.json": JSON.stringify({
+          rustExceptions: [
+            {
+              pin: "1.97.1",
+              reason: "Compiler support tracked upstream",
+              tracking: "https://github.com/stella/tooling/issues/123",
+              expires: "2099-01-01",
+            },
+          ],
+        }),
+      }),
+    ).toEqual([]);
+  }
 });

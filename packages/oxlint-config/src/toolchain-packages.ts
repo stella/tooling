@@ -112,19 +112,93 @@ const shellSubstitutions = (command: string) => {
   return bodies;
 };
 
-// Preserve quoted assignment values when separating direct shell commands.
-export const compilerCommandSegments = (command: string) => {
+// Literal heredoc bodies are data, not direct shell command invocations.
+const shellExecutableSource = (command: string) => {
+  const pending: {
+    delimiter: string;
+    stripTabs: boolean;
+    literal: boolean;
+    execute: boolean;
+  }[] = [];
+  return command
+    .split(/\r?\n/)
+    .map((line) => {
+      const here = pending.at(0);
+      if (here !== undefined) {
+        if (
+          (here.stripTabs ? line.replace(/^\t+/, "") : line) === here.delimiter
+        ) {
+          pending.shift();
+          return "";
+        }
+        return here.execute
+          ? line
+          : here.literal
+            ? ""
+            : shellSubstitutions(line).join("\n");
+      }
+      const words = [
+        ...line.matchAll(
+          /(?:[^\s"'\\;&|()]|\\[\s\S]|"(?:[^"\\]|\\[\s\S])*"|'[^']*')+/g,
+        ),
+      ];
+      for (let index = 0; index < words.length; index++) {
+        const match = words.at(index);
+        const word = match?.[0];
+        if (word === undefined) continue;
+        if (word.startsWith("#")) return line.slice(0, match?.index);
+        const here = /^<<(-?)(.*)$/.exec(word);
+        let delimiter = here?.[2];
+        if (delimiter === "") delimiter = words.at(++index)?.[0];
+        if (
+          here !== null &&
+          delimiter !== undefined &&
+          !delimiter.startsWith("<")
+        )
+          pending.push({
+            delimiter: decodeShellWord(delimiter),
+            stripTabs: here[1] === "-",
+            literal: /['"\\]/.test(delimiter),
+            execute: /^(?:\/bin\/)?(?:bash|sh|zsh)$/.test(
+              decodeShellWord(words.at(0)?.[0] ?? ""),
+            ),
+          });
+      }
+      return line;
+    })
+    .join("\n");
+};
+
+/** Shared executable shell words preserve assignments for runtime selectors. */
+export const shellCommandSegments = (command: string) => {
   const segments: string[][] = [[]];
-  for (const source of [command, ...shellSubstitutions(command)]) {
+  const executableSource = shellExecutableSource(command);
+  for (const source of [
+    executableSource,
+    ...shellSubstitutions(executableSource),
+  ]) {
     segments.push([]);
     const shellWords = source.match(
       /(?:[^\s"'\\;&|()]|\\[\s\S]|"(?:[^"\\]|\\[\s\S])*"|'[^']*')+|&&|\|\||[();&|\n]/g,
     );
+    let comment = false;
     for (const word of shellWords ?? []) {
+      if (word === "\n") comment = false;
+      else if (comment) continue;
+      if (word.startsWith("#")) {
+        comment = true;
+        continue;
+      }
       if (/^(?:&&|\|\||[;&|\n])$/.test(word)) segments.push([]);
       else segments.at(-1)?.push(word);
     }
   }
+  return segments;
+};
+
+// Inspect direct compiler commands after removing environment launcher assignments.
+export const compilerCommandSegments = (command: string) => {
+  const segments = shellCommandSegments(command);
   return segments.map((words) => {
     let start = 0;
     const skipAssignments = () => {

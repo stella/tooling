@@ -24,6 +24,8 @@ test("both input readers exclude dependency trees for every accepted input kind"
     ...javascriptDependencyLockfiles,
     "uv.lock",
     "pyproject.toml",
+    "scripts/rust.sh",
+    "scripts/ci-service-images.json",
   ];
   for (const file of inputs) {
     expect(toolchainInputKind(file)).toBeDefined();

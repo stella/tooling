@@ -27,6 +27,7 @@ import {
   isDockerDefinitionPath,
 } from "./toolchain-inputs";
 import { nodeSelectorMatches } from "./toolchain-node";
+import { checkRustReferences, type RustException } from "./toolchain-rust";
 
 export const runtimeRules = [
   "bun-pins",
@@ -45,7 +46,6 @@ type RuntimePolicy = {
   node: string;
   python: string;
   rust: string;
-  rustCompilerDevelopment: string;
   bun: string;
   packages: Record<string, string>;
   actions: Record<string, { sha: string; version: string }>;
@@ -77,6 +77,7 @@ type CheckRuntimeFileOptions = {
   onDelegated?: ((report: RuntimeDelegation) => void) | undefined;
   dynamicSelectors?: readonly DynamicSelector[] | undefined;
   onDynamicSelector?: ((entry: DynamicSelector) => void) | undefined;
+  rustExceptions?: readonly RustException[] | undefined;
   engineFloors?: readonly ResolvedEngineFloor[] | undefined;
   onEngineFloor?:
     | ((floor: ResolvedEngineFloor, status: "matched" | "mismatch") => void)
@@ -222,10 +223,16 @@ export const checkRuntimeFile = ({
   onDelegated,
   dynamicSelectors = [],
   onDynamicSelector,
+  rustExceptions = [],
   engineFloors = [],
   onEngineFloor,
 }: CheckRuntimeFileOptions): RuntimeDiagnostic[] => {
-  const diagnostics: RuntimeDiagnostic[] = [];
+  const diagnostics: RuntimeDiagnostic[] = checkRustReferences({
+    file,
+    text,
+    rust: policy.rust,
+    exceptions: rustExceptions,
+  });
   const name = path.posix.basename(file);
   const lines = text.split(/\r?\n/);
   type RuntimeDiagnosticOptions = Pick<
@@ -273,7 +280,10 @@ export const checkRuntimeFile = ({
     line = 1,
     selector,
   }: RuntimePinOptions) => {
-    let matches = value === expected;
+    let matches =
+      value === expected ||
+      (rule === "rust-version" &&
+        rustExceptions.some((entry) => entry.pin === value));
     if (selector === "node") matches = nodeSelectorMatches(value, expected);
     else if (label.includes("python"))
       matches = pythonSelectorMatches(value, expected);
@@ -354,17 +364,10 @@ export const checkRuntimeFile = ({
     const parsed = toml("rust-version");
     if (parsed !== undefined) {
       const toolchain = parsed["toolchain"];
-      const components = record(toolchain)
-        ? toolchain["components"]
-        : undefined;
-      const expected =
-        Array.isArray(components) && components.includes("rustc-dev")
-          ? policy.rustCompilerDevelopment
-          : policy.rust;
       pin({
         rule: "rust-version",
         value: record(toolchain) ? toolchain["channel"] : undefined,
-        expected,
+        expected: policy.rust,
         label: "Rust channel",
         line: lineOf("channel"),
       });
@@ -513,7 +516,10 @@ export const checkRuntimeFile = ({
         const configured = tools[tool];
         if (configured !== undefined)
           pin({
-            rule: "runtime-manager",
+            rule:
+              tool === "rust" || tool === "core:rust"
+                ? "rust-version"
+                : "runtime-manager",
             value: record(configured) ? configured["version"] : configured,
             expected,
             selector: nodeTools.has(tool) ? "node" : undefined,
@@ -533,7 +539,10 @@ export const checkRuntimeFile = ({
       )?.[1];
       if (expected !== undefined)
         pin({
-          rule: "runtime-manager",
+          rule:
+            tool === "rust" || tool === "core:rust"
+              ? "rust-version"
+              : "runtime-manager",
           value: fields.slice(1).join(" "),
           expected,
           selector: nodeTools.has(tool) ? "node" : undefined,
@@ -555,11 +564,17 @@ export const checkRuntimeFile = ({
     at,
   }: RuntimeImageOptions) => {
     const unknownRuntime = () => {
-      if (dynamic(image) && authorizeDynamic("image", line, at)) return;
+      const rustImage =
+        typeof image === "string" &&
+        /^rust(?=:|@|$)/i.test(canonicalDockerRuntime(image));
+      if (!rustImage && dynamic(image) && authorizeDynamic("image", line, at))
+        return;
       add({
-        rule: "runtime-docker",
+        rule: rustImage ? "rust-version" : "runtime-docker",
         line,
-        message: `cannot determine ${label} runtime; use a static image or a scoped dynamicSelectors declaration`,
+        message: rustImage
+          ? `cannot determine ${label} Rust release; use a static exact pin`
+          : `cannot determine ${label} runtime; use a static image or a scoped dynamicSelectors declaration`,
       });
     };
     if (typeof image !== "string") {
@@ -579,7 +594,7 @@ export const checkRuntimeFile = ({
       digestSeparator < 0
         ? structuralImage
         : structuralImage.slice(0, digestSeparator);
-    const managedFamily = /^(node|python|oven\/bun)(?=:|$)/i.exec(
+    const managedFamily = /^(node|python|rust|oven\/bun)(?=:|$)/i.exec(
       structuralReference,
     )?.[1];
     const tagSeparator =
@@ -597,7 +612,7 @@ export const checkRuntimeFile = ({
       unknownRuntime();
       return;
     }
-    if (!/^(node|python|oven\/bun)$/i.test(imageRepository)) return;
+    if (!/^(node|python|rust|oven\/bun)$/i.test(imageRepository)) return;
     const tool = imageRepository.toLowerCase();
     if (image.includes("$")) {
       unknownRuntime();
@@ -607,7 +622,12 @@ export const checkRuntimeFile = ({
       digestSeparator < 0 ? undefined : canonical.slice(digestSeparator + 1);
     if (digest !== undefined && !/^sha256:[a-fA-F\d]{64}$/.test(digest)) {
       add({
-        rule: tool === "oven/bun" ? "bun-pins" : "runtime-docker",
+        rule:
+          tool === "rust"
+            ? "rust-version"
+            : tool === "oven/bun"
+              ? "bun-pins"
+              : "runtime-docker",
         line,
         message: `${label} ${tool} digest must be sha256 followed by 64 hexadecimal characters`,
       });
@@ -623,13 +643,19 @@ export const checkRuntimeFile = ({
     let expected = policy.bun;
     if (tool === "node") expected = policy.node;
     else if (tool === "python") expected = policy.python;
+    else if (tool === "rust") expected = policy.rust;
     if (digest !== undefined) {
       if (
         version === undefined ||
         !/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/.test(version)
       ) {
         add({
-          rule: tool === "oven/bun" ? "bun-pins" : "runtime-docker",
+          rule:
+            tool === "rust"
+              ? "rust-version"
+              : tool === "oven/bun"
+                ? "bun-pins"
+                : "runtime-docker",
           line,
           message: `${label} ${tool} digest requires an exact stable patch tag matching ${expected}`,
         });
@@ -648,7 +674,12 @@ export const checkRuntimeFile = ({
       }
     }
     pin({
-      rule: tool === "oven/bun" ? "bun-pins" : "runtime-docker",
+      rule:
+        tool === "rust"
+          ? "rust-version"
+          : tool === "oven/bun"
+            ? "bun-pins"
+            : "runtime-docker",
       value: version,
       expected,
       selector: tool === "node" ? "node" : undefined,

@@ -25,6 +25,7 @@ import {
   runtimeRules,
   type RuntimeDelegation,
 } from "./toolchain-runtime";
+import { parseRustExceptions } from "./toolchain-rust";
 import { parseToolchainPolicy } from "./toolchain-schema";
 
 export const toolchainRules = [
@@ -59,12 +60,13 @@ export const parseToolchainConfiguration = (input: unknown) => {
         key !== "cloud" &&
         key !== "engineFloors" &&
         key !== "dynamicSelectors" &&
-        key !== "consumerChecks",
+        key !== "consumerChecks" &&
+        key !== "rustExceptions",
     ) ||
     (input["optOuts"] !== undefined && !array(input["optOuts"]))
   )
     throw new Error(
-      "stll-toolchain.json accepts only optOuts, cloud, engineFloors, dynamicSelectors and consumerChecks declarations",
+      "stll-toolchain.json accepts only optOuts, cloud, engineFloors, dynamicSelectors consumerChecks and rustExceptions declarations",
     );
   const disabled = new Set<string>();
   const optOuts = input["optOuts"] ?? [];
@@ -82,6 +84,10 @@ export const parseToolchainConfiguration = (input: unknown) => {
       throw new Error(
         "each opt-out requires a unique known rule and a nonempty reason",
       );
+    if (entry["rule"] === "rust-version")
+      throw new Error(
+        "rust-version requires expiring exact-pin rustExceptions, not an opt-out",
+      );
     if (entry["rule"] === "node-engine")
       throw new Error(
         "node-engine cannot be opted out; engines.node must support the shared Node series",
@@ -94,6 +100,7 @@ export const parseToolchainConfiguration = (input: unknown) => {
   }
   return {
     disabled,
+    rustExceptions: parseRustExceptions(input["rustExceptions"]),
     cloud: parseCloudSetup(input["cloud"]),
     engineFloors: parseEngineFloors(input["engineFloors"]),
     dynamicSelectors: parseDynamicSelectors(input["dynamicSelectors"]),
@@ -251,6 +258,7 @@ export const checkToolchain = ({
           packages: { ...policy.packages, typescript: policy.typescript },
         },
         trackedFiles,
+        rustExceptions: configuration.rustExceptions,
         dynamicSelectors: dynamicSelectors.filter(
           (entry) => entry.path === file,
         ),

@@ -760,12 +760,6 @@ const setupRuntimeVersion = ({
   if (typeof value !== "string" && typeof value !== "number")
     throw new Error("Unclassifiable setup runtime selector");
   const selector = String(value).trim();
-  if (runtime === "rust" && /^nightly-\d{4}-\d{2}-\d{2}$/.test(selector)) {
-    const date = selector.slice("nightly-".length);
-    if (new Date(date).toISOString().slice(0, 10) !== date)
-      throw new Error("Invalid dated Rust toolchain");
-    return selector;
-  }
   return stableVersion(selector);
 };
 type SetupRuntimeFileOptions = {

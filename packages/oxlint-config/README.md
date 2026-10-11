@@ -530,7 +530,7 @@ cannot be compared without executing Bun.
 Workflow/action and Docker definition edits conservatively force full CI.
 Unrelated application dependency changes do not force compiler parity.
 Setup-action runtime selectors and their tracked version-file contents must
-identify an exact stable release (or a dated Rust nightly). Floating selectors,
+identify an exact stable release. Floating selectors,
 ranges, expressions, empty
 values, or omitted runtime versions report an unreadable snapshot and run parity
 even when their committed text is unchanged.
@@ -580,3 +580,17 @@ Supported text locks include Bun, npm, pnpm and bounded
 Yarn Classic/Berry shapes; unrecognized lock shapes run parity. Yarn compiler
 `patch:` protocols are unsupported and run parity because their patch bytes are
 not represented by the lock checksum alone.
+
+## Rust selectors
+
+The shared `toolchain.json` Rust pin applies to `rust-toolchain(.toml)`, runtime
+managers, workflow Rust action/reusable-workflow inputs and `RUSTUP_TOOLCHAIN`,
+Cargo/rustup commands in scripts, and Rust Docker/service images. An omitted
+`dtolnay/rust-toolchain` version selects a floating action default and fails.
+Cargo manifest `rust-version` remains an MSRV floor at or below the shared pin.
+
+Only `rustExceptions` in the consumer's root `stll-toolchain.json` can authorize
+another exact stable release. Each record contains exactly `pin`, `reason`,
+`tracking` (a GitHub issue URL) and `expires` (a future `YYYY-MM-DD` date).
+Channels, expired records and `rust-version` rule opt-outs fail validation.
+See the [root policy guide](../../README.md) for a complete declaration.

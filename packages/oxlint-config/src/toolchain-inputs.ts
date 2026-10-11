@@ -84,6 +84,8 @@ export const toolchainInputKind = (file: string) => {
     return "presence";
   if (
     githubAutomationFileKind(file) !== undefined ||
+    /\.(?:sh|bash|zsh)$/.test(file) ||
+    /(?:^|\/)ci-service-images\.json$/.test(file) ||
     isMiseConfigPath(file) ||
     isPythonDependencyManifest(file) ||
     isDockerDefinitionPath(file) ||

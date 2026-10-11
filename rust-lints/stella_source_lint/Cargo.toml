@@ -1,0 +1,12 @@
+[package]
+name = "stella_source_lint"
+version = "0.1.0"
+authors = ["stella"]
+description = "Stable Rust source policy checks for stella repositories"
+edition = "2024"
+rust-version = "1.99.0"
+publish = false
+
+[dependencies]
+proc-macro2 = { version = "1", features = ["span-locations"] }
+syn = { version = "2", features = ["full", "visit"] }
