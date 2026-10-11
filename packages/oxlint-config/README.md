@@ -36,6 +36,28 @@ portable safety and route-query rules. See the
 [repository usage guide](https://github.com/stella/tooling#usage) for other
 presets, CommonJS configuration, and plugin composition.
 
+`library()` is framework-neutral. Enable React and its actionable React Compiler
+rules only for files owned by React:
+
+```ts
+export default library({
+  react: {
+    files: ["packages/react/**/*.{ts,tsx}", "apps/web/src/**/*.{ts,tsx}"],
+  },
+});
+```
+
+Include `.ts` hooks as well as `.tsx` components. Keep Vue composables and other
+frameworks outside these globs. Consumer `rules` take precedence over all preset
+rules, including scoped presets. Consumer `overrides` are applied last and can
+customize individual paths. React defaults remain disabled outside the selected files.
+Consumer overrides can change React rules without supplying a plugin list; an
+explicit `plugins` list remains authoritative. Framework-neutral
+`jsx-a11y` configuration can continue to be supplied through `plugins` and `rules`.
+
+When upgrading from a version that enabled React globally, add `react.files`
+explicitly to preserve diagnostics in React packages.
+
 ## Shared toolchain and Bun
 
 `@stll/oxlint-config/toolchain.json` is a versioned policy for package pins,
