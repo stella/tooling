@@ -1,6 +1,6 @@
 import { parseDocument } from "yaml";
 
-import { canonicalDockerRuntime } from "./toolchain-images";
+import { canonicalDockerRuntime, rustImageVersion } from "./toolchain-images";
 import { githubAutomationFileKind, isShellScript } from "./toolchain-inputs";
 import { decodeShellWord, shellCommandSegments } from "./toolchain-packages";
 
@@ -207,14 +207,11 @@ export const checkRustReferences = ({
         typeof value === "string" &&
         /^rust(?=:|@|$)/.test(canonicalDockerRuntime(value))
       ) {
-        const version = canonicalDockerRuntime(value)
+        const tag = canonicalDockerRuntime(value)
           .replace(/^rust:?/, "")
           .split("@")
-          .at(0)
-          ?.replace(
-            /-(?:alpine(?:\d+(?:\.\d+)*)?|(?:bookworm|bullseye|trixie|buster)(?:-slim)?|slim)$/,
-            "",
-          );
+          .at(0);
+        const version = tag === undefined ? undefined : rustImageVersion(tag);
         select(version, "Rust service image", lineOf(value));
       } else if (Array.isArray(value)) value.forEach(images);
       else if (record(value)) Object.values(value).forEach(images);
@@ -254,22 +251,30 @@ export const checkRustReferences = ({
       if (typeof uses === "string") {
         const action = uses.split("@").at(0)?.toLowerCase();
         const inputs = record(value["with"]) ? value["with"] : {};
-        if (action === "dtolnay/rust-toolchain") {
+        if (
+          action === "dtolnay/rust-toolchain" ||
+          action === "actions-rust-lang/setup-rust-toolchain"
+        ) {
           const entries = Object.entries(inputs).filter(
             ([key]) => key.toLowerCase() === "toolchain",
           );
           if (entries.length !== 1)
             select(
               undefined,
-              "dtolnay/rust-toolchain input (the action default floats)",
+              `${action} requires an explicit exact toolchain input`,
               lineOf(uses),
             );
-          else
-            select(
-              entries.at(0)?.at(1),
-              "dtolnay/rust-toolchain toolchain",
-              lineOf("toolchain:"),
-            );
+          else {
+            const selected = entries.at(0)?.at(1);
+            // setup-rust-toolchain installs every comma-separated release.
+            const selectors =
+              action === "actions-rust-lang/setup-rust-toolchain" &&
+              typeof selected === "string"
+                ? selected.split(",").map((pin) => pin.trim())
+                : [selected];
+            for (const selector of selectors)
+              select(selector, `${action} toolchain`, lineOf("toolchain:"));
+          }
         } else if (
           /(?:^|\/)\.github\/workflows\/[^@]+\.ya?ml(?:@|$)/.test(uses)
         ) {

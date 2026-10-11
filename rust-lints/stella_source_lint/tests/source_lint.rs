@@ -73,6 +73,28 @@ fn example() {
 }
 
 #[test]
+fn arbitrary_macro_brackets_are_checked_without_treating_them_as_attributes() {
+    let positive = r###"fn main() {
+    passthrough!(# ["stella tooling"]);
+    passthrough!(#! ["stella tooling"]);
+    passthrough!(# [doc = "Stella tooling"]);
+    passthrough!(#! [doc = "Stella tooling"]);
+}"###;
+    assert!(lint_source(positive).unwrap().is_empty());
+
+    let mutation = positive.replace("stella tooling", "Stella tooling");
+    assert_ne!(positive, mutation);
+    let diagnostics = lint_source(&mutation).unwrap();
+    assert_eq!(
+        diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.line)
+            .collect::<Vec<_>>(),
+        vec![2, 3],
+    );
+}
+
+#[test]
 fn malformed_sources_are_errors() {
     assert!(lint_source("fn main( {").is_err());
 }

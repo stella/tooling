@@ -169,14 +169,88 @@ const shellExecutableSource = (command: string) => {
     .join("\n");
 };
 
+const executableShellWords = (words: readonly string[]) => {
+  let start = 0;
+  const skipAssignments = () => {
+    while (
+      /^[A-Za-z_][A-Za-z\d_]*=/.test(decodeShellWord(words.at(start) ?? ""))
+    )
+      start += 1;
+  };
+  skipAssignments();
+  while (
+    /^(?:\/usr\/bin\/|\/bin\/)?env$/.test(
+      decodeShellWord(words.at(start) ?? ""),
+    )
+  ) {
+    start += 1;
+    while (start < words.length) {
+      const option = decodeShellWord(words.at(start) ?? "");
+      if (option === "--") {
+        start += 1;
+        break;
+      }
+      if (option === "-u" || option === "--unset") {
+        start += 2;
+        continue;
+      }
+      if (
+        option === "-" ||
+        option === "-i" ||
+        option === "--ignore-environment" ||
+        /^--unset=.+|^-u.+/.test(option)
+      ) {
+        start += 1;
+        continue;
+      }
+      break;
+    }
+    skipAssignments();
+  }
+  return words.slice(start);
+};
+
+// A quoted argument is executable only when the command itself is a shell with -c.
+const shellCommandBody = (rawWords: readonly string[]) => {
+  const words = executableShellWords(
+    rawWords.filter((word) => word !== "(" && word !== ")"),
+  ).map(decodeShellWord);
+  if (!/^(?:\/(?:[^/]+\/)*)?(?:bash|dash|ksh|zsh|sh)$/.test(words.at(0) ?? ""))
+    return undefined;
+  const valueOptions = new Set([
+    "--rcfile",
+    "--init-file",
+    "-o",
+    "+o",
+    "-O",
+    "+O",
+  ]);
+  for (let index = 1; index < words.length; index++) {
+    const option = words.at(index);
+    if (option === undefined || option === "--" || !/^[+-]/.test(option))
+      return undefined;
+    if (valueOptions.has(option)) {
+      index++;
+      continue;
+    }
+    if (/^-[^-]*c/.test(option)) return words.at(index + 1);
+  }
+  return undefined;
+};
+
 /** Shared executable shell words preserve assignments for runtime selectors. */
-export const shellCommandSegments = (command: string) => {
+export const shellCommandSegments = (
+  command: string,
+  grouping: "boundaries" | "tokens" = "boundaries",
+) => {
   const segments: string[][] = [[]];
   const executableSource = shellExecutableSource(command);
-  for (const source of [
+  const sources = new Set([
     executableSource,
     ...shellSubstitutions(executableSource),
-  ]) {
+  ]);
+  for (const source of sources) {
+    const firstSegment = segments.length;
     segments.push([]);
     const shellWords = source.match(
       /(?:[^\s"'\\;&|()]|\\[\s\S]|"(?:[^"\\]|\\[\s\S])*"|'[^']*')+|&&|\|\||[();&|\n]/g,
@@ -189,50 +263,27 @@ export const shellCommandSegments = (command: string) => {
         comment = true;
         continue;
       }
-      if (/^(?:&&|\|\||[();&|\n])$/.test(word)) segments.push([]);
+      if ((word === "(" || word === ")") && grouping === "tokens")
+        segments.at(-1)?.push(word);
+      else if (/^(?:&&|\|\||[();&|\n])$/.test(word)) segments.push([]);
       else segments.at(-1)?.push(word);
+    }
+    for (const words of segments.slice(firstSegment)) {
+      const body = shellCommandBody(words);
+      if (body === undefined) continue;
+      const executableBody = shellExecutableSource(body);
+      sources.add(executableBody);
+      for (const substitution of shellSubstitutions(executableBody))
+        sources.add(substitution);
     }
   }
   return segments;
 };
 
 // Inspect direct compiler commands after removing environment launcher assignments.
-export const compilerCommandSegments = (command: string) => {
-  const segments = shellCommandSegments(command);
-  return segments.map((words) => {
-    let start = 0;
-    const skipAssignments = () => {
-      while (/^[A-Za-z_][A-Za-z\d_]*=/.test(words.at(start) ?? "")) start += 1;
-    };
-    skipAssignments();
-    while (/^(?:\/usr\/bin\/|\/bin\/)?env$/.test(words.at(start) ?? "")) {
-      start += 1;
-      while (start < words.length) {
-        const option = words.at(start);
-        if (option === "--") {
-          start += 1;
-          break;
-        }
-        if (option === "-u" || option === "--unset") {
-          start += 2;
-          continue;
-        }
-        if (
-          option === "-" ||
-          option === "-i" ||
-          option === "--ignore-environment" ||
-          /^--unset=.+|^-u.+/.test(option ?? "")
-        ) {
-          start += 1;
-          continue;
-        }
-        break;
-      }
-      skipAssignments();
-    }
-    return words.slice(start);
-  });
-};
+export const compilerCommandSegments = (command: string) =>
+  // Compiler policy compares raw invocations; retaining grouping prevents widening its allowlist.
+  shellCommandSegments(command, "tokens").map(executableShellWords);
 
 const launcherValueOptions = new Map(
   Object.entries({

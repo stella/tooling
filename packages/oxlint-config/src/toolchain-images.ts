@@ -27,3 +27,10 @@ export const canonicalDockerRuntime = (image: string) => {
     registry === undefined ? image : image.slice(registry.length + 1);
   return repository.replace(/^library\//i, "");
 };
+
+/** Preserve Rust release identity across official Debian slim and Alpine variants. */
+export const rustImageVersion = (tag: string) =>
+  tag.replace(
+    /-(?:alpine(?:\d+(?:\.\d+)*)?|(?:bookworm|bullseye|trixie|buster)(?:-slim)?|slim(?:-(?:bookworm|bullseye|trixie|buster))?)$/,
+    "",
+  );

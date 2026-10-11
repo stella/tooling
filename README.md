@@ -94,7 +94,10 @@ only `engineFloors` is declared.
 
 The Rust stable pin is `1.99.0`. Floating channels and off-pin Rust references
 fail the shared check. Cargo `rust-version` declarations remain minimum support
-versions and may be lower than the shared pin.
+versions and may be lower than the shared pin. Rust setup actions
+(`dtolnay/rust-toolchain` and `actions-rust-lang/setup-rust-toolchain`) require
+explicit exact toolchain inputs; every release in a comma-separated setup list
+must satisfy the pin or its declared exception.
 
 Rust exceptions use one closed declaration in root `stll-toolchain.json`:
 

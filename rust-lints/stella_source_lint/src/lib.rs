@@ -5,6 +5,7 @@ use std::io;
 use std::path::{Component, Path, PathBuf};
 
 use proc_macro2::{Delimiter, TokenStream, TokenTree};
+use syn::parse::Parser;
 use syn::visit::{self, Visit};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -44,16 +45,28 @@ impl StringVisitor {
     fn visit_tokens(&mut self, tokens: TokenStream) {
         let mut tokens = tokens.into_iter().peekable();
         while let Some(token) = tokens.next() {
-            // Attributes, including desugared doc comments, are not literal expressions.
+            // Macro grammars may use # followed by brackets without forming an attribute.
+            // Skip only a complete Rust attribute, including desugared doc comments.
             if matches!(&token, TokenTree::Punct(punct) if punct.as_char() == '#') {
-                if matches!(tokens.peek(), Some(TokenTree::Punct(punct)) if punct.as_char() == '!')
-                {
-                    tokens.next();
+                let mut candidate = TokenStream::from(token.clone());
+                let mut lookahead = tokens.clone();
+                let inner = matches!(lookahead.peek(), Some(TokenTree::Punct(punct)) if punct.as_char() == '!');
+                if inner {
+                    candidate.extend(lookahead.next());
                 }
-                if matches!(tokens.peek(), Some(TokenTree::Group(group)) if group.delimiter() == Delimiter::Bracket)
+                if let Some(TokenTree::Group(group)) = lookahead.next()
+                    && group.delimiter() == Delimiter::Bracket
                 {
-                    tokens.next();
-                    continue;
+                    candidate.extend([TokenTree::Group(group)]);
+                    let parsed = if inner {
+                        syn::Attribute::parse_inner.parse2(candidate)
+                    } else {
+                        syn::Attribute::parse_outer.parse2(candidate)
+                    };
+                    if parsed.is_ok() {
+                        tokens = lookahead;
+                        continue;
+                    }
                 }
             }
             match token {

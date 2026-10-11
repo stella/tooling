@@ -302,3 +302,89 @@ test("rustup run and override set require an exact selected release", () => {
   ])
     expect(check("scripts/rust.sh", command)).toHaveLength(1);
 });
+
+test("executable shell command arguments expose nested Rust selectors", () => {
+  const quote = (source: string) => `'${source.replaceAll("'", "'\\''")}'`;
+  const commands = [
+    (pin: string) => `cargo +${pin} test`,
+    (pin: string) => `rustup default ${pin}`,
+    (pin: string) => `rustup run ${pin} cargo test`,
+  ];
+  const launchers = [
+    (source: string) => `bash -c ${quote(source)}`,
+    (source: string) => `sh -c ${quote(source)}`,
+    (source: string) => `bash -lc ${quote(source)}`,
+    (source: string) => `/bin/bash --noprofile --norc -eu -c ${quote(source)}`,
+    (source: string) => `bash -o errexit -O extglob -lc ${quote(source)}`,
+    (source: string) => `env -u OLD_FLAG CHECK=1 bash -c ${quote(source)}`,
+    (source: string) => `bash -c ${quote(`sh -c ${quote(source)}`)}`,
+  ];
+  for (const command of commands)
+    for (const launch of launchers) {
+      expect(check("scripts/rust.sh", launch(command(rust)))).toEqual([]);
+      expect(launch(command("nightly"))).not.toBe(launch(command(rust)));
+      expect(
+        check("scripts/rust.sh", launch(command("nightly"))).length,
+      ).toBeGreaterThan(0);
+    }
+  expect(check("scripts/rust.sh", `bash -c "cargo +${rust} test"`)).toEqual([]);
+  expect(
+    check("scripts/rust.sh", 'bash -c "cargo +nightly test"'),
+  ).toHaveLength(1);
+});
+
+test("literal shell command examples remain data at every nesting level", () => {
+  for (const source of [
+    `echo 'bash -c "cargo +nightly test"'`,
+    `printf '%s\\n' 'sh -c "rustup run nightly cargo test"'`,
+    `bash -c 'echo "cargo +nightly test"'`,
+    `bash -lc 'printf "%s\\n" "rustup run nightly cargo test"'`,
+    `cat <<'TEXT'\nbash -c 'cargo +nightly test'\nTEXT`,
+  ])
+    expect(check("scripts/rust.sh", source)).toEqual([]);
+});
+
+test("Rust setup actions require explicit exact selectors across toolchain lists", () => {
+  const action = `actions-rust-lang/setup-rust-toolchain@${sha}`;
+  const setup = (pin?: string) =>
+    workflow(
+      `    steps:\n      - uses: ${action}${pin === undefined ? "" : `\n        with: {toolchain: '${pin}'}`}`,
+    );
+  expect(check(".github/workflows/ci.yml", setup(rust))).toEqual([]);
+  expect(check(".github/workflows/ci.yml", setup(`${rust}, ${rust}`))).toEqual(
+    [],
+  );
+  for (const pin of ["nightly", undefined, `${rust}, nightly`])
+    expect(
+      check(".github/workflows/ci.yml", setup(pin)).length,
+    ).toBeGreaterThan(0);
+});
+
+test("both Rust slim tag orderings retain exact pins on every image surface", () => {
+  const digest = `@sha256:${"a".repeat(64)}`;
+  const surfaces = [
+    { file: "Dockerfile", source: (image: string) => `FROM ${image}` },
+    {
+      file: ".github/workflows/ci.yml",
+      source: (image: string) => workflow(`    container: '${image}'`),
+    },
+    {
+      file: "scripts/ci-service-images.json",
+      source: (image: string) => JSON.stringify({ rust: { image } }),
+    },
+  ];
+  for (const suffix of [
+    "-slim-bookworm",
+    "-slim-trixie",
+    "-bookworm-slim",
+    "-trixie-slim",
+  ])
+    for (const hash of ["", digest])
+      for (const { file, source } of surfaces) {
+        expect(check(file, source(`rust:${rust}${suffix}${hash}`))).toEqual([]);
+        for (const mutation of ["1.97.1", `${rust}-rc.1`, "nightly"])
+          expect(
+            check(file, source(`rust:${mutation}${suffix}${hash}`)).length,
+          ).toBeGreaterThan(0);
+      }
+});

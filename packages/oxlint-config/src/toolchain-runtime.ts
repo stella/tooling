@@ -20,7 +20,7 @@ import {
   engineFloorSelectorMatches,
   type ResolvedEngineFloor,
 } from "./toolchain-engine-floors";
-import { canonicalDockerRuntime } from "./toolchain-images";
+import { canonicalDockerRuntime, rustImageVersion } from "./toolchain-images";
 import {
   githubAutomationFileKind,
   isMiseConfigPath,
@@ -639,7 +639,10 @@ export const checkRuntimeFile = ({
         ? /-(?:alpine|slim|debian)$/
         : /-(?:alpine(?:\d+(?:\.\d+)*)?|(?:bookworm|bullseye|trixie|buster)(?:-slim)?|slim)$/;
     // Strip only supported image variants; prerelease qualifiers remain invalid pins.
-    const version = tag?.replace(variantSuffix, "");
+    const version =
+      tool === "rust" && tag !== undefined
+        ? rustImageVersion(tag)
+        : tag?.replace(variantSuffix, "");
     let expected = policy.bun;
     if (tool === "node") expected = policy.node;
     else if (tool === "python") expected = policy.python;
