@@ -70,12 +70,8 @@ jobs:
           node-version-file: .node-version
 
       - run: bun install --frozen-lockfile
-      - run: bun run check:lockfile-versions
-      - run: bun run check:registry-versions
-      - run: bun run typecheck
-      - run: bun run test
-      - run: bun run lint
-      - run: bun run publint
+      - name: Verify release from clean build outputs
+        run: bash scripts/verify-release.sh
 
   pack:
     name: Build and pack ${{ matrix.package }}
