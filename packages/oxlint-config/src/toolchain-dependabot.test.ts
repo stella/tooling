@@ -53,7 +53,14 @@ const update = (ecosystem = "npm", directory = "/") => {
     ),
     ignore:
       ignored.length > 0
-        ? ignored.map((name) => ({ "dependency-name": name }))
+        ? ignored.map((name) => ({
+            "dependency-name": name,
+            "update-types": [
+              "version-update:semver-major",
+              "version-update:semver-minor",
+              "version-update:semver-patch",
+            ],
+          }))
         : undefined,
   };
 };
@@ -566,7 +573,9 @@ describe("Dependabot policy", () => {
       expect(bad).not.toBe(good);
       expect(
         check(bad, files).some(({ message }) =>
-          message.includes(`bun: ignore all updates for shared pin ${name}`),
+          message.includes(
+            `bun: ignore all version updates for shared pin ${name}`,
+          ),
         ),
       ).toBe(true);
     }
@@ -933,7 +942,7 @@ describe("Dependabot policy", () => {
           },
         ]),
         files,
-      ).some(({ message }) => message.includes("ignore all updates")),
+      ).some(({ message }) => message.includes("ignore all version updates")),
     ).toBe(true);
   });
 
@@ -978,6 +987,73 @@ describe("Dependabot policy", () => {
     ).not.toContain("docker");
   });
 
+  test("shared pins ignore version updates while preserving security updates", () => {
+    for (const ecosystem of [
+      "npm",
+      "bun",
+      "github-actions",
+      "docker",
+      "docker-compose",
+    ]) {
+      const base = update(ecosystem);
+      expect(check(config([base]), {})).toEqual([]);
+      const validIgnore = base.ignore ?? [];
+      for (const name of fixtureIgnores(ecosystem)) {
+        for (const unsafe of [
+          { "dependency-name": name },
+          { "dependency-name": name, "update-types": [] },
+          {
+            "dependency-name": name,
+            "update-types": ["security-update:semver-major"],
+          },
+          {
+            "dependency-name": name,
+            "update-types": [
+              "version-update:semver-major",
+              "version-update:semver-major",
+              "version-update:semver-patch",
+            ],
+          },
+          {
+            "dependency-name": name,
+            "update-types": [
+              "version-update:semver-major",
+              "version-update:semver-minor",
+              "version-update:semver-patch",
+            ],
+            versions: ["*"],
+          },
+        ]) {
+          for (const ignore of [
+            validIgnore.map((entry) =>
+              entry["dependency-name"] === name ? unsafe : entry,
+            ),
+            [...validIgnore, unsafe],
+          ])
+            expect(
+              check(config([{ ...base, ignore }]), {}).some(({ message }) =>
+                message.includes("security updates must remain enabled"),
+              ),
+            ).toBe(true);
+        }
+      }
+      expect(
+        check(
+          config([
+            {
+              ...base,
+              ignore: validIgnore.map((entry) => ({
+                "dependency-name": entry["dependency-name"],
+                "update-types": [...entry["update-types"]].reverse(),
+              })),
+            },
+          ]),
+          {},
+        ),
+      ).toEqual([]);
+    }
+  });
+
   test("rejects restricted ignores and cooldown overrides", () => {
     const base = update();
     const ignores = [
@@ -993,7 +1069,7 @@ describe("Dependabot policy", () => {
     for (const ignore of ignores)
       expect(
         check(config([{ ...base, ignore }])).some(({ message }) =>
-          message.includes("ignore all updates"),
+          message.includes("ignore all version updates"),
         ),
       ).toBe(true);
     for (const override of [
