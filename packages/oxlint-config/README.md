@@ -50,13 +50,18 @@ export default library({
 Include `.ts` hooks as well as `.tsx` components. Keep Vue composables and other
 frameworks outside these globs. Consumer `rules` take precedence over all preset
 rules, including scoped presets. Consumer `overrides` are applied last and can
-customize individual paths. React defaults remain disabled outside the selected files.
-Consumer overrides can change React rules without supplying a plugin list; an
-explicit `plugins` list remains authoritative. Framework-neutral
+customize individual paths. React is activated only in the selected override.
+Oxlint resolves later overrides against the base plugin list: when configuring
+React rules in a consumer override, explicitly supply
+`plugins: [...libraryPlugins, "react"]` (plus any other consumer plugins) and
+select React-owned files. Framework-neutral
 `jsx-a11y` configuration can continue to be supplied through `plugins` and `rules`.
 
 When upgrading from a version that enabled React globally, add `react.files`
-explicitly to preserve diagnostics in React packages.
+explicitly to preserve diagnostics in React packages. Direct composition is also
+breaking: `libraryRules` and `libraryPlugins` are now framework-neutral. Import
+`reactRules` and add `"react"` to the plugins of a file-scoped override to retain
+React diagnostics.
 
 ## Shared toolchain and Bun
 

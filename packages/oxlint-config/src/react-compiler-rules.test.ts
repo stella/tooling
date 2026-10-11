@@ -132,7 +132,11 @@ test("React diagnostics stay inside consumer-selected files", async () => {
         react: { files: ["react-hook.ts"] },
         rules: { "react/hooks": "off" },
         overrides: [
-          { files: ["react-hook.ts"], rules: { "react/hooks": "error" } },
+          {
+            files: ["react-hook.ts"],
+            plugins: [...libraryPlugins, "react"],
+            rules: { "react/hooks": "error" },
+          },
         ],
       }),
     ).toEqual(
@@ -148,7 +152,49 @@ test("React diagnostics stay inside consumer-selected files", async () => {
         react: { files: ["react-hook.ts"] },
         overrides: [{ files: ["*.ts"], rules: { "react/hooks": "off" } }],
       }),
+    ).toEqual(scoped);
+    expect(
+      await lint({
+        react: { files: ["react-hook.ts"] },
+        overrides: [
+          {
+            files: ["react-hook.ts"],
+            plugins: [...libraryPlugins, "react"],
+            rules: { "react/hooks": "off" },
+          },
+        ],
+      }),
     ).toEqual([]);
+    const unlistedRule = "react/jsx-no-comment-textnodes";
+    expect(unlistedRule in reactRules).toBe(false);
+    await writeFile(
+      join(directory, "non-react-view.tsx"),
+      "export const view = <div>// a text comment</div>;\n",
+    );
+    const unlistedOptions = {
+      [unlistedRule]: "error",
+      "react/hooks": "off",
+    } as const;
+    expect(
+      await lint({
+        react: { files: ["react-hook.ts"] },
+        rules: unlistedOptions,
+      }),
+    ).toEqual([]);
+    expect(
+      await lint({
+        react: { files: ["non-react-view.tsx"] },
+        rules: unlistedOptions,
+      }),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "react(jsx-no-comment-textnodes)",
+          filename: "non-react-view.tsx",
+        }),
+      ]),
+    );
+    await rm(join(directory, "non-react-view.tsx"));
     await writeFile(
       join(directory, "consumer.test.ts"),
       "console.log('consumer');\n",
@@ -175,7 +221,12 @@ test("React scoping retains consumer plugins and permits later rule overrides", 
     react: { files: ["react/**"] },
     overrides: [{ files: ["react/**"], rules: { "react/hooks": "warn" } }],
   });
-  expect(config.plugins).toEqual(expect.arrayContaining(["jsx-a11y", "react"]));
+  expect(config.plugins).toContain("jsx-a11y");
+  expect(config.plugins).not.toContain("react");
+  expect(config.overrides?.at(-2)?.plugins).toEqual([
+    ...(config.plugins ?? []),
+    "react",
+  ]);
   expect(config.overrides?.at(-1)?.rules).toEqual({ "react/hooks": "warn" });
 });
 
@@ -210,7 +261,7 @@ test("consumer plugin lists remain authoritative when overriding scoped rules", 
   expect(config.overrides?.at(-1)?.plugins).toEqual(["eslint"]);
 });
 
-test("broad disabling overrides keep React defaults off outside the selected files", () => {
+test("broad disabling overrides never activate React outside the selected files", () => {
   const disabledSettings = [
     "off",
     "allow",
@@ -226,9 +277,10 @@ test("broad disabling overrides keep React defaults off outside the selected fil
         { files: ["**/*.test.ts"], rules: { "react/hooks": setting } },
       ],
     });
-    for (const name of Object.keys(reactRules)) {
-      expect(config.rules?.[name]).toBe("off");
-    }
+    expect(config.plugins).not.toContain("react");
+    expect(
+      Object.keys(config.rules ?? {}).some((name) => name.startsWith("react/")),
+    ).toBe(false);
     expect(config.overrides?.at(-1)?.plugins).toBeUndefined();
     expect(config.overrides?.at(-1)?.rules).toEqual({ "react/hooks": setting });
   }

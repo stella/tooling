@@ -203,7 +203,6 @@ export const libraryOverrides = [
 
 export const library = (options: LibraryOptions = {}): OxlintConfig => {
   const plugins = new Set([...libraryPlugins, ...(options.plugins ?? [])]);
-  if (options.react !== undefined) plugins.add("react");
   const presetOverrides = [
     ...libraryOverrides,
     ...(options.react === undefined
@@ -211,18 +210,11 @@ export const library = (options: LibraryOptions = {}): OxlintConfig => {
       : [
           {
             files: options.react.files,
+            plugins: [...plugins, "react"],
             rules: reactRules,
           } satisfies OxlintOverride,
         ]),
   ];
-  // Oxlint resolves each consumer override against the base plugin list.
-  // Register scoped plugins here so later overrides can disable their rules;
-  // all React defaults remain off outside the consumer-selected files.
-  const scopedRuleDefaults: Rules = {};
-  if (options.react !== undefined) {
-    for (const name of Object.keys(reactRules))
-      scopedRuleDefaults[name] = "off";
-  }
   return defineConfig({
     options: {
       denyWarnings: true,
@@ -242,7 +234,6 @@ export const library = (options: LibraryOptions = {}): OxlintConfig => {
     ],
     rules: {
       ...libraryRules,
-      ...scopedRuleDefaults,
       ...options.rules,
     },
     overrides: [
