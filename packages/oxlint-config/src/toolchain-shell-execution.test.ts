@@ -54,6 +54,13 @@ test("heredoc programs run only when the receiving shell reads its program from 
     "bash",
     "/bin/sh",
     "env RUST_LOG=info bash",
+    "env -C /tmp bash",
+    "env --chdir /tmp bash",
+    "env --chdir=/tmp bash",
+    "env -C/tmp bash",
+    "env -S 'bash -s'",
+    "env --split-string='bash -s'",
+    "env -C /tmp -S 'bash -s'",
     "bash -s",
     "bash -se argument",
     "bash --noprofile -s argument",
@@ -286,6 +293,7 @@ test("only the effective stdin heredoc is a shell program", () => {
   const dataHeaders = [
     "bash 3<<'DATA' </dev/null",
     "bash <<'DATA' </dev/null",
+    "bash <<'DATA' <script.sh",
     "bash <<'DATA' 0<&1",
     "bash <<'DATA' 0<&-",
   ];

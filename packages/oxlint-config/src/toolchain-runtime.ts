@@ -925,7 +925,8 @@ export const checkRuntimeFile = ({
         const implicit = /^(<<-?(?:'[^']+'|"[^"]+"|\S+))(?:\s+(.+))?$/.exec(
           source,
         );
-        if (implicit !== null) source = `${implicit[2] ?? "sh"} ${implicit[1]}`;
+        if (implicit !== null && implicit[2] === undefined)
+          source = `sh ${source}`;
         collectHeredocs(content, line);
         if (heredocs.length > 0) pendingRustRun = { source, line };
         else checkRustCommand(source, line);

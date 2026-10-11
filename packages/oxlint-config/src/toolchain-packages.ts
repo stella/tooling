@@ -437,15 +437,37 @@ const executableShellWords = (words: readonly string[]) => {
         start += 1;
         break;
       }
-      if (option === "-u" || option === "--unset") {
+      if (["-u", "--unset", "-C", "--chdir"].includes(option)) {
         start += 2;
         continue;
+      }
+      if (
+        option === "-S" ||
+        option === "--split-string" ||
+        option.startsWith("--split-string=") ||
+        (option.startsWith("-S") && option.length > 2)
+      ) {
+        let source: string;
+        if (option === "-S" || option === "--split-string") {
+          source = decodeShellWord(words.at(start + 1) ?? "");
+          start += 2;
+        } else {
+          source = option.startsWith("-S")
+            ? option.slice(2)
+            : option.slice("--split-string=".length);
+          start++;
+        }
+        return executableShellWords([
+          "env",
+          ...shellTokens(source).map(({ value }) => value),
+          ...words.slice(start),
+        ]);
       }
       if (
         option === "-" ||
         option === "-i" ||
         option === "--ignore-environment" ||
-        /^--unset=.+|^-u.+/.test(option)
+        /^--(?:unset|chdir)=.+|^-[uC].+/.test(option)
       ) {
         start += 1;
         continue;

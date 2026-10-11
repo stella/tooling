@@ -608,3 +608,28 @@ test("Docker ENV parses every assignment without shell command boundaries", () =
     ),
   ).toHaveLength(1);
 });
+
+test("Docker leading heredocs retain stdin redirection order", () => {
+  for (const header of [
+    "RUN <<'DATA' bash </dev/null",
+    "RUN <<'DATA' bash <script.sh",
+    "RUN <<'DATA' bash 0<&-",
+  ]) {
+    const source = (pin: string) =>
+      `FROM rust:${rust}\n${header}\ncargo +${pin} test\nDATA`;
+    expect(check("Dockerfile", source(rust))).toEqual([]);
+    expect(check("Dockerfile", source("nightly"))).toEqual([]);
+  }
+  for (const header of [
+    "RUN <<'DATA'",
+    "RUN <<'DATA' bash",
+    "RUN </dev/null bash <<'DATA'",
+  ]) {
+    const source = (pin: string) =>
+      `FROM rust:${rust}\n${header}\ncargo +${pin} test\nDATA`;
+    expect(check("Dockerfile", source(rust))).toEqual([]);
+    expect(check("Dockerfile", source("nightly"))).toMatchObject([
+      { rule: "rust-version" },
+    ]);
+  }
+});
