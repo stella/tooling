@@ -65,19 +65,8 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      # Bun validates the resolved graph but does not refresh or validate cached
-      # workspace self-versions. Release automation uses this same script in
-      # byte-preserving --write mode; CI keeps it in check-only mode.
-      - name: Lockfile workspace-version check
-        run: bun run check:lockfile-versions
-
-      # Fails a Version Packages PR before merge if a bump lands at or below a
-      # version already on npm; the publish job repeats this gate.
-      - name: Registry version check
-        run: bun run check:registry-versions
-
-      - name: Build shared commands
-        run: bun run build
+      - name: Verify release from clean build outputs
+        run: bash scripts/verify-release.sh
 
       - name: Typecheck diagnostic parity
         run: bun run check:typecheck-parity --changed-since "$TOOLCHAIN_BASE"
@@ -89,20 +78,11 @@ jobs:
             bun node_modules/typescript/bin/tsc --noEmit -p packages/oxlint-plugin
           '
 
-      - name: Typecheck with Bun (timed)
-        run: /usr/bin/time -v bun run typecheck
-
-      - name: Test
-        run: bun run test
-
       - name: Validate actual declaration-only build profile
         run: bun scripts/check-publish-artifact-profiles.ts
 
       - name: Validate consumer install lifecycle isolation
         run: bun scripts/check-consumer-install-lifecycle.ts
-
-      - name: Lint
-        run: bun run lint
 
       - name: Shared toolchain check
         run: |
@@ -113,9 +93,6 @@ jobs:
 
       - name: Published package contracts
         run: bun run check:publish-contract
-
-      - name: Publint
-        run: bun run publint
 
       - name: Pack dry run
         run: bun run pack:dry-run
