@@ -1,5 +1,11 @@
 # @stll/oxlint-config
 
+## 0.14.1
+
+### Patch Changes
+
+- [#81](https://github.com/stella/tooling/pull/81) [`b46475d`](https://github.com/stella/tooling/commit/b46475dbc61afb88628c8e9eb0548ad0aac5d5c7) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Check every packed JavaScript file against its declared syntax target and consumer Node. Add a guarded declaration-only Vite helper and recognize immutable Nuxt target markers across module formats.
+
 ## 0.14.0
 
 ### Minor Changes
