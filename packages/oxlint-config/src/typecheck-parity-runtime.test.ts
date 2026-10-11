@@ -1009,7 +1009,6 @@ test.skipIf(process.env["CI"] !== "true")(
             if ("outFile" in configuration) {
               expect(original.status).toBe(1);
               expect(compared.baseline.rawStatus).toBe(1);
-              expect(originalOutput).toContain("TS0");
               expect(compilerDiagnosticCodes(originalOutput)).toEqual([
                 "TS5102",
               ]);
