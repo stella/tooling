@@ -28,8 +28,8 @@
     "check:publish-contract": "node packages/oxlint-config/dist/publish-contract-cli.mjs"
   },
   "devDependencies": {
-    "@changesets/changelog-github": "1.0.0",
-    "@changesets/cli": "3.0.0",
+    "@changesets/changelog-github": "1.0.1",
+    "@changesets/cli": "3.0.3",
     "@stll/oxlint-config": "workspace:*",
     "@stll/oxlint-plugin": "workspace:*",
     "bun-types": "1.4.3",
@@ -37,8 +37,8 @@
     "oxlint": "1.87.0",
     "oxlint-tsgolint": "7.0.2003",
     "pnpm": "12.9.1",
-    "publint": "0.3.21",
-    "tsdown": "0.22.9",
+    "publint": "0.3.25",
+    "tsdown": "0.23.0",
     "typescript": "7.0.2"
   },
   "overrides": {
