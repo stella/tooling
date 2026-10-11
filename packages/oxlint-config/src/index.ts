@@ -205,6 +205,18 @@ export const library = (options: LibraryOptions = {}): OxlintConfig => {
   const plugins = Array.from(
     new Set([...libraryPlugins, ...(options.plugins ?? [])]),
   );
+  const presetOverrides = [
+    ...libraryOverrides,
+    ...(options.react === undefined
+      ? []
+      : [
+          {
+            files: options.react.files,
+            plugins: [...plugins, "react"],
+            rules: reactRules,
+          } satisfies OxlintOverride,
+        ]),
+  ];
   return defineConfig({
     options: {
       denyWarnings: true,
@@ -227,16 +239,11 @@ export const library = (options: LibraryOptions = {}): OxlintConfig => {
       ...options.rules,
     },
     overrides: [
-      ...libraryOverrides,
-      ...(options.react === undefined
-        ? []
-        : [
-            {
-              files: options.react.files,
-              plugins: [...plugins, "react"],
-              rules: reactRules,
-            } satisfies OxlintOverride,
-          ]),
+      // Consumer rules take precedence over every preset, including scoped ones.
+      ...presetOverrides.map((override) => ({
+        ...override,
+        rules: { ...override.rules, ...options.rules },
+      })),
       ...(options.overrides ?? []),
     ],
   });

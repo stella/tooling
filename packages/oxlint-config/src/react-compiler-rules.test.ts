@@ -47,9 +47,9 @@ test("React diagnostics stay inside consumer-selected files", async () => {
         ),
       );
     }
-    const lint = async (react?: LibraryOptions["react"]) => {
+    const lint = async (options: LibraryOptions = {}) => {
       const config = library({
-        react,
+        ...options,
         options: { typeAware: false, denyWarnings: false },
       });
       // Exercise built-in rules without loading unrelated shared JS plugins.
@@ -90,7 +90,7 @@ test("React diagnostics stay inside consumer-selected files", async () => {
       return diagnostics;
     };
     expect(await lint()).toEqual([]);
-    const scoped = await lint({ files: ["react-hook.ts"] });
+    const scoped = await lint({ react: { files: ["react-hook.ts"] } });
     expect(scoped).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -109,7 +109,7 @@ test("React diagnostics stay inside consumer-selected files", async () => {
       ),
     ).toBe(true);
     // The Vue fixture must trigger the detector when mistakenly selected.
-    const allFiles = await lint({ files: ["*.ts"] });
+    const allFiles = await lint({ react: { files: ["*.ts"] } });
     expect(allFiles).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -118,6 +118,43 @@ test("React diagnostics stay inside consumer-selected files", async () => {
         }),
       ]),
     );
+    expect(
+      await lint({
+        react: { files: ["react-hook.ts"] },
+        rules: { "react/hooks": "off" },
+      }),
+    ).toEqual([]);
+    expect(
+      await lint({
+        react: { files: ["react-hook.ts"] },
+        rules: { "react/hooks": "off" },
+        overrides: [
+          { files: ["react-hook.ts"], rules: { "react/hooks": "error" } },
+        ],
+      }),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "react(hooks)",
+          filename: "react-hook.ts",
+        }),
+      ]),
+    );
+    await writeFile(
+      join(directory, "consumer.test.ts"),
+      "console.log('consumer');\n",
+    );
+    expect(
+      await lint({
+        react: { files: ["react-hook.ts"] },
+        rules: { "react/hooks": "off", "no-console": "error" },
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        code: "eslint(no-console)",
+        filename: "consumer.test.ts",
+      }),
+    ]);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -134,4 +171,21 @@ test("React scoping retains consumer plugins and permits later rule overrides", 
     "react",
   ]);
   expect(config.overrides?.at(-1)?.rules).toEqual({ "react/hooks": "warn" });
+});
+
+test("consumer rules win over every preset override", () => {
+  const rules = {
+    "react/hooks": "off",
+    "no-console": "error",
+    "no-shadow": "off",
+  } as const;
+  for (const config of [
+    library({ rules }),
+    library({ rules, react: { files: ["react/**"] } }),
+  ]) {
+    expect(config.overrides?.length).toBeGreaterThan(0);
+    for (const override of config.overrides ?? []) {
+      expect(override.rules).toEqual(expect.objectContaining(rules));
+    }
+  }
 });
