@@ -1,5 +1,15 @@
 # @stll/oxlint-config
 
+## 1.0.0
+
+### Major Changes
+
+- [#98](https://github.com/stella/tooling/pull/98) [`4154cc5`](https://github.com/stella/tooling/commit/4154cc5f9b46795bc63ec9710047843fb763e524) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Pin Rust to 1.99.0 and enforce Rust selectors across commands, workflows and images. Replace the compiler-development toolchain field with one stable pin and validated, expiring consumer exceptions.
+
+### Patch Changes
+
+- [#98](https://github.com/stella/tooling/pull/98) [`4154cc5`](https://github.com/stella/tooling/commit/4154cc5f9b46795bc63ec9710047843fb763e524) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Check Rust selectors in brace groups, Docker commands and additional rustup commands. Preserve shell redirection semantics and inspect heredoc bodies as programs only for stdin-driven shells.
+
 ## 0.15.0
 
 ### Minor Changes
