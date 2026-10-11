@@ -87,6 +87,82 @@ type CheckRuntimeFileOptions = {
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+type DockerEnvironmentOptions = { source: string; escape: string };
+
+// ENV uses whitespace-delimited assignments, not shell operators or command substitution.
+const dockerEnvironmentAssignments = ({
+  source,
+  escape,
+}: DockerEnvironmentOptions) => {
+  const words: string[] = [];
+  let word = "";
+  let quote: "'" | '"' | undefined;
+  for (let index = 0; index < source.length; index++) {
+    const character = source.at(index) ?? "";
+    if (character === escape && quote !== "'") {
+      word += character + (source.at(++index) ?? "");
+      continue;
+    }
+    if (character === quote) quote = undefined;
+    else if (quote === undefined && (character === "'" || character === '"'))
+      quote = character;
+    else if (quote === undefined && /\s/.test(character)) {
+      if (word !== "") words.push(word);
+      word = "";
+      continue;
+    }
+    word += character;
+  }
+  if (quote !== undefined) return undefined;
+  if (word !== "") words.push(word);
+  const decode = (raw: string) => {
+    let value = "";
+    let quoted: "'" | '"' | undefined;
+    for (let index = 0; index < raw.length; index++) {
+      const character = raw.at(index) ?? "";
+      if (character === quoted) {
+        quoted = undefined;
+        continue;
+      }
+      if (quoted === undefined && (character === "'" || character === '"')) {
+        quoted = character;
+        continue;
+      }
+      const next = raw.at(index + 1);
+      if (
+        character === escape &&
+        quoted !== "'" &&
+        next !== undefined &&
+        (quoted === undefined ||
+          next === '"' ||
+          next === "$" ||
+          next === escape)
+      ) {
+        value += next;
+        index++;
+      } else value += character;
+    }
+    return value;
+  };
+  const first = words.at(0);
+  if (first === undefined) return undefined;
+  if (!first.includes("=")) {
+    const legacy = /^(\S+)\s+([\s\S]*)$/.exec(source);
+    if (legacy === null) return undefined;
+    return [{ key: decode(legacy[1] ?? ""), value: decode(legacy[2] ?? "") }];
+  }
+  const assignments: { key: string; value: string }[] = [];
+  for (const raw of words) {
+    const separator = raw.indexOf("=");
+    if (separator < 1) return undefined;
+    assignments.push({
+      key: decode(raw.slice(0, separator)),
+      value: decode(raw.slice(separator + 1)),
+    });
+  }
+  return assignments;
+};
+
 const pythonSelectorMatches = (value: unknown, expected: string) =>
   value === expected ||
   (typeof value === "string" &&
@@ -228,6 +304,7 @@ export const checkRuntimeFile = ({
   onEngineFloor,
 }: CheckRuntimeFileOptions): RuntimeDiagnostic[] => {
   const diagnostics: RuntimeDiagnostic[] = checkRustReferences({
+    type: "file",
     file,
     text,
     rust: policy.rust,
@@ -614,6 +691,9 @@ export const checkRuntimeFile = ({
     }
     if (!/^(node|python|rust|oven\/bun)$/i.test(imageRepository)) return;
     const tool = imageRepository.toLowerCase();
+    let imageRule: RuntimeRule = "runtime-docker";
+    if (tool === "rust") imageRule = "rust-version";
+    else if (tool === "oven/bun") imageRule = "bun-pins";
     if (image.includes("$")) {
       unknownRuntime();
       return;
@@ -622,12 +702,7 @@ export const checkRuntimeFile = ({
       digestSeparator < 0 ? undefined : canonical.slice(digestSeparator + 1);
     if (digest !== undefined && !/^sha256:[a-fA-F\d]{64}$/.test(digest)) {
       add({
-        rule:
-          tool === "rust"
-            ? "rust-version"
-            : tool === "oven/bun"
-              ? "bun-pins"
-              : "runtime-docker",
+        rule: imageRule,
         line,
         message: `${label} ${tool} digest must be sha256 followed by 64 hexadecimal characters`,
       });
@@ -653,12 +728,7 @@ export const checkRuntimeFile = ({
         !/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/.test(version)
       ) {
         add({
-          rule:
-            tool === "rust"
-              ? "rust-version"
-              : tool === "oven/bun"
-                ? "bun-pins"
-                : "runtime-docker",
+          rule: imageRule,
           line,
           message: `${label} ${tool} digest requires an exact stable patch tag matching ${expected}`,
         });
@@ -677,12 +747,7 @@ export const checkRuntimeFile = ({
       }
     }
     pin({
-      rule:
-        tool === "rust"
-          ? "rust-version"
-          : tool === "oven/bun"
-            ? "bun-pins"
-            : "runtime-docker",
+      rule: imageRule,
       value: version,
       expected,
       selector: tool === "node" ? "node" : undefined,
@@ -700,6 +765,19 @@ export const checkRuntimeFile = ({
       [];
     let instruction = "";
     let startLine = 1;
+    let pendingRustRun: { source: string; line: number } | undefined;
+    const checkRustCommand = (source: string, line: number) => {
+      diagnostics.push(
+        ...checkRustReferences({
+          type: "command",
+          file,
+          source,
+          line,
+          rust: policy.rust,
+          exceptions: rustExceptions,
+        }),
+      );
+    };
     const expand = (value: string) => {
       for (let count = 0; count <= variables.size; count++) {
         const next = value.replace(
@@ -800,7 +878,63 @@ export const checkRuntimeFile = ({
           variables.set(key, expand(value.replace(/^(["'])(.*)\1$/, "$2")));
         return;
       }
-      if (/^\s*(?:RUN|COPY)\s+/i.test(content)) {
+      const run = /^\s*RUN\s+(.+)$/i.exec(content);
+      if (run !== null) {
+        let source = run[1] ?? "";
+        source = source.replace(/^(?:--\S+\s+)*/, "");
+        if (source.startsWith("[")) {
+          try {
+            const words: unknown = JSON.parse(source);
+            if (
+              Array.isArray(words) &&
+              words.every((word: unknown) => typeof word === "string")
+            ) {
+              // Exec-form arguments are literal; only an explicit shell -c evaluates their contents.
+              source = words
+                .map((word) => `'${word.replaceAll("'", "'\\''")}'`)
+                .join(" ");
+            }
+          } catch {
+            // A leading bracket also starts a shell test; preserve shell form unless JSON proves exec form.
+          }
+        }
+        const implicit = /^(<<-?(?:'[^']+'|"[^"]+"|\S+))(?:\s+(.+))?$/.exec(
+          source,
+        );
+        if (implicit !== null && implicit[2] === undefined)
+          source = `sh ${source}`;
+        collectHeredocs(content, line);
+        if (heredocs.length > 0) pendingRustRun = { source, line };
+        else checkRustCommand(source, line);
+        return;
+      }
+      const environment = /^\s*ENV\s+(.+)$/i.exec(content);
+      if (environment !== null) {
+        const assignments = dockerEnvironmentAssignments({
+          source: environment[1] ?? "",
+          escape,
+        });
+        if (assignments === undefined) {
+          add({
+            rule: "runtime-docker",
+            line,
+            message: "invalid Docker ENV assignments",
+          });
+          return;
+        }
+        diagnostics.push(
+          ...checkRustReferences({
+            type: "environment",
+            file,
+            assignments,
+            line,
+            rust: policy.rust,
+            exceptions: rustExceptions,
+          }),
+        );
+        return;
+      }
+      if (/^\s*COPY\s+/i.test(content)) {
         collectHeredocs(content, line);
         return;
       }
@@ -820,11 +954,16 @@ export const checkRuntimeFile = ({
     lines.forEach((line, index) => {
       const heredoc = heredocs.at(0);
       if (heredoc !== undefined) {
+        if (pendingRustRun !== undefined) pendingRustRun.source += `\n${line}`;
         if (
           (heredoc.stripTabs ? line.replace(/^\t+/, "") : line) ===
           heredoc.delimiter
         )
           heredocs.shift();
+        if (heredocs.length === 0 && pendingRustRun !== undefined) {
+          checkRustCommand(pendingRustRun.source, pendingRustRun.line);
+          pendingRustRun = undefined;
+        }
         return;
       }
       if (line.trimStart().startsWith("#")) return;

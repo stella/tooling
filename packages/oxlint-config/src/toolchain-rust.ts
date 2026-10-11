@@ -60,18 +60,22 @@ export const parseRustExceptions = (
 
 type RustReferenceOptions = {
   file: string;
-  text: string;
   rust: string;
   exceptions: readonly RustException[];
-};
+} & (
+  | { type: "file"; text: string }
+  | { type: "command"; source: string; line: number }
+  | {
+      type: "environment";
+      assignments: readonly { key: string; value: string }[];
+      line: number;
+    }
+);
 
 /** Only executable fields are inspected: unrelated action inputs are not Rust selectors. */
-export const checkRustReferences = ({
-  file,
-  text,
-  rust,
-  exceptions,
-}: RustReferenceOptions) => {
+export const checkRustReferences = (options: RustReferenceOptions) => {
+  const { file, rust, exceptions } = options;
+  const text = options.type === "file" ? options.text : "";
   const diagnostics: {
     rule: "rust-version";
     path: string;
@@ -143,23 +147,66 @@ export const checkRustReferences = ({
         select(selector?.value.slice(1), "cargo toolchain", selector?.line);
       }
       if (executable !== "rustup") continue;
-      let selectors = arguments_;
+      let subcommandPosition = 0;
+      while (subcommandPosition < arguments_.length) {
+        const token = arguments_.at(subcommandPosition);
+        if (token === undefined) break;
+        if (token.value === "--") {
+          subcommandPosition++;
+          break;
+        }
+        if (token.value.startsWith("+")) {
+          select(token.value.slice(1), "rustup toolchain", token.line);
+        } else if (!token.value.startsWith("-")) break;
+        subcommandPosition++;
+      }
+      const invocation = arguments_.slice(subcommandPosition);
+      const subcommand = invocation.at(0)?.value;
+      if (subcommand === "target" || subcommand === "component") {
+        // These commands name targets/components positionally; only this option selects Rust.
+        for (let index = 1; index < invocation.length; index++) {
+          const token = invocation.at(index);
+          if (token?.value === "--toolchain") {
+            select(
+              invocation.at(++index)?.value,
+              "rustup --toolchain",
+              token.line,
+            );
+          } else if (token?.value.startsWith("--toolchain=")) {
+            select(
+              token.value.slice("--toolchain=".length),
+              "rustup --toolchain",
+              token.line,
+            );
+          }
+        }
+        continue;
+      }
+      let selectors: typeof invocation;
+      let requiresSelector = true;
       let firstSelectorOnly = false;
-      if (arguments_.at(0)?.value === "default")
-        selectors = arguments_.slice(1);
-      else if (
-        arguments_.at(0)?.value === "toolchain" &&
-        arguments_.at(1)?.value === "install"
-      )
-        selectors = arguments_.slice(2);
-      else if (arguments_.at(0)?.value === "run") {
-        selectors = arguments_.slice(1);
+      if (
+        subcommand === "default" ||
+        subcommand === "install" ||
+        subcommand === "add" ||
+        subcommand === "update"
+      ) {
+        selectors = invocation.slice(1);
+        requiresSelector = subcommand !== "update";
+      } else if (
+        subcommand === "toolchain" &&
+        ["install", "add", "update"].includes(invocation.at(1)?.value ?? "")
+      ) {
+        selectors = invocation.slice(2);
+        requiresSelector = invocation.at(1)?.value !== "update";
+      } else if (subcommand === "run") {
+        selectors = invocation.slice(1);
         firstSelectorOnly = true;
       } else if (
-        arguments_.at(0)?.value === "override" &&
-        arguments_.at(1)?.value === "set"
+        subcommand === "override" &&
+        invocation.at(1)?.value === "set"
       ) {
-        selectors = arguments_.slice(2);
+        selectors = invocation.slice(2);
         firstSelectorOnly = true;
       } else continue;
       let selected = 0;
@@ -183,9 +230,20 @@ export const checkRustReferences = ({
         select(token.value, "rustup toolchain", token.line);
         if (firstSelectorOnly) break;
       }
-      if (selected === 0) select(undefined, "rustup toolchain", firstLine);
+      if (selected === 0 && requiresSelector)
+        select(undefined, "rustup toolchain", firstLine);
     }
   };
+  if (options.type === "environment") {
+    for (const { key, value } of options.assignments) {
+      if (key === "RUSTUP_TOOLCHAIN") select(value, key, options.line);
+    }
+    return diagnostics;
+  }
+  if (options.type === "command") {
+    shell(options.source, options.line);
+    return diagnostics;
+  }
   const lineOf = (token: string) => {
     const index = text.split(/\r?\n/).findIndex((line) => line.includes(token));
     return index < 0 ? 1 : index + 1;

@@ -1,4 +1,5 @@
 pub mod cli;
+mod config;
 
 use std::fs;
 use std::io;
@@ -14,10 +15,17 @@ pub struct Diagnostic {
     pub column: usize,
 }
 
+pub(crate) fn capitalized_product_name() -> String {
+    let mut name = String::from("stella");
+    name[..1].make_ascii_uppercase();
+    name
+}
+
 fn has_stella_word(value: &str) -> bool {
-    value.match_indices("Stella").any(|(index, _)| {
+    let product = capitalized_product_name();
+    value.match_indices(product.as_str()).any(|(index, _)| {
         let before = value[..index].chars().next_back();
-        let after = value[index + "Stella".len()..].chars().next();
+        let after = value[index + product.len()..].chars().next();
         before.is_none_or(is_word_boundary) && after.is_none_or(is_word_boundary)
     })
 }

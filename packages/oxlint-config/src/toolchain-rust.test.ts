@@ -388,3 +388,250 @@ test("both Rust slim tag orderings retain exact pins on every image surface", ()
           ).toBeGreaterThan(0);
       }
 });
+
+test("rustup update and install spellings validate every explicit release", () => {
+  for (const command of [
+    "rustup update",
+    "rustup toolchain update",
+    "rustup install",
+    "rustup add",
+    "rustup toolchain install",
+  ]) {
+    expect(check("scripts/rust.sh", `${command} ${rust}`)).toEqual([]);
+    expect(
+      check("scripts/rust.sh", `${command} --profile minimal ${rust}`),
+    ).toEqual([]);
+    for (const mutation of ["nightly", "stable", "1.97.1", "''"]) {
+      expect(`${command} ${mutation}`).not.toBe(`${command} ${rust}`);
+      expect(check("scripts/rust.sh", `${command} ${mutation}`)).toHaveLength(
+        1,
+      );
+    }
+    expect(check("scripts/rust.sh", `${command} ${rust} nightly`)).toHaveLength(
+      1,
+    );
+  }
+  expect(check("scripts/rust.sh", "rustup update")).toEqual([]);
+  expect(check("scripts/rust.sh", "rustup toolchain update")).toEqual([]);
+});
+
+test("rustup global options and selected toolchains preserve subcommand validation", () => {
+  for (const prefix of [
+    "--quiet",
+    "-v",
+    `--quiet +${rust}`,
+    `+${rust}`,
+    "--",
+  ]) {
+    for (const command of [
+      "component add rustfmt --toolchain",
+      "target add wasm32-unknown-unknown --toolchain",
+      "add",
+      "toolchain add",
+      "default",
+    ]) {
+      const positive = `rustup ${prefix} ${command} ${rust}`;
+      const mutation = `rustup ${prefix} ${command} nightly`;
+      expect(positive).not.toBe(mutation);
+      expect(check("scripts/rust.sh", positive)).toEqual([]);
+      expect(check("scripts/rust.sh", mutation)).toHaveLength(1);
+    }
+  }
+  expect(check("scripts/rust.sh", `rustup --quiet +${rust} show`)).toEqual([]);
+  expect(check("scripts/rust.sh", "rustup --quiet +nightly show")).toHaveLength(
+    1,
+  );
+});
+
+test("rustup target and component options select exact releases while defaults remain valid", () => {
+  const commands = [
+    "rustup target add wasm32-unknown-unknown",
+    "rustup component add rustfmt",
+  ];
+  const surfaces = [
+    { file: "scripts/rust.sh", source: (command: string) => command },
+    {
+      file: "package.json",
+      source: (command: string) =>
+        JSON.stringify({ scripts: { prepare: command } }),
+    },
+    {
+      file: ".github/workflows/ci.yml",
+      source: (command: string) =>
+        workflow(`    steps:\n      - run: ${command}`),
+    },
+  ];
+  for (const command of commands)
+    for (const option of [
+      (pin: string) => `--toolchain ${pin}`,
+      (pin: string) => `--toolchain=${pin}`,
+    ])
+      for (const { file, source } of surfaces) {
+        expect(check(file, source(`${command} ${option(rust)}`))).toEqual([]);
+        for (const mutation of ["nightly", "stable", "1.97.1", "''"]) {
+          expect(option(mutation)).not.toBe(option(rust));
+          expect(
+            check(file, source(`${command} ${option(mutation)}`)),
+          ).toHaveLength(1);
+        }
+        expect(check(file, source(command))).toEqual([]);
+      }
+  for (const command of commands) {
+    expect(check("scripts/rust.sh", `${command} --toolchain`)).toHaveLength(1);
+    expect(check("scripts/rust.sh", `${command} --toolchain=`)).toHaveLength(1);
+    expect(
+      check(
+        "scripts/rust.sh",
+        `${command} --toolchain=${rust} --toolchain=nightly`,
+      ),
+    ).toHaveLength(1);
+  }
+  expect(
+    check(
+      "scripts/rust.sh",
+      `rustup target add --toolchain ${rust} wasm32-unknown-unknown`,
+    ),
+  ).toEqual([]);
+  expect(
+    check(
+      "scripts/rust.sh",
+      "rustup target add --toolchain nightly wasm32-unknown-unknown",
+    ),
+  ).toHaveLength(1);
+  expect(
+    check(
+      "scripts/rust.sh",
+      "echo 'rustup component add rustfmt --toolchain=nightly'",
+    ),
+  ).toEqual([]);
+});
+
+test("rustup installation aliases enforce the same exact selector policy", () => {
+  for (const command of [
+    "rustup toolchain install",
+    "rustup toolchain add",
+    "rustup install",
+  ]) {
+    expect(check("scripts/rust.sh", `${command} ${rust}`)).toEqual([]);
+    expect(check("scripts/rust.sh", `${command} nightly`)).toMatchObject([
+      { rule: "rust-version" },
+    ]);
+  }
+});
+
+test("Docker RUN and ENV instructions retain Rust pin enforcement", () => {
+  const instructions = [
+    (pin: string) => `RUN rustup default ${pin}`,
+    (pin: string) => `RUN --mount=type=cache,target=/cache cargo +${pin} test`,
+    (pin: string) => ["RUN rustup toolchain add " + "\\", pin].join("\n"),
+    (pin: string) => `RUN ["rustup", "default", "${pin}"]`,
+    (pin: string) => `RUN ["sh", "-c", "rustup default ${pin}"]`,
+    (pin: string) => `RUN [ -f Cargo.toml ] && cargo +${pin} test`,
+    (pin: string) => `RUN [ -f Cargo.toml ] && rustup default ${pin}`,
+    (pin: string) => `RUN <<'SCRIPT'\ncargo +${pin} test\nSCRIPT`,
+    (pin: string) => `RUN <<SCRIPT bash\nrustup default ${pin}\nSCRIPT`,
+    (pin: string) => `ENV RUSTUP_TOOLCHAIN=${pin}`,
+    (pin: string) => `ENV OTHER=value RUSTUP_TOOLCHAIN="${pin}"`,
+    (pin: string) => `ENV RUSTUP_TOOLCHAIN ${pin}`,
+  ];
+  for (const instruction of instructions) {
+    const positive = `FROM rust:${rust}\n${instruction(rust)}`;
+    const mutation = `FROM rust:${rust}\n${instruction("nightly")}`;
+    expect(positive).not.toBe(mutation);
+    expect(check("Dockerfile", positive)).toEqual([]);
+    expect(check("Dockerfile", mutation)).toMatchObject([
+      { rule: "rust-version", line: 2 },
+    ]);
+  }
+  expect(
+    check(
+      "Dockerfile",
+      `FROM rust:${rust}\nRUN echo 'cargo +nightly test'\nRUN cat <<'DATA'\ncargo +nightly test\nDATA`,
+    ),
+  ).toEqual([]);
+  expect(
+    check(
+      "Dockerfile",
+      `FROM rust:${rust}\nRUN ["echo", "$(rustup default nightly)", "apostrophe's"]\nENV NOTES="$(rustup default nightly)" RUSTUP_TOOLCHAIN=${rust}`,
+    ),
+  ).toEqual([]);
+  expect(
+    check(
+      "Dockerfile",
+      `FROM rust:${rust}\nRUN echo okay\n\nENV RUSTUP_TOOLCHAIN=nightly`,
+    ),
+  ).toMatchObject([{ rule: "rust-version", line: 4 }]);
+});
+
+test("Docker ENV parses every assignment without shell command boundaries", () => {
+  const instructions = [
+    (pin: string) => `ENV OTHER=value; RUSTUP_TOOLCHAIN=${pin}`,
+    (pin: string) => `ENV OTHER=value& RUSTUP_TOOLCHAIN=${pin}`,
+    (pin: string) => `ENV OTHER=value| RUSTUP_TOOLCHAIN=${pin}`,
+    (pin: string) => `ENV OTHER=#literal RUSTUP_TOOLCHAIN=${pin}`,
+    (pin: string) => `ENV OTHER="spaces ; & | #" RUSTUP_TOOLCHAIN='${pin}'`,
+    (pin: string) => `ENV OTHER=escaped\\ space RUSTUP_TOOLCHAIN="${pin}"`,
+    (pin: string) => `ENV RUSTUP_TOOLCHAIN=${rust} RUSTUP_TOOLCHAIN=${pin}`,
+    (pin: string) => `ENV RUSTUP_TOOLCHAIN "${pin}"`,
+    (pin: string) => `ENV RUSTUP_TOOLCHAIN '${pin}'`,
+    (pin: string) => `ENV RUSTUP_TOOLCHAIN=${pin.slice(0, 2)}"${pin.slice(2)}"`,
+  ];
+  for (const instruction of instructions) {
+    const positive = `FROM rust:${rust}\n${instruction(rust)}`;
+    const mutation = `FROM rust:${rust}\n${instruction("nightly")}`;
+    expect(positive).not.toBe(mutation);
+    expect(check("Dockerfile", positive)).toEqual([]);
+    expect(check("Dockerfile", mutation)).toMatchObject([
+      { rule: "rust-version", line: 2 },
+    ]);
+  }
+  for (const value of [
+    "ENV OTHER value; RUSTUP_TOOLCHAIN=nightly",
+    'ENV OTHER="RUSTUP_TOOLCHAIN=nightly; $(rustup default nightly)"',
+    "ENV OTHER='quote \\\" and ;' RUSTUP_TOOLCHAIN=1.99.0",
+  ])
+    expect(check("Dockerfile", `FROM rust:${rust}\n${value}`)).toEqual([]);
+  expect(
+    check(
+      "Dockerfile",
+      "# escape=`\nFROM rust:1.99.0\nENV OTHER=escaped` space RUSTUP_TOOLCHAIN=1.99.0",
+    ),
+  ).toEqual([]);
+  expect(
+    check(
+      "Dockerfile",
+      "# escape=`\nFROM rust:1.99.0\nENV OTHER=escaped` space RUSTUP_TOOLCHAIN=nightly",
+    ),
+  ).toHaveLength(1);
+  expect(
+    check(
+      "Dockerfile",
+      `FROM rust:${rust}\nENV RUSTUP_TOOLCHAIN ${rust} extra`,
+    ),
+  ).toHaveLength(1);
+});
+
+test("Docker leading heredocs retain stdin redirection order", () => {
+  for (const header of [
+    "RUN <<'DATA' bash </dev/null",
+    "RUN <<'DATA' bash <script.sh",
+    "RUN <<'DATA' bash 0<&-",
+  ]) {
+    const source = (pin: string) =>
+      `FROM rust:${rust}\n${header}\ncargo +${pin} test\nDATA`;
+    expect(check("Dockerfile", source(rust))).toEqual([]);
+    expect(check("Dockerfile", source("nightly"))).toEqual([]);
+  }
+  for (const header of [
+    "RUN <<'DATA'",
+    "RUN <<'DATA' bash",
+    "RUN </dev/null bash <<'DATA'",
+  ]) {
+    const source = (pin: string) =>
+      `FROM rust:${rust}\n${header}\ncargo +${pin} test\nDATA`;
+    expect(check("Dockerfile", source(rust))).toEqual([]);
+    expect(check("Dockerfile", source("nightly"))).toMatchObject([
+      { rule: "rust-version" },
+    ]);
+  }
+});

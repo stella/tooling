@@ -1,0 +1,3 @@
+{
+  "fixturePaths": ["tests/fixtures", "tests/source_lint.rs"]
+}
