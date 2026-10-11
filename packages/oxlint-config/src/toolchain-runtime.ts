@@ -691,6 +691,9 @@ export const checkRuntimeFile = ({
     }
     if (!/^(node|python|rust|oven\/bun)$/i.test(imageRepository)) return;
     const tool = imageRepository.toLowerCase();
+    let imageRule: RuntimeRule = "runtime-docker";
+    if (tool === "rust") imageRule = "rust-version";
+    else if (tool === "oven/bun") imageRule = "bun-pins";
     if (image.includes("$")) {
       unknownRuntime();
       return;
@@ -699,12 +702,7 @@ export const checkRuntimeFile = ({
       digestSeparator < 0 ? undefined : canonical.slice(digestSeparator + 1);
     if (digest !== undefined && !/^sha256:[a-fA-F\d]{64}$/.test(digest)) {
       add({
-        rule:
-          tool === "rust"
-            ? "rust-version"
-            : tool === "oven/bun"
-              ? "bun-pins"
-              : "runtime-docker",
+        rule: imageRule,
         line,
         message: `${label} ${tool} digest must be sha256 followed by 64 hexadecimal characters`,
       });
@@ -730,12 +728,7 @@ export const checkRuntimeFile = ({
         !/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/.test(version)
       ) {
         add({
-          rule:
-            tool === "rust"
-              ? "rust-version"
-              : tool === "oven/bun"
-                ? "bun-pins"
-                : "runtime-docker",
+          rule: imageRule,
           line,
           message: `${label} ${tool} digest requires an exact stable patch tag matching ${expected}`,
         });
@@ -754,12 +747,7 @@ export const checkRuntimeFile = ({
       }
     }
     pin({
-      rule:
-        tool === "rust"
-          ? "rust-version"
-          : tool === "oven/bun"
-            ? "bun-pins"
-            : "runtime-docker",
+      rule: imageRule,
       value: version,
       expected,
       selector: tool === "node" ? "node" : undefined,
