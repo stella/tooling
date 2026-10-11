@@ -4,6 +4,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   library,
@@ -61,7 +62,9 @@ test("React diagnostics stay inside consumer-selected files", async () => {
       await writeFile(join(directory, "oxlint.json"), JSON.stringify(config));
       const process = Bun.spawn(
         [
-          join(import.meta.dir, "../../../..", "node_modules/.bin/oxlint"),
+          fileURLToPath(
+            new URL("./bin/oxlint", import.meta.resolve("oxlint/package.json")),
+          ),
           "-c",
           "oxlint.json",
           "--format",
@@ -113,7 +116,7 @@ test("React diagnostics stay inside consumer-selected files", async () => {
     expect(allFiles).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          code: "react(immutability)",
+          code: "react(hooks)",
           filename: "vue-composable.ts",
         }),
       ]),
@@ -188,4 +191,18 @@ test("consumer rules win over every preset override", () => {
       expect(override.rules).toEqual(expect.objectContaining(rules));
     }
   }
+});
+
+test("consumer plugin lists remain authoritative when overriding scoped rules", () => {
+  const config = library({
+    react: { files: ["react/**"] },
+    overrides: [
+      {
+        files: ["react/**"],
+        plugins: ["eslint"],
+        rules: { "react/hooks": "off" },
+      },
+    ],
+  });
+  expect(config.overrides?.at(-1)?.plugins).toEqual(["eslint"]);
 });

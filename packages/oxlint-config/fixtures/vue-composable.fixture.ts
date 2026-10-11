@@ -1,7 +1,9 @@
-import type { Ref } from "vue";
+import { useId } from "vue";
 
-// Vue composables may mutate caller-owned refs.
-export const useCounter = (count: Ref<number>) => {
-  count.value += 1;
-  return count.value;
+// Vue composables may conditionally call Vue APIs during setup.
+export const useOptionalId = (enabled: boolean) => {
+  if (enabled) {
+    return useId();
+  }
+  return undefined;
 };

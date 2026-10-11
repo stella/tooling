@@ -50,7 +50,8 @@ export default library({
 Include `.ts` hooks as well as `.tsx` components. Keep Vue composables and other
 frameworks outside these globs. Consumer `rules` take precedence over all preset
 rules, including scoped presets. Consumer `overrides` are applied last and can
-customize individual paths. Framework-neutral
+customize individual paths. An override that sets scoped plugin rules retains
+their plugin unless it supplies its own `plugins` list. Framework-neutral
 `jsx-a11y` configuration can continue to be supplied through `plugins` and `rules`.
 
 When upgrading from a version that enabled React globally, add `react.files`

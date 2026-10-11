@@ -217,6 +217,26 @@ export const library = (options: LibraryOptions = {}): OxlintConfig => {
           } satisfies OxlintOverride,
         ]),
   ];
+  const scopedPlugins = Array.from(
+    new Set(
+      presetOverrides.flatMap((override) =>
+        "plugins" in override
+          ? override.plugins.filter((plugin) => !plugins.includes(plugin))
+          : [],
+      ),
+    ),
+  );
+  const consumerOverrides = (options.overrides ?? []).map((override) => {
+    if (override.plugins !== undefined) return override;
+    // Oxlint starts each override from the base plugin list. Explicit scoped
+    // rule choices must activate their plugin even after an earlier override.
+    const ruleNames = Object.keys(override.rules ?? {});
+    const requiredPlugins = scopedPlugins.filter((plugin) =>
+      ruleNames.some((name) => name.startsWith(`${plugin}/`)),
+    );
+    if (requiredPlugins.length === 0) return override;
+    return { ...override, plugins: [...plugins, ...requiredPlugins] };
+  });
   return defineConfig({
     options: {
       denyWarnings: true,
@@ -244,7 +264,7 @@ export const library = (options: LibraryOptions = {}): OxlintConfig => {
         ...override,
         rules: { ...override.rules, ...options.rules },
       })),
-      ...(options.overrides ?? []),
+      ...consumerOverrides,
     ],
   });
 };
