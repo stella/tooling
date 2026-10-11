@@ -441,3 +441,77 @@ TypeScript configuration. Use `react` for a React peer and a render smoke; use
 `node` for an import and representative call. Dependency bindings, runtime tools,
 and caches belong to the runner. A nightly failure must open or update one issue
 in the consuming repository and use its existing failure notification.
+
+## Toolchain changes and typecheck probes
+
+`stll-toolchain-changed --since <git-ref>` compares committed snapshots at the
+reference and `HEAD`. Fetch the reference and its history before running it.
+It prints one JSON object with `changed`, `tools`, and `status`; the detector
+exits successfully even when history is unreadable, reporting `changed: true`
+and `status: "unreadable"`. Use `changed` to force the full CI depth on both
+pull requests and merge-queue runs. An unreadable snapshot never skips checks.
+
+The comparison includes Bun declarations, Node selectors and support ranges,
+resolved TypeScript compiler versions (including workspace and compatibility
+aliases), oxlint, oxlint-tsgolint, oxfmt, and shared tooling pins. Lockfile
+resolutions determine installed package versions; manifest ranges alone do not.
+Resolution locations and importer bindings are retained: swapping compiler
+versions between workspaces cannot look unchanged. Compiler specifier changes
+run parity even when the resolved release version is unchanged. Unknown lock
+shapes and ambiguous resolutions report an unreadable snapshot. Supported text
+locks include Bun JSONC (schema 0/1), pnpm YAML (5.4/6/9), npm package-lock/
+shrinkwrap (1/2/3), and bounded Yarn Classic/Berry shapes; a binary-only Bun lock
+cannot be compared without executing Bun.
+Workflow/action and Docker definition edits conservatively force full CI.
+Unrelated application dependency changes do not force compiler parity.
+Setup-action runtime selectors and their tracked version-file contents must
+identify an exact stable release (or a dated Rust nightly). Floating selectors,
+ranges, expressions, empty
+values, or omitted runtime versions report an unreadable snapshot and run parity
+even when their committed text is unchanged.
+
+On pull requests, run the repository's ordinary Bun typecheck and the probe,
+then select parity using the same detector:
+
+```sh
+stll-typecheck-probe --project packages/api/tsconfig.json --seed-dir packages/api/src -- bun run typecheck
+stll-typecheck-parity --changed-since origin/main --project packages/api/tsconfig.json
+```
+
+The probe writes an exclusive temporary TypeScript file in the declared
+project, requires the command to fail with TS2322 attributed to that file, removes
+it, and requires the clean command to pass. Use `--seed-dir` to select a repository-relative directory inside the project;
+the default is the config directory. The config must include the seed directory;
+excluded seeds fail instead of producing a vacuous pass. Commands are argv,
+not shell expressions. Cleanup also runs on failure and handled termination.
+Repeat the probe for independently checked projects as needed.
+
+Conditional parity runs when Bun, TypeScript, or shared declarations change;
+otherwise it prints `parity skipped: toolchain unchanged since ...`. An unreadable
+reference runs full parity. Nightly jobs omit `--changed-since` to run full parity.
+Node and lint-tool changes still force full CI through the shared detector.
+
+Workflow, composite-action, Docker, mise, and tool-version declarations are
+conservatively fingerprinted for compiler parity, including referenced tracked
+setup-action version files (Node, Bun, Python, Go, Java and other runtimes).
+Rust toolchain-file selectors and conventional runtime files are included;
+cache-dependency-path is not a runtime selector. Compose and Kubernetes image
+definitions are conservatively fingerprinted alongside Dockerfiles. Catalog and unresolved declaration changes also force parity;
+an unclassifiable reference runs full parity. This may run parity for unrelated
+edits to these declaration files. Active installed compiler comparisons still
+use the owning lockfile resolutions.
+
+Compiler patch declarations, lockfile patch hashes, and their tracked patch files
+are included even when the compiler version is unchanged. Compiler patch-package
+files are included too. Missing referenced compiler patches fail closed; unrelated
+package patches do not trigger compiler parity.
+
+Compiler manifest specifiers and complete compiler lock entries form part of the
+change identity, including resolved URLs, integrity, commits, checksums and patch
+hashes. Changing a source at the same release version runs parity. Local compiler
+sources without an immutable byte identity fail closed; a version alone does not
+identify a local directory. Git compiler sources require a full commit identity.
+Supported text locks include Bun, npm, pnpm and bounded
+Yarn Classic/Berry shapes; unrecognized lock shapes run parity. Yarn compiler
+`patch:` protocols are unsupported and run parity because their patch bytes are
+not represented by the lock checksum alone.

@@ -11,6 +11,8 @@ export default defineConfig({
     "src/publish-build-target-nuxt-helper.ts",
     "src/consumer-compat-cli.ts",
     "src/typecheck-parity-cli.ts",
+    "src/toolchain-changed-cli.ts",
+    "src/typecheck-probe-cli.ts",
   ],
   format: ["esm", "cjs"],
   dts: true,
