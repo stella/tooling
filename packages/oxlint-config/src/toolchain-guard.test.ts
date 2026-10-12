@@ -66,7 +66,7 @@ test("large tracked file lists preserve all paths and toolchain diagnostics", ()
     }
     expect(readToolchainInputs(root).trackedFiles).toEqual(new Set(paths));
     expect(checkToolchain({ root, policy })).toContainEqual(
-      expect.objectContaining({ file: ".node-version", rule: "node-version" }),
+      expect.objectContaining({ path: ".node-version", rule: "node-version" }),
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
