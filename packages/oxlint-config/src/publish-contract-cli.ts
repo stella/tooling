@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -8,6 +7,7 @@ import {
   discoverConsumerManifests,
 } from "./consumer-compat-config";
 import { resolveConsumerReleasePack } from "./consumer-release-pack";
+import { readGitTrackedOutput } from "./git-tracked-output";
 import { resolvePublishBuildTarget } from "./publish-build-target";
 import {
   checkPublishContract,
@@ -34,10 +34,7 @@ const main = async () => {
       node: policy.consumerNode,
       typescript: policy.consumerTypescript,
     };
-    const tracked = execFileSync("git", ["ls-files", "-z"], {
-      cwd: root,
-      encoding: "utf8",
-    }).split("\0");
+    const tracked = readGitTrackedOutput(root, "paths").split("\0");
     const files: Record<string, string> = {};
     for (const file of tracked) {
       if (

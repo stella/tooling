@@ -11,6 +11,7 @@ import path from "node:path";
 
 import { cloudSetupPath, generateCloudSetup } from "./cloud-setup";
 import { parseCloudSetup } from "./cloud-setup-schema";
+import { readGitTrackedOutput } from "./git-tracked-output";
 import {
   checkConsumerChecks,
   parseConsumerChecks,
@@ -118,14 +119,7 @@ export const parseToolchainConfiguration = (input: unknown) => {
 /** Read one tracked configuration snapshot for guards and policy generation. */
 export const readToolchainInputs = (root: string) => {
   const diagnostics: SharedToolchainDiagnostic[] = [];
-  const tracked = execFileSync(
-    "git",
-    ["ls-files", "-z", "--cached", "--stage"],
-    {
-      cwd: root,
-      encoding: "utf8",
-    },
-  )
+  const tracked = readGitTrackedOutput(root, "staged")
     .split("\0")
     // Gitlinks identify submodule directories, never executable script files.
     .filter((entry) => entry !== "" && !entry.startsWith("160000 "))
