@@ -104,7 +104,7 @@
   "devDependencies": {
     "@oxlint/plugins": "1.87.0",
     "@stll/typescript-config": "workspace:*",
-    "@types/node": "25.9.1",
+    "@types/node": "26.6.4",
     "oxfmt": "0.72.0",
     "typescript": "7.0.2"
   },
