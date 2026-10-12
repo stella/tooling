@@ -14,6 +14,7 @@ import path from "node:path";
 import toolchain from "../toolchain.json";
 import { cloudSetupPath, generateCloudSetup } from "./cloud-setup";
 import type { parseCloudSetup } from "./cloud-setup-schema";
+import { readGitTrackedOutput } from "./git-tracked-output";
 import {
   consumerCheckWorkflow,
   consumerRunnerVersion,
@@ -28,6 +29,50 @@ import { toolchainInputKind } from "./toolchain-inputs";
 import { packagePinKeys, parseToolchainPolicy } from "./toolchain-schema";
 
 const policy = parseToolchainPolicy(toolchain);
+
+test("large tracked file lists preserve all paths and toolchain diagnostics", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "stll-large-file-list-"));
+  try {
+    execFileSync("git", ["init", "-q", root]);
+    const blob = execFileSync("git", ["hash-object", "-w", "--stdin"], {
+      cwd: root,
+      input: "",
+      encoding: "utf8",
+    }).trim();
+    // Populate only the index: thousands of irrelevant source files need no I/O.
+    const paths = Array.from(
+      { length: 6000 },
+      (_, index) => `src/${"x".repeat(200)}-${index}.ts`,
+    );
+    paths.push(".node-version");
+    const indexInput = paths
+      .map((file) => `100644 ${blob}\t${file}\0`)
+      .join("");
+    execFileSync("git", ["update-index", "-z", "--index-info"], {
+      cwd: root,
+      input: indexInput,
+    });
+    writeFileSync(path.join(root, ".node-version"), "0.0.0\n");
+    for (const mode of ["paths", "staged"] as const) {
+      const output = readGitTrackedOutput(root, mode);
+      expect(Buffer.byteLength(output)).toBeGreaterThan(1024 * 1024);
+      const listed = output
+        .split("\0")
+        .filter((entry) => entry !== "")
+        .map((entry) =>
+          mode === "staged" ? entry.slice(entry.indexOf("\t") + 1) : entry,
+        );
+      expect(new Set(listed)).toEqual(new Set(paths));
+    }
+    expect(readToolchainInputs(root).trackedFiles).toEqual(new Set(paths));
+    expect(checkToolchain({ root, policy })).toContainEqual(
+      expect.objectContaining({ file: ".node-version", rule: "node-version" }),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 const fixture = (
   files: Record<string, string>,
   untracked: Record<string, string> = {},
