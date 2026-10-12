@@ -1,5 +1,11 @@
 # @stll/oxlint-config
 
+## 1.0.2
+
+### Patch Changes
+
+- [#114](https://github.com/stella/tooling/pull/114) [`14e426c`](https://github.com/stella/tooling/commit/14e426cfc033e228a1d6ad2b45c79c2923185253) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Read tracked Git file lists without a subprocess output buffer limit in toolchain and publish-contract checks.
+
 ## 1.0.1
 
 ### Patch Changes
