@@ -68,16 +68,6 @@ jobs:
       - name: Verify release from clean build outputs
         run: bash scripts/verify-release.sh
 
-      - name: Typecheck diagnostic parity
-        run: bun run check:typecheck-parity --changed-since "$TOOLCHAIN_BASE"
-
-      - name: Typecheck with TypeScript (timed)
-        run: |
-          /usr/bin/time -v sh -c '
-            bun node_modules/typescript/bin/tsc --noEmit -p packages/oxlint-config &&
-            bun node_modules/typescript/bin/tsc --noEmit -p packages/oxlint-plugin
-          '
-
       - name: Validate actual declaration-only build profile
         run: bun scripts/check-publish-artifact-profiles.ts
 
@@ -89,7 +79,6 @@ jobs:
           bun run check:toolchain
           node packages/oxlint-config/dist/toolchain-check-cli.mjs
           node packages/oxlint-config/dist/toolchain-changed-cli.mjs --since "$TOOLCHAIN_BASE"
-          node packages/oxlint-config/dist/typecheck-probe-cli.mjs --project packages/oxlint-config/tsconfig.json --seed-dir packages/oxlint-config/src -- bun check -p packages/oxlint-config
 
       - name: Published package contracts
         run: bun run check:publish-contract

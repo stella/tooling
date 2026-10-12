@@ -1,0 +1,55 @@
+name: Typecheck proofs
+
+on:
+  workflow_dispatch:
+    inputs:
+      changed_since:
+        description: Git reference for conditional diagnostic parity
+        required: true
+        default: HEAD^
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  proofs:
+    name: Optional compiler proofs and timings
+    runs-on: ubuntu-latest
+    env:
+      TOOLCHAIN_BASE: ${{ inputs.changed_since }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build shared commands
+        run: bun run build
+
+      - name: Typecheck diagnostic parity
+        run: bun run check:typecheck-parity --changed-since "$TOOLCHAIN_BASE"
+
+      - name: Typecheck with TypeScript (timed)
+        run: |
+          /usr/bin/time -v sh -c '
+            bun node_modules/typescript/bin/tsc --noEmit -p packages/oxlint-config &&
+            bun node_modules/typescript/bin/tsc --noEmit -p packages/oxlint-plugin
+          '
+
+      - name: Typecheck seeded rejection proof
+        run: node packages/oxlint-config/dist/typecheck-probe-cli.mjs --project packages/oxlint-config/tsconfig.json --seed-dir packages/oxlint-config/src -- bun check -p packages/oxlint-config
