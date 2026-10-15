@@ -1,5 +1,23 @@
 # @stll/oxlint-config
 
+## 1.2.0
+
+### Minor Changes
+
+- [#124](https://github.com/stella/tooling/pull/124) [`9f0df31`](https://github.com/stella/tooling/commit/9f0df31da56dd2ff015aa592698827bba23bf603) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Resolve the generated Claude SessionStart hook through `$CLAUDE_PROJECT_DIR` so it
+  runs from repository subdirectories; regeneration replaces the previous
+  relative-path hook. Generated Claude settings set empty commit and pull request
+  attribution, and `cloud-setup-drift` enforces both. Add GNU time (`/usr/bin/time`)
+  from Ubuntu's `time` package as an optional cloud tool.
+
+### Patch Changes
+
+- [#125](https://github.com/stella/tooling/pull/125) [`290a4e7`](https://github.com/stella/tooling/commit/290a4e7b6db8768a5d74ae89f7024e7240f4f3ef) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Toolchain change detection reads Bun text lockfiles at version 2, which share the version 1 layout, so a repository with such a lockfile is compared instead of being reported as unreadable.
+
+- [#129](https://github.com/stella/tooling/pull/129) [`a0261ca`](https://github.com/stella/tooling/commit/a0261cad827b6734bad5768293022da91beeb171) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Allow cloud setup to install dependencies without lifecycle scripts, skip the package index refresh only when an install downloads nothing, and log the duration of each setup phase.
+
+- [#116](https://github.com/stella/tooling/pull/116) [`7b81321`](https://github.com/stella/tooling/commit/7b813219e9c01f88798cd70746c75ef40d5ff04c) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Treat service image names as metadata when validating official Rust image versions.
+
 ## 1.1.0
 
 ### Minor Changes
