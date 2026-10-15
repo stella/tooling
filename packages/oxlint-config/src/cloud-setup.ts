@@ -1,9 +1,14 @@
+import { createHash } from "node:crypto";
 import { valid } from "semver";
 
 import { renderCloudServiceInstall } from "./cloud-setup-install";
 import { cloudServices, parseCloudSetup } from "./cloud-setup-schema";
 import { renderCloudServiceStart } from "./cloud-setup-services";
+import { renderCloudShellInstall } from "./cloud-setup-shell";
+import { resolveCloudToolchains } from "./cloud-setup-toolchains";
+import { renderCloudToolInstall } from "./cloud-setup-tools-install";
 import { nodeSelectorMatches } from "./toolchain-node";
+import type { RustException } from "./toolchain-rust";
 import type { parseToolchainPolicy } from "./toolchain-schema";
 
 export const cloudSetupPath = ".agents/cloud-setup.sh";
@@ -14,6 +19,8 @@ type GenerateCloudSetupOptions = {
   policy: ReturnType<typeof parseToolchainPolicy>;
   cloud: NonNullable<ReturnType<typeof parseCloudSetup>>;
   nodeVersion: string;
+  files?: Readonly<Record<string, string>>;
+  rustExceptions?: readonly RustException[];
 };
 
 const script = String.raw`#!/usr/bin/env bash
@@ -68,9 +75,9 @@ runtime_ready() {
   [[ -x "$BUN_DIR/bun" && "$($BUN_DIR/bun --version)" == "$BUN_VERSION" ]] || fail 'Pinned Bun is unavailable; run install'
 }
 install_runtimes() {
-  if ! command -v curl >/dev/null || ! command -v unzip >/dev/null || ! command -v xz >/dev/null || ! command -v openssl >/dev/null || ! command -v gpg >/dev/null; then
+  if ! command -v curl >/dev/null || ! command -v unzip >/dev/null || ! command -v xz >/dev/null || ! command -v openssl >/dev/null || ! command -v gpg >/dev/null || ! ldconfig -p | awk '$1 == "libatomic.so.1" { found=1 } END { exit !found }'; then
     apt-get update
-    DEBIAN_FRONTEND=noninteractive apt_install ca-certificates curl unzip xz-utils openssl gnupg util-linux
+    DEBIAN_FRONTEND=noninteractive apt_install ca-certificates curl unzip xz-utils openssl gnupg util-linux libatomic1
   fi
   local scratch node_archive bun_archive bun_folder
   scratch="$(mktemp -d)"
@@ -122,15 +129,24 @@ dependency_install() {
 @SERVICE_INSTALL@
 @SERVICE_START@
 
+@TOOL_INSTALL@
+
+@INPUT_VALIDATION@
+
 @ENV_FUNCTIONS@
 
 if [[ "$MODE" == install ]]; then
   install_runtimes
   install_services
+  install_tools
+  install_shell_environment
   dependency_install
   exit 0
 fi
 runtime_ready
+verify_tools
+install_shell_environment
+verify_shell_environment
 @ENV_VALIDATE@
 prepare_state
 start_services
@@ -172,6 +188,8 @@ export const generateCloudSetup = ({
   policy,
   cloud,
   nodeVersion,
+  files = {},
+  rustExceptions = [],
 }: GenerateCloudSetupOptions) => {
   const selected = parseCloudSetup(cloud);
   if (selected === undefined) throw new Error("cloud declaration is required");
@@ -183,10 +201,47 @@ export const generateCloudSetup = ({
     throw new Error(
       "cloud requires a tracked exact .node-version within the shared Node series",
     );
+  const toolchains = resolveCloudToolchains({
+    cloud: selected,
+    files,
+    rust: policy.rust,
+    rustExceptions,
+  });
   const services = cloudServices.filter((service) =>
     selected.services.includes(service),
   );
   const replacements = new Map([
+    [
+      "@TOOL_INSTALL@",
+      renderCloudToolInstall(toolchains) +
+        renderCloudShellInstall({
+          nodeVersion: exactNode,
+          bunVersion: policy.bun,
+          rust: toolchains.rust,
+        }),
+    ],
+    [
+      "@INPUT_VALIDATION@",
+      [
+        "rust-toolchain.toml",
+        "rust-toolchain",
+        ...(selected.tools?.["wasm-bindgen-cli"] === undefined
+          ? []
+          : ["Cargo.lock"]),
+      ]
+        .flatMap((file) => {
+          const content = files[file];
+          if (content === undefined)
+            return [
+              `[[ ! -e ${shellQuote(file)} && ! -L ${shellQuote(file)} ]] || fail ${shellQuote(`${file} appeared; regenerate cloud-setup.sh`)}`,
+            ];
+          const hash = createHash("sha256").update(content).digest("hex");
+          return [
+            `[[ -f ${shellQuote(file)} && ! -L ${shellQuote(file)} ]] && [[ "$(sha256sum -- ${shellQuote(file)} | cut -d ' ' -f1)" == ${shellQuote(hash)} ]] || fail ${shellQuote(`${file} changed; regenerate cloud-setup.sh`)}`,
+          ];
+        })
+        .join("\n"),
+    ],
     ["@BUN@", policy.bun],
     ["@NODE@", exactNode],
     [

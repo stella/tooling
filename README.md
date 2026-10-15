@@ -441,15 +441,23 @@ versioned `stella/.github` contract. Package tags use the immutable
 ## Shared cloud setup
 
 Declare `cloud` in tracked root `stll-toolchain.json`, then run
-`bunx --no-install stll-cloud-setup` to generate `.agents/cloud-setup.sh`.
+`bunx --no-install stll-cloud-setup` to generate `.agents/cloud-setup.sh` and merge
+its remote-only Claude `SessionStart` hook into `.claude/settings.json`.
 The declaration requires `install` exactly `bun install --frozen-lockfile`.
 `services` is any subset of `postgres` and `valkey`; omit it or use `[]` for
 runtimes and dependencies only. A canonical repository-relative `envFile`, such
 as `.env.cloud`, is required with services and rejected without services.
 Runtime-only scripts emit no environment file code. A tracked root
 `.node-version` must select an exact stable patch within the shared Node series.
+Root `rust-toolchain.toml` enables pinned Rust automatically; `cloud.rust` can
+also declare its toolchain, components, and targets. Optional `cloud.tools`
+installs exact supported releases of `cargo-nextest`, `wasm-bindgen-cli`, and
+`uv` from verified prebuilt artifacts. The wasm-bindgen CLI pin must match the
+crate in `Cargo.lock`. Installed commands work in a fresh shell without sourcing
+runtime environment files.
 The mandatory `cloud-setup-drift` rule compares the committed script with the
-same generator and rejects missing, changed, or undeclared scripts.
+same generator and rejects missing, changed, or undeclared scripts and missing
+or conflicting startup hooks.
 
 The script has explicit `install` and `start` commands. It targets Ubuntu 24.04
 with root access or passwordless sudo; these are capability requirements,

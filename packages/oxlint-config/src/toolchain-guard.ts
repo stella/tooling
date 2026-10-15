@@ -10,6 +10,11 @@ import {
 import path from "node:path";
 
 import { cloudSetupPath, generateCloudSetup } from "./cloud-setup";
+import {
+  cloudClaudeSettingsPath,
+  cloudSessionStartFix,
+  hasCloudSessionStartHook,
+} from "./cloud-setup-claude";
 import { parseCloudSetup } from "./cloud-setup-schema";
 import { readGitTrackedOutput } from "./git-tracked-output";
 import {
@@ -244,6 +249,13 @@ export const checkToolchain = ({
         "cloud setup script requires an explicit cloud declaration in stll-toolchain.json",
     });
   if (cloud !== undefined) {
+    if (!hasCloudSessionStartHook(files[cloudClaudeSettingsPath]))
+      diagnostics.push({
+        rule: "cloud-setup-drift",
+        path: cloudClaudeSettingsPath,
+        line: 1,
+        message: `tracked Claude cloud SessionStart hook is missing, disabled or differs from shared policy; run stll-cloud-setup; if automatic merge is unsafe, ${cloudSessionStartFix}`,
+      });
     try {
       const nodeVersion = files[".node-version"];
       if (nodeVersion === undefined)
@@ -254,6 +266,8 @@ export const checkToolchain = ({
         policy,
         cloud,
         nodeVersion: nodeVersion.trim(),
+        files,
+        rustExceptions: configuration.rustExceptions,
       });
       if (script !== expected)
         diagnostics.push({

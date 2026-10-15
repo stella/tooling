@@ -69,7 +69,7 @@ service_prune_pid() {
 `;
 
 const postgresStart = String.raw`
-  local pg_bin='/usr/lib/postgresql/@POSTGRES@/bin' pg_data="$STATE/postgres" pg_password pg_details pg_pid pg_version
+  local pg_bin='/usr/lib/postgresql/@POSTGRES@/bin' pg_data="$STATE/postgres" pg_password pg_details pg_pid pg_version pg_state='already running'
   service_password "$STATE/postgres.password"
   pg_password="$(cat "$STATE/postgres.password")"
   service_directory "$pg_data"
@@ -88,6 +88,7 @@ const postgresStart = String.raw`
   service_prune_pid "$pg_data/postmaster.pid" "$pg_bin/postgres" postgres
   if ! service_run env PGHOST=127.0.0.1 PGHOSTADDR=127.0.0.1 "$pg_bin/pg_ctl" -D "$pg_data" status >/dev/null 2>&1; then
     service_run env PGHOST=127.0.0.1 PGHOSTADDR=127.0.0.1 "$pg_bin/pg_ctl" -D "$pg_data" -l "$pg_data/cloud.log" -o "-h 127.0.0.1 -p 55432 -c unix_socket_directories=" -t 10 -w start >/dev/null || fail "PostgreSQL start failed; port 55432 must be available"
+    pg_state=started
   fi
   pg_details="$(env -u PGSERVICE -u PGSERVICEFILE -u PGOPTIONS PGHOSTADDR=127.0.0.1 PGPASSWORD="$pg_password" PGCONNECT_TIMEOUT=2 "$pg_bin/psql" -X -h 127.0.0.1 -p 55432 -U stll_cloud -d postgres -At -v ON_ERROR_STOP=1 -c "SELECT current_setting('data_directory'), current_setting('listen_addresses'), current_setting('port'), current_setting('server_version_num'), current_setting('unix_socket_directories')")" || fail "PostgreSQL authenticated readiness failed"
   pg_version="$(printf '%s\n' "$pg_details" | cut -d '|' -f4)"
@@ -97,10 +98,11 @@ const postgresStart = String.raw`
   service_process "$pg_pid" "$pg_bin/postgres"
   [[ "$(env -u PGSERVICE -u PGSERVICEFILE -u PGOPTIONS PGHOSTADDR=127.0.0.1 PGPASSWORD="$pg_password" PGCONNECT_TIMEOUT=2 "$pg_bin/psql" -X -h 127.0.0.1 -p 55432 -U stll_cloud -d postgres -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_database WHERE datname = 'cloud_test'")" == 1 ]] || env -u PGSERVICE -u PGSERVICEFILE -u PGOPTIONS PGHOSTADDR=127.0.0.1 PGPASSWORD="$pg_password" PGCONNECT_TIMEOUT=2 "$pg_bin/createdb" -h 127.0.0.1 -p 55432 -U stll_cloud cloud_test || fail "PostgreSQL test database creation failed"
   DATABASE_URL="postgresql://stll_cloud:$pg_password@127.0.0.1:55432/cloud_test"
+  printf 'postgres: %s\n' "$pg_state"
 `;
 
 const valkeyStart = String.raw`
-  local vk_data="$STATE/valkey" vk_password vk_config vk_info vk_pid vk_expected ready=0
+  local vk_data="$STATE/valkey" vk_password vk_config vk_info vk_pid vk_expected ready=0 vk_state='already running'
   service_password "$STATE/valkey.password"
   vk_password="$(cat "$STATE/valkey.password")"
   service_directory "$vk_data"
@@ -120,7 +122,8 @@ const valkeyStart = String.raw`
   [[ "$(cat "$vk_config")" == "$vk_expected" ]] || fail "Valkey configuration differs from managed settings"
   service_prune_pid "$vk_data/valkey.pid" "$(command -v valkey-server)" valkey
   if [[ ! -e "$vk_data/valkey.pid" ]]; then
-    service_run valkey-server "$vk_config" || fail "Valkey start failed; port 56379 must be available"
+    service_run valkey-server "$vk_config" >/dev/null || fail "Valkey start failed; port 56379 must be available"
+    vk_state=started
   fi
   for ((attempt=0; attempt<20; attempt++)); do
     if vk_info="$(VALKEYCLI_AUTH="$vk_password" timeout 0.2 valkey-cli -h 127.0.0.1 -p 56379 --raw INFO server 2>/dev/null)"; then
@@ -136,6 +139,7 @@ const valkeyStart = String.raw`
   [[ "$(VALKEYCLI_AUTH="$vk_password" timeout 2 valkey-cli -h 127.0.0.1 -p 56379 --raw CONFIG GET bind)" == $'bind\n127.0.0.1' ]] || fail "Valkey endpoint must bind only loopback"
   [[ "$(VALKEYCLI_AUTH="$vk_password" timeout 2 valkey-cli -h 127.0.0.1 -p 56379 --raw CONFIG GET dir)" == "$(printf 'dir\n%s' "$vk_data")" ]] || fail "Valkey endpoint has a different data directory"
   REDIS_URL="redis://:$vk_password@127.0.0.1:56379/0"
+  printf 'valkey: %s\n' "$vk_state"
 `;
 
 /** Render only declared services; installation and environment-file ownership stay with the caller. */
