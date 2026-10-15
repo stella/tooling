@@ -265,11 +265,12 @@ const visitStepsInOrder = (
   checkouts: readonly string[],
   visitStep: (step: unknown, checkouts: readonly string[]) => void,
 ) => {
-  let scope = checkouts;
+  // Each visit completes before the next checkout joins the scope.
+  const scope = [...checkouts];
   for (const step of steps) {
     visitStep(step, scope);
     const checkout = sameRepositoryCheckoutPath(step);
-    if (checkout !== undefined) scope = [...scope, checkout];
+    if (checkout !== undefined) scope.push(checkout);
   }
 };
 
