@@ -15,8 +15,10 @@ import toolchain from "../toolchain.json";
 import { cloudSetupPath, generateCloudSetup } from "./cloud-setup";
 import {
   cloudClaudeSettingsPath,
+  cloudAttribution,
+  cloudAttributionFix,
   cloudSessionStartHook,
-  mergeCloudSessionStartHook,
+  mergeCloudClaudeSettings,
 } from "./cloud-setup-claude";
 import type { parseCloudSetup } from "./cloud-setup-schema";
 import { readGitTrackedOutput } from "./git-tracked-output";
@@ -588,7 +590,7 @@ const cloudDeclaration = {
   install: "bun install --frozen-lockfile",
 } as const;
 const cloudFixtureFiles = () => ({
-  [cloudClaudeSettingsPath]: mergeCloudSessionStartHook(undefined),
+  [cloudClaudeSettingsPath]: mergeCloudClaudeSettings(undefined),
   "stll-toolchain.json": JSON.stringify({
     optOuts: [],
     cloud: cloudDeclaration,
@@ -1070,4 +1072,38 @@ test("cloud drift requires the tracked remote-only SessionStart hook while prese
         }),
       );
   }
+});
+
+test("cloud drift requires empty commit and pull request attribution with the exact repair", () => {
+  const files = cloudFixtureFiles();
+  const script = generateCloudSetup({
+    policy,
+    cloud: { ...cloudDeclaration, services: [] },
+    nodeVersion: "26.10.0",
+  });
+  const hooks = { SessionStart: [cloudSessionStartHook] };
+  const attributionDrift = {
+    rule: "cloud-setup-drift" as const,
+    path: cloudClaudeSettingsPath,
+    line: 1,
+    message: `tracked Claude attribution is missing or differs from shared policy; run stll-cloud-setup; if automatic merge is unsafe, ${cloudAttributionFix}`,
+  };
+  const check = (settings: string) =>
+    fixture({
+      ...files,
+      [cloudSetupPath]: script,
+      [cloudClaudeSettingsPath]: settings,
+    });
+  expect(
+    check(JSON.stringify({ attribution: cloudAttribution, hooks })),
+  ).toEqual([]);
+  for (const attribution of [
+    undefined,
+    { commit: "" },
+    { commit: "", pr: "generated" },
+    { commit: "Co-Authored-By: tool", pr: "" },
+  ])
+    expect(check(JSON.stringify({ attribution, hooks }))).toEqual([
+      attributionDrift,
+    ]);
 });

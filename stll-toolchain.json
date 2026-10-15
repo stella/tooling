@@ -1,4 +1,10 @@
 {
+  "cloud": {
+    "install": "bun install --frozen-lockfile",
+    "tools": {
+      "time": "1.9"
+    }
+  },
   "engineFloors": [
     {
       "package": "packages/oxlint-config",

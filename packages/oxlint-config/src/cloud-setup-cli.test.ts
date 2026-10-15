@@ -21,7 +21,9 @@ import policyInput from "../toolchain.json";
 import { cloudSetupPath, generateCloudSetup } from "./cloud-setup";
 import {
   cloudClaudeSettingsPath,
+  cloudAttributionFix,
   cloudSessionStartFix,
+  hasCloudAttribution,
   hasCloudSessionStartHook,
 } from "./cloud-setup-claude";
 import { parseCloudSetup } from "./cloud-setup-schema";
@@ -159,6 +161,7 @@ test("cloud CLI safely merges existing untracked Claude settings without replaci
     );
     expect(JSON.parse(settings)).toMatchObject(original);
     expect(hasCloudSessionStartHook(settings)).toBe(true);
+    expect(hasCloudAttribution(settings)).toBe(true);
     expect(invoke(root).status).toBe(0);
     expect(await readFile(join(root, cloudClaudeSettingsPath), "utf8")).toBe(
       settings,
@@ -189,6 +192,20 @@ test("cloud CLI leaves outputs untouched when Claude settings cannot be safely m
       );
     });
   }
+});
+
+test("cloud CLI leaves outputs untouched when existing attribution conflicts", async () => {
+  await withRepository(async (root) => {
+    const input = JSON.stringify({ attribution: { commit: "custom", pr: "" } });
+    await mkdir(join(root, ".claude"));
+    await writeFile(join(root, cloudClaudeSettingsPath), input);
+    const result = invoke(root);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(cloudAttributionFix);
+    expect(await readFile(join(root, cloudClaudeSettingsPath), "utf8")).toBe(
+      input,
+    );
+  });
 });
 
 test("cloud CLI refuses linked Claude settings and parents without writing outside targets", async () => {

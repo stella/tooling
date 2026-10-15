@@ -12,7 +12,10 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 import { cloudEnvironmentMarker } from "../packages/oxlint-config/src/cloud-setup";
-import { cloudSetupArtifacts } from "../packages/oxlint-config/src/cloud-setup-artifacts";
+import {
+  cloudSetupArtifacts,
+  cloudSetupPackages,
+} from "../packages/oxlint-config/src/cloud-setup-artifacts";
 import { renderCloudNetwork } from "../packages/oxlint-config/src/cloud-setup-network";
 import { cloudShellProfileSource } from "../packages/oxlint-config/src/cloud-setup-shell";
 import { parseToolchainPolicy } from "../packages/oxlint-config/src/toolchain-schema";
@@ -171,6 +174,7 @@ uv_version="$(uv --version)"
 uvx_version="$(uvx --version)"
 [[ "$uv_version" == "uv $UV_VERSION" || "$uv_version" == "uv $UV_VERSION "* ]]
 [[ "$uvx_version" == "uvx $UV_VERSION" || "$uvx_version" == "uvx $UV_VERSION "* ]]
+/usr/bin/time -v true 2>&1 | grep -q 'Maximum resident set size'
 [[ "$(rustup target list --installed)" == *wasm32-unknown-unknown* ]]
 components="$(rustup component list --installed)"
 [[ "$components" == *clippy-* && "$components" == *rustfmt-* ]]
@@ -814,6 +818,7 @@ if (fs.statSync(path.join(vite, "consumer-cache")).uid !== uid) process.exit(1);
             "cargo-nextest": cloudSetupArtifacts["cargo-nextest"].version,
             "wasm-bindgen-cli": cloudSetupArtifacts["wasm-bindgen-cli"].version,
             uv: cloudSetupArtifacts.uv.version,
+            time: cloudSetupPackages.time.version,
           },
         },
       }),
