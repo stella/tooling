@@ -87,7 +87,7 @@ runtime_ready() {
 }
 install_runtimes() {
   if ! command -v curl >/dev/null || ! command -v unzip >/dev/null || ! command -v xz >/dev/null || ! command -v openssl >/dev/null || ! command -v gpg >/dev/null || ! ldconfig -p | awk '$1 == "libatomic.so.1" { found=1 } END { exit !found }'; then
-    apt_network update
+    apt_refresh_for ca-certificates curl unzip xz-utils openssl gnupg util-linux libatomic1
     DEBIAN_FRONTEND=noninteractive apt_install ca-certificates curl unzip xz-utils openssl gnupg util-linux libatomic1
   fi
   local scratch node_archive bun_archive bun_folder

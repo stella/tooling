@@ -34,4 +34,9 @@ apt_network() {
   [[ -n "$hosts" ]] || hosts='configured APT hosts'
   network_run "$hosts" 180 apt-get -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o Acquire::Retries=3 -o APT::Update::Error-Mode=any "$@"
 }
+apt_refresh_for() {
+  # Image indexes usually resolve setup packages already; an unrelated slow
+  # source must not block setup, so refresh only when they cannot.
+  DEBIAN_FRONTEND=noninteractive apt-get --simulate --no-install-recommends install "$@" >/dev/null 2>&1 || apt_network update
+}
 `;

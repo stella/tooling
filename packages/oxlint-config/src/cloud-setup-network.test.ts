@@ -185,3 +185,30 @@ network_run github.com 120 fixture-command
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("APT refreshes indexes only when cached indexes cannot resolve the install", () => {
+  const stub = (simulation: number) => `
+apt-get() {
+  if [[ "$1" == --simulate ]]; then
+    printf 'simulate:%s\\n' "$*" >&2
+    return ${simulation}
+  fi
+  printf 'network:%s\\n' "$*"
+}
+apt_network() { printf 'refresh:%s\\n' "$*"; }
+apt_refresh_for curl ./valkey-server.deb
+echo after
+`;
+  const cached = run(stub(0));
+  expect(cached.exitCode).toBe(0);
+  expect(cached.stdout.toString()).toBe("after\n");
+  const stale = run(stub(100));
+  expect(stale.exitCode).toBe(0);
+  expect(stale.stdout.toString()).toBe("refresh:update\nafter\n");
+  const failed = run(stub(100).replace(
+    "apt_network() { printf 'refresh:%s\\n' \"$*\"; }",
+    "apt_network() { return 7; }",
+  ));
+  expect(failed.exitCode).not.toBe(0);
+  expect(failed.stdout.toString()).toBe("");
+});

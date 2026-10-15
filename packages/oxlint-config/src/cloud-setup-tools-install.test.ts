@@ -305,7 +305,7 @@ test("both Rust provisioning entrypoints stop on bounded network failure before 
     withFixture(({ run, networkCalls }) => {
       const result = run(
         `
-        apt_network() { [[ "$*" == update ]] || exit 89; }
+        apt_refresh_for() { [[ "$*" == build-essential ]] || exit 89; }
         apt_install() { [[ "$*" == build-essential ]] || exit 88; }
         fetch_verified() { printf '%s' fixture > "$3"; }
         rust_ready() { return 1; }
