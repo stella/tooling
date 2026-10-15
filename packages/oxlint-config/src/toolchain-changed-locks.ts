@@ -386,7 +386,7 @@ const importerDependencies = (value: unknown) => {
 
 // Bun text lockfiles 0-2 share the workspaces table and the
 // [descriptor, registry, metadata, integrity] package entries read below.
-const BUN_TEXT_LOCKFILE_VERSIONS = [0, 1, 2];
+const BUN_TEXT_LOCKFILE_VERSIONS = new Set([0, 1, 2]);
 
 export const parseChangedLock = ({
   file,
@@ -401,7 +401,7 @@ export const parseChangedLock = ({
     const parsed = parseChangedJson(text);
     if (
       !changedRecord(parsed) ||
-      !BUN_TEXT_LOCKFILE_VERSIONS.includes(Number(parsed["lockfileVersion"])) ||
+      !BUN_TEXT_LOCKFILE_VERSIONS.has(Number(parsed["lockfileVersion"])) ||
       !changedRecord(parsed["packages"]) ||
       !changedRecord(parsed["workspaces"])
     )
