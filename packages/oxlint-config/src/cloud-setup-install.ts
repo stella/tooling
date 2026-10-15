@@ -41,7 +41,7 @@ apt_install() (
   policy_state=installed
   printf '%s\n' '#!/bin/sh' 'exit 101' > /usr/sbin/policy-rc.d
   chmod 755 /usr/sbin/policy-rc.d
-  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$@"
+  DEBIAN_FRONTEND=noninteractive apt_network install -y --no-install-recommends "$@"
 )
 
 `;
@@ -169,7 +169,7 @@ const postgresInstall = String.raw`
     if [[ "$PGDG_SOURCE_STATE" == missing ]]; then
       local key key_fingerprint
       key="$(mktemp)"
-      curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.2 https://www.postgresql.org/media/keys/ACCC4CF8.asc -o "$key"
+      download_file https://www.postgresql.org/media/keys/ACCC4CF8.asc "$key" 45
       key_fingerprint="$(pgdg_key_fingerprint "$key")"
       [[ "$key_fingerprint" == @PGDG_FINGERPRINT@ ]] || fail 'PostgreSQL signing key mismatch'
       install -d -m 755 /usr/share/keyrings
@@ -177,7 +177,7 @@ const postgresInstall = String.raw`
       rm -- "$key"
       printf '%s\n' '@PGDG_SOURCE@' > /etc/apt/sources.list.d/stll-pgdg.list
     fi
-    apt-get update
+    apt_network update
     apt_install postgresql-@POSTGRES@ postgresql-client-@POSTGRES@
   fi
   postgres_ready || fail 'PostgreSQL toolchain is incomplete or differs from the policy major'
@@ -193,15 +193,15 @@ const valkeyInstall = String.raw`
       arm64) server_url='@ARM64_SERVER_URL@'; server_sha='@ARM64_SERVER_SHA@'; tools_url='@ARM64_TOOLS_URL@'; tools_sha='@ARM64_TOOLS_SHA@' ;;
       *) fail 'Unsupported Valkey architecture' ;;
     esac
-    curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.2 "$server_url" -o "$scratch/valkey-server.deb"
-    curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.2 "$tools_url" -o "$scratch/valkey-tools.deb"
+    download_file "$server_url" "$scratch/valkey-server.deb" 120
+    download_file "$tools_url" "$scratch/valkey-tools.deb" 120
     (cd "$scratch"; printf '%s  %s\n' "$server_sha" valkey-server.deb "$tools_sha" valkey-tools.deb | sha256sum --strict -c -)
     for package in valkey-server valkey-tools; do
       [[ "$(dpkg-deb -f "$scratch/$package.deb" Package)" == "$package" ]] || fail 'Valkey artifact package mismatch'
       [[ "$(dpkg-deb -f "$scratch/$package.deb" Version)" == '@VALKEY@-1.noble' ]] || fail 'Valkey artifact version mismatch'
       [[ "$(dpkg-deb -f "$scratch/$package.deb" Architecture)" == "$ARCH" ]] || fail 'Valkey artifact architecture mismatch'
     done
-    apt-get update
+    apt_network update
     apt_install "$scratch/valkey-server.deb" "$scratch/valkey-tools.deb"
     rm -rf -- "$scratch"
   fi

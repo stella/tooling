@@ -2,6 +2,7 @@
 import { expect, test } from "bun:test";
 
 import { parseToolchainConfiguration } from "./toolchain-guard";
+import { ownedDockerImageAliases } from "./toolchain-images";
 import { toolchainInputKind } from "./toolchain-inputs";
 import { checkRuntimeFile } from "./toolchain-runtime";
 import { parseRustExceptions } from "./toolchain-rust";
@@ -387,6 +388,42 @@ test("both Rust slim tag orderings retain exact pins on every image surface", ()
             check(file, source(`rust:${mutation}${suffix}${hash}`)).length,
           ).toBeGreaterThan(0);
       }
+});
+
+test("service image names are metadata and rustfs is not an official Rust image", () => {
+  const inventory = (image: string) =>
+    JSON.stringify([
+      { source: "docker.io/rustfs/rustfs:1.0.0", name: "rustfs" },
+      { source: image, name: "rust" },
+    ]);
+  for (const repository of ownedDockerImageAliases(["rust"])) {
+    expect(
+      check(
+        "scripts/ci-service-images.json",
+        inventory(`${repository}:${rust}`),
+      ),
+    ).toEqual([]);
+    for (const tag of ["nightly", "1.97.1", "latest"]) {
+      expect(
+        check(
+          "scripts/ci-service-images.json",
+          inventory(`${repository}:${tag}`),
+        ),
+      ).toHaveLength(1);
+    }
+    expect(
+      check("scripts/ci-service-images.json", inventory(repository)),
+    ).toHaveLength(1);
+  }
+  for (const image of [
+    "rustfs",
+    "rustfs:1.0.0",
+    "docker.io/rustfs/rustfs:1.0.0",
+  ]) {
+    expect(check("scripts/ci-service-images.json", inventory(image))).toEqual(
+      [],
+    );
+  }
 });
 
 test("rustup update and install spellings validate every explicit release", () => {

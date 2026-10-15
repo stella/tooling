@@ -14,7 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { cloudServices } from "./cloud-setup-schema";
+import { cloudServices, type CloudService } from "./cloud-setup-schema";
 import { renderCloudServiceStart } from "./cloud-setup-services";
 
 const policy = { postgres: "18", valkey: "9.1.1" };
@@ -189,6 +189,175 @@ start_services
     expect(result.stderr.toString()).not.toContain("unexpected");
   } finally {
     rmSync(state, { recursive: true, force: true });
+  }
+});
+
+type StartStatusFixtureOptions = {
+  services: readonly CloudService[];
+  state: "running" | "stopped";
+  failure?: "authentication" | "identity";
+};
+const startStatusFixture = ({
+  services,
+  state,
+  failure,
+}: StartStatusFixtureOptions) => {
+  const directory = mkdtempSync(path.join(tmpdir(), "cloud-status-test-"));
+  const secret = "a".repeat(64);
+  const calls = path.join(directory, "starts");
+  try {
+    writeFileSync(calls, "");
+    for (const service of cloudServices) {
+      mkdirSync(path.join(directory, service));
+      writeFileSync(path.join(directory, `${service}.password`), `${secret}\n`);
+    }
+    writeFileSync(path.join(directory, "postgres/PG_VERSION"), policy.postgres);
+    writeFileSync(path.join(directory, "postgres/postmaster.pid"), "123\n");
+    if (state === "running")
+      writeFileSync(path.join(directory, "valkey/valkey.pid"), "456\n");
+    writeFileSync(
+      path.join(directory, "valkey/valkey.conf"),
+      [
+        "bind 127.0.0.1",
+        "port 56379",
+        "protected-mode yes",
+        "daemonize yes",
+        `requirepass ${secret}`,
+        `dir ${directory}/valkey`,
+        `pidfile ${directory}/valkey/valkey.pid`,
+        `logfile ${directory}/valkey/valkey.log`,
+        'save ""',
+        "appendonly no",
+        "",
+      ].join("\n"),
+    );
+    const fragment = renderCloudServiceStart({ services, ...policy });
+    const result = Bun.spawnSync(
+      [
+        "bash",
+        "-euo",
+        "pipefail",
+        "-c",
+        `
+fail() { printf '%s\\n' "$*" >&2; exit 1; }
+id() { printf 1000; }
+stat() {
+  case "$*" in
+    "-c %u $STATE") printf 0 ;;
+    "-c %u $STATE/valkey/valkey.pid") printf 1000 ;;
+    *) fail 'Unexpected ownership query' ;;
+  esac
+}
+root() { fail 'Unexpected root operation'; }
+service_run() {
+  case "$*" in
+    *pg_ctl*status) [[ "$FIXTURE_STATE" == running ]] ;;
+    *pg_ctl*start)
+      printf '%s\\n' postgres >> "$FIXTURE_CALLS"
+      printf '%s\\n' "$FIXTURE_SECRET"
+      ;;
+    "valkey-server $STATE/valkey/valkey.conf")
+      printf '%s\\n' 456 > "$STATE/valkey/valkey.pid"
+      printf '%s\\n' valkey >> "$FIXTURE_CALLS"
+      printf '%s\\n' "$FIXTURE_SECRET"
+      ;;
+    *) fail 'Unexpected service operation' ;;
+  esac
+}
+env() {
+  case "$*" in
+    *"current_setting("*)
+      [[ "$FIXTURE_FAILURE" != authentication ]] || return 1
+      printf '%s|127.0.0.1|55432|180000|\\n' "$STATE/postgres"
+      ;;
+    *"SELECT count("*) printf '1\\n' ;;
+    *) fail 'Unexpected database operation' ;;
+  esac
+}
+timeout() { shift; "$@"; }
+valkey-server() { fail 'Unexpected direct service launch'; }
+valkey-cli() {
+  case "$*" in
+    *"INFO server")
+      [[ "$FIXTURE_FAILURE" != authentication ]] || return 1
+      printf 'valkey_version:${policy.valkey}\\r\\nconfig_file:%s/valkey/valkey.conf\\r\\nprocess_id:456\\r\\nuptime_in_seconds:1\\r\\n' "$STATE"
+      ;;
+    *"CONFIG GET bind") printf 'bind\\n127.0.0.1\\n' ;;
+    *"CONFIG GET dir") printf 'dir\\n%s/valkey\\n' "$STATE" ;;
+    *) fail 'Unexpected cache operation' ;;
+  esac
+}
+sleep() { :; }
+${fragment}
+service_file() { :; }
+service_directory() { :; }
+service_password() { :; }
+service_prune_pid() { :; }
+service_process() { [[ "$FIXTURE_FAILURE" != identity ]] || fail 'Managed service identity differs'; }
+start_services
+`,
+      ],
+      {
+        env: {
+          ...process.env,
+          STATE: directory,
+          FIXTURE_STATE: state,
+          FIXTURE_FAILURE: failure ?? "",
+          FIXTURE_SECRET: secret,
+          FIXTURE_CALLS: calls,
+        },
+      },
+    );
+    return { result, starts: readFileSync(calls, "utf8"), secret };
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+};
+
+test("start reports one successful state per declared service without subprocess output or credentials", () => {
+  const exercised = new Set<string>();
+  for (let mask = 0; mask < 2 ** cloudServices.length; mask += 1) {
+    const services = cloudServices.filter(
+      (_, index) => (mask & (1 << index)) !== 0,
+    );
+    for (const state of ["running", "stopped"] as const) {
+      const { result, starts, secret } = startStatusFixture({
+        services,
+        state,
+      });
+      const status = state === "running" ? "already running" : "started";
+      expect(result.stderr.toString()).toBe("");
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout.toString()).toBe(
+        services.map((service) => `${service}: ${status}\n`).join(""),
+      );
+      expect(result.stdout.toString()).not.toContain(secret);
+      expect(starts).toBe(
+        state === "running"
+          ? ""
+          : services.map((service) => `${service}\n`).join(""),
+      );
+      for (const service of services) exercised.add(service);
+    }
+  }
+  expect([...exercised].sort()).toEqual(cloudServices.map(String).sort());
+});
+
+test("start emits no success status when service authentication or identity fails", () => {
+  for (const service of cloudServices) {
+    for (const state of ["running", "stopped"] as const) {
+      for (const failure of ["authentication", "identity"] as const) {
+        const { result, secret } = startStatusFixture({
+          services: [service],
+          state,
+          failure,
+        });
+        expect(result.exitCode).toBe(1);
+        expect(result.stderr.toString()).not.toBe("");
+        expect(result.stdout.toString()).toBe("");
+        expect(result.stderr.toString()).not.toContain(secret);
+      }
+    }
   }
 });
 

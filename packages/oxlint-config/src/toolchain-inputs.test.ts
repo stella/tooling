@@ -278,3 +278,11 @@ test("shell shebangs identify extensionless executable inputs without selecting 
   ).toBeUndefined();
   expect(toolchainInputKind("README", "cargo +stable test")).toBeUndefined();
 });
+
+test("cloud setup reads committed Claude settings and Cargo lock dependency versions", () => {
+  expect(toolchainInputKind(".claude/settings.json")).toBe("config");
+  expect(toolchainInputKind(".claude/settings.local.json")).toBeUndefined();
+  expect(toolchainInputKind("Cargo.lock")).toBe("config");
+  expect(toolchainInputKind("crates/project/Cargo.lock")).toBeUndefined();
+  expect(toolchainInputKind("vendor/project/Cargo.lock")).toBeUndefined();
+});

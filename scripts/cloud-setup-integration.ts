@@ -12,7 +12,13 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 import { cloudEnvironmentMarker } from "../packages/oxlint-config/src/cloud-setup";
+import { cloudSetupArtifacts } from "../packages/oxlint-config/src/cloud-setup-artifacts";
+import { renderCloudNetwork } from "../packages/oxlint-config/src/cloud-setup-network";
+import { cloudShellProfileSource } from "../packages/oxlint-config/src/cloud-setup-shell";
 import { parseToolchainPolicy } from "../packages/oxlint-config/src/toolchain-schema";
+
+const freshShellPath =
+  "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 
 type CommandOptions = {
   label: string;
@@ -45,7 +51,7 @@ const command = async ({
   output = "trimmed",
 }: CommandOptions) => {
   const child = Bun.spawn(args, {
-    cwd,
+    ...(cwd === undefined ? {} : { cwd }),
     env: env ?? process.env,
     stdout: "pipe",
     stderr: "pipe",
@@ -71,6 +77,15 @@ const assert = (condition: boolean, message: string) => {
   if (!condition) throw new Error(message);
 };
 
+const timedCommand = async (options: CommandOptions) => {
+  const started = performance.now();
+  const output = await command(options);
+  process.stdout.write(
+    `${options.label}: ${((performance.now() - started) / 1000).toFixed(2)} seconds\n`,
+  );
+  return output;
+};
+
 const main = async () => {
   assert(
     process.env["CI"] === "true" && process.platform === "linux",
@@ -86,6 +101,25 @@ const main = async () => {
     label: "Service administration",
     args: [...rootPrefix, "true"],
   });
+  await command({
+    label: "Offline network namespace capability",
+    args: [...rootPrefix, "unshare", "--net", "--", "true"],
+  });
+  const timeoutStarted = performance.now();
+  const timeoutDiagnostic = await command({
+    label: "Real GNU timeout deadline",
+    args: [
+      "bash",
+      "-c",
+      `exec 2>&1\nfail() { echo "$*" >&2; exit 1; }\n${renderCloudNetwork()}\nnetwork_run static.rust-lang.org 1 sleep 10`,
+    ],
+    outcome: "failure",
+  });
+  assert(
+    timeoutDiagnostic.includes("download timed out: static.rust-lang.org") &&
+      performance.now() - timeoutStarted < 5000,
+    "GNU timeout did not enforce the deadline with its download host diagnostic",
+  );
   const source = resolve(import.meta.dirname, "..");
   const policy = parseToolchainPolicy(
     JSON.parse(
@@ -121,6 +155,63 @@ const main = async () => {
       args: ["bash", generated, "start"],
       outcome,
     });
+  const freshShell = () => {
+    const verifyRuntime = String.raw`
+set -euo pipefail
+trap 'echo "Fresh shell check failed at line $LINENO" >&2' ERR
+[[ "$(bun --version)" == "$BUN_VERSION" ]]
+[[ "$(node --version)" == "v$NODE_VERSION" ]]
+[[ "$(rustc --version)" == "rustc $RUST_VERSION "* ]]
+[[ "$(cargo --version)" == "cargo $RUST_VERSION "* ]]
+[[ "$(rustup --version 2>/dev/null)" == "rustup $RUSTUP_VERSION "* ]]
+nextest_version="$(cargo nextest --version)"
+[[ "$nextest_version" == "cargo-nextest $NEXTEST_VERSION" || "$nextest_version" == "cargo-nextest $NEXTEST_VERSION "* ]]
+[[ "$(wasm-bindgen --version)" == "wasm-bindgen $WASM_BINDGEN_VERSION" ]]
+uv_version="$(uv --version)"
+uvx_version="$(uvx --version)"
+[[ "$uv_version" == "uv $UV_VERSION" || "$uv_version" == "uv $UV_VERSION "* ]]
+[[ "$uvx_version" == "uvx $UV_VERSION" || "$uvx_version" == "uvx $UV_VERSION "* ]]
+[[ "$(rustup target list --installed)" == *wasm32-unknown-unknown* ]]
+components="$(rustup component list --installed)"
+[[ "$components" == *clippy-* && "$components" == *rustfmt-* ]]
+for tool in bun node rustc cargo rustup cargo-nextest wasm-bindgen wasm-bindgen-test-runner wasm2es6js uv uvx; do
+  executable="$(readlink -f "$(command -v "$tool")")"
+  printf '%s %s ' "$tool" "$executable"
+  stat -c '%i:%s:%y' "$executable"
+done
+for tool in rustc cargo rustdoc rustfmt clippy-driver; do
+  executable="$(rustup which "$tool")"
+  printf 'rust-toolchain-%s %s ' "$tool" "$executable"
+  stat -c '%i:%s:%y' "$executable"
+done
+`;
+    return command({
+      label: "Offline fresh shell versions and installed file identity",
+      args: [
+        ...rootPrefix,
+        "unshare",
+        "--net",
+        "--",
+        "env",
+        "-i",
+        `PATH=${freshShellPath}`,
+        `HOME=${fixture}`,
+        `BUN_VERSION=${policy.bun}`,
+        `NODE_VERSION=${nodeVersion}`,
+        `RUST_VERSION=${policy.rust}`,
+        `RUSTUP_VERSION=${cloudSetupArtifacts["rustup-init"].version}`,
+        `NEXTEST_VERSION=${cloudSetupArtifacts["cargo-nextest"].version}`,
+        `WASM_BINDGEN_VERSION=${cloudSetupArtifacts["wasm-bindgen-cli"].version}`,
+        `UV_VERSION=${cloudSetupArtifacts.uv.version}`,
+        "bash",
+        "--noprofile",
+        "--norc",
+        "-c",
+        verifyRuntime,
+      ],
+      cwd: fixture,
+    });
+  };
   const pgQuery = (query: string) => {
     if (databaseUrl === undefined)
       throw new Error("Database connection is unavailable");
@@ -400,6 +491,7 @@ exit 1
     const username = `stll-cloud-ci-${process.pid}`;
     const home = `/home/${username}`;
     const consumer = join(fixture, "nonroot-consumer");
+    const staleRuntimeBin = join(consumer, "stale-runtime-bin");
     const userScript = join(consumer, ".agents/cloud-setup.sh");
     const sudoers = `/etc/sudoers.d/${username}`;
     let userState: "absent" | "created" = "absent";
@@ -421,6 +513,39 @@ exit 1
       await root(["chmod", "711", fixture], "Consumer fixture traversal");
       await mkdir(join(consumer, "local-package"), { recursive: true });
       await mkdir(join(consumer, "apps/api"), { recursive: true });
+      await mkdir(staleRuntimeBin, { recursive: true });
+      for (const tool of ["bun", "node"])
+        await writeFile(
+          join(staleRuntimeBin, tool),
+          '#!/bin/sh\nprintf "%s\\n" "stale-runtime"\n',
+          { mode: 0o755 },
+        );
+      const startupFiles = [
+        ".bashrc",
+        ".profile",
+        ".bash_profile",
+        ".bash_login",
+      ];
+      const startupSeed = (file: string) =>
+        `# Existing consumer startup settings\nexport CLOUD_STARTUP_PRESERVED=ready\n${file === ".bashrc" ? "case $- in *i*) ;; *) return ;; esac\n" : ""}export PATH='${staleRuntimeBin}':"$PATH"\n`;
+      const startupTemplate = join(fixture, "consumer-startup-template");
+      for (const file of startupFiles) {
+        await writeFile(startupTemplate, startupSeed(file));
+        await root(
+          [
+            "install",
+            "-m",
+            "644",
+            "-o",
+            username,
+            "-g",
+            username,
+            startupTemplate,
+            join(home, file),
+          ],
+          "Seed existing user startup settings and stale runtime PATH",
+        );
+      }
       await writeFile(
         join(consumer, "local-package/package.json"),
         JSON.stringify({
@@ -484,10 +609,10 @@ exit 1
         cwd: consumer,
       });
       const rule = join(fixture, "nonroot-sudo-rule");
-      // Authorize only this generated install command, never unrestricted sudo.
+      // Authorize only this generated lifecycle, never unrestricted sudo.
       await writeFile(
         rule,
-        `${username} ALL=(root) NOPASSWD: /usr/bin/true, /usr/bin/bash ${userScript} install\n`,
+        `${username} ALL=(root) NOPASSWD: /usr/bin/true, /usr/bin/bash ${userScript} install, /usr/bin/bash ${userScript} start\n`,
       );
       await root(
         ["install", "-m", "440", "-o", "root", "-g", "root", rule, sudoers],
@@ -511,6 +636,95 @@ exit 1
           "install",
         ],
         "Nonroot generated install through sudo",
+      );
+      const startupAfterInstall = [];
+      for (const file of startupFiles) {
+        const text = await root(
+          ["cat", join(home, file)],
+          "Installed user startup settings",
+        );
+        assert(
+          text.includes(startupSeed(file)) &&
+            text.split("\n").filter((line) => line === cloudShellProfileSource)
+              .length === (file === ".bashrc" ? 2 : 1),
+          "User startup settings were replaced or cloud profile source is duplicated",
+        );
+        startupAfterInstall.push(text);
+      }
+      await root(
+        [
+          "runuser",
+          "-u",
+          username,
+          "--",
+          "env",
+          `HOME=${home}`,
+          "bash",
+          userScript,
+          "install",
+        ],
+        "Cached nonroot generated install through sudo",
+      );
+      for (const [index, file] of startupFiles.entries())
+        assert(
+          (await root(
+            ["cat", join(home, file)],
+            "Cached user startup settings",
+          )) === startupAfterInstall.at(index),
+          "Cached installation changed user startup settings",
+        );
+      const verifyShellPath = String.raw`
+set -euo pipefail
+trap 'echo "Bash startup check failed at line $LINENO" >&2' ERR
+[[ "$CLOUD_STARTUP_PRESERVED" == ready ]]
+[[ "$(command -v bun)" == "/opt/stll-cloud/bun/$BUN_VERSION/bun" ]]
+[[ "$(command -v node)" == "/opt/stll-cloud/node/$NODE_VERSION/bin/node" ]]
+[[ "$(bun --version)" == "$BUN_VERSION" ]]
+[[ "$(node --version)" == "v$NODE_VERSION" ]]
+`;
+      for (const shellArgs of [
+        ["--login", "-c", verifyShellPath],
+        ["-i", "-c", verifyShellPath],
+        [
+          "--noprofile",
+          "--norc",
+          "-c",
+          `. "$HOME/.bashrc"\n${verifyShellPath}`,
+        ],
+      ])
+        await root(
+          [
+            "runuser",
+            "-u",
+            username,
+            "--",
+            "env",
+            "-i",
+            `HOME=${home}`,
+            `PATH=${staleRuntimeBin}:${freshShellPath}`,
+            `BUN_VERSION=${policy.bun}`,
+            `NODE_VERSION=${nodeVersion}`,
+            "/bin/bash",
+            ...shellArgs,
+          ],
+          "Fresh Bash startup replaces stale runtime PATH and preserves user settings",
+        );
+      await root(
+        [
+          "unshare",
+          "--net",
+          "--",
+          "runuser",
+          "-u",
+          username,
+          "--",
+          "env",
+          `HOME=${home}`,
+          "bash",
+          userScript,
+          "start",
+        ],
+        "Nonroot runtime-only startup without a network",
       );
       const verifyWrite = `
 const fs = require("node:fs");
@@ -581,6 +795,14 @@ if (fs.statSync(path.join(vite, "consumer-cache")).uid !== uid) process.exit(1);
     );
     await writeFile(join(fixture, ".node-version"), `${nodeVersion}\n`);
     await writeFile(
+      join(fixture, "rust-toolchain.toml"),
+      `[toolchain]\nchannel = "${policy.rust}"\nprofile = "minimal"\ncomponents = ["rustfmt", "clippy"]\ntargets = ["wasm32-unknown-unknown"]\n`,
+    );
+    await writeFile(
+      join(fixture, "Cargo.lock"),
+      `version = 4\n\n[[package]]\nname = "wasm-bindgen"\nversion = "${cloudSetupArtifacts["wasm-bindgen-cli"].version}"\nsource = "registry+https://github.com/rust-lang/crates.io-index"\n`,
+    );
+    await writeFile(
       join(fixture, "stll-toolchain.json"),
       JSON.stringify({
         optOuts: [],
@@ -588,6 +810,11 @@ if (fs.statSync(path.join(vite, "consumer-cache")).uid !== uid) process.exit(1);
           services: ["postgres", "valkey"],
           install: "bun install --frozen-lockfile",
           envFile: "apps/api/.env.test",
+          tools: {
+            "cargo-nextest": cloudSetupArtifacts["cargo-nextest"].version,
+            "wasm-bindgen-cli": cloudSetupArtifacts["wasm-bindgen-cli"].version,
+            uv: cloudSetupArtifacts.uv.version,
+          },
         },
       }),
     );
@@ -611,6 +838,8 @@ if (fs.statSync(path.join(vite, "consumer-cache")).uid !== uid) process.exit(1);
         "package.json",
         "bun.lock",
         ".node-version",
+        "rust-toolchain.toml",
+        "Cargo.lock",
         "stll-toolchain.json",
       ],
       cwd: fixture,
@@ -623,14 +852,48 @@ if (fs.statSync(path.join(vite, "consumer-cache")).uid !== uid) process.exit(1);
       ],
       cwd: fixture,
     });
-    await command({
-      label: "Generated runtime and dependency install",
+    await timedCommand({
+      label: "Synthetic integration fixture first install",
       args: ["bash", generated, "install"],
     });
-    await command({
-      label: "Cached runtime and dependency install",
+    const installedFiles = await freshShell();
+    const smoke = join(fixture, "rust-smoke");
+    const smokeManifest = join(smoke, "Cargo.toml");
+    await mkdir(join(smoke, "src"), { recursive: true });
+    await writeFile(
+      smokeManifest,
+      '[package]\nname = "cloud-setup-smoke"\nversion = "0.1.0"\nedition = "2024"\n\n[lib]\ncrate-type = ["cdylib", "rlib"]\n',
+    );
+    await writeFile(
+      join(smoke, "src/lib.rs"),
+      '#[unsafe(no_mangle)]\npub extern "C" fn answer() -> u32 { 42 }\n\n#[test]\nfn executes_native_code() { assert_eq!(answer(), 42); }\n',
+    );
+    for (const invocation of [
+      ["nextest", "run", "--offline"],
+      ["build", "--offline", "--target", "wasm32-unknown-unknown"],
+    ])
+      await command({
+        label: "Offline native test and WebAssembly compilation",
+        args: [
+          "env",
+          "-i",
+          `HOME=${fixture}`,
+          `PATH=${freshShellPath}`,
+          "cargo",
+          ...invocation,
+          "--manifest-path",
+          smokeManifest,
+        ],
+        cwd: fixture,
+      });
+    await timedCommand({
+      label: "Synthetic integration fixture cached install",
       args: ["bash", generated, "install"],
     });
+    assert(
+      (await freshShell()) === installedFiles,
+      "Cached installation replaced pinned runtime or tool files",
+    );
     assert(
       (await command({
         label: "Installed Bun version",

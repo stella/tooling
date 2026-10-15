@@ -19,7 +19,7 @@ test("engine integration refuses non-CI execution before preparing services", ()
   );
 });
 
-test("every owned-state shell fragment remains syntactically valid Bash", () => {
+test("every embedded shell verifier remains syntactically valid Bash", () => {
   const source = readFileSync(
     path.join(import.meta.dirname, "cloud-setup-integration.ts"),
     "utf8",
