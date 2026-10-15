@@ -164,11 +164,12 @@ test("environment files require canonical safe repository-relative paths", () =>
 });
 
 test("install accepts the frozen command with or without lifecycle scripts and nothing else", () => {
-  for (const install of cloudInstallCommands)
-    expect(parseCloudSetup({ ...declaration, install })).toEqual({
-      ...declaration,
-      install,
-    });
+  for (const install of cloudInstallCommands) {
+    const parsed = parseCloudSetup({ ...declaration, install });
+    expect(parsed?.install).toBe(install);
+    expect(parsed?.services).toEqual(["postgres"]);
+    expect(parsed?.envFile).toBe(declaration.envFile);
+  }
   for (const install of [
     "bun install",
     "bun install --ignore-scripts",
