@@ -75,14 +75,23 @@ const requestParts = (
 ) => {
   const request = input instanceof Request ? input : undefined;
   const initBody = init?.body ?? undefined;
+  let bodyReplay: "replayable" | "stream" | "request" = "replayable";
+  if (initBody instanceof ReadableStream) {
+    bodyReplay = "stream";
+  } else if (
+    initBody === undefined &&
+    request !== undefined &&
+    request.body !== null
+  ) {
+    bodyReplay = "request";
+  }
   return {
     headers: new Headers(init?.headers ?? request?.headers),
     method: (init?.method ?? request?.method ?? "GET").toUpperCase(),
     redirect: init?.redirect ?? request?.redirect ?? "follow",
     // A Request's own signal must keep cancelling the later hops.
     signal: init?.signal ?? request?.signal ?? null,
-    // Direct init streams cannot be replayed. Request bodies use a clone.
-    replayable: !(initBody instanceof ReadableStream),
+    bodyReplay,
   };
 };
 
@@ -147,9 +156,9 @@ const deleteHeaders = (headers: Headers, names: readonly string[]) => {
  * hop at a time, because the platform would otherwise follow a redirect from
  * an allowed server to any host without asking the guard. Each hop goes out
  * with the caller's own `init` (Bun transport options such as `tls` included)
- * and `redirect: "manual"`. Request bodies are cloned before the first hop
- * and buffered only if a redirect needs to resend them. Direct init streams
- * stay unbuffered and cannot be resent. The returned response is the last
+ * and `redirect: "manual"`. Request bodies and direct init streams pass
+ * through without cloning or buffering and cannot be resent. Other init
+ * bodies retain their native replay path. The returned response is the last
  * hop's (its `url` is the final URL;
  * `redirected` is false).
  */
@@ -184,75 +193,50 @@ const guardedFetch =
     if (parts.redirect !== "follow") {
       return await original(input, init);
     }
-    let { method, replayable } = parts;
+    let { method, bodyReplay } = parts;
     const { headers, signal } = parts;
     let body = init?.body;
-    // A Request exposes even a string payload as a stream. Keep a second
-    // branch before fetch consumes it, and materialize it only when needed.
-    const requestCopy =
-      input instanceof Request &&
-      input.body !== null &&
-      (body === undefined || body === null)
-        ? input.clone()
-        : undefined;
-    let requestBody = requestCopy;
-    const releaseRequestCopy = () => {
-      if (
-        requestCopy?.body !== undefined &&
-        requestCopy.body !== null &&
-        !requestCopy.bodyUsed
-      ) {
-        // A tee cancellation can wait for the transport's other branch. Do not
-        // block the response on it; any cancellation failure stays visible.
-        void requestCopy.body.cancel();
+    let response = await original(input, { ...init, redirect: "manual" });
+    for (let hops = 0; ; hops += 1) {
+      const location = response.headers.get("location");
+      if (!REDIRECT_STATUSES.has(response.status) || location === null) {
+        return response;
       }
-    };
-    try {
-      let response = await original(input, { ...init, redirect: "manual" });
-      for (let hops = 0; ; hops += 1) {
-        const location = response.headers.get("location");
-        if (!REDIRECT_STATUSES.has(response.status) || location === null) {
-          return response;
-        }
-        await response.body?.cancel();
-        if (hops >= MAX_REDIRECTS) {
-          return panic(`fetch: more than ${MAX_REDIRECTS} redirects`);
-        }
-        const next = new URL(location, url);
-        const refused = refuse(next);
-        if (refused !== undefined) {
-          throw refused;
-        }
-        if (next.origin !== url.origin) {
-          deleteHeaders(headers, CREDENTIAL_HEADERS);
-        }
-        if (dropsBody(response.status, method)) {
-          method = "GET";
-          body = undefined;
-          replayable = true; // no body left to resend
-          requestBody = undefined;
-          releaseRequestCopy();
-          deleteHeaders(headers, REQUEST_BODY_HEADERS);
-        } else if (requestBody !== undefined) {
-          body = await requestBody.arrayBuffer();
-          requestBody = undefined;
-        } else if (!replayable) {
-          return panic(
-            `fetch: a ${response.status} redirect cannot resend a streamed body`,
-          );
-        }
-        url = next;
-        response = await original(url.href, {
-          ...init,
-          body: body ?? null,
-          headers,
-          method,
-          redirect: "manual",
-          signal,
-        });
+      await response.body?.cancel();
+      if (hops >= MAX_REDIRECTS) {
+        return panic(`fetch: more than ${MAX_REDIRECTS} redirects`);
       }
-    } finally {
-      releaseRequestCopy();
+      const next = new URL(location, url);
+      const refused = refuse(next);
+      if (refused !== undefined) {
+        throw refused;
+      }
+      if (next.origin !== url.origin) {
+        deleteHeaders(headers, CREDENTIAL_HEADERS);
+      }
+      if (dropsBody(response.status, method)) {
+        method = "GET";
+        body = undefined;
+        bodyReplay = "replayable"; // no body left to resend
+        deleteHeaders(headers, REQUEST_BODY_HEADERS);
+      } else if (bodyReplay === "request") {
+        return panic(
+          `fetch: a ${response.status} redirect cannot resend a Request body; pass the body in init to replay it without cloning or buffering`,
+        );
+      } else if (bodyReplay === "stream") {
+        return panic(
+          `fetch: a ${response.status} redirect cannot resend a streamed body`,
+        );
+      }
+      url = next;
+      response = await original(url.href, {
+        ...init,
+        body: body ?? null,
+        headers,
+        method,
+        redirect: "manual",
+        signal,
+      });
     }
   };
 
