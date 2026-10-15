@@ -1,5 +1,20 @@
 # @stll/oxlint-config
 
+## 1.1.0
+
+### Minor Changes
+
+- [#122](https://github.com/stella/tooling/pull/122) [`e86f590`](https://github.com/stella/tooling/commit/e86f590b25dcb78d992094144aa14a4768ab07de) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Provision pinned Rust toolchains and optional prebuilt cargo-nextest, wasm-bindgen,
+  and uv tools in generated cloud setup scripts. Expose installed commands to fresh
+  shells and merge a remote-only Claude SessionStart hook for cached environments.
+
+  Bound network installation with explicit download, package-manager and dependency
+  deadlines, and report the relevant hosts when a timeout occurs.
+
+### Patch Changes
+
+- [#118](https://github.com/stella/tooling/pull/118) [`1c72b07`](https://github.com/stella/tooling/commit/1c72b078bdcde7429249e0445c735539d5b67adf) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Update runtime dependencies: acorn, picomatch, smol-toml, tsx, yaml.
+
 ## 1.0.2
 
 ### Patch Changes
