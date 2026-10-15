@@ -174,3 +174,36 @@ export const getCloudSetupArtifact = (
     );
   return artifact;
 };
+
+type CloudSetupPackage = {
+  version: string;
+  package: string;
+  binary: `/${string}`;
+  identity: string;
+};
+
+/** Ubuntu 24.04 packages; apt resolves them from the image's configured sources. */
+export const cloudSetupPackages = {
+  // GNU time reports "UNKNOWN" as its version; dpkg records the upstream release.
+  time: {
+    version: "1.9",
+    package: "time",
+    binary: "/usr/bin/time",
+    identity: "time (GNU Time) ",
+  },
+} as const satisfies Record<string, CloudSetupPackage>;
+
+export type CloudSetupPackageTool = keyof typeof cloudSetupPackages;
+
+/** Ubuntu 24.04 ships one release per package; other versions are unsupported. */
+export const getCloudSetupPackage = (
+  tool: CloudSetupPackageTool,
+  version: string,
+) => {
+  const release = cloudSetupPackages[tool];
+  if (release.version !== version)
+    throw new Error(
+      `Unsupported ${tool} version ${version}; supported versions: ${release.version}`,
+    );
+  return release;
+};

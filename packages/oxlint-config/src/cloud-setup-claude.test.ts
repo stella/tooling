@@ -14,17 +14,43 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  cloudAttribution,
+  cloudAttributionFix,
   cloudSessionStartFix,
   cloudSessionStartHook,
+  hasCloudAttribution,
   hasCloudSessionStartHook,
-  mergeCloudSessionStartHook,
+  mergeCloudClaudeSettings,
 } from "./cloud-setup-claude";
 import { cloudShellProfilePath } from "./cloud-setup-shell";
 
 const settingsWith = (entries: readonly unknown[]) =>
-  JSON.stringify({ hooks: { SessionStart: entries } });
+  JSON.stringify({
+    attribution: cloudAttribution,
+    hooks: { SessionStart: entries },
+  });
+// The exact hook @stll/oxlint-config 1.1.0 committed into consumer settings.
+const releasedHook = {
+  matcher: "",
+  hooks: [
+    {
+      type: "command",
+      command: `if [ "\${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
+  bash .agents/cloud-setup.sh start || exit "$?"
+  if [ -n "\${CLAUDE_ENV_FILE:-}" ]; then
+    if [ ! -f /etc/profile.d/stll-cloud.sh ]; then
+      printf '%s\\n' 'cloud-setup: cloud shell profile is unavailable; run install' >&2
+      exit 1
+    fi
+    printf '\\n' >> "$CLAUDE_ENV_FILE" || exit "$?"
+    cat /etc/profile.d/stll-cloud.sh >> "$CLAUDE_ENV_FILE"
+  fi
+fi`,
+    },
+  ],
+};
 
-test("Claude hook merge preserves unrelated settings and reaches a byte-stable fixed point", () => {
+test("Claude settings merge preserves unrelated settings and reaches a byte-stable fixed point", () => {
   const unrelated = {
     permissions: { allow: ["Read"], deny: ["Bash(rm:*)"] },
     env: { EXAMPLE: "value" },
@@ -38,22 +64,77 @@ test("Claude hook merge preserves unrelated settings and reaches a byte-stable f
       ],
     },
   };
-  for (const input of [undefined, "{}", JSON.stringify(unrelated)]) {
-    const merged = mergeCloudSessionStartHook(input);
+  for (const input of [
+    undefined,
+    "{}",
+    JSON.stringify(unrelated),
+    JSON.stringify({ attribution: cloudAttribution }),
+    JSON.stringify({ hooks: { SessionStart: [cloudSessionStartHook] } }),
+  ]) {
+    const merged = mergeCloudClaudeSettings(input);
     expect(hasCloudSessionStartHook(merged)).toBe(true);
-    expect(mergeCloudSessionStartHook(merged)).toBe(merged);
+    expect(hasCloudAttribution(merged)).toBe(true);
+    expect(mergeCloudClaudeSettings(merged)).toBe(merged);
   }
   expect(
-    JSON.parse(mergeCloudSessionStartHook(JSON.stringify(unrelated))),
+    JSON.parse(mergeCloudClaudeSettings(JSON.stringify(unrelated))),
   ).toEqual({
     ...unrelated,
+    attribution: { commit: "", pr: "" },
     hooks: {
       ...unrelated.hooks,
       SessionStart: [...unrelated.hooks.SessionStart, cloudSessionStartHook],
     },
   });
   const compact = settingsWith([cloudSessionStartHook]);
-  expect(mergeCloudSessionStartHook(compact)).toBe(compact);
+  expect(mergeCloudClaudeSettings(compact)).toBe(compact);
+});
+
+test("Claude settings merge replaces the released relative hook in place", () => {
+  const unrelated = {
+    matcher: "startup",
+    hooks: [{ type: "command", command: "echo existing" }],
+  };
+  const merged = mergeCloudClaudeSettings(
+    JSON.stringify({
+      env: { EXAMPLE: "value" },
+      hooks: { SessionStart: [releasedHook, unrelated] },
+    }),
+  );
+  expect(JSON.parse(merged)).toEqual({
+    env: { EXAMPLE: "value" },
+    attribution: cloudAttribution,
+    hooks: { SessionStart: [cloudSessionStartHook, unrelated] },
+  });
+  expect(hasCloudSessionStartHook(settingsWith([releasedHook]))).toBe(false);
+  expect(() =>
+    mergeCloudClaudeSettings(
+      settingsWith([releasedHook, cloudSessionStartHook]),
+    ),
+  ).toThrow(cloudSessionStartFix);
+});
+
+test("Claude attribution conflicts fail with the exact manual fix and drift rejects them", () => {
+  const hooks = { SessionStart: [cloudSessionStartHook] };
+  for (const attribution of [
+    null,
+    "",
+    {},
+    { commit: "" },
+    { commit: "", pr: "", extra: "" },
+    { commit: "Co-Authored-By: tool", pr: "" },
+    { commit: "", pr: "generated" },
+  ]) {
+    const input = JSON.stringify({ attribution, hooks });
+    expect(() => mergeCloudClaudeSettings(input)).toThrow(cloudAttributionFix);
+    expect(hasCloudAttribution(input)).toBe(false);
+    expect(hasCloudSessionStartHook(input)).toBe(true);
+  }
+  expect(hasCloudAttribution(undefined)).toBe(false);
+  expect(hasCloudAttribution(JSON.stringify({ hooks }))).toBe(false);
+  expect(cloudAttributionFix).toContain(
+    JSON.stringify({ attribution: { commit: "", pr: "" } }, null, 2),
+  );
 });
 
 test("Claude hook unsafe merges fail with the exact manual fix and drift rejects them", () => {
@@ -87,9 +168,7 @@ test("Claude hook unsafe merges fail with the exact manual fix and drift rejects
     ]),
   ];
   for (const input of invalid) {
-    expect(() => mergeCloudSessionStartHook(input)).toThrow(
-      cloudSessionStartFix,
-    );
+    expect(() => mergeCloudClaudeSettings(input)).toThrow(cloudSessionStartFix);
     expect(hasCloudSessionStartHook(input)).toBe(false);
   }
   expect(hasCloudSessionStartHook(undefined)).toBe(false);
@@ -108,11 +187,43 @@ test("Claude SessionStart starts services only for the exact remote environment 
     for (const remote of [undefined, "", "false", "1", "TRUE", "true"]) {
       const env = { ...process.env };
       delete env["CLAUDE_CODE_REMOTE"];
+      env["CLAUDE_PROJECT_DIR"] = root;
       if (remote !== undefined) env["CLAUDE_CODE_REMOTE"] = remote;
       const result = spawnSync("bash", ["-c", command], { cwd: root, env });
       expect(result.status).toBe(remote === "true" ? 7 : 0);
     }
     expect(readFileSync(join(root, "calls"), "utf8")).toBe("start\n");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("remote Claude SessionStart resolves the setup script from the project root in a subdirectory", () => {
+  const root = mkdtempSync(join(tmpdir(), "cloud-claude-subdirectory-"));
+  try {
+    const subdirectory = join(root, "packages/example");
+    mkdirSync(join(root, ".agents"));
+    mkdirSync(subdirectory, { recursive: true });
+    writeFileSync(
+      join(root, ".agents/cloud-setup.sh"),
+      'printf "%s %s\\n" "$1" "$PWD" >> "$CLAUDE_PROJECT_DIR/calls"\n',
+    );
+    const env = { ...process.env };
+    delete env["CLAUDE_ENV_FILE"];
+    const result = spawnSync(
+      "bash",
+      ["-c", cloudSessionStartHook.hooks[0].command],
+      {
+        cwd: subdirectory,
+        env: { ...env, CLAUDE_CODE_REMOTE: "true", CLAUDE_PROJECT_DIR: root },
+        encoding: "utf8",
+      },
+    );
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    expect(readFileSync(join(root, "calls"), "utf8")).toBe(
+      `start ${subdirectory}\n`,
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -149,6 +260,7 @@ test("Claude SessionStart persists literal pinned exports after start while reta
       ...process.env,
       PATH: [...inherited, "/usr/bin", "/bin"].join(":"),
       CLAUDE_ENV_FILE: environment,
+      CLAUDE_PROJECT_DIR: root,
     };
     for (const remote of ["", "false", "TRUE", "true"]) {
       writeFileSync(environment, original);
@@ -210,8 +322,8 @@ test("Claude SessionStart persists literal pinned exports after start while reta
 
 test("Node settings parse diagnostics use the canonical repair without echoing input", () => {
   const marker = "fixture-settings-source";
-  const program = `import { mergeCloudSessionStartHook } from "./src/cloud-setup-claude.ts";
-try { mergeCloudSessionStartHook(${JSON.stringify(`${marker} is invalid JSON`)}); process.exitCode = 2; }
+  const program = `import { mergeCloudClaudeSettings } from "./src/cloud-setup-claude.ts";
+try { mergeCloudClaudeSettings(${JSON.stringify(`${marker} is invalid JSON`)}); process.exitCode = 2; }
 catch (error) { process.stdout.write(error.message); }
 `;
   const result = spawnSync(

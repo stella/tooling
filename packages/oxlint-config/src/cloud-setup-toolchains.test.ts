@@ -3,7 +3,10 @@ import { expect, test } from "bun:test";
 
 import policyInput from "../toolchain.json";
 import { generateCloudSetup } from "./cloud-setup";
-import { cloudSetupArtifacts } from "./cloud-setup-artifacts";
+import {
+  cloudSetupArtifacts,
+  cloudSetupPackages,
+} from "./cloud-setup-artifacts";
 import { cloudInstallCommand, parseCloudSetup } from "./cloud-setup-schema";
 import { resolveCloudToolchains } from "./cloud-setup-toolchains";
 import { parseToolchainPolicy } from "./toolchain-schema";
@@ -121,6 +124,27 @@ test("extra tools form a closed exact-pin selection and require their inputs", (
     }),
   ).toThrow("requires a Rust toolchain");
   expect(() => resolve({ tools: { uv: "0.0.1" } })).toThrow("Unsupported uv");
+});
+
+test("GNU time resolves the Ubuntu package release without Rust", () => {
+  const { version } = cloudSetupPackages.time;
+  expect(resolve({ tools: { time: version } })).toEqual({
+    rust: undefined,
+    tools: [
+      { type: "package", tool: "time", release: cloudSetupPackages.time },
+    ],
+  });
+  expect(() => resolve({ tools: { time: "1.9.0" } })).toThrow(
+    `Unsupported time version 1.9.0; supported versions: ${version}`,
+  );
+  for (const pin of ["1.9-0.2build1", "1", "v1.9", "latest", 1.9, null])
+    expect(() => resolve({ tools: { time: pin } })).toThrow(
+      "cloud.tools.time must be an exact stable release",
+    );
+  for (const pin of ["0.2", "0.9"])
+    expect(() => resolve({ tools: { uv: pin } })).toThrow(
+      "cloud.tools.uv must be an exact stable release",
+    );
 });
 
 test("wasm-bindgen CLI equals the unique locked crate version", () => {

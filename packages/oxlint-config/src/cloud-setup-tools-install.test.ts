@@ -14,13 +14,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import policy from "../toolchain.json";
-import { cloudSetupArtifacts } from "./cloud-setup-artifacts";
 import {
+  cloudSetupArtifacts,
+  cloudSetupPackages,
+} from "./cloud-setup-artifacts";
+import {
+  cloudArtifactTools,
   cloudExtraTools,
   cloudInstallCommand,
+  cloudPackageTools,
   cloudRustComponentBinaries,
   parseCloudSetup,
-  type CloudExtraTool,
+  type CloudArtifactTool,
 } from "./cloud-setup-schema";
 import { resolveCloudToolchains } from "./cloud-setup-toolchains";
 import { renderCloudToolInstall } from "./cloud-setup-tools-install";
@@ -33,9 +38,17 @@ const installedComponents = components
 const cloud = parseCloudSetup({
   install: cloudInstallCommand,
   rust: { components, targets: ["wasm32-unknown-unknown"] },
-  tools: Object.fromEntries(
-    cloudExtraTools.map((tool) => [tool, cloudSetupArtifacts[tool].version]),
-  ),
+  tools: {
+    ...Object.fromEntries(
+      cloudArtifactTools.map((tool) => [
+        tool,
+        cloudSetupArtifacts[tool].version,
+      ]),
+    ),
+    ...Object.fromEntries(
+      cloudPackageTools.map((tool) => [tool, cloudSetupPackages[tool].version]),
+    ),
+  },
 });
 if (cloud === undefined) throw new Error("Expected cloud tool fixture");
 const fragment = renderCloudToolInstall(
@@ -92,23 +105,37 @@ esac
 `,
     { mode: 0o755 },
   );
-  const toolPath = (tool: CloudExtraTool, binary: string) =>
+  const toolPath = (tool: CloudArtifactTool, binary: string) =>
     join(managed, "tools", tool, cloudSetupArtifacts[tool].version, binary);
-  const writeTool = (tool: CloudExtraTool, binary: string, version: string) => {
+  const writeTool = (
+    tool: CloudArtifactTool,
+    binary: string,
+    version: string,
+  ) => {
     const path = toolPath(tool, binary);
     mkdirSync(join(path, ".."), { recursive: true });
     writeFileSync(path, `#!/bin/sh\nprintf '%s\\n' '${binary} ${version}'\n`, {
       mode: 0o755,
     });
   };
-  for (const tool of cloudExtraTools)
+  for (const tool of cloudArtifactTools)
     for (const binary of Object.keys(cloudSetupArtifacts[tool].amd64.binaries))
       writeTool(tool, binary, cloudSetupArtifacts[tool].version);
+  const timePath = join(directory, "usr-bin-time");
+  const writeTime = (identity: string) =>
+    writeFileSync(
+      timePath,
+      `#!/bin/sh\n[ "$1" = --version ] || exit 96\nprintf '%s\\n' '${identity}' 'Copyright (C) 2018 Free Software Foundation, Inc.'\n`,
+      { mode: 0o755 },
+    );
+  writeTime("time (GNU Time) UNKNOWN");
   const rewritten = fragment
     .replaceAll("/opt/stll-cloud", managed)
-    .replaceAll("/usr/local/bin", join(directory, "bin"));
+    .replaceAll("/usr/local/bin", join(directory, "bin"))
+    .replaceAll(cloudSetupPackages.time.binary, timePath);
   expect(rewritten).not.toContain("/opt/stll-cloud");
   expect(rewritten).not.toContain("/usr/local/bin");
+  expect(rewritten).not.toContain(cloudSetupPackages.time.binary);
   const run = (command: string, env: Record<string, string> = {}) =>
     Bun.spawnSync(
       [
@@ -126,6 +153,10 @@ runuser() {
   [[ "$1" == -u && "$2" == fixture-user && "$3" == -- ]] || return 94
   shift 3
   "$@"
+}
+dpkg-query() {
+  [[ "$*" == '-W -f=\${Version} time' && -n "$FIXTURE_TIME_PACKAGE" ]] || return 1
+  printf '%s' "$FIXTURE_TIME_PACKAGE"
 }
 network_run() {
   printf '%s\\n' "$@" >> "$FIXTURE_NETWORK_CALLS"
@@ -155,11 +186,21 @@ ${command}
           FIXTURE_RUSTUP_OLD: "0",
           FIXTURE_COMPONENTS: installedComponents,
           FIXTURE_MISSING_TOOLCHAIN: "0",
+          FIXTURE_TIME_PACKAGE: "1.9-0.2build1",
           ...env,
         },
       },
     );
-  return { directory, networkMarker, networkCalls, run, toolPath, writeTool };
+  return {
+    directory,
+    networkMarker,
+    networkCalls,
+    run,
+    timePath,
+    toolPath,
+    writeTime,
+    writeTool,
+  };
 };
 
 type ToolFixture = ReturnType<typeof createFixture>;
@@ -216,7 +257,7 @@ test("Rust readiness requires each exact component for the active host, never a 
 test("every declared tool rejects incomplete cached binaries and version prefix collisions", () => {
   withFixture(({ run, toolPath, writeTool }) => {
     const exercised = new Set<string>();
-    for (const tool of cloudExtraTools) {
+    for (const tool of cloudArtifactTools) {
       exercised.add(tool);
       const verify = `verify_${tool.replaceAll("-", "_")}`;
       const release = cloudSetupArtifacts[tool];
@@ -234,7 +275,9 @@ test("every declared tool rejects incomplete cached binaries and version prefix 
       expect(run(verify).exitCode).toBe(1);
       writeTool(tool, primary, release.version);
     }
-    expect([...exercised].sort()).toEqual(cloudExtraTools.map(String).sort());
+    expect([...exercised].sort()).toEqual(
+      cloudArtifactTools.map(String).sort(),
+    );
     expect([...exercised].sort()).toEqual(
       Object.keys(cloudSetupArtifacts)
         .filter((tool) => tool !== "rustup-init")
@@ -358,5 +401,75 @@ test("prebuilt tool downloads preserve bounded helper failure status and clean t
     expect(result.exitCode).toBe(73);
     const downloadedPath = readFileSync(scratchFile, "utf8");
     expect(existsSync(join(downloadedPath, ".."))).toBe(false);
+  });
+});
+
+test("the closed tool list is exactly the artifact and package catalogs", () => {
+  expect(cloudExtraTools.map(String).sort()).toEqual(
+    [...cloudArtifactTools, ...Object.keys(cloudSetupPackages)].sort(),
+  );
+});
+
+test("GNU time readiness requires the GNU binary and the pinned Ubuntu package release", () => {
+  withFixture(({ run, timePath, writeTime }) => {
+    expect(run("verify_time").exitCode).toBe(0);
+    expect(run("verify_tools").exitCode).toBe(0);
+    for (const version of ["", "1.10-1", "1.9.1-1", "11.9-1", "1.9"])
+      expect(
+        run("verify_time", { FIXTURE_TIME_PACKAGE: version }).exitCode,
+      ).toBe(1);
+    const failed = run("verify_tools", { FIXTURE_TIME_PACKAGE: "" });
+    expect(failed.exitCode).toBe(1);
+    expect(failed.stderr.toString()).toContain(
+      "Pinned time is unavailable; run install",
+    );
+    writeTime("time (BSD) 1.9");
+    expect(run("verify_time").exitCode).toBe(1);
+    rmSync(timePath);
+    expect(run("verify_time").exitCode).toBe(1);
+  });
+});
+
+test("GNU time installation skips present packages and otherwise uses bounded apt", () => {
+  withFixture(({ run, directory, networkCalls, timePath, writeTime }) => {
+    const calls = join(directory, "apt-calls");
+    const apt = `
+      apt_network() { printf 'network %s\\n' "$*" >> "$FIXTURE_APT_CALLS"; return "$FIXTURE_APT_STATUS"; }
+      apt_install() { printf 'install %s\\n' "$*" >> "$FIXTURE_APT_CALLS"; [[ -z "$FIXTURE_APT_IDENTITY" ]] || printf '%s\\n' '#!/bin/sh' "printf '%s\\\\n' '$FIXTURE_APT_IDENTITY'" > "$FIXTURE_TIME_PATH"; chmod 755 "$FIXTURE_TIME_PATH"; }
+      install_time
+    `;
+    const env = {
+      FIXTURE_APT_CALLS: calls,
+      FIXTURE_APT_STATUS: "0",
+      FIXTURE_APT_IDENTITY: "time (GNU Time) UNKNOWN",
+      FIXTURE_TIME_PATH: timePath,
+    };
+    const present = run(apt, env);
+    expect(present.stderr.toString()).toBe("");
+    expect(present.exitCode).toBe(0);
+    expect(existsSync(calls)).toBe(false);
+
+    rmSync(timePath);
+    const installed = run(apt, env);
+    expect(installed.stderr.toString()).toBe("");
+    expect(installed.exitCode).toBe(0);
+    expect(readFileSync(calls, "utf8")).toBe("network update\ninstall time\n");
+    expect(run("verify_time").exitCode).toBe(0);
+
+    rmSync(calls);
+    rmSync(timePath);
+    const timedOut = run(apt, { ...env, FIXTURE_APT_STATUS: "124" });
+    expect(timedOut.exitCode).toBe(124);
+    expect(readFileSync(calls, "utf8")).toBe("network update\n");
+    expect(existsSync(timePath)).toBe(false);
+
+    rmSync(calls);
+    writeTime("time (BSD) 1.9");
+    const mismatched = run(apt, { ...env, FIXTURE_APT_IDENTITY: "" });
+    expect(mismatched.exitCode).toBe(1);
+    expect(mismatched.stderr.toString()).toContain(
+      "Installed time version differs from its pin",
+    );
+    expect(existsSync(networkCalls)).toBe(false);
   });
 });

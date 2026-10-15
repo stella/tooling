@@ -7,7 +7,7 @@ import { cloudSetupPath, generateCloudSetup } from "./cloud-setup";
 import {
   cloudClaudeSettingsPath,
   cloudSessionStartFix,
-  mergeCloudSessionStartHook,
+  mergeCloudClaudeSettings,
 } from "./cloud-setup-claude";
 import {
   parseToolchainConfiguration,
@@ -145,7 +145,7 @@ const main = async () => {
   await checkOutput(destination);
   const settingsDestination = join(root, cloudClaudeSettingsPath);
   const settings = await readClaudeSettings(settingsDestination);
-  const mergedSettings = mergeCloudSessionStartHook(settings?.text);
+  const mergedSettings = mergeCloudClaudeSettings(settings?.text);
   await writeOutput({ destination, text: script, mode: 0o755 });
   if (mergedSettings !== settings?.text)
     await writeOutput({

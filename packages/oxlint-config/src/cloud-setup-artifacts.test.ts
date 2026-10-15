@@ -8,12 +8,15 @@ import { generateCloudSetup } from "./cloud-setup";
 import {
   cloudSetupArtifacts,
   cloudSetupArtifactVersions,
+  cloudSetupPackages,
   getCloudSetupArtifact,
+  getCloudSetupPackage,
   type CloudSetupArtifactTool,
 } from "./cloud-setup-artifacts";
 import {
   cloudInstallCommand,
   cloudExtraTools,
+  isCloudPackageTool,
   parseCloudSetup,
 } from "./cloud-setup-schema";
 import { parseToolchainPolicy } from "./toolchain-schema";
@@ -88,6 +91,17 @@ test("artifact lookup accepts every explicit version and rejects unsupported ver
   }
 });
 
+test("package catalog accepts only the Ubuntu 24.04 release", () => {
+  for (const [tool, release] of Object.entries(cloudSetupPackages)) {
+    if (!isCloudPackageTool(tool)) throw new Error(`Unknown package ${tool}`);
+    expect(getCloudSetupPackage(tool, release.version)).toBe(release);
+    for (const version of ["latest", "", `v${release.version}`, "999.0"])
+      expect(() => getCloudSetupPackage(tool, version)).toThrow(
+        `Unsupported ${tool} version ${version}; supported versions: ${release.version}`,
+      );
+  }
+});
+
 test("the documented direct network hosts equal the complete generated download host set", async () => {
   const policy = parseToolchainPolicy(policyInput);
   const cloud = parseCloudSetup({
@@ -99,7 +113,12 @@ test("the documented direct network hosts equal the complete generated download 
       targets: ["wasm32-unknown-unknown", "wasm32-wasip1-threads"],
     },
     tools: Object.fromEntries(
-      cloudExtraTools.map((tool) => [tool, cloudSetupArtifacts[tool].version]),
+      cloudExtraTools.map((tool) => [
+        tool,
+        isCloudPackageTool(tool)
+          ? cloudSetupPackages[tool].version
+          : cloudSetupArtifacts[tool].version,
+      ]),
     ),
   });
   if (cloud === undefined) throw new Error("cloud declaration absent");
