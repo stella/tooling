@@ -1,7 +1,14 @@
 /// <reference types="bun-types" />
 import { expect, test } from "bun:test";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-import { renderCloudShellProfile } from "./cloud-setup-shell";
+import {
+  cloudShellProfilePath,
+  renderCloudShellInstall,
+  renderCloudShellProfile,
+} from "./cloud-setup-shell";
 
 const nodeVersion = "26.10.0";
 const bunVersion = "1.4.3";
@@ -53,5 +60,51 @@ test("managed PATH prepending is an idempotent projection that preserves every u
     expect(result.stderr.toString()).toBe("");
     expect(result.exitCode).toBe(0);
     expect(result.stdout.toString()).toBe(expected);
+  }
+});
+
+test("shell environment installation cleans its temporary file and preserves startup failure status", () => {
+  for (const status of [0, 73, 124]) {
+    const directory = mkdtempSync(join(tmpdir(), "cloud-shell-cleanup-"));
+    try {
+      const destination = join(directory, "profile.sh");
+      const temporary = join(directory, "temporary");
+      const rendered = renderCloudShellInstall({
+        nodeVersion,
+        bunVersion,
+        rust: undefined,
+      }).replaceAll(cloudShellProfilePath, destination);
+      const result = Bun.spawnSync(
+        [
+          "/bin/bash",
+          "-euo",
+          "pipefail",
+          "-c",
+          `
+        fail() { printf '%s\\n' "$*" >&2; exit 1; }
+        mktemp() { printf '' > "$FIXTURE_TEMPORARY"; printf '%s' "$FIXTURE_TEMPORARY"; }
+        install() { [[ "$1" == -m && "$2" == 644 ]] || return 90; cp "$3" "$4"; }
+        runuser() { return "$FIXTURE_STATUS"; }
+        ${rendered}
+        install_shell_environment
+      `,
+        ],
+        {
+          env: {
+            ...process.env,
+            OUTPUT_USER: "fixture",
+            OUTPUT_HOME: directory,
+            FIXTURE_STATUS: String(status),
+            FIXTURE_TEMPORARY: temporary,
+          },
+        },
+      );
+      expect(result.stderr.toString()).toBe("");
+      expect(result.exitCode).toBe(status);
+      expect(existsSync(temporary)).toBe(false);
+      expect(readFileSync(destination, "utf8")).toBe(profile);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   }
 });

@@ -13,6 +13,7 @@ import { dirname, join, resolve } from "node:path";
 
 import { cloudEnvironmentMarker } from "../packages/oxlint-config/src/cloud-setup";
 import { cloudSetupArtifacts } from "../packages/oxlint-config/src/cloud-setup-artifacts";
+import { renderCloudNetwork } from "../packages/oxlint-config/src/cloud-setup-network";
 import { cloudShellProfileSource } from "../packages/oxlint-config/src/cloud-setup-shell";
 import { parseToolchainPolicy } from "../packages/oxlint-config/src/toolchain-schema";
 
@@ -104,6 +105,21 @@ const main = async () => {
     label: "Offline network namespace capability",
     args: [...rootPrefix, "unshare", "--net", "--", "true"],
   });
+  const timeoutStarted = performance.now();
+  const timeoutDiagnostic = await command({
+    label: "Real GNU timeout deadline",
+    args: [
+      "bash",
+      "-c",
+      `exec 2>&1\nfail() { echo "$*" >&2; exit 1; }\n${renderCloudNetwork()}\nnetwork_run static.rust-lang.org 1 sleep 10`,
+    ],
+    outcome: "failure",
+  });
+  assert(
+    timeoutDiagnostic.includes("download timed out: static.rust-lang.org") &&
+      performance.now() - timeoutStarted < 5000,
+    "GNU timeout did not enforce the deadline with its download host diagnostic",
+  );
   const source = resolve(import.meta.dirname, "..");
   const policy = parseToolchainPolicy(
     JSON.parse(

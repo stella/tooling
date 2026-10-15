@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { valid } from "semver";
 
 import { renderCloudServiceInstall } from "./cloud-setup-install";
+import { renderCloudNetwork } from "./cloud-setup-network";
 import { cloudServices, parseCloudSetup } from "./cloud-setup-schema";
 import { renderCloudServiceStart } from "./cloud-setup-services";
 import { renderCloudShellInstall } from "./cloud-setup-shell";
@@ -70,13 +71,15 @@ case "$(uname -m)" in
   *) fail 'Only amd64 and arm64 are supported' ;;
 esac
 
+@NETWORK@
+
 runtime_ready() {
   [[ -x "$NODE_DIR/bin/node" && "$($NODE_DIR/bin/node --version)" == "v$NODE_VERSION" ]] || fail 'Pinned Node is unavailable; run install'
   [[ -x "$BUN_DIR/bun" && "$($BUN_DIR/bun --version)" == "$BUN_VERSION" ]] || fail 'Pinned Bun is unavailable; run install'
 }
 install_runtimes() {
   if ! command -v curl >/dev/null || ! command -v unzip >/dev/null || ! command -v xz >/dev/null || ! command -v openssl >/dev/null || ! command -v gpg >/dev/null || ! ldconfig -p | awk '$1 == "libatomic.so.1" { found=1 } END { exit !found }'; then
-    apt-get update
+    apt_network update
     DEBIAN_FRONTEND=noninteractive apt_install ca-certificates curl unzip xz-utils openssl gnupg util-linux libatomic1
   fi
   local scratch node_archive bun_archive bun_folder
@@ -84,8 +87,8 @@ install_runtimes() {
   trap 'rm -rf -- "$scratch"' RETURN
   if [[ ! -x "$NODE_DIR/bin/node" ]] || [[ "$($NODE_DIR/bin/node --version)" != "v$NODE_VERSION" ]]; then
     node_archive="node-v$NODE_VERSION-linux-$NODE_ARCH.tar.xz"
-    curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.2 "https://nodejs.org/dist/v$NODE_VERSION/$node_archive" -o "$scratch/$node_archive"
-    curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.2 "https://nodejs.org/dist/v$NODE_VERSION/SHASUMS256.txt" -o "$scratch/node-sums"
+    download_file "https://nodejs.org/dist/v$NODE_VERSION/$node_archive" "$scratch/$node_archive" 120
+    download_file "https://nodejs.org/dist/v$NODE_VERSION/SHASUMS256.txt" "$scratch/node-sums" 45
     (cd "$scratch"; awk -v name="$node_archive" '$2 == name { print; count++ } END { if (count != 1) exit 1 }' node-sums | sha256sum --strict -c -)
     install -d -m 755 "$NODE_DIR"
     tar -xJf "$scratch/$node_archive" --strip-components=1 -C "$NODE_DIR"
@@ -93,8 +96,8 @@ install_runtimes() {
   if [[ ! -x "$BUN_DIR/bun" ]] || [[ "$($BUN_DIR/bun --version)" != "$BUN_VERSION" ]]; then
     bun_folder="bun-linux-$BUN_ARCH"
     bun_archive="$bun_folder.zip"
-    curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.2 "https://github.com/oven-sh/bun/releases/download/bun-v$BUN_VERSION/$bun_archive" -o "$scratch/$bun_archive"
-    curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.2 "https://github.com/oven-sh/bun/releases/download/bun-v$BUN_VERSION/SHASUMS256.txt" -o "$scratch/bun-sums"
+    download_file "https://github.com/oven-sh/bun/releases/download/bun-v$BUN_VERSION/$bun_archive" "$scratch/$bun_archive" 120
+    download_file "https://github.com/oven-sh/bun/releases/download/bun-v$BUN_VERSION/SHASUMS256.txt" "$scratch/bun-sums" 45
     (cd "$scratch"; awk -v name="$bun_archive" '$2 == name || $2 == "*" name { print $1 "  " name; count++ } END { if (count != 1) exit 1 }' bun-sums | sha256sum --strict -c -)
     unzip -q "$scratch/$bun_archive" -d "$scratch/bun"
     install -d -m 755 "$BUN_DIR"
@@ -110,7 +113,7 @@ install_runtimes() {
 }
 
 dependency_install() {
-  local directory
+  local directory download_hosts
   for directory in /var/cache/stll-cloud /var/cache/stll-cloud/bun; do
     [[ ! -L "$directory" ]] || fail 'Dependency cache parent must not be a symlink'
     if [[ -e "$directory" ]]; then
@@ -123,7 +126,26 @@ dependency_install() {
     [[ -d "$BUN_CACHE" && "$(stat -c '%u' "$BUN_CACHE")" == "$OUTPUT_UID" ]] || fail 'Dependency cache ownership differs from the invoking user'
   fi
   install -d -m 700 -o "$OUTPUT_UID" -g "$OUTPUT_GID" "$BUN_CACHE"
-  runuser -u "$OUTPUT_USER" -- env HOME="$OUTPUT_HOME" BUN_INSTALL_CACHE_DIR="$BUN_CACHE" PATH="$PATH" "$BUN_DIR/bun" install --frozen-lockfile
+  # Report hostnames only: lockfile/config URLs may contain credentials.
+  # These are known install hosts; lifecycle scripts can contact other hosts.
+  download_hosts="$(HOME="$OUTPUT_HOME" "$NODE_DIR/bin/node" -e '
+const fs = require("node:fs");
+const path = require("node:path");
+const hosts = new Set(["registry.npmjs.org"]);
+const inputs = [process.env.BUN_CONFIG_REGISTRY ?? "", process.env.NPM_CONFIG_REGISTRY ?? "", process.env.npm_config_registry ?? ""];
+for (const file of ["bun.lock", ".npmrc", "bunfig.toml", path.join(process.env.HOME, ".npmrc"), path.join(process.env.HOME, ".bunfig.toml"), path.join(process.env.XDG_CONFIG_HOME ?? process.env.HOME, ".bunfig.toml")]) {
+  if (fs.existsSync(file)) inputs.push(fs.readFileSync(file, "utf8"));
+}
+for (const input of inputs) {
+  for (const match of input.matchAll(/(?:git\+)?https?:\/\/[^\s"\x27<>\\]+/g)) {
+    try { hosts.add(new URL(match[0].replace(/^git\+/, "")).hostname); } catch {}
+  }
+  if (/github:/.test(input)) { hosts.add("github.com"); hosts.add("codeload.github.com"); }
+}
+process.stdout.write([...hosts].sort().join(","));
+')"
+  # Bun 1.4.3 socket inactivity timeout, in seconds; the outer bound includes scripts.
+  network_run "$download_hosts" 240 runuser -u "$OUTPUT_USER" -- env HOME="$OUTPUT_HOME" BUN_INSTALL_CACHE_DIR="$BUN_CACHE" PATH="$PATH" BUN_CONFIG_HTTP_IDLE_TIMEOUT=20 "$BUN_DIR/bun" install --frozen-lockfile
 }
 
 @SERVICE_INSTALL@
@@ -211,6 +233,7 @@ export const generateCloudSetup = ({
     selected.services.includes(service),
   );
   const replacements = new Map([
+    ["@NETWORK@", renderCloudNetwork()],
     [
       "@TOOL_INSTALL@",
       renderCloudToolInstall(toolchains) +

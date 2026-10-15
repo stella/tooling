@@ -402,6 +402,14 @@ The supported OS, privileges, and pinned runtime requirements are checked explic
 
 ### Network hosts
 
+Downloads use a 20-second connection timeout, three retries, and a total deadline
+(45 seconds for manifests and keys; 120 seconds for binary archives). APT uses
+20-second Acquire timeouts, three retries, and a 180-second command deadline.
+Rust provisioning commands have a 180-second deadline. Frozen dependency
+installation uses a 20-second Bun HTTP idle timeout and a 240-second overall
+deadline, including lifecycle scripts. Timeout failures name the download host
+or the configured package hosts; a redirected download names its original host.
+
 Allow these direct download hosts for the generated installer:
 
 | Host                   | Downloads                                                                |

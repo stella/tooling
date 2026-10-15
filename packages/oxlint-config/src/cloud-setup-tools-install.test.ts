@@ -1,10 +1,12 @@
 /// <reference types="bun-types" />
 
 import { expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -52,6 +54,7 @@ const createFixture = () => {
   const managed = join(directory, "managed");
   const cargoBin = join(managed, "cargo/bin");
   const networkMarker = join(directory, "network-attempt");
+  const networkCalls = join(directory, "bounded-network-calls");
   mkdirSync(cargoBin, { recursive: true });
   mkdirSync(join(managed, "rustup"), { recursive: true });
   const environmentCheck = `
@@ -65,7 +68,10 @@ fi
     `#!/bin/sh
 ${environmentCheck}
 case "$*" in
-  --version) printf '%s\\n' 'rustup ${cloudSetupArtifacts["rustup-init"].version} (fixture 2026-10-15)' ;;
+  --version)
+    if [ "$FIXTURE_RUSTUP_OLD" = 1 ]; then printf '%s\\n' 'rustup 0.0.1 (fixture)';
+    else printf '%s\\n' 'rustup ${cloudSetupArtifacts["rustup-init"].version} (fixture 2026-10-15)'; fi ;;
+  "set auto-self-update disable") : ;;
   "component list --toolchain $FIXTURE_TOOLCHAIN --installed") printf '%s\\n' "$FIXTURE_COMPONENTS" ;;
   "target list --toolchain $FIXTURE_TOOLCHAIN --installed") printf '%s\\n' wasm32-unknown-unknown ;;
   *) exit 92 ;;
@@ -121,6 +127,12 @@ runuser() {
   shift 3
   "$@"
 }
+network_run() {
+  printf '%s\\n' "$@" >> "$FIXTURE_NETWORK_CALLS"
+  [[ "$FIXTURE_NETWORK_STATUS" == 0 ]] || return "$FIXTURE_NETWORK_STATUS"
+  shift 2
+  "$@"
+}
 ${rewritten}
 ${command}
 `,
@@ -138,13 +150,16 @@ ${command}
           RUSTUP_UPDATE_ROOT: "https://fixture.invalid/rustup",
           FIXTURE_TOOLCHAIN: policy.rust,
           FIXTURE_NETWORK: networkMarker,
+          FIXTURE_NETWORK_CALLS: networkCalls,
+          FIXTURE_NETWORK_STATUS: "0",
+          FIXTURE_RUSTUP_OLD: "0",
           FIXTURE_COMPONENTS: installedComponents,
           FIXTURE_MISSING_TOOLCHAIN: "0",
           ...env,
         },
       },
     );
-  return { directory, networkMarker, run, toolPath, writeTool };
+  return { directory, networkMarker, networkCalls, run, toolPath, writeTool };
 };
 
 type ToolFixture = ReturnType<typeof createFixture>;
@@ -158,7 +173,7 @@ const withFixture = (check: (fixture: ToolFixture) => void) => {
 };
 
 test("Rust readiness forces the pinned offline environment even when callers override it", () => {
-  withFixture(({ run, networkMarker }) => {
+  withFixture(({ run, networkMarker, networkCalls }) => {
     const command = `
 [[ "$RUSTUP_AUTO_INSTALL" == 0 && "$RUSTUP_TOOLCHAIN" == "$FIXTURE_TOOLCHAIN" ]]
 RUSTUP_AUTO_INSTALL=1 RUSTUP_TOOLCHAIN=nightly verify_rust
@@ -173,6 +188,7 @@ RUSTUP_AUTO_INSTALL=1 RUSTUP_TOOLCHAIN=nightly verify_rust
     expect(missing.exitCode).toBe(1);
     expect(missing.stderr.toString()).toContain("run install");
     expect(existsSync(networkMarker)).toBe(false);
+    expect(existsSync(networkCalls)).toBe(false);
   });
 });
 
@@ -225,5 +241,122 @@ test("every declared tool rejects incomplete cached binaries and version prefix 
         .sort(),
     );
     expect(run("verify_tools").exitCode).toBe(0);
+  });
+});
+
+test("verified artifacts use the bounded downloader and never hash failed downloads", () => {
+  withFixture(({ run, directory }) => {
+    const payload = "artifact payload";
+    const checksum = createHash("sha256").update(payload).digest("hex");
+    const destination = join(directory, "artifact");
+    const successful = run(
+      `
+      download_file() {
+        [[ "$1" == https://github.com/example/archive.tar.gz && "$2" == "$FIXTURE_DESTINATION" && "$3" == 120 ]] || exit 90
+        printf '%s' 'artifact payload' > "$2"
+      }
+      fetch_verified https://github.com/example/archive.tar.gz ${checksum} "$FIXTURE_DESTINATION"
+    `,
+      { FIXTURE_DESTINATION: destination },
+    );
+    expect(successful.exitCode).toBe(0);
+    expect(readFileSync(destination, "utf8")).toBe(payload);
+    const failed = run(
+      `
+      download_file() { return 73; }
+      sha256sum() { printf '%s' hashed > "$FIXTURE_HASH_MARKER"; }
+      fetch_verified https://github.com/example/archive.tar.gz ${checksum} "$FIXTURE_DESTINATION"
+    `,
+      {
+        FIXTURE_DESTINATION: destination,
+        FIXTURE_HASH_MARKER: join(directory, "hashed"),
+      },
+    );
+    expect(failed.exitCode).toBe(73);
+    expect(existsSync(join(directory, "hashed"))).toBe(false);
+  });
+});
+
+test("Rust network execution passes one pinned environment through the bounded external command helper", () => {
+  withFixture(({ run, networkCalls }) => {
+    const successful = run(
+      'rust_run network "$CARGO_HOME/bin/rustup" --version',
+    );
+    expect(successful.exitCode).toBe(0);
+    expect(readFileSync(networkCalls, "utf8").split("\n").slice(0, 3)).toEqual([
+      "static.rust-lang.org",
+      "180",
+      "runuser",
+    ]);
+    for (const status of [124, 137])
+      expect(
+        run('rust_run network "$CARGO_HOME/bin/rustup" --version', {
+          FIXTURE_NETWORK_STATUS: String(status),
+        }).exitCode,
+      ).toBe(status);
+    expect(
+      run('rust_run invalid "$CARGO_HOME/bin/rustup" --version').exitCode,
+    ).toBe(1);
+  });
+});
+
+test("both Rust provisioning entrypoints stop on bounded network failure before later install work", () => {
+  for (const entrypoint of ["installer", "toolchain"]) {
+    withFixture(({ run, networkCalls }) => {
+      const result = run(
+        `
+        apt_network() { [[ "$*" == update ]] || exit 89; }
+        apt_install() { [[ "$*" == build-essential ]] || exit 88; }
+        fetch_verified() { printf '%s' fixture > "$3"; }
+        rust_ready() { return 1; }
+        install_rust
+      `,
+        {
+          FIXTURE_RUSTUP_OLD: entrypoint === "installer" ? "1" : "0",
+          FIXTURE_NETWORK_STATUS: "124",
+          ARCH: "amd64",
+        },
+      );
+      expect(result.stderr.toString()).toBe("");
+      expect(result.exitCode).toBe(124);
+      const call = readFileSync(networkCalls, "utf8").split("\n");
+      expect(call.slice(0, 3)).toEqual([
+        "static.rust-lang.org",
+        "180",
+        "runuser",
+      ]);
+      if (entrypoint === "installer") {
+        expect(call.some((argument) => argument.endsWith("/rustup-init"))).toBe(
+          true,
+        );
+        expect(call).toContain("--default-toolchain");
+      } else {
+        expect(call).toContain("toolchain");
+        expect(call).toContain("install");
+        expect(call).toContain(policy.rust);
+      }
+    });
+  }
+});
+
+test("prebuilt tool downloads preserve bounded helper failure status and clean temporary files", () => {
+  withFixture(({ run, directory, toolPath }) => {
+    rmSync(toolPath("uv", "uv"));
+    const scratchFile = join(directory, "download-scratch");
+    const result = run(
+      `
+      download_file() {
+        printf '%s' "$2" > "$FIXTURE_SCRATCH_FILE"
+        [[ "$1" == https://github.com/* && "$3" == 120 ]] || exit 90
+        return 73
+      }
+      install_uv
+    `,
+      { ARCH: "amd64", FIXTURE_SCRATCH_FILE: scratchFile },
+    );
+    expect(result.stderr.toString()).toBe("");
+    expect(result.exitCode).toBe(73);
+    const downloadedPath = readFileSync(scratchFile, "utf8");
+    expect(existsSync(join(downloadedPath, ".."))).toBe(false);
   });
 });

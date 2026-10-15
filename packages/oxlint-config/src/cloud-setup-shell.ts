@@ -74,7 +74,7 @@ done
 export const renderCloudShellInstall = (options: CloudShellOptions) => {
   const profile = renderCloudShellProfile(options);
   return `install_shell_environment() (
-  local temporary
+  # Subshell scope retains temporary for EXIT cleanup after a failed command.
   [[ ! -L ${quote(cloudShellProfilePath)} ]] || fail 'Managed shell profile must not be a symlink'
   if [[ -e ${quote(cloudShellProfilePath)} ]]; then
     [[ -f ${quote(cloudShellProfilePath)} && "$(stat -c '%h:%u' ${quote(cloudShellProfilePath)})" == 1:0 ]] || fail 'Managed shell profile must be a root-owned single-link file'
