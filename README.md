@@ -4,9 +4,9 @@
 
 # stella tooling
 
-Shared TypeScript, oxlint, and Rust configuration for stella public packages.
+Shared TypeScript, oxlint, Rust, and test tooling for public packages.
 
-This repo intentionally contains only portable tooling policy:
+This repo contains portable tooling and test primitives:
 
 - `@stll/typescript-config`: strict TypeScript config presets.
 - `@stll/oxlint-config`: general upstream oxlint rules and the shared
@@ -14,6 +14,7 @@ This repo intentionally contains only portable tooling policy:
 - `@stll/oxlint-plugin`: portable static-safety rules for unsafe type
   assertions, incomplete union-keyed records, raw DOM HTML sinks, and
   route-query waterfalls.
+- [`@stll/test-kit`](packages/test-kit/README.md): deterministic clocks, observable waits, temporary directories, and network guards for Bun and Vitest.
 - `rust/`: source-of-truth Rust formatting, lint, and Cargo profile templates.
 - `rust-lints/`: Dylint libraries for stella-specific Rust rules.
 

@@ -1,0 +1,100 @@
+{
+  "name": "@stll/test-kit",
+  "version": "0.0.0",
+  "description": "Deterministic clocks, observable waits, temporary directories, and network guards for tests.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stella/tooling.git",
+    "directory": "packages/test-kit"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "sideEffects": [
+    "./dist/bun/forbid-network.mjs",
+    "./dist/vitest/forbid-network.mjs"
+  ],
+  "main": "dist/index.mjs",
+  "types": "dist/index.d.mts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "default": "./dist/index.mjs"
+    },
+    "./bun": {
+      "import": {
+        "types": "./dist/bun.d.mts",
+        "default": "./dist/bun.mjs"
+      },
+      "default": "./dist/bun.mjs"
+    },
+    "./vitest": {
+      "import": {
+        "types": "./dist/vitest.d.mts",
+        "default": "./dist/vitest.mjs"
+      },
+      "default": "./dist/vitest.mjs"
+    },
+    "./drizzle": {
+      "import": {
+        "types": "./dist/db-clock.d.mts",
+        "default": "./dist/db-clock.mjs"
+      },
+      "default": "./dist/db-clock.mjs"
+    },
+    "./bun/forbid-network": {
+      "import": {
+        "types": "./dist/bun/forbid-network.d.mts",
+        "default": "./dist/bun/forbid-network.mjs"
+      },
+      "default": "./dist/bun/forbid-network.mjs"
+    },
+    "./vitest/forbid-network": {
+      "import": {
+        "types": "./dist/vitest/forbid-network.d.mts",
+        "default": "./dist/vitest/forbid-network.mjs"
+      },
+      "default": "./dist/vitest/forbid-network.mjs"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "bun check -p .",
+    "test": "bun test test/*.test.ts test/bun && bun test --preload ./src/bun/forbid-network.ts test/preload",
+    "test:vitest": "vitest run --config vitest.config.ts && vitest run --config vitest-network.config.ts"
+  },
+  "dependencies": {
+    "@stll/time": "^0.3.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "@stll/typescript-config": "workspace:*",
+    "@types/node": "25.9.1",
+    "bun-types": "1.4.3",
+    "drizzle-orm": "1.0.0-rc.4",
+    "vitest": "^4.1.10"
+  },
+  "peerDependencies": {
+    "drizzle-orm": "^0.45.2 || >=1.0.0-rc.1 <2",
+    "vitest": "^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "vitest": {
+      "optional": true
+    },
+    "drizzle-orm": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=22.23.3"
+  }
+}

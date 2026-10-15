@@ -4,6 +4,11 @@
       "package": "packages/oxlint-config",
       "workflow": ".github/workflows/ci.yml",
       "job": "engine-floor"
+    },
+    {
+      "package": "packages/test-kit",
+      "workflow": ".github/workflows/ci.yml",
+      "job": "test-kit-floor"
     }
   ],
   "rustExceptions": [

@@ -140,4 +140,5 @@ jobs:
         packages/oxlint-config/package.json
         packages/oxlint-plugin/package.json
         packages/typescript-config/package.json
+        packages/test-kit/package.json
       source-ref: ${{ inputs.source_ref || '' }}

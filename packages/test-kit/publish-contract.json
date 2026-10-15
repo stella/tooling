@@ -1,0 +1,64 @@
+{
+  "engines": {
+    "node": ">=22.23.3"
+  },
+  "peerDependencies": {
+    "drizzle-orm": "^0.45.2 || >=1.0.0-rc.1 <2",
+    "vitest": "^4.0.0"
+  },
+  "target": {
+    "type": "javascript",
+    "targets": [
+      "node22.23.3"
+    ]
+  },
+  "entryPoints": {
+    "type": "module",
+    "exports": {
+      ".": {
+        "import": {
+          "types": "./dist/index.d.mts",
+          "default": "./dist/index.mjs"
+        },
+        "default": "./dist/index.mjs"
+      },
+      "./bun": {
+        "import": {
+          "types": "./dist/bun.d.mts",
+          "default": "./dist/bun.mjs"
+        },
+        "default": "./dist/bun.mjs"
+      },
+      "./vitest": {
+        "import": {
+          "types": "./dist/vitest.d.mts",
+          "default": "./dist/vitest.mjs"
+        },
+        "default": "./dist/vitest.mjs"
+      },
+      "./drizzle": {
+        "import": {
+          "types": "./dist/db-clock.d.mts",
+          "default": "./dist/db-clock.mjs"
+        },
+        "default": "./dist/db-clock.mjs"
+      },
+      "./bun/forbid-network": {
+        "import": {
+          "types": "./dist/bun/forbid-network.d.mts",
+          "default": "./dist/bun/forbid-network.mjs"
+        },
+        "default": "./dist/bun/forbid-network.mjs"
+      },
+      "./vitest/forbid-network": {
+        "import": {
+          "types": "./dist/vitest/forbid-network.d.mts",
+          "default": "./dist/vitest/forbid-network.mjs"
+        },
+        "default": "./dist/vitest/forbid-network.mjs"
+      }
+    },
+    "main": "dist/index.mjs",
+    "types": "dist/index.d.mts"
+  }
+}
