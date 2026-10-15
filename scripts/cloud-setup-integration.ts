@@ -45,7 +45,7 @@ const command = async ({
   output = "trimmed",
 }: CommandOptions) => {
   const child = Bun.spawn(args, {
-    cwd,
+    ...(cwd === undefined ? {} : { cwd }),
     env: env ?? process.env,
     stdout: "pipe",
     stderr: "pipe",
