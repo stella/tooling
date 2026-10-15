@@ -214,14 +214,58 @@ const snapshotText = ({
   return snapshotText({ snapshot, file: target, visited });
 };
 /** Read declared selector files too, without executing workflows or inspecting installed tools. */
+/**
+ * Directories where a step list checks out this same repository again.
+ *
+ * A selector such as `base/package.json` after a checkout with `path: base`
+ * names the repository's own `package.json` at another ref, so it is read
+ * as that tracked file. Checkouts of another repository, or paths built from
+ * expressions, add nothing: their selectors stay outside the snapshot.
+ */
+const sameRepositoryCheckoutPaths = (steps: unknown): string[] => {
+  if (!Array.isArray(steps)) return [];
+  const paths: string[] = [];
+  for (const step of steps) {
+    if (!changedRecord(step)) continue;
+    const uses = step["uses"];
+    if (typeof uses !== "string" || !uses.startsWith("actions/checkout@"))
+      continue;
+    const options = step["with"];
+    if (!changedRecord(options)) continue;
+    const repository = options["repository"];
+    if (
+      repository !== undefined &&
+      repository !== "${{ github.repository }}"
+    )
+      continue;
+    const checkoutPath = options["path"];
+    if (
+      typeof checkoutPath !== "string" ||
+      checkoutPath.includes("${{") ||
+      path.posix.isAbsolute(checkoutPath)
+    )
+      continue;
+    const normalized = path.posix.normalize(checkoutPath).replace(/\/+$/, "");
+    if (
+      normalized === "" ||
+      normalized === "." ||
+      normalized.split("/").includes("..")
+    )
+      continue;
+    paths.push(normalized);
+  }
+  return paths;
+};
+
 const selectorFiles = (snapshot: GitSnapshot) => {
   const files = new Map<string, Set<ToolchainChangedTool>>();
-  const visit = (value: unknown) => {
+  const visit = (value: unknown, checkouts: readonly string[] = []) => {
     if (Array.isArray(value)) {
-      for (const entry of value) visit(entry);
+      for (const entry of value) visit(entry, checkouts);
       return;
     }
     if (!changedRecord(value)) return;
+    const scope = [...checkouts, ...sameRepositoryCheckoutPaths(value["steps"])];
     for (const [key, entry] of Object.entries(value)) {
       const input = key.toLowerCase();
       if (
@@ -230,7 +274,7 @@ const selectorFiles = (snapshot: GitSnapshot) => {
           input,
         )
       ) {
-        visit(entry);
+        visit(entry, scope);
         continue;
       }
       if (
@@ -241,7 +285,14 @@ const selectorFiles = (snapshot: GitSnapshot) => {
         entry.split("/").includes("..")
       )
         throw new Error("Unclassifiable setup version-file declaration");
-      const file = path.posix.normalize(entry);
+      const declared = path.posix.normalize(entry);
+      const checkout = scope.find((prefix) =>
+        declared.startsWith(`${prefix}/`),
+      );
+      const file =
+        checkout === undefined
+          ? declared
+          : declared.slice(checkout.length + 1);
       if (
         file === "." ||
         file

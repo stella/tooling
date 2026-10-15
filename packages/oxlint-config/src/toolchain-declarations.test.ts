@@ -39,6 +39,20 @@ type DeclarationMutation = {
   before: Record<string, unknown>;
   after: Record<string, unknown>;
 };
+const checkoutAction =
+  "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1";
+const checkoutWorkflow = (checkout: Record<string, string>, selector: string) => ({
+  on: { pull_request: {} },
+  jobs: {
+    replay: {
+      "runs-on": "ubuntu-latest",
+      steps: [
+        { uses: checkoutAction, with: checkout },
+        { uses: bunAction, with: { "bun-version-file": selector } },
+      ],
+    },
+  },
+});
 const mutations = [
   {
     name: "workflow-only Bun literal bump",
@@ -63,6 +77,17 @@ const mutations = [
         "bun-version-file": "config/runtime-next.txt",
       }),
     },
+  },
+  {
+    name: "Bun version-file content bump behind a same-repository checkout path",
+    before: {
+      ".github/workflows/replay.yml": checkoutWorkflow(
+        { ref: "main", path: "base" },
+        "base/config/runtime.txt",
+      ),
+      "config/runtime.txt": "1.4.2\n",
+    },
+    after: { "config/runtime.txt": "1.4.3\n" },
   },
   {
     name: "Bun version-file content bump at an arbitrary tracked path",
@@ -291,6 +316,44 @@ for (const mutation of mutations)
       expect(passed).toBe(false);
     });
   });
+
+test("a same-repository checkout path selector is compared, and another repository's is not", async () => {
+  await withSnapshots(
+    {
+      name: "checkout path selectors",
+      before: {
+        ".github/workflows/replay.yml": checkoutWorkflow(
+          { ref: "main", path: "base/" },
+          "base/config/runtime.txt",
+        ),
+        "config/runtime.txt": "1.4.3\n",
+      },
+      after: { "README.md": "unrelated\n" },
+    },
+    async ({ repo, since }) => {
+      const result = await detectToolchainChanges({ repo, since });
+      expect(result.status).toBe("compared");
+      expect(result.changed).toBe(false);
+    },
+  );
+  await withSnapshots(
+    {
+      name: "foreign checkout path selector",
+      before: {
+        ".github/workflows/replay.yml": checkoutWorkflow(
+          { repository: "example/other", path: "other" },
+          "other/config/runtime.txt",
+        ),
+        "config/runtime.txt": "1.4.3\n",
+      },
+      after: { "README.md": "unrelated\n" },
+    },
+    async ({ repo, since }) => {
+      const result = await detectToolchainChanges({ repo, since });
+      expect(result.status).toBe("unreadable");
+    },
+  );
+});
 
 test("unclassifiable changed runtime declarations run parity rather than skipping", async () => {
   await withSnapshots(
