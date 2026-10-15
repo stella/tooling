@@ -4,5 +4,4 @@ minimumReleaseAge = 432_000
 minimumReleaseAgeExcludes = [
   # 2026-10-10: align Bun's type contract with the pinned runtime.
   # Remove this exception after 2026-10-16, once the five-day quarantine clears.
-  "bun-types", # quarantine-expires: 2026-10-15T05:25:00.000Z
 ]
