@@ -174,7 +174,7 @@ uv_version="$(uv --version)"
 uvx_version="$(uvx --version)"
 [[ "$uv_version" == "uv $UV_VERSION" || "$uv_version" == "uv $UV_VERSION "* ]]
 [[ "$uvx_version" == "uvx $UV_VERSION" || "$uvx_version" == "uvx $UV_VERSION "* ]]
-/usr/bin/time -v true 2>&1 | grep -q 'Maximum resident set size'
+[[ "$(/usr/bin/time -v true 2>&1)" == *"Maximum resident set size"* ]]
 [[ "$(rustup target list --installed)" == *wasm32-unknown-unknown* ]]
 components="$(rustup component list --installed)"
 [[ "$components" == *clippy-* && "$components" == *rustfmt-* ]]
