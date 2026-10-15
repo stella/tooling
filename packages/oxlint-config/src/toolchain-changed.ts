@@ -214,15 +214,117 @@ const snapshotText = ({
   return snapshotText({ snapshot, file: target, visited });
 };
 /** Read declared selector files too, without executing workflows or inspecting installed tools. */
+type CheckoutStep =
+  | { kind: "root"; sameRepository: boolean }
+  | { kind: "unknown" }
+  | { kind: "path"; path: string; sameRepository: boolean };
+
+/**
+ * What one `actions/checkout` step puts where, or `undefined` for any other step.
+ *
+ * A selector such as `base/package.json` after a checkout of this repository
+ * with `path: base` names the repository's own `package.json` at another ref,
+ * so it is read as that tracked file. A path built from an expression could
+ * replace any directory, so it is `unknown`.
+ */
+const checkoutStep = (step: unknown): CheckoutStep | undefined => {
+  if (!changedRecord(step)) return undefined;
+  const uses = step["uses"];
+  if (typeof uses !== "string" || !uses.startsWith("actions/checkout@"))
+    return undefined;
+  const options = changedRecord(step["with"]) ? step["with"] : {};
+  const repository = options["repository"];
+  const sameRepository =
+    repository === undefined || repository === "${{ github.repository }}";
+  const checkoutPath = options["path"];
+  if (checkoutPath === undefined) return { kind: "root", sameRepository };
+  if (
+    typeof checkoutPath !== "string" ||
+    checkoutPath.includes("${{") ||
+    path.posix.isAbsolute(checkoutPath)
+  )
+    return { kind: "unknown" };
+  const normalized = path.posix.normalize(checkoutPath).replace(/\/+$/, "");
+  if (normalized === "" || normalized === ".") return { kind: "root", sameRepository };
+  if (normalized.split("/").includes("..")) return { kind: "unknown" };
+  return { kind: "path", path: normalized, sameRepository };
+};
+
+/**
+ * Checked-out directories in step order, each owned by this repository
+ * (`true`) or another (`false`). `""` is the workspace root. With no
+ * checkout recorded, selectors name tracked files directly.
+ */
+type CheckoutScope = ReadonlyMap<string, boolean>;
+
+/**
+ * The tracked file a declared selector names under the checkouts preceding
+ * its step. The most specific checkout directory decides; a selector inside
+ * another repository's checkout is not a tracked file, whatever this
+ * repository tracks at the same path.
+ */
+const resolveCheckoutSelector = (
+  declared: string,
+  checkouts: CheckoutScope,
+): string => {
+  const file = path.posix.normalize(declared);
+  let owner: string | undefined;
+  for (const directory of checkouts.keys())
+    if (
+      (directory === "" || file.startsWith(`${directory}/`)) &&
+      (owner === undefined || directory.length > owner.length)
+    )
+      owner = directory;
+  if (owner === undefined) return file;
+  if (checkouts.get(owner) !== true)
+    throw new Error(
+      `Setup version-file names a file outside this repository: ${declared}`,
+    );
+  return owner === "" ? file : file.slice(owner.length + 1);
+};
+
+/** Visit each step with only the checkouts that precede it. */
+const visitStepsInOrder = (
+  steps: readonly unknown[],
+  checkouts: CheckoutScope,
+  visitStep: (step: unknown, checkouts: CheckoutScope) => void,
+) => {
+  // Each visit completes before the next checkout changes the scope.
+  const scope = new Map(checkouts);
+  for (const step of steps) {
+    visitStep(step, scope);
+    const checkout = checkoutStep(step);
+    if (checkout === undefined) continue;
+    if (checkout.kind !== "path") {
+      // A root checkout replaces the workspace; an expression path may
+      // replace anything, so nothing after it is known to be tracked.
+      scope.clear();
+      scope.set("", checkout.kind === "root" && checkout.sameRepository);
+      continue;
+    }
+    for (const directory of scope.keys())
+      if (
+        directory === checkout.path ||
+        directory.startsWith(`${checkout.path}/`)
+      )
+        scope.delete(directory);
+    scope.set(checkout.path, checkout.sameRepository);
+  }
+};
+
 const selectorFiles = (snapshot: GitSnapshot) => {
   const files = new Map<string, Set<ToolchainChangedTool>>();
-  const visit = (value: unknown) => {
+  const visit = (value: unknown, checkouts: CheckoutScope = new Map()) => {
     if (Array.isArray(value)) {
-      for (const entry of value) visit(entry);
+      for (const entry of value) visit(entry, checkouts);
       return;
     }
     if (!changedRecord(value)) return;
     for (const [key, entry] of Object.entries(value)) {
+      if (key === "steps" && Array.isArray(entry)) {
+        visitStepsInOrder(entry, checkouts, visit);
+        continue;
+      }
       const input = key.toLowerCase();
       if (
         !/(?:^|-)version-file$/.test(input) &&
@@ -230,7 +332,7 @@ const selectorFiles = (snapshot: GitSnapshot) => {
           input,
         )
       ) {
-        visit(entry);
+        visit(entry, checkouts);
         continue;
       }
       if (
@@ -241,7 +343,7 @@ const selectorFiles = (snapshot: GitSnapshot) => {
         entry.split("/").includes("..")
       )
         throw new Error("Unclassifiable setup version-file declaration");
-      const file = path.posix.normalize(entry);
+      const file = resolveCheckoutSelector(entry, checkouts);
       if (
         file === "." ||
         file
@@ -816,7 +918,7 @@ const setupRuntimeFileVersion = ({
 
 const setupRuntimeVersions = (snapshot: GitSnapshot) => {
   const versions: { file: string; runtime: string; version: string }[] = [];
-  const step = (value: unknown, file: string) => {
+  const step = (value: unknown, file: string, checkouts: CheckoutScope) => {
     if (!changedRecord(value) || typeof value["uses"] !== "string") return;
     const action = value["uses"].split("@").at(0)?.toLowerCase();
     let runtime = /(?:^|\/)setup-([^/]+)$/.exec(action ?? "")?.[1];
@@ -874,7 +976,7 @@ const setupRuntimeVersions = (snapshot: GitSnapshot) => {
           throw new Error("Unclassifiable setup version-file declaration");
         version = setupRuntimeFileVersion({
           snapshot,
-          file: path.posix.normalize(input),
+          file: resolveCheckoutSelector(input, checkouts),
           runtime: inputRuntime,
         });
       } else version = setupRuntimeVersion(input);
@@ -891,7 +993,9 @@ const setupRuntimeVersions = (snapshot: GitSnapshot) => {
     if (!changedRecord(value)) return;
     for (const [key, entry] of Object.entries(value)) {
       if (key === "steps" && Array.isArray(entry)) {
-        for (const child of entry) step(child, file);
+        visitStepsInOrder(entry, new Map(), (child, checkouts) =>
+          step(child, file, checkouts),
+        );
       } else visit(entry, file);
     }
   };
