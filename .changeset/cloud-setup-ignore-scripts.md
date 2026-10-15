@@ -2,4 +2,4 @@
 "@stll/oxlint-config": patch
 ---
 
-Allow cloud setup to install dependencies without lifecycle scripts, refresh package indexes only when the cached ones cannot resolve an install, and log the duration of each setup phase.
+Allow cloud setup to install dependencies without lifecycle scripts, skip the package index refresh only when an install downloads nothing, and log the duration of each setup phase.
