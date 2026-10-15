@@ -215,46 +215,62 @@ const snapshotText = ({
 };
 /** Read declared selector files too, without executing workflows or inspecting installed tools. */
 /**
- * Directories where a step list checks out this same repository again.
+ * The directory where one step checks out this same repository again.
  *
  * A selector such as `base/package.json` after a checkout with `path: base`
  * names the repository's own `package.json` at another ref, so it is read
  * as that tracked file. Checkouts of another repository, or paths built from
- * expressions, add nothing: their selectors stay outside the snapshot.
+ * expressions, return nothing: their selectors stay outside the snapshot.
  */
-const sameRepositoryCheckoutPaths = (steps: unknown): string[] => {
-  if (!Array.isArray(steps)) return [];
-  const paths: string[] = [];
+const sameRepositoryCheckoutPath = (step: unknown): string | undefined => {
+  if (!changedRecord(step)) return undefined;
+  const uses = step["uses"];
+  if (typeof uses !== "string" || !uses.startsWith("actions/checkout@"))
+    return undefined;
+  const options = step["with"];
+  if (!changedRecord(options)) return undefined;
+  const repository = options["repository"];
+  if (repository !== undefined && repository !== "${{ github.repository }}")
+    return undefined;
+  const checkoutPath = options["path"];
+  if (
+    typeof checkoutPath !== "string" ||
+    checkoutPath.includes("${{") ||
+    path.posix.isAbsolute(checkoutPath)
+  )
+    return undefined;
+  const normalized = path.posix.normalize(checkoutPath).replace(/\/+$/, "");
+  if (
+    normalized === "" ||
+    normalized === "." ||
+    normalized.split("/").includes("..")
+  )
+    return undefined;
+  return normalized;
+};
+
+/** The tracked file a declared selector names, given the checkouts that precede its step. */
+const resolveCheckoutSelector = (
+  declared: string,
+  checkouts: readonly string[],
+): string => {
+  const file = path.posix.normalize(declared);
+  const checkout = checkouts.find((prefix) => file.startsWith(`${prefix}/`));
+  return checkout === undefined ? file : file.slice(checkout.length + 1);
+};
+
+/** Visit each step with only the same-repository checkouts that precede it. */
+const visitStepsInOrder = (
+  steps: readonly unknown[],
+  checkouts: readonly string[],
+  visitStep: (step: unknown, checkouts: readonly string[]) => void,
+) => {
+  let scope = checkouts;
   for (const step of steps) {
-    if (!changedRecord(step)) continue;
-    const uses = step["uses"];
-    if (typeof uses !== "string" || !uses.startsWith("actions/checkout@"))
-      continue;
-    const options = step["with"];
-    if (!changedRecord(options)) continue;
-    const repository = options["repository"];
-    if (
-      repository !== undefined &&
-      repository !== "${{ github.repository }}"
-    )
-      continue;
-    const checkoutPath = options["path"];
-    if (
-      typeof checkoutPath !== "string" ||
-      checkoutPath.includes("${{") ||
-      path.posix.isAbsolute(checkoutPath)
-    )
-      continue;
-    const normalized = path.posix.normalize(checkoutPath).replace(/\/+$/, "");
-    if (
-      normalized === "" ||
-      normalized === "." ||
-      normalized.split("/").includes("..")
-    )
-      continue;
-    paths.push(normalized);
+    visitStep(step, scope);
+    const checkout = sameRepositoryCheckoutPath(step);
+    if (checkout !== undefined) scope = [...scope, checkout];
   }
-  return paths;
 };
 
 const selectorFiles = (snapshot: GitSnapshot) => {
@@ -265,8 +281,11 @@ const selectorFiles = (snapshot: GitSnapshot) => {
       return;
     }
     if (!changedRecord(value)) return;
-    const scope = [...checkouts, ...sameRepositoryCheckoutPaths(value["steps"])];
     for (const [key, entry] of Object.entries(value)) {
+      if (key === "steps" && Array.isArray(entry)) {
+        visitStepsInOrder(entry, checkouts, visit);
+        continue;
+      }
       const input = key.toLowerCase();
       if (
         !/(?:^|-)version-file$/.test(input) &&
@@ -274,7 +293,7 @@ const selectorFiles = (snapshot: GitSnapshot) => {
           input,
         )
       ) {
-        visit(entry, scope);
+        visit(entry, checkouts);
         continue;
       }
       if (
@@ -285,14 +304,7 @@ const selectorFiles = (snapshot: GitSnapshot) => {
         entry.split("/").includes("..")
       )
         throw new Error("Unclassifiable setup version-file declaration");
-      const declared = path.posix.normalize(entry);
-      const checkout = scope.find((prefix) =>
-        declared.startsWith(`${prefix}/`),
-      );
-      const file =
-        checkout === undefined
-          ? declared
-          : declared.slice(checkout.length + 1);
+      const file = resolveCheckoutSelector(entry, checkouts);
       if (
         file === "." ||
         file
@@ -867,7 +879,7 @@ const setupRuntimeFileVersion = ({
 
 const setupRuntimeVersions = (snapshot: GitSnapshot) => {
   const versions: { file: string; runtime: string; version: string }[] = [];
-  const step = (value: unknown, file: string) => {
+  const step = (value: unknown, file: string, checkouts: readonly string[]) => {
     if (!changedRecord(value) || typeof value["uses"] !== "string") return;
     const action = value["uses"].split("@").at(0)?.toLowerCase();
     let runtime = /(?:^|\/)setup-([^/]+)$/.exec(action ?? "")?.[1];
@@ -925,7 +937,7 @@ const setupRuntimeVersions = (snapshot: GitSnapshot) => {
           throw new Error("Unclassifiable setup version-file declaration");
         version = setupRuntimeFileVersion({
           snapshot,
-          file: path.posix.normalize(input),
+          file: resolveCheckoutSelector(input, checkouts),
           runtime: inputRuntime,
         });
       } else version = setupRuntimeVersion(input);
@@ -942,7 +954,9 @@ const setupRuntimeVersions = (snapshot: GitSnapshot) => {
     if (!changedRecord(value)) return;
     for (const [key, entry] of Object.entries(value)) {
       if (key === "steps" && Array.isArray(entry)) {
-        for (const child of entry) step(child, file);
+        visitStepsInOrder(entry, [], (child, checkouts) =>
+          step(child, file, checkouts),
+        );
       } else visit(entry, file);
     }
   };

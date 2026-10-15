@@ -320,6 +320,34 @@ for (const mutation of mutations)
 test("a same-repository checkout path selector is compared, and another repository's is not", async () => {
   await withSnapshots(
     {
+      name: "selector before its checkout",
+      before: {
+        ".github/workflows/replay.yml": {
+          on: { pull_request: {} },
+          jobs: {
+            replay: {
+              "runs-on": "ubuntu-latest",
+              steps: [
+                {
+                  uses: bunAction,
+                  with: { "bun-version-file": "base/config/runtime.txt" },
+                },
+                { uses: checkoutAction, with: { ref: "main", path: "base" } },
+              ],
+            },
+          },
+        },
+        "config/runtime.txt": "1.4.3\n",
+      },
+      after: { "README.md": "unrelated\n" },
+    },
+    async ({ repo, since }) => {
+      const result = await detectToolchainChanges({ repo, since });
+      expect(result.status).toBe("unreadable");
+    },
+  );
+  await withSnapshots(
+    {
       name: "checkout path selectors",
       before: {
         ".github/workflows/replay.yml": checkoutWorkflow(
