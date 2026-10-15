@@ -29,7 +29,7 @@ export RUSTUP_HOME=/opt/stll-cloud/rustup
 export CARGO_HOME=/opt/stll-cloud/cargo
 export RUSTUP_TOOLCHAIN='@RUST@'
 export RUSTUP_AUTO_INSTALL=0
-rust_run() { runuser -u "$OUTPUT_USER" -- env HOME="$OUTPUT_HOME" RUSTUP_HOME="$RUSTUP_HOME" CARGO_HOME="$CARGO_HOME" RUSTUP_AUTO_INSTALL=0 RUSTUP_TOOLCHAIN=@RUST@ PATH="$PATH" "$@"; }
+rust_run() { runuser -u "$OUTPUT_USER" -- env HOME="$OUTPUT_HOME" RUSTUP_HOME="$RUSTUP_HOME" CARGO_HOME="$CARGO_HOME" RUSTUP_AUTO_INSTALL=0 RUSTUP_TOOLCHAIN=@RUST@ RUSTUP_DIST_SERVER=https://static.rust-lang.org RUSTUP_UPDATE_ROOT=https://static.rust-lang.org/rustup PATH="$PATH" "$@"; }
 rust_ready() {
   local directory
   for directory in "$RUSTUP_HOME" "$CARGO_HOME"; do

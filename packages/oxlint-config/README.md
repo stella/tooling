@@ -415,7 +415,7 @@ Allow these direct download hosts for the generated installer:
 
 GitHub release downloads redirect to `release-assets.githubusercontent.com`;
 allow that host as well. This includes Bun and the optional prebuilt tools.
-The installer introduces no additional Rust download host.
+Rust provisioning uses `static.rust-lang.org` for both distribution and update endpoints.
 
 System prerequisites use the image's configured Ubuntu apt repositories:
 standard Ubuntu 24.04 images use `archive.ubuntu.com`, `security.ubuntu.com`,

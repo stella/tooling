@@ -55,7 +55,7 @@ const createFixture = () => {
   mkdirSync(cargoBin, { recursive: true });
   mkdirSync(join(managed, "rustup"), { recursive: true });
   const environmentCheck = `
-if [ "$RUSTUP_AUTO_INSTALL" != 0 ] || [ "$RUSTUP_TOOLCHAIN" != "$FIXTURE_TOOLCHAIN" ]; then
+if [ "$RUSTUP_AUTO_INSTALL" != 0 ] || [ "$RUSTUP_TOOLCHAIN" != "$FIXTURE_TOOLCHAIN" ] || [ "$RUSTUP_DIST_SERVER" != https://static.rust-lang.org ] || [ "$RUSTUP_UPDATE_ROOT" != https://static.rust-lang.org/rustup ]; then
   printf '%s\\n' network > "$FIXTURE_NETWORK"
   exit 91
 fi
@@ -134,6 +134,8 @@ ${command}
           OUTPUT_HOME: directory,
           RUSTUP_TOOLCHAIN: "nightly",
           RUSTUP_AUTO_INSTALL: "1",
+          RUSTUP_DIST_SERVER: "https://fixture.invalid",
+          RUSTUP_UPDATE_ROOT: "https://fixture.invalid/rustup",
           FIXTURE_TOOLCHAIN: policy.rust,
           FIXTURE_NETWORK: networkMarker,
           FIXTURE_COMPONENTS: installedComponents,
