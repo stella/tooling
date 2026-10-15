@@ -1,5 +1,11 @@
 # @stll/oxlint-config
 
+## 1.2.2
+
+### Patch Changes
+
+- [#132](https://github.com/stella/tooling/pull/132) [`3805ff3`](https://github.com/stella/tooling/commit/3805ff3cc93cd9d59b24dafd50ab7d65c088000e) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Toolchain change detection reads a setup wrapper action such as `setup-bun-cached` as the runtime its name starts with, so its `bun-version-file` selector is compared instead of the repository being reported as unreadable.
+
 ## 1.2.1
 
 ### Patch Changes
