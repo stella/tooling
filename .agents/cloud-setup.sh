@@ -58,14 +58,14 @@ release_log_holders() {
   # Processes left by package scripts may still hold a step log after the command exits.
   # Setup starts its own services later, so end them rather than let them write into a
   # deleted log for their whole lifetime.
+  # One find over all descriptor links; no process per descriptor.
   local log="$1" root="${CLOUD_PROC_ROOT:-/proc}" fd pid
-  for fd in "$root"/[0-9]*/fd/*; do
-    [[ -L "$fd" ]] || continue
-    [[ "$(readlink "$fd" 2>/dev/null)" == "$log" ]] || continue
-    pid="$(basename "$(dirname "$(dirname "$fd")")")"
-    [[ "$pid" != "$$" ]] || continue
+  while IFS= read -r fd; do
+    pid="${fd%/fd/*}"
+    pid="${pid##*/}"
+    [[ "$pid" =~ ^[0-9]+$ && "$pid" != "$$" ]] || continue
     kill -TERM "$pid" 2>/dev/null || true
-  done
+  done < <(find "$root" -mindepth 3 -maxdepth 3 -path "$root/[0-9]*/fd/*" -lname "$log" 2>/dev/null)
 }
 network_run() (
   local host="$1" seconds="$2" status=0
