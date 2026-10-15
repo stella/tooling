@@ -41,7 +41,10 @@ apt_install() (
   policy_state=installed
   printf '%s\n' '#!/bin/sh' 'exit 101' > /usr/sbin/policy-rc.d
   chmod 755 /usr/sbin/policy-rc.d
-  DEBIAN_FRONTEND=noninteractive apt_network install -y --no-install-recommends "$@"
+  # The network deadline covers downloads only; unpacking and maintainer scripts
+  # (for example locale generation or cluster creation) run offline afterwards.
+  DEBIAN_FRONTEND=noninteractive apt_network install -y --no-install-recommends --download-only "$@"
+  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --no-download "$@"
 )
 
 `;
