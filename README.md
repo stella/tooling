@@ -450,7 +450,11 @@ versioned `stella/.github` contract. Package tags use the immutable
 Declare `cloud` in tracked root `stll-toolchain.json`, then run
 `bunx --no-install stll-cloud-setup` to generate `.agents/cloud-setup.sh` and merge
 its remote-only Claude `SessionStart` hook into `.claude/settings.json`.
-The declaration requires `install` exactly `bun install --frozen-lockfile`.
+The declaration requires `install` exactly `bun install --frozen-lockfile` or
+`bun install --frozen-lockfile --ignore-scripts`. Use the second when lifecycle
+scripts (for example postinstall code generation) are too heavy for cloud setup;
+tasks then run those scripts themselves when they need the output. Every setup
+phase logs its start and duration to stderr.
 `services` is any subset of `postgres` and `valkey`; omit it or use `[]` for
 runtimes and dependencies only. A canonical repository-relative `envFile`, such
 as `.env.cloud`, is required with services and rejected without services.

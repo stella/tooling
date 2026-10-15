@@ -10,6 +10,14 @@ usage() { echo 'Usage: cloud-setup.sh install|start' >&2; exit 2; }
 case "$1" in install|start) MODE="$1" ;; *) usage ;; esac
 fail() { echo "cloud-setup: $*" >&2; exit 1; }
 trap 'echo "cloud-setup: command failed at line $LINENO" >&2' ERR
+# Each phase logs its start and duration so a stalled phase is visible in the task log.
+step() {
+  local name="$1" started="$SECONDS"
+  shift
+  echo "cloud-setup: $name started" >&2
+  "$@"
+  echo "cloud-setup: $name done in $((SECONDS - started))s" >&2
+}
 [[ -f /etc/os-release ]] || fail 'Ubuntu 24.04 is required'
 . /etc/os-release
 [[ "$ID" == ubuntu && "$VERSION_ID" == 24.04 && "$VERSION_CODENAME" == noble ]] || fail 'Only Ubuntu 24.04 (noble) is supported'
@@ -80,6 +88,15 @@ apt_network() {
   [[ -n "$hosts" ]] || hosts='configured APT hosts'
   network_run "$hosts" 180 apt-get -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o Acquire::Retries=3 -o APT::Update::Error-Mode=any "$@"
 }
+apt_refresh_for() {
+  # Skip the refresh only when the install downloads nothing: then no package
+  # source is contacted and stale cached indexes cannot point at missing files.
+  local uris
+  if uris="$(DEBIAN_FRONTEND=noninteractive apt-get --print-uris -qq -y --no-install-recommends install "$@" 2>/dev/null)" && [[ -z "$uris" ]]; then
+    return 0
+  fi
+  apt_network update
+}
 
 
 runtime_ready() {
@@ -88,7 +105,7 @@ runtime_ready() {
 }
 install_runtimes() {
   if ! command -v curl >/dev/null || ! command -v unzip >/dev/null || ! command -v xz >/dev/null || ! command -v openssl >/dev/null || ! command -v gpg >/dev/null || ! ldconfig -p | awk '$1 == "libatomic.so.1" { found=1 } END { exit !found }'; then
-    apt_network update
+    apt_refresh_for ca-certificates curl unzip xz-utils openssl gnupg util-linux libatomic1
     DEBIAN_FRONTEND=noninteractive apt_install ca-certificates curl unzip xz-utils openssl gnupg util-linux libatomic1
   fi
   local scratch node_archive bun_archive bun_folder
@@ -378,18 +395,18 @@ verify_shell_environment() {
 
 
 if [[ "$MODE" == install ]]; then
-  install_runtimes
-  install_services
-  install_tools
-  install_shell_environment
-  dependency_install
+  step runtimes install_runtimes
+  step services install_services
+  step tools install_tools
+  step shell install_shell_environment
+  step dependencies dependency_install
   exit 0
 fi
-runtime_ready
-verify_tools
-install_shell_environment
-verify_shell_environment
+step runtime-check runtime_ready
+step tool-check verify_tools
+step shell install_shell_environment
+step shell-check verify_shell_environment
 
-prepare_state
-start_services
+step state prepare_state
+step service-start start_services
 

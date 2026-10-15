@@ -36,6 +36,14 @@ usage() { echo 'Usage: cloud-setup.sh install|start' >&2; exit 2; }
 case "$1" in install|start) MODE="$1" ;; *) usage ;; esac
 fail() { echo "cloud-setup: $*" >&2; exit 1; }
 trap 'echo "cloud-setup: command failed at line $LINENO" >&2' ERR
+# Each phase logs its start and duration so a stalled phase is visible in the task log.
+step() {
+  local name="$1" started="$SECONDS"
+  shift
+  echo "cloud-setup: $name started" >&2
+  "$@"
+  echo "cloud-setup: $name done in $((SECONDS - started))s" >&2
+}
 [[ -f /etc/os-release ]] || fail 'Ubuntu 24.04 is required'
 . /etc/os-release
 [[ "$ID" == ubuntu && "$VERSION_ID" == 24.04 && "$VERSION_CODENAME" == noble ]] || fail 'Only Ubuntu 24.04 (noble) is supported'
@@ -79,7 +87,7 @@ runtime_ready() {
 }
 install_runtimes() {
   if ! command -v curl >/dev/null || ! command -v unzip >/dev/null || ! command -v xz >/dev/null || ! command -v openssl >/dev/null || ! command -v gpg >/dev/null || ! ldconfig -p | awk '$1 == "libatomic.so.1" { found=1 } END { exit !found }'; then
-    apt_network update
+    apt_refresh_for ca-certificates curl unzip xz-utils openssl gnupg util-linux libatomic1
     DEBIAN_FRONTEND=noninteractive apt_install ca-certificates curl unzip xz-utils openssl gnupg util-linux libatomic1
   fi
   local scratch node_archive bun_archive bun_folder
@@ -145,7 +153,7 @@ for (const input of inputs) {
 process.stdout.write([...hosts].sort().join(","));
 ')"
   # Bun 1.4.3 socket inactivity timeout, in seconds; the outer bound includes scripts.
-  network_run "$download_hosts" 240 runuser -u "$OUTPUT_USER" -- env HOME="$OUTPUT_HOME" BUN_INSTALL_CACHE_DIR="$BUN_CACHE" PATH="$PATH" BUN_CONFIG_HTTP_IDLE_TIMEOUT=20 "$BUN_DIR/bun" install --frozen-lockfile
+  network_run "$download_hosts" 240 runuser -u "$OUTPUT_USER" -- env HOME="$OUTPUT_HOME" BUN_INSTALL_CACHE_DIR="$BUN_CACHE" PATH="$PATH" BUN_CONFIG_HTTP_IDLE_TIMEOUT=20 "$BUN_DIR/bun" @INSTALL_ARGS@
 }
 
 @SERVICE_INSTALL@
@@ -158,20 +166,20 @@ process.stdout.write([...hosts].sort().join(","));
 @ENV_FUNCTIONS@
 
 if [[ "$MODE" == install ]]; then
-  install_runtimes
-  install_services
-  install_tools
-  install_shell_environment
-  dependency_install
+  step runtimes install_runtimes
+  step services install_services
+  step tools install_tools
+  step shell install_shell_environment
+  step dependencies dependency_install
   exit 0
 fi
-runtime_ready
-verify_tools
-install_shell_environment
-verify_shell_environment
+step runtime-check runtime_ready
+step tool-check verify_tools
+step shell install_shell_environment
+step shell-check verify_shell_environment
 @ENV_VALIDATE@
-prepare_state
-start_services
+step state prepare_state
+step service-start start_services
 @ENV_WRITE@
 `;
 
@@ -233,6 +241,7 @@ export const generateCloudSetup = ({
     selected.services.includes(service),
   );
   const replacements = new Map([
+    ["@INSTALL_ARGS@", selected.install.replace(/^bun /, "")],
     ["@NETWORK@", renderCloudNetwork()],
     [
       "@TOOL_INSTALL@",
