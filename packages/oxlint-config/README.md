@@ -306,7 +306,8 @@ Add an explicit declaration to tracked root `stll-toolchain.json`:
     "tools": {
       "cargo-nextest": "0.9.148",
       "wasm-bindgen-cli": "0.2.126",
-      "uv": "0.13.1"
+      "uv": "0.13.1",
+      "time": "1.9"
     }
   }
 }
@@ -336,10 +337,15 @@ setup also provisions Ubuntu's `build-essential` package for native compilation
 and linking.
 
 `cloud.tools` is a closed object: the supported keys are `cargo-nextest`,
-`wasm-bindgen-cli`, and `uv`. Each value must be an exact release supported by
+`wasm-bindgen-cli`, `uv`, and `time`. Each value must be an exact release supported by
 the installed tooling package. Unknown tools and unsupported versions fail
-generation. These tools use versioned upstream Linux binaries with committed
+generation. `cargo-nextest`, `wasm-bindgen-cli`, and `uv` use versioned upstream Linux binaries with committed
 SHA256 pins for amd64 and arm64; setup does not build them with `cargo install`.
+`time` installs GNU time (`/usr/bin/time`, needed for `/usr/bin/time -v`) from
+Ubuntu's `time` package with bounded apt; its value is the upstream release
+(`1.9` on Ubuntu 24.04). GNU time reports its version as `UNKNOWN`, so setup
+verifies the binary's GNU identity and the installed package release. A present,
+matching package is reused without network access.
 `wasm-bindgen-cli` requires the matching `wasm-bindgen` crate version in tracked
 root `Cargo.lock`. Regenerate after updating the lockfile or any tool pin.
 
@@ -353,17 +359,22 @@ SHA256 pins, and installs those local files with apt. It does not resolve Valkey
 from a mutable package index.
 The command writes `.agents/cloud-setup.sh` with executable permissions and
 merges a `SessionStart` hook into `.claude/settings.json`. The hook runs
-`bash .agents/cloud-setup.sh start` only when `CLAUDE_CODE_REMOTE=true`, including
-sessions that reuse cached filesystems. After successful startup, it appends the
+`bash "$CLAUDE_PROJECT_DIR/.agents/cloud-setup.sh" start` only when
+`CLAUDE_CODE_REMOTE=true`, including sessions that reuse cached filesystems and
+sessions started from a repository subdirectory. Generation replaces the
+relative-path hook written by 1.1.0 in place. After successful startup, it appends the
 managed shell profile's literal exports to `CLAUDE_ENV_FILE` when available, so
 subsequent Claude commands select pinned runtimes and tools before preinstalled
-versions while retaining their inherited `PATH`. Existing environment-file
+versions while retaining their inherited `PATH`. The settings also set
+`"attribution": {"commit": "", "pr": ""}`, so cloud sessions add no tool
+attribution to commits or pull requests. Existing environment-file
 content, unrelated settings, and hooks are preserved. Invalid JSON, disabled
-hooks, or conflicting cloud startup entries stop generation with a repair
-instruction. Commit both generated files.
+hooks, conflicting cloud startup entries, or a different `attribution` value stop
+generation with a repair instruction. Commit both generated files.
 Generation refuses symlink parents or destinations and hard-linked destinations.
-`stll-toolchain-check` rejects missing, drifted, or undeclared tracked scripts and
-missing or conflicting startup hooks with mandatory `cloud-setup-drift`.
+`stll-toolchain-check` rejects missing, drifted, or undeclared tracked scripts,
+missing or conflicting startup hooks, and missing or different attribution
+settings with mandatory `cloud-setup-drift`.
 Regenerate after changing the policy or declaration. `stll-cloud-setup --help`
 prints usage without reading repository configuration.
 
@@ -425,7 +436,8 @@ GitHub release downloads redirect to `release-assets.githubusercontent.com`;
 allow that host as well. This includes Bun and the optional prebuilt tools.
 Rust provisioning uses `static.rust-lang.org` for both distribution and update endpoints.
 
-System prerequisites use the image's configured Ubuntu apt repositories:
+System prerequisites and the optional `time` package use the image's configured
+Ubuntu apt repositories:
 standard Ubuntu 24.04 images use `archive.ubuntu.com`, `security.ubuntu.com`,
 or `ports.ubuntu.com`, depending on architecture. Images configured with a
 mirror need that mirror's host instead. Frozen Bun installation also needs

@@ -5,13 +5,14 @@ import { cloudSetupPath } from "./cloud-setup";
 import { cloudShellProfilePath } from "./cloud-setup-shell";
 
 export const cloudClaudeSettingsPath = ".claude/settings.json";
-export const cloudSessionStartHook = {
-  matcher: "",
-  hooks: [
-    {
-      type: "command",
-      command: `if [ "\${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
-  bash ${cloudSetupPath} start || exit "$?"
+const sessionStartHook = (script: string) =>
+  ({
+    matcher: "",
+    hooks: [
+      {
+        type: "command",
+        command: `if [ "\${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
+  ${script} start || exit "$?"
   if [ -n "\${CLAUDE_ENV_FILE:-}" ]; then
     if [ ! -f ${cloudShellProfilePath} ]; then
       printf '%s\\n' 'cloud-setup: cloud shell profile is unavailable; run install' >&2
@@ -21,9 +22,19 @@ export const cloudSessionStartHook = {
     cat ${cloudShellProfilePath} >> "$CLAUDE_ENV_FILE"
   fi
 fi`,
-    },
-  ],
-} as const;
+      },
+    ],
+  }) as const;
+// Hooks run in the session's working directory; resolve the script from the project root.
+export const cloudSessionStartHook = sessionStartHook(
+  `bash "$CLAUDE_PROJECT_DIR/${cloudSetupPath}"`,
+);
+// @stll/oxlint-config 1.1.0 generated this form; regeneration replaces it in place.
+// Remove once supported consumers have regenerated with a later release.
+const previousCloudSessionStartHooks = [
+  sessionStartHook(`bash ${cloudSetupPath}`),
+];
+export const cloudAttribution = { commit: "", pr: "" } as const;
 
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -89,49 +100,111 @@ const cloudHookGroups = (sessionStart: readonly unknown[]) =>
 export const cloudSessionStartFix =
   `preserve unrelated settings in ${cloudClaudeSettingsPath}, repair its JSON/hooks structure and set disableAllHooks to false if needed, and ensure hooks.SessionStart contains exactly this cloud setup entry (replace conflicting cloud setup entries):\n` +
   JSON.stringify(cloudSessionStartHook, null, 2);
+export const cloudAttributionFix =
+  `preserve unrelated settings in ${cloudClaudeSettingsPath} and set its top-level attribution to exactly:\n` +
+  JSON.stringify({ attribution: cloudAttribution }, null, 2);
 
-/** Append only when the existing settings have no conflicting cloud startup. */
-export const mergeCloudSessionStartHook = (text: string | undefined) => {
+const sessionStartState = (sessionStart: readonly unknown[]) => {
+  const groups = cloudHookGroups(sessionStart);
+  const group = groups.at(0);
+  if (group === undefined) return { type: "missing" } as const;
+  if (groups.length === 1 && isDeepStrictEqual(group, cloudSessionStartHook))
+    return { type: "current" } as const;
+  if (
+    groups.length === 1 &&
+    previousCloudSessionStartHooks.some((hook) =>
+      isDeepStrictEqual(group, hook),
+    )
+  )
+    return { type: "previous", group } as const;
+  return { type: "conflict" } as const;
+};
+
+const attributionState = (settings: Record<string, unknown>) => {
+  const attribution = settings["attribution"];
+  if (attribution === undefined) return "missing";
+  return isDeepStrictEqual(attribution, cloudAttribution)
+    ? "current"
+    : "conflict";
+};
+
+const mergeError = (reason: string, fix: string) =>
+  new Error(
+    `cannot safely merge ${cloudClaudeSettingsPath}: ${reason}; ${fix}`,
+  );
+
+const readMergeableSettings = (text: string | undefined) => {
   try {
-    const { settings, hooks, sessionStart } = readSettings(text);
-    const cloudGroups = cloudHookGroups(sessionStart);
-    if (cloudGroups.length !== 0) {
-      if (
-        cloudGroups.length === 1 &&
-        isDeepStrictEqual(cloudGroups.at(0), cloudSessionStartHook) &&
-        text !== undefined
-      )
-        return text;
-      throw new Error("existing cloud setup SessionStart hook differs");
-    }
-    return `${JSON.stringify(
-      {
-        ...settings,
-        hooks: {
-          ...hooks,
-          SessionStart: [...sessionStart, cloudSessionStartHook],
-        },
-      },
-      null,
-      2,
-    )}\n`;
+    return readSettings(text);
   } catch (error) {
-    throw new Error(
-      `cannot safely merge ${cloudClaudeSettingsPath}: ${error instanceof Error ? error.message : String(error)}; ${cloudSessionStartFix}`,
+    throw mergeError(
+      error instanceof Error ? error.message : String(error),
+      cloudSessionStartFix,
     );
   }
+};
+
+/** Add the cloud hook and attribution; never overwrite conflicting values. */
+export const mergeCloudClaudeSettings = (text: string | undefined) => {
+  const { settings, hooks, sessionStart } = readMergeableSettings(text);
+  const hook = sessionStartState(sessionStart);
+  if (hook.type === "conflict")
+    throw mergeError(
+      "existing cloud setup SessionStart hook differs",
+      cloudSessionStartFix,
+    );
+  const attribution = attributionState(settings);
+  if (attribution === "conflict")
+    throw mergeError("existing attribution differs", cloudAttributionFix);
+  if (
+    hook.type === "current" &&
+    attribution === "current" &&
+    text !== undefined
+  )
+    return text;
+  const mergedSessionStart = (() => {
+    switch (hook.type) {
+      case "current":
+        return sessionStart;
+      case "missing":
+        return [...sessionStart, cloudSessionStartHook];
+      case "previous":
+        return sessionStart.map((entry) =>
+          entry === hook.group ? cloudSessionStartHook : entry,
+        );
+      default: {
+        const exhaustive: never = hook;
+        throw new Error(`Unsupported hook state: ${String(exhaustive)}`);
+      }
+    }
+  })();
+  return `${JSON.stringify(
+    {
+      ...settings,
+      attribution: cloudAttribution,
+      hooks: { ...hooks, SessionStart: mergedSessionStart },
+    },
+    null,
+    2,
+  )}\n`;
 };
 
 /** Settings formatting and unrelated hooks do not affect the generated contract. */
 export const hasCloudSessionStartHook = (text: string | undefined) => {
   if (text === undefined) return false;
   try {
-    const { sessionStart } = readSettings(text);
-    const cloudGroups = cloudHookGroups(sessionStart);
     return (
-      cloudGroups.length === 1 &&
-      isDeepStrictEqual(cloudGroups.at(0), cloudSessionStartHook)
+      sessionStartState(readSettings(text).sessionStart).type === "current"
     );
+  } catch {
+    return false;
+  }
+};
+
+export const hasCloudAttribution = (text: string | undefined) => {
+  if (text === undefined) return false;
+  try {
+    return attributionState(readSettings(text).settings) === "current";
   } catch {
     return false;
   }

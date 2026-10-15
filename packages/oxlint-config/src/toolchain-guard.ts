@@ -11,8 +11,10 @@ import path from "node:path";
 
 import { cloudSetupPath, generateCloudSetup } from "./cloud-setup";
 import {
+  cloudAttributionFix,
   cloudClaudeSettingsPath,
   cloudSessionStartFix,
+  hasCloudAttribution,
   hasCloudSessionStartHook,
 } from "./cloud-setup-claude";
 import { parseCloudSetup } from "./cloud-setup-schema";
@@ -255,6 +257,13 @@ export const checkToolchain = ({
         path: cloudClaudeSettingsPath,
         line: 1,
         message: `tracked Claude cloud SessionStart hook is missing, disabled or differs from shared policy; run stll-cloud-setup; if automatic merge is unsafe, ${cloudSessionStartFix}`,
+      });
+    if (!hasCloudAttribution(files[cloudClaudeSettingsPath]))
+      diagnostics.push({
+        rule: "cloud-setup-drift",
+        path: cloudClaudeSettingsPath,
+        line: 1,
+        message: `tracked Claude attribution is missing or differs from shared policy; run stll-cloud-setup; if automatic merge is unsafe, ${cloudAttributionFix}`,
       });
     try {
       const nodeVersion = files[".node-version"];

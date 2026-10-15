@@ -1,21 +1,39 @@
 import {
   cloudSetupArtifacts,
+  cloudSetupPackages,
   type CloudSetupArtifactTool,
+  type CloudSetupPackageTool,
 } from "./cloud-setup-artifacts";
 
 export const cloudServices = ["postgres", "valkey"] as const;
 export type CloudService = (typeof cloudServices)[number];
-export type CloudExtraTool = Exclude<CloudSetupArtifactTool, "rustup-init">;
-export const cloudExtraTools = Object.keys(cloudSetupArtifacts).filter(
-  (tool): tool is CloudExtraTool =>
+export type CloudArtifactTool = Exclude<CloudSetupArtifactTool, "rustup-init">;
+export const cloudArtifactTools = Object.keys(cloudSetupArtifacts).filter(
+  (tool): tool is CloudArtifactTool =>
     tool !== "rustup-init" && Object.hasOwn(cloudSetupArtifacts, tool),
 );
+export const cloudPackageTools = Object.keys(cloudSetupPackages).filter(
+  (tool): tool is CloudSetupPackageTool =>
+    Object.hasOwn(cloudSetupPackages, tool),
+);
+export type CloudExtraTool = CloudArtifactTool | CloudSetupPackageTool;
+export const cloudExtraTools = [...cloudArtifactTools, ...cloudPackageTools];
+export const isCloudPackageTool = (
+  tool: string,
+): tool is CloudSetupPackageTool =>
+  cloudPackageTools.some((candidate) => candidate === tool);
 
 const object = (input: unknown): input is Record<string, unknown> =>
   typeof input === "object" && input !== null && !Array.isArray(input);
 const exactPin = (input: unknown): input is string =>
   typeof input === "string" &&
   /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/.test(input);
+// Upstream releases of distribution packages may omit the patch component.
+const exactToolPin = (tool: CloudExtraTool, input: unknown): input is string =>
+  isCloudPackageTool(tool)
+    ? typeof input === "string" &&
+      /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:\.(?:0|[1-9]\d*))?$/.test(input)
+    : exactPin(input);
 
 export const cloudRustComponentBinaries = {
   clippy: ["cargo-clippy", "clippy-driver"],
@@ -81,7 +99,7 @@ const parseTools = (input: unknown) => {
         throw new Error(`cloud.tools.${tool} must be an exact stable release`);
       continue;
     }
-    if (!exactPin(pin))
+    if (!exactToolPin(tool, pin))
       throw new Error(`cloud.tools.${tool} must be an exact stable release`);
     result[tool] = pin;
   }

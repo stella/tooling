@@ -124,18 +124,44 @@ install_rust() (
     );
 };
 
-export const renderCloudToolInstall = ({
-  rust,
-  tools,
-}: ReturnType<typeof resolveCloudToolchains>) => {
-  const installs = tools.map(({ tool, release }) => {
-    const directory = `/opt/stll-cloud/tools/${tool}/${release.version}`;
-    const command = tool === "wasm-bindgen-cli" ? "wasm-bindgen" : tool;
-    const versionPrefix = tool === "cargo-nextest" ? "cargo-nextest" : command;
-    const marker = `${versionPrefix} ${release.version}`;
-    return {
-      name: tool.replaceAll("-", "_"),
-      text: `verify_${tool.replaceAll("-", "_")}() {
+type CloudToolEntry = ReturnType<
+  typeof resolveCloudToolchains
+>["tools"][number];
+
+// Present packages are reused; apt never downgrades or replaces them.
+const packageToolInstall = ({
+  tool,
+  release,
+}: Extract<CloudToolEntry, { type: "package" }>) => {
+  const name = tool.replaceAll("-", "_");
+  return {
+    name,
+    text: `verify_${name}() {
+  [[ -x ${quote(release.binary)} && "$(${quote(release.binary)} --version 2>/dev/null)" == ${quote(release.identity)}* ]] || return 1
+  [[ "$(dpkg-query -W -f='\${Version}' ${quote(release.package)} 2>/dev/null)" == ${quote(`${release.version}-`)}* ]]
+}
+install_${name}() {
+  if ! verify_${name}; then
+    apt_network update
+    apt_install ${quote(release.package)}
+    verify_${name} || fail ${quote(`Installed ${tool} version differs from its pin`)}
+  fi
+}
+`,
+  };
+};
+
+const artifactToolInstall = ({
+  tool,
+  release,
+}: Extract<CloudToolEntry, { type: "artifact" }>) => {
+  const directory = `/opt/stll-cloud/tools/${tool}/${release.version}`;
+  const command = tool === "wasm-bindgen-cli" ? "wasm-bindgen" : tool;
+  const versionPrefix = tool === "cargo-nextest" ? "cargo-nextest" : command;
+  const marker = `${versionPrefix} ${release.version}`;
+  return {
+    name: tool.replaceAll("-", "_"),
+    text: `verify_${tool.replaceAll("-", "_")}() {
   ${Object.keys(release.amd64.binaries)
     .map((binary) => `[[ -x ${quote(`${directory}/${binary}`)} ]] || return 1`)
     .join("\n  ")}
@@ -174,7 +200,24 @@ ${Object.keys(release.amd64.binaries)
   .join("\n")}
 )
 `,
-    };
+  };
+};
+
+export const renderCloudToolInstall = ({
+  rust,
+  tools,
+}: ReturnType<typeof resolveCloudToolchains>) => {
+  const installs = tools.map((entry) => {
+    switch (entry.type) {
+      case "package":
+        return packageToolInstall(entry);
+      case "artifact":
+        return artifactToolInstall(entry);
+      default: {
+        const exhaustive: never = entry;
+        throw new Error(`Unsupported cloud tool: ${String(exhaustive)}`);
+      }
+    }
   });
   return `${helpers}${rust === undefined ? "" : rustInstall(rust)}\n${installs.map(({ text }) => text).join("\n")}
 install_tools() {

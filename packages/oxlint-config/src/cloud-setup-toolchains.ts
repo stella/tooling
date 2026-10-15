@@ -3,8 +3,14 @@ import { parse as parseToml } from "smol-toml";
 import {
   cloudSetupArtifacts,
   getCloudSetupArtifact,
+  getCloudSetupPackage,
 } from "./cloud-setup-artifacts";
-import { cloudExtraTools, parseCloudRustNames } from "./cloud-setup-schema";
+import {
+  cloudExtraTools,
+  isCloudPackageTool,
+  parseCloudRustNames,
+  type CloudExtraTool,
+} from "./cloud-setup-schema";
 import type { parseCloudSetup } from "./cloud-setup-schema";
 import type { RustException } from "./toolchain-rust";
 
@@ -77,9 +83,13 @@ export const resolveCloudToolchains = ({
       ...(cloud.rust?.targets ?? []),
     ]),
   ].sort();
-  const tools = cloudExtraTools.flatMap((tool) => {
-    const version = cloud.tools?.[tool];
-    if (version === undefined) return [];
+  const resolveTool = (tool: CloudExtraTool, version: string) => {
+    if (isCloudPackageTool(tool))
+      return {
+        type: "package",
+        tool,
+        release: getCloudSetupPackage(tool, version),
+      } as const;
     if (tool === "cargo-nextest" && !rustEnabled)
       throw new Error("cloud.tools.cargo-nextest requires a Rust toolchain");
     if (tool === "wasm-bindgen-cli") {
@@ -103,7 +113,15 @@ export const resolveCloudToolchains = ({
           `cloud.tools.wasm-bindgen-cli ${version} must equal the unique wasm-bindgen crate version in Cargo.lock (found ${[...versions].join(", ") || "none"})`,
         );
     }
-    return [{ tool, release: getCloudSetupArtifact(tool, version) }];
+    return {
+      type: "artifact",
+      tool,
+      release: getCloudSetupArtifact(tool, version),
+    } as const;
+  };
+  const tools = cloudExtraTools.flatMap((tool) => {
+    const version = cloud.tools?.[tool];
+    return version === undefined ? [] : [resolveTool(tool, version)];
   });
   return {
     rust:
