@@ -1,12 +1,13 @@
 import { existsSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import fs, { readFile, writeFile } from "node:fs/promises";
 
 import {
   createTestTmpDir,
   createTestTmpDirSlot,
   withTestTmpDir,
 } from "../src/tmp.js";
-import { describe, expect, test } from "./runner.js";
+import { rejectionOf } from "./rejection.js";
+import { describe, expect, spyOn, test } from "./runner.js";
 
 describe("test temp dirs", () => {
   test("each directory is fresh and removed when its scope ends", async () => {
@@ -41,23 +42,67 @@ describe("test temp dirs", () => {
     expect(() => dir.join("/etc/passwd")).toThrow("escapes");
   });
 
+  test("failed removal can be retried and concurrent calls share cleanup", async () => {
+    const dir = await createTestTmpDir();
+    const failure = new Error("cleanup refused");
+    const remove = spyOn(fs, "rm").mockRejectedValueOnce(failure);
+    try {
+      expect(await rejectionOf(dir.remove())).toBe(failure);
+      expect(existsSync(dir.path)).toBe(true);
+      const first = dir.remove();
+      const concurrent = dir.remove();
+      expect(concurrent).toBe(first);
+      await Promise.all([first, concurrent]);
+      expect(existsSync(dir.path)).toBe(false);
+      await dir.remove();
+      expect(remove).toHaveBeenCalledTimes(2);
+    } finally {
+      remove.mockRestore();
+      await dir.remove();
+    }
+  });
+
   test("refuses a prefix that is not short kebab-case", async () => {
     await expect(createTestTmpDir("../up")).rejects.toThrow("kebab-case");
   });
 });
 
 describe("temp dir slot", () => {
+  test("retains a directory whose cleanup failed until close is retried", async () => {
+    const slot = createTestTmpDirSlot("kit-slot");
+    await slot.open();
+    const running = slot.current().path;
+    const failure = new Error("cleanup refused");
+    const remove = spyOn(fs, "rm").mockRejectedValueOnce(failure);
+    try {
+      expect(await rejectionOf(slot.close())).toBe(failure);
+      expect(slot.current().path).toBe(running);
+      expect(existsSync(running)).toBe(true);
+      await slot.close();
+      expect(existsSync(running)).toBe(false);
+    } finally {
+      remove.mockRestore();
+      await slot.close();
+    }
+  });
+
   test("an overlapping open is refused and keeps the running test's directory", async () => {
     const slot = createTestTmpDirSlot("kit-slot");
     await slot.open();
     const running = slot.current().path;
-    await expect(slot.open()).rejects.toThrow("one test at a time");
-    // The refused test's teardown runs first and must leave the directory.
-    await slot.close();
-    expect(existsSync(running)).toBe(true);
-    expect(slot.current().path).toBe(running);
-    await slot.close();
-    expect(existsSync(running)).toBe(false);
-    expect(() => slot.current()).toThrow("only while a test runs");
+    try {
+      await expect(slot.open()).rejects.toThrow("one test at a time");
+      // The refused test's teardown runs first and must leave the directory.
+      await slot.close();
+      expect(existsSync(running)).toBe(true);
+      expect(slot.current().path).toBe(running);
+      await slot.close();
+      expect(existsSync(running)).toBe(false);
+      expect(() => slot.current()).toThrow("only while a test runs");
+    } finally {
+      // Also drain a refused open if an earlier assertion interrupted teardown.
+      await slot.close();
+      await slot.close();
+    }
   });
 });

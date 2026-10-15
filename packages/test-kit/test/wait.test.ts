@@ -51,6 +51,23 @@ describe("hang guards", () => {
     );
   });
 
+  test("a rejection after the hang guard remains handled by the race", async () => {
+    const clock = createTestClock();
+    const task = deferred();
+    const waiting = settledWithin(task.promise, {
+      clock,
+      description: "late task",
+      timeoutMs: 100,
+    });
+    const outcome = waiting.catch((error: unknown) => error);
+    await clock.advance(100);
+    expect(await outcome).toBeInstanceOf(WaitTimeoutError);
+    task.reject(new Error("late task failure"));
+    // Advance through pending reactions; either runner fails on an unhandled rejection.
+    await clock.advance(10);
+    expect(await outcome).toBeInstanceOf(WaitTimeoutError);
+  });
+
   test("a rejection passes through unchanged", async () => {
     const clock = createTestClock();
     const waiting = settledWithin(Promise.reject(new Error("boom")), {

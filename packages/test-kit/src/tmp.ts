@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -29,16 +29,18 @@ const safePrefix = (prefix: string) => {
 export const createTestTmpDir = async (
   prefix = "stll-test",
 ): Promise<TestTmpDir> => {
-  const root = await mkdtemp(
+  const root = await fs.mkdtemp(
     path.join(tmpdir(), `${safePrefix(prefix)}-${process.pid}-`),
   );
-  let removed = false;
-  const remove = async () => {
-    if (removed) {
-      return;
-    }
-    removed = true;
-    await rm(root, { force: true, recursive: true });
+  let removal: Promise<void> | undefined;
+  const remove = () => {
+    removal ??= fs
+      .rm(root, { force: true, recursive: true })
+      .catch((error: unknown) => {
+        removal = undefined;
+        throw error;
+      });
+    return removal;
   };
   return {
     path: root,
@@ -96,10 +98,10 @@ export const createTestTmpDirSlot = (prefix?: string): TestTmpDirSlot => {
         return;
       }
       const open = state;
-      state = "closed";
       if (typeof open === "object") {
         await open.dir.remove();
       }
+      state = "closed";
     },
     current: () =>
       typeof state === "object"
