@@ -332,10 +332,8 @@ describe("network guard", () => {
         async (method, expected) => {
           await withFake(redirectOnce(307), async (calls) => {
             await fetch("https://localhost:8443/start", { method });
-            // The transport normalizes each hop's Request before sending it.
-            expect(
-              calls.map((call) => new Request(call.url, call.init).method),
-            ).toEqual([expected, expected]);
+            expect(calls).toHaveLength(2);
+            expect(calls[0]?.init?.method).toBe(method);
             expect(calls[1]?.init?.method).toBe(expected);
           });
         },
@@ -358,6 +356,85 @@ describe("network guard", () => {
           expect(calls[1]?.init?.method).toBe("PUT");
         });
       });
+
+      test.each([
+        "request getters",
+        "init overrides",
+        "undefined cache override",
+      ])(
+        "redirects preserve non-body Request options using %s",
+        async (source) => {
+          await withFake(redirectOnce(307), async (calls) => {
+            const requestOptions = {
+              cache: "no-store",
+              credentials: "include",
+              mode: "cors",
+              referrer: "https://localhost:8443/source",
+              referrerPolicy: "no-referrer",
+              integrity: "sha256-fixture",
+              keepalive: true,
+              priority: "high",
+              duplex: "half",
+            } as const;
+            const request = new Request(
+              "https://localhost:8443/start",
+              requestOptions,
+            );
+            const keys = Object.keys(requestOptions);
+            // Own getters make every required transport option observable on
+            // both runtimes, independently of native Request getter coverage.
+            Object.defineProperties(
+              request,
+              Object.fromEntries(
+                Object.entries(requestOptions).map(([key, value]) => [
+                  key,
+                  { get: () => value, configurable: true },
+                ]),
+              ),
+            );
+            const overrides =
+              source === "init overrides"
+                ? ({
+                    cache: "reload",
+                    credentials: "omit",
+                    mode: "same-origin",
+                    referrer: "",
+                    referrerPolicy: "origin",
+                    integrity: "sha256-overridden",
+                    keepalive: false,
+                  } as const satisfies RequestInit)
+                : source === "undefined cache override"
+                  ? {}
+                  : undefined;
+            if (
+              source === "undefined cache override" &&
+              overrides !== undefined
+            ) {
+              Reflect.set(overrides, "cache", undefined);
+            }
+            if (source === "init overrides" && overrides !== undefined) {
+              Reflect.set(overrides, "priority", "low");
+              Reflect.set(overrides, "duplex", "half");
+            }
+            await fetch(request, overrides);
+            expect(calls).toHaveLength(2);
+            const redirected = calls[1]?.init;
+            expect(redirected).toBeDefined();
+            expect(redirected?.cache).toBe(
+              source === "init overrides" ? "reload" : "no-store",
+            );
+            for (const key of keys) {
+              const override: unknown =
+                overrides === undefined
+                  ? undefined
+                  : Reflect.get(overrides, key);
+              const expected: unknown =
+                override === undefined ? Reflect.get(request, key) : override;
+              expect(Reflect.get(redirected ?? {}, key)).toBe(expected);
+            }
+          });
+        },
+      );
 
       test("an upload stream is handed on as is, never copied", async () => {
         await withFake(

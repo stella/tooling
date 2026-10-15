@@ -77,12 +77,34 @@ const NORMALIZED_METHODS = new Set([
   "PUT",
 ]);
 
+// Request options live on prototype getters, so spreading a Request loses them.
+// Body, headers, method, redirect and signal have their own hop handling below.
+const REQUEST_FETCH_OPTIONS = [
+  "cache",
+  "credentials",
+  "mode",
+  "referrer",
+  "referrerPolicy",
+  "integrity",
+  "keepalive",
+  "priority",
+  "duplex",
+];
+
 // What a hop needs from the caller's request, whichever form it came in.
 const requestParts = (
   input: Parameters<typeof fetch>[0],
   init: Parameters<typeof fetch>[1],
 ) => {
   const request = input instanceof Request ? input : undefined;
+  const options: Record<string, unknown> = { ...init };
+  if (request !== undefined) {
+    for (const key of REQUEST_FETCH_OPTIONS) {
+      if (key in request && options[key] === undefined) {
+        options[key] = Reflect.get(request, key);
+      }
+    }
+  }
   const initBody = init?.body ?? undefined;
   let bodyReplay: "replayable" | "stream" | "request" = "replayable";
   if (initBody instanceof ReadableStream) {
@@ -97,6 +119,7 @@ const requestParts = (
   const method = init?.method ?? request?.method ?? "GET";
   const normalized = method.toUpperCase();
   return {
+    options,
     headers: new Headers(init?.headers ?? request?.headers),
     method: NORMALIZED_METHODS.has(normalized) ? normalized : method,
     redirect: init?.redirect ?? request?.redirect ?? "follow",
@@ -241,7 +264,7 @@ const guardedFetch =
       }
       url = next;
       response = await original(url.href, {
-        ...init,
+        ...parts.options,
         body: body ?? null,
         headers,
         method,
