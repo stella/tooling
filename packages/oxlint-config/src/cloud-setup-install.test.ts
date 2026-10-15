@@ -27,7 +27,12 @@ const fragment = renderCloudServiceInstall({
   .replaceAll("/var/lock/stll-cloud-apt.lock", '"$FIXTURE_LOCK"')
   .replaceAll("/usr/sbin/policy-rc.d", '"$FIXTURE_POLICY"');
 
-const runInstall = (directory: string, exitCode: number) => {
+const runInstall = (
+  directory: string,
+  exitCode: number,
+  offlineExitCode = 0,
+  packages: string[] = ["fixture-package"],
+) => {
   expect(fragment).not.toContain("/var/lock/");
   expect(fragment).not.toContain("/usr/sbin/");
   return Bun.spawnSync(
@@ -42,12 +47,20 @@ apt_network() {
   [[ "$DEBIAN_FRONTEND" == noninteractive ]]
   [[ "$(cat "$FIXTURE_POLICY")" == $'#!/bin/sh\\nexit 101' ]]
   [[ -x "$FIXTURE_POLICY" ]]
-  printf '%s' "$*" > "$FIXTURE_CALLS"
+  printf 'network:%s\n' "$*" >> "$FIXTURE_CALLS"
   return "$FIXTURE_EXIT"
 }
+apt-get() {
+  [[ "$DEBIAN_FRONTEND" == noninteractive ]]
+  [[ "$(cat "$FIXTURE_POLICY")" == $'#!/bin/sh\nexit 101' ]]
+  printf 'offline:%s\n' "$*" >> "$FIXTURE_CALLS"
+  return "$FIXTURE_OFFLINE_EXIT"
+}
 ${fragment}
-apt_install fixture-package
+apt_install "$@"
 `,
+      "install",
+      ...packages,
     ],
     {
       env: {
@@ -57,6 +70,7 @@ apt_install fixture-package
         FIXTURE_LOCK: join(directory, "apt.lock"),
         FIXTURE_CALLS: join(directory, "apt.calls"),
         FIXTURE_EXIT: String(exitCode),
+        FIXTURE_OFFLINE_EXIT: String(offlineExitCode),
       },
     },
   );
@@ -73,8 +87,13 @@ test("package installation restores policy bytes and mode across success, failur
         const result = runInstall(directory, exitCode);
         expect(result.stderr.toString()).toBe("");
         expect(result.exitCode).toBe(exitCode);
+        // Only the download runs under the network deadline; a failed
+        // download never reaches the offline install.
         expect(readFileSync(join(directory, "apt.calls"), "utf8")).toBe(
-          "install -y --no-install-recommends fixture-package",
+          "network:install -y --no-install-recommends --download-only fixture-package\n" +
+            (exitCode === 0
+              ? "offline:install -y --no-install-recommends --no-download fixture-package\n"
+              : ""),
         );
         expect(existsSync(file)).toBe(existing);
         if (existing) {
@@ -123,9 +142,15 @@ test("service installation uses shared bounded network helpers for every downloa
       ...parseToolchainPolicy(policy),
       services,
     });
-    expect(rendered).not.toMatch(/\b(?:curl|wget|apt-get)\b/);
+    // The only raw apt-get is the offline install, which cannot download.
+    const offline =
+      '  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --no-download "$@"\n';
+    expect(rendered.split(offline)).toHaveLength(2);
+    expect(rendered.replace(offline, "")).not.toMatch(
+      /\b(?:curl|wget|apt-get)\b/,
+    );
     expect(rendered).toContain(
-      'DEBIAN_FRONTEND=noninteractive apt_network install -y --no-install-recommends "$@"',
+      'DEBIAN_FRONTEND=noninteractive apt_network install -y --no-install-recommends --download-only "$@"\n  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --no-download "$@"\n)',
     );
     expect(rendered).not.toContain("apt_network update");
     const refreshes = [...rendered.matchAll(/^ *apt_refresh_for (.+)\n *apt_install (.+)$/gm)];
@@ -502,6 +527,36 @@ test("verified PGDG sources cannot enable APT trust overrides", () => {
     const disabled = runSourcePreflight({ directory, files: [deb822] });
     expect(disabled.exitCode).toBe(0);
     expect(disabled.stdout.toString()).toBe("reuse");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("offline package configuration failures propagate and still restore the policy", () => {
+  const directory = mkdtempSync(join(tmpdir(), "cloud-apt-test-"));
+  try {
+    const result = runInstall(directory, 0, 100);
+    expect(result.exitCode).toBe(100);
+    expect(readFileSync(join(directory, "apt.calls"), "utf8")).toBe(
+      "network:install -y --no-install-recommends --download-only fixture-package\n" +
+        "offline:install -y --no-install-recommends --no-download fixture-package\n",
+    );
+    expect(existsSync(join(directory, "policy-rc.d"))).toBe(false);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("local package archives install in one bounded step because apt cannot pre-download them", () => {
+  const directory = mkdtempSync(join(tmpdir(), "cloud-apt-test-"));
+  try {
+    const result = runInstall(directory, 0, 0, ["/tmp/a.deb", "/tmp/b.deb"]);
+    expect(result.stderr.toString()).toBe("");
+    expect(result.exitCode).toBe(0);
+    expect(readFileSync(join(directory, "apt.calls"), "utf8")).toBe(
+      "network:install -y --no-install-recommends /tmp/a.deb /tmp/b.deb\n",
+    );
+    expect(existsSync(join(directory, "policy-rc.d"))).toBe(false);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
