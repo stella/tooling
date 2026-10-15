@@ -3,19 +3,16 @@ export const renderCloudNetwork = () => String.raw`
 network_run() (
   local host="$1" seconds="$2" status=0
   shift 2
-  set -o pipefail
   network_log="$(mktemp)" || return "$?"
   trap 'rm -f -- "$network_log"' EXIT
   trap 'exit 129' HUP
   trap 'exit 130' INT
   trap 'exit 143' TERM
-  if timeout --signal=TERM --kill-after=5s "$seconds"s "$@" 2>&1 | tee "$network_log"; then
-    return 0
-  else
-    # Scalar Bash array expansion reads PIPESTATUS[0] before assignment resets it.
-    status="$PIPESTATUS"
-  fi
-  [[ "$status" != 0 ]] || fail 'Cannot capture network command output'
+  # Output goes to a file, never a pipe: package scripts may leave processes that keep
+  # inherited descriptors open, and a pipe reader would wait for them past the command.
+  timeout --signal=TERM --kill-after=5s "$seconds"s "$@" > "$network_log" 2>&1 || status=$?
+  cat -- "$network_log" || fail 'Cannot capture network command output'
+  [[ "$status" != 0 ]] || return 0
   if [[ "$status" == 124 || "$status" == 137 || "$status" == 28 ]] || grep -Eiq 'timed[[:space:]-]+out|time[[:space:]-]+out|timeout[[:space:]]+(was[[:space:]]+)?(reached|expired)|(connection|operation|socket)[[:space:]-]+timeout' "$network_log"; then
     fail "download timed out: $host"
   fi

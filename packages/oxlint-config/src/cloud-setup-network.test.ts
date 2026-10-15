@@ -168,7 +168,7 @@ test("network logs are removed after outer deadlines and capture failures", () =
         `
 mktemp() { command mktemp "$FIXTURE_DIRECTORY/network.XXXXXX"; }
 timeout() { [[ "$FIXTURE_FAILURE" != deadline ]] || return 124; printf 'complete\\n'; }
-tee() { if [[ "$FIXTURE_FAILURE" == capture ]]; then command cat >/dev/null; return 23; fi; command tee "$@"; }
+cat() { [[ "$FIXTURE_FAILURE" != capture ]] || return 23; command cat "$@"; }
 network_run github.com 120 fixture-command
 `,
         { FIXTURE_DIRECTORY: directory, FIXTURE_FAILURE: failure },
@@ -224,4 +224,18 @@ timeout() { printf 'deadline:%s\\n' "$3"; }
   expect(fallback.stdout.toString()).toContain("deadline:180s");
   const extended = run(`${stub}APT_DEADLINE=600 apt_network install x`);
   expect(extended.stdout.toString()).toContain("deadline:600s");
+});
+
+test("a process left behind with the command's output open does not hold the network step", () => {
+  const started = performance.now();
+  // The command exits at once but leaves a child holding its stdout and stderr,
+  // like a service started by a package maintainer script.
+  const result = run(
+    `timeout() { shift 3; "$@"; }
+network_run example.test 20 sh -c 'sleep 30 & echo configured'`,
+  );
+  const elapsedSeconds = (performance.now() - started) / 1000;
+  expect(result.exitCode).toBe(0);
+  expect(result.stdout.toString()).toBe("configured\n");
+  expect(elapsedSeconds).toBeLessThan(10);
 });
