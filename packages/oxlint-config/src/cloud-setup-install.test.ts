@@ -27,7 +27,12 @@ const fragment = renderCloudServiceInstall({
   .replaceAll("/var/lock/stll-cloud-apt.lock", '"$FIXTURE_LOCK"')
   .replaceAll("/usr/sbin/policy-rc.d", '"$FIXTURE_POLICY"');
 
-const runInstall = (directory: string, exitCode: number, offlineExitCode = 0) => {
+const runInstall = (
+  directory: string,
+  exitCode: number,
+  offlineExitCode = 0,
+  packages: string[] = ["fixture-package"],
+) => {
   expect(fragment).not.toContain("/var/lock/");
   expect(fragment).not.toContain("/usr/sbin/");
   return Bun.spawnSync(
@@ -52,8 +57,10 @@ apt-get() {
   return "$FIXTURE_OFFLINE_EXIT"
 }
 ${fragment}
-apt_install fixture-package
+apt_install "$@"
 `,
+      "install",
+      ...packages,
     ],
     {
       env: {
@@ -145,7 +152,6 @@ test("service installation uses shared bounded network helpers for every downloa
     expect(rendered).toContain(
       'DEBIAN_FRONTEND=noninteractive apt_network install -y --no-install-recommends --download-only "$@"\n  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --no-download "$@"\n)',
     );
-    expect(rendered).not.toMatch(/apt_network install(?![^\n]*--download-only)/);
     expect(rendered).not.toContain("apt_network update");
     const refreshes = [...rendered.matchAll(/^ *apt_refresh_for (.+)\n *apt_install (.+)$/gm)];
     expect(refreshes.length).toBe(services.length);
@@ -534,6 +540,21 @@ test("offline package configuration failures propagate and still restore the pol
     expect(readFileSync(join(directory, "apt.calls"), "utf8")).toBe(
       "network:install -y --no-install-recommends --download-only fixture-package\n" +
         "offline:install -y --no-install-recommends --no-download fixture-package\n",
+    );
+    expect(existsSync(join(directory, "policy-rc.d"))).toBe(false);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("local package archives install in one bounded step because apt cannot pre-download them", () => {
+  const directory = mkdtempSync(join(tmpdir(), "cloud-apt-test-"));
+  try {
+    const result = runInstall(directory, 0, 0, ["/tmp/a.deb", "/tmp/b.deb"]);
+    expect(result.stderr.toString()).toBe("");
+    expect(result.exitCode).toBe(0);
+    expect(readFileSync(join(directory, "apt.calls"), "utf8")).toBe(
+      "network:install -y --no-install-recommends /tmp/a.deb /tmp/b.deb\n",
     );
     expect(existsSync(join(directory, "policy-rc.d"))).toBe(false);
   } finally {
