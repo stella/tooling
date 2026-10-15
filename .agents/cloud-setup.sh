@@ -54,6 +54,19 @@ case "$(uname -m)" in
 esac
 
 
+release_log_holders() {
+  # Processes left by package scripts may still hold a step log after the command exits.
+  # Setup starts its own services later, so end them rather than let them write into a
+  # deleted log for their whole lifetime.
+  local log="$1" root="${CLOUD_PROC_ROOT:-/proc}" fd pid
+  for fd in "$root"/[0-9]*/fd/*; do
+    [[ -L "$fd" ]] || continue
+    [[ "$(readlink "$fd" 2>/dev/null)" == "$log" ]] || continue
+    pid="$(basename "$(dirname "$(dirname "$fd")")")"
+    [[ "$pid" != "$$" ]] || continue
+    kill -TERM "$pid" 2>/dev/null || true
+  done
+}
 network_run() (
   local host="$1" seconds="$2" status=0
   shift 2
@@ -65,6 +78,7 @@ network_run() (
   # Output goes to a file, never a pipe: package scripts may leave processes that keep
   # inherited descriptors open, and a pipe reader would wait for them past the command.
   timeout --signal=TERM --kill-after=5s "$seconds"s "$@" > "$network_log" 2>&1 || status=$?
+  release_log_holders "$network_log"
   cat -- "$network_log" || fail 'Cannot capture network command output'
   [[ "$status" != 0 ]] || return 0
   if [[ "$status" == 124 || "$status" == 137 || "$status" == 28 ]] || grep -Eiq 'timed[[:space:]-]+out|time[[:space:]-]+out|timeout[[:space:]]+(was[[:space:]]+)?(reached|expired)|(connection|operation|socket)[[:space:]-]+timeout' "$network_log"; then
