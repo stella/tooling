@@ -922,6 +922,11 @@ const setupRuntimeVersions = (snapshot: GitSnapshot) => {
     if (!changedRecord(value) || typeof value["uses"] !== "string") return;
     const action = value["uses"].split("@").at(0)?.toLowerCase();
     let runtime = /(?:^|\/)setup-([^/]+)$/.exec(action ?? "")?.[1];
+    // A wrapper such as `setup-bun-cached` sets up the runtime its name starts with.
+    const wrapped = ["bun", "node", "python", "go", "java"].find((candidate) =>
+      runtime?.startsWith(`${candidate}-`),
+    );
+    if (wrapped !== undefined) runtime = wrapped;
     if (action === "dtolnay/rust-toolchain") runtime = "rust";
     if (runtime === undefined) return;
     const raw = value["with"];

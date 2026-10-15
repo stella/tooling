@@ -90,6 +90,27 @@ const mutations = [
     after: { "config/runtime.txt": "1.4.3\n" },
   },
   {
+    name: "Bun version-file content bump through a setup wrapper action",
+    before: {
+      ".github/workflows/check.yml": {
+        on: { pull_request: {} },
+        jobs: {
+          check: {
+            "runs-on": "ubuntu-latest",
+            steps: [
+              {
+                uses: "example/.github/actions/setup-bun-cached@0c5077e51419868618aeaa5fe8019c62421857d6",
+                with: { "bun-version-file": "config/runtime.txt" },
+              },
+            ],
+          },
+        },
+      },
+      "config/runtime.txt": "1.4.2\n",
+    },
+    after: { "config/runtime.txt": "1.4.3\n" },
+  },
+  {
     name: "Bun version-file content bump at an arbitrary tracked path",
     before: {
       ".github/workflows/check.yml": workflow({
