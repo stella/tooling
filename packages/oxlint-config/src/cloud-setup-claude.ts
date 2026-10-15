@@ -30,21 +30,29 @@ const record = (value: unknown): value is Record<string, unknown> =>
 const array = (value: unknown): value is readonly unknown[] =>
   Array.isArray(value);
 
+const parseSettings = (text: string) => {
+  try {
+    const settings: unknown = JSON.parse(text, (_key, value: unknown) => {
+      if (
+        typeof value === "number" &&
+        (!Number.isFinite(value) ||
+          (Number.isInteger(value) && !Number.isSafeInteger(value)))
+      )
+        throw new Error(
+          "settings contains a number that cannot be safely preserved",
+        );
+      return value;
+    });
+    return settings;
+  } catch (error) {
+    if (error instanceof SyntaxError)
+      throw new Error("settings must contain valid JSON");
+    throw error;
+  }
+};
+
 const readSettings = (text: string | undefined) => {
-  const settings: unknown =
-    text === undefined
-      ? {}
-      : JSON.parse(text, (_key, value: unknown) => {
-          if (
-            typeof value === "number" &&
-            (!Number.isFinite(value) ||
-              (Number.isInteger(value) && !Number.isSafeInteger(value)))
-          )
-            throw new Error(
-              "settings contains a number that cannot be safely preserved",
-            );
-          return value;
-        });
+  const settings = text === undefined ? {} : parseSettings(text);
   if (
     text !== undefined &&
     parseDocument(text, { uniqueKeys: true }).errors.length > 0

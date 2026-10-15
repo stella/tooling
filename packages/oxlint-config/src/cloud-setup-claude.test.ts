@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   cloudSessionStartFix,
@@ -205,4 +206,25 @@ test("Claude SessionStart persists literal pinned exports after start while reta
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("Node settings parse diagnostics use the canonical repair without echoing input", () => {
+  const marker = "fixture-settings-source";
+  const program = `import { mergeCloudSessionStartHook } from "./src/cloud-setup-claude.ts";
+try { mergeCloudSessionStartHook(${JSON.stringify(`${marker} is invalid JSON`)}); process.exitCode = 2; }
+catch (error) { process.stdout.write(error.message); }
+`;
+  const result = spawnSync(
+    "node",
+    ["--import", "tsx", "--input-type=module", "-e", program],
+    {
+      cwd: fileURLToPath(new URL("../", import.meta.url)),
+      encoding: "utf8",
+    },
+  );
+  expect(result.status).toBe(0);
+  expect(result.stderr).toBe("");
+  expect(result.stdout).toContain("settings must contain valid JSON");
+  expect(result.stdout).toContain(cloudSessionStartFix);
+  expect(result.stdout).not.toContain(marker);
 });
