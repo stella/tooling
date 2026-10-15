@@ -1,5 +1,11 @@
 # @stll/oxlint-config
 
+## 1.2.1
+
+### Patch Changes
+
+- [#130](https://github.com/stella/tooling/pull/130) [`3c2766b`](https://github.com/stella/tooling/commit/3c2766b2ecb638e9437f4f4324e98cbe394e04d1) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Toolchain change detection reads a setup version-file selector under a same-repository `actions/checkout` path, such as `base/package.json` after a checkout with `path: base`, as the repository's own tracked file, so the repository is compared instead of being reported as unreadable.
+
 ## 1.2.0
 
 ### Minor Changes
