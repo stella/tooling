@@ -68,6 +68,9 @@ jobs:
       - name: Verify release from clean build outputs
         run: bash scripts/verify-release.sh
 
+      - name: Typecheck diagnostic parity
+        run: bun run check:typecheck-parity --changed-since "$TOOLCHAIN_BASE"
+
       - name: Validate actual declaration-only build profile
         run: bun scripts/check-publish-artifact-profiles.ts
 
