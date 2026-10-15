@@ -98,6 +98,8 @@ Bun tests need `@stll/test-kit/bun/forbid-network` as a preload to guard named s
 
 The guard covers `fetch` (including redirect hops), `node:net`, and `node:tls`. Under Bun it also covers `Bun.connect` and `fetch.preconnect`. Loopback addresses and local URL schemes remain available. Bun's `init.unix` keeps its Unix-socket behavior; Node ignores that extension and still checks the URL host. Additional hosts require explicit names. Remote proxy settings refuse installation; custom tests can pass an explicit `environment` map.
 
+Socket calls must identify an allowed host or a non-empty Unix socket path. Normalized socket arguments are inspected too; unknown targets, including port-only calls, are refused.
+
 Install before importing code that captures transport functions. The guard is a test backstop, not an operating-system network sandbox; it does not cover native clients or transports such as UDP and HTTP/2 that bypass these functions. The guard never clones or buffers request bodies. A `Request` with a body passes through untouched; a 307/308 redirect that needs to resend it fails with an explicit error: pass the body in `init` instead. Replayable `init.body` values follow redirects; a caller-supplied `ReadableStream` passes through untouched and cannot be resent. This bounded-memory contract also applies to string bodies already wrapped in a `Request`. Redirect responses retain the final hop's URL; `redirected` is false because the guard follows redirects itself.
 
 ## Drizzle database clock

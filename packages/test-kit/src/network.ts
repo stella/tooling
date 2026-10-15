@@ -274,17 +274,27 @@ type SocketTarget = {
 // `(options)`, `(port, host?, options?)`, `(port, options)` and `(path)`.
 // The guard refuses the call if any of them is refused, so an overload that
 // places the host somewhere unexpected cannot slip past as "localhost".
-const socketHosts = (args: readonly unknown[]): string[] => {
-  const [first, second] = args;
-  if (typeof first === "string" && !/^\d+$/u.test(first)) {
-    return []; // a Unix socket path
+const socketHosts = (args: readonly unknown[]): (string | undefined)[] => {
+  let normalized = args;
+  const seen = new Set<unknown[]>();
+  // Cached HTTP factories pass Node's normalized argument array to Socket.connect.
+  // Inspect its options without changing the arguments forwarded to the transport.
+  while (Array.isArray(normalized.at(0))) {
+    const nested = normalized.at(0);
+    if (!Array.isArray(nested) || seen.has(nested)) {
+      return [undefined];
+    }
+    seen.add(nested);
+    normalized = [...nested, ...normalized.slice(1)];
   }
+  const [first, second] = normalized;
   const hosts: string[] = [];
-  let unixOnly = false;
+  let unixOnly =
+    typeof first === "string" && first.length > 0 && !/^\d+$/u.test(first);
   if (typeof second === "string") {
     hosts.push(second);
   }
-  for (const arg of args) {
+  for (const arg of normalized) {
     if (typeof arg !== "object" || arg === null) {
       continue;
     }
@@ -295,9 +305,11 @@ const socketHosts = (args: readonly unknown[]): string[] => {
       }
     }
     unixOnly ||=
-      typeof target.path === "string" || typeof target.unix === "string";
+      (typeof target.path === "string" && target.path.length > 0) ||
+      (typeof target.unix === "string" && target.unix.length > 0);
   }
-  return hosts.length === 0 && !unixOnly ? ["localhost"] : hosts;
+  // An absent host must remain unknown; a guessed localhost could admit a new overload.
+  return hosts.length === 0 && !unixOnly ? [undefined] : hosts;
 };
 
 let installed: (() => void) | undefined;
@@ -351,11 +363,10 @@ export const installNetworkGuard = ({
   }
   const allowed = new Set(allowHosts.map((host) => host.toLowerCase()));
   const refusal = (host: string | undefined, via: string) =>
-    host === undefined ||
-    isLoopbackHost(host) ||
-    allowed.has(host.toLowerCase())
+    host !== undefined &&
+    (isLoopbackHost(host) || allowed.has(host.toLowerCase()))
       ? undefined
-      : new NetworkAccessError(host, via);
+      : new NetworkAccessError(host ?? "(undetermined socket target)", via);
   for (const key of PROXY_ENVIRONMENT_KEYS) {
     const error = refuseProxyHref(environment[key], key, (url) =>
       refusal(url.hostname, key),
@@ -370,8 +381,8 @@ export const installNetworkGuard = ({
       socketHosts(args)
         .map((host) => refusal(host, via))
         .find((error) => error !== undefined);
-  // Bun's module-level factories open sockets without going through
-  // Socket.prototype.connect, so each entry point is guarded on its own.
+  // Guard each factory as well as the prototype: cached factories can reach
+  // Socket.connect with normalized arguments instead of the public overloads.
   const restores = [
     guardFetch((url) => refusal(url.hostname, "fetch")),
     guardMethod(

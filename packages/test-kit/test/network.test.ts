@@ -1,3 +1,4 @@
+import http from "node:http";
 import net, {
   connect as connectNet,
   createConnection as createNetConnection,
@@ -567,6 +568,116 @@ describe("network guard", () => {
     expect(() => new net.Socket().connect(443, "example.com")).toThrow(
       NetworkAccessError,
     );
+  });
+
+  test("HTTP imported before installation refuses a remote request without waiting for a connection", async () => {
+    uninstall = installNetworkGuard({ environment: {} });
+    const error = await new Promise<unknown>((resolve) => {
+      try {
+        const request = http.get("http://203.0.113.7:443/", { agent: false });
+        request.once("error", resolve);
+        // A broken guard must not leave an outbound request running or wait for its timeout.
+        request.destroy();
+        setImmediate(() => resolve(undefined));
+      } catch (caught) {
+        resolve(caught);
+      }
+    });
+    expect(error).toBeInstanceOf(NetworkAccessError);
+  });
+
+  test("HTTP imported before installation can still reach an explicit loopback host", async () => {
+    uninstall = installNetworkGuard({ environment: {} });
+    const server = await startServer((_request, response) =>
+      response.end("local HTTP"),
+    );
+    const body = await new Promise<string>((resolve, reject) => {
+      const request = http.get(
+        `http://127.0.0.1:${server.port}/`,
+        { agent: false },
+        (response) => {
+          const chunks: string[] = [];
+          response.setEncoding("utf8");
+          response.on("data", (chunk: unknown) => {
+            if (typeof chunk !== "string") {
+              reject(new Error("HTTP fixture expected decoded text"));
+              response.destroy();
+              return;
+            }
+            chunks.push(chunk);
+          });
+          response.once("end", () => resolve(chunks.join("")));
+          response.once("error", reject);
+        },
+      );
+      request.once("error", reject);
+    });
+    expect(body).toBe("local HTTP");
+  });
+
+  test("normalized socket arguments retain their remote host refusal", () => {
+    uninstall = installNetworkGuard({ environment: {} });
+    const socket = new net.Socket();
+    socket.once("error", () => undefined);
+    try {
+      expect(() =>
+        Reflect.apply(socket.connect, socket, [
+          [{ host: "203.0.113.7", port: 443 }],
+        ]),
+      ).toThrow(NetworkAccessError);
+    } finally {
+      socket.destroy();
+    }
+  });
+
+  const circularSocketArguments: unknown[] = [];
+  circularSocketArguments.push(circularSocketArguments);
+  test.each([
+    { name: "no arguments", args: [] },
+    { name: "empty options", args: [{}] },
+    { name: "port only", args: [1234] },
+    { name: "empty IPC path", args: [{ path: "" }] },
+    { name: "empty positional IPC path", args: [""] },
+    { name: "nested empty normalized arguments", args: [[[]]] },
+    { name: "circular normalized arguments", args: [circularSocketArguments] },
+  ])("undetermined socket targets fail closed: $name", async ({ args }) => {
+    uninstall = installNetworkGuard({ environment: {} });
+    const socket = new net.Socket();
+    socket.once("error", () => undefined);
+    try {
+      const error = await rejectionOf(
+        Promise.resolve().then(() => {
+          Reflect.apply(socket.connect, socket, args);
+        }),
+      );
+      expect(error).toBeInstanceOf(NetworkAccessError);
+      expect(error).toHaveProperty("host", "(undetermined socket target)");
+    } finally {
+      socket.destroy();
+    }
+  });
+
+  test("explicit IPC paths pass through without opening a real socket", () => {
+    const socket = new net.Socket();
+    const original = spyOn(net.Socket.prototype, "connect").mockImplementation(
+      () => socket,
+    );
+    try {
+      uninstall = installNetworkGuard({ environment: {} });
+      for (const args of [
+        ["/tmp/test-kit-fixture.sock"],
+        [{ path: "/tmp/test-kit-fixture.sock" }],
+        [[{ path: "/tmp/test-kit-fixture.sock" }]],
+      ]) {
+        expect(Reflect.apply(socket.connect, socket, args)).toBe(socket);
+      }
+      expect(original).toHaveBeenCalledTimes(3);
+    } finally {
+      uninstall?.();
+      uninstall = undefined;
+      original.mockRestore();
+      socket.destroy();
+    }
   });
 
   test.skipIf(typeof Bun === "undefined")(
