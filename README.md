@@ -642,7 +642,10 @@ Conditional parity runs when Bun, TypeScript, or shared declarations change;
 otherwise it prints `parity skipped: toolchain unchanged since ...`. An unreadable
 reference runs full parity. Omit `--changed-since` to run full parity on demand.
 This repository runs the probe, conditional parity, and timed TypeScript checks
-only through `.github/workflows/typecheck-proofs.yml` (`workflow_dispatch`).
+only through `.github/workflows/typecheck-proofs.yml` (`workflow_dispatch`),
+whose required `changed_since` input names the base of the change to prove:
+the detector compares the toolchain at that base with the head, so a default
+such as the previous commit could miss a change made earlier on the branch.
 It has no automatic or scheduled trigger. Node and lint-tool changes still force
 full CI through the shared detector.
 

@@ -4,9 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       changed_since:
-        description: Git reference for conditional diagnostic parity
+        description: Base reference for conditional diagnostic parity (the branch point of the change to prove)
         required: true
-        default: HEAD^
         type: string
 
 permissions:
