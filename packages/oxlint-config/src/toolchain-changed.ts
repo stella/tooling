@@ -215,7 +215,7 @@ const snapshotText = ({
 };
 /** Read declared selector files too, without executing workflows or inspecting installed tools. */
 type CheckoutStep =
-  | { kind: "root" }
+  | { kind: "root"; sameRepository: boolean }
   | { kind: "unknown" }
   | { kind: "path"; path: string; sameRepository: boolean };
 
@@ -237,7 +237,7 @@ const checkoutStep = (step: unknown): CheckoutStep | undefined => {
   const sameRepository =
     repository === undefined || repository === "${{ github.repository }}";
   const checkoutPath = options["path"];
-  if (checkoutPath === undefined) return { kind: "root" };
+  if (checkoutPath === undefined) return { kind: "root", sameRepository };
   if (
     typeof checkoutPath !== "string" ||
     checkoutPath.includes("${{") ||
@@ -245,18 +245,23 @@ const checkoutStep = (step: unknown): CheckoutStep | undefined => {
   )
     return { kind: "unknown" };
   const normalized = path.posix.normalize(checkoutPath).replace(/\/+$/, "");
-  if (normalized === "" || normalized === ".") return { kind: "root" };
+  if (normalized === "" || normalized === ".") return { kind: "root", sameRepository };
   if (normalized.split("/").includes("..")) return { kind: "unknown" };
   return { kind: "path", path: normalized, sameRepository };
 };
 
-/** Checked-out directories, each owned by this repository or another, in step order. */
+/**
+ * Checked-out directories in step order, each owned by this repository
+ * (`true`) or another (`false`). `""` is the workspace root. With no
+ * checkout recorded, selectors name tracked files directly.
+ */
 type CheckoutScope = ReadonlyMap<string, boolean>;
 
 /**
- * The tracked file a declared selector names under the checkouts preceding its step.
- * The most specific checkout directory decides; one holding another repository
- * leaves the selector outside the snapshot.
+ * The tracked file a declared selector names under the checkouts preceding
+ * its step. The most specific checkout directory decides; a selector inside
+ * another repository's checkout is not a tracked file, whatever this
+ * repository tracks at the same path.
  */
 const resolveCheckoutSelector = (
   declared: string,
@@ -266,12 +271,16 @@ const resolveCheckoutSelector = (
   let owner: string | undefined;
   for (const directory of checkouts.keys())
     if (
-      file.startsWith(`${directory}/`) &&
+      (directory === "" || file.startsWith(`${directory}/`)) &&
       (owner === undefined || directory.length > owner.length)
     )
       owner = directory;
-  if (owner === undefined || checkouts.get(owner) !== true) return file;
-  return file.slice(owner.length + 1);
+  if (owner === undefined) return file;
+  if (checkouts.get(owner) !== true)
+    throw new Error(
+      `Setup version-file names a file outside this repository: ${declared}`,
+    );
+  return owner === "" ? file : file.slice(owner.length + 1);
 };
 
 /** Visit each step with only the checkouts that precede it. */
@@ -285,9 +294,12 @@ const visitStepsInOrder = (
   for (const step of steps) {
     visitStep(step, scope);
     const checkout = checkoutStep(step);
-    if (checkout === undefined || checkout.kind === "root") continue;
-    if (checkout.kind === "unknown") {
+    if (checkout === undefined) continue;
+    if (checkout.kind !== "path") {
+      // A root checkout replaces the workspace; an expression path may
+      // replace anything, so nothing after it is known to be tracked.
       scope.clear();
+      scope.set("", checkout.kind === "root" && checkout.sameRepository);
       continue;
     }
     for (const directory of scope.keys())

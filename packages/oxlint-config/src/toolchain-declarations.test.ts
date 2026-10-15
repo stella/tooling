@@ -320,6 +320,7 @@ for (const mutation of mutations)
 for (const [name, replacement] of [
   ["another repository", { repository: "example/other", path: "base" }],
   ["an expression path", { ref: "main", path: "${{ github.workspace }}/base" }],
+  ["the workspace root", { ref: "main" }],
 ] as const)
   test(`a later checkout of ${name} unmaps the same-repository checkout it may replace`, async () => {
     await withSnapshots(
@@ -409,6 +410,8 @@ test("a same-repository checkout path selector is compared, and another reposito
           "other/config/runtime.txt",
         ),
         "config/runtime.txt": "1.4.3\n",
+        // This repository tracks the same path; the checkout still owns it.
+        "other/config/runtime.txt": "1.4.3\n",
       },
       after: { "README.md": "unrelated\n" },
     },
