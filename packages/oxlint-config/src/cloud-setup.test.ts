@@ -397,3 +397,53 @@ test("runtime-only declarations emit no environment file code", () => {
     expect(generated).toContain(cloudEnvironmentMarker);
   }
 });
+
+test("the declared install command is rendered verbatim into the pinned install", () => {
+  const frozen = generate(declaration);
+  expect(frozen).toContain('"$BUN_DIR/bun" install --frozen-lockfile\n');
+  expect(frozen).not.toContain("--ignore-scripts");
+  const scriptless = generate({
+    ...declaration,
+    install: `${cloudInstallCommand} --ignore-scripts`,
+  });
+  expect(scriptless).toContain(
+    '"$BUN_DIR/bun" install --frozen-lockfile --ignore-scripts\n',
+  );
+  expect(scriptless).not.toContain("@INSTALL_ARGS@");
+});
+
+test("every lifecycle phase runs through the timed step logger", () => {
+  const generated = generate(declaration);
+  const body = generated.slice(generated.indexOf('if [[ "$MODE" == install ]]'));
+  for (const phase of [
+    "install_runtimes",
+    "install_services",
+    "install_tools",
+    "dependency_install",
+    "runtime_ready",
+    "verify_tools",
+    "verify_shell_environment",
+    "prepare_state",
+    "start_services",
+  ])
+    expect(body).toMatch(new RegExp(`^ *step [a-z-]+ ${phase}$`, "m"));
+  const helper = generated.slice(
+    generated.indexOf("step() {"),
+    generated.indexOf("}", generated.indexOf("step() {")) + 1,
+  );
+  const ok = Bun.spawnSync(
+    ["bash", "-c", `set -euo pipefail\n${helper}\nstep demo true`],
+    { stderr: "pipe" },
+  );
+  expect(ok.exitCode).toBe(0);
+  expect(ok.stderr.toString()).toMatch(
+    /^cloud-setup: demo started\ncloud-setup: demo done in \d+s\n$/,
+  );
+  const failed = Bun.spawnSync(
+    ["bash", "-c", `set -euo pipefail\n${helper}\nstep demo false\necho after`],
+    { stdout: "pipe", stderr: "pipe" },
+  );
+  expect(failed.exitCode).not.toBe(0);
+  expect(failed.stdout.toString()).toBe("");
+  expect(failed.stderr.toString()).not.toContain("demo done");
+});

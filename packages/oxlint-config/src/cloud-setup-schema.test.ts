@@ -4,6 +4,7 @@ import { expect, test } from "bun:test";
 
 import {
   cloudInstallCommand,
+  cloudInstallCommands,
   cloudServices,
   parseCloudSetup,
 } from "./cloud-setup-schema";
@@ -159,5 +160,27 @@ test("environment files require canonical safe repository-relative paths", () =>
   ])
     expect(() => parseCloudSetup({ ...declaration, envFile })).toThrow(
       "cloud.envFile",
+    );
+});
+
+test("install accepts the frozen command with or without lifecycle scripts and nothing else", () => {
+  for (const install of cloudInstallCommands)
+    expect(parseCloudSetup({ ...declaration, install })).toEqual({
+      ...declaration,
+      install,
+    });
+  for (const install of [
+    "bun install",
+    "bun install --ignore-scripts",
+    "bun install --ignore-scripts --frozen-lockfile",
+    `${cloudInstallCommand} --ignore-scripts --production`,
+    `${cloudInstallCommand}  --ignore-scripts`,
+    `${cloudInstallCommand} --ignore-scripts `,
+    undefined,
+    null,
+    1,
+  ])
+    expect(() => parseCloudSetup({ ...declaration, install })).toThrow(
+      "cloud.install must be exactly one of",
     );
 });
