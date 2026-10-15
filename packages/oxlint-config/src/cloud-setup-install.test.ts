@@ -47,7 +47,7 @@ apt_network() {
   [[ "$DEBIAN_FRONTEND" == noninteractive ]]
   [[ "$(cat "$FIXTURE_POLICY")" == $'#!/bin/sh\\nexit 101' ]]
   [[ -x "$FIXTURE_POLICY" ]]
-  printf 'network:%s\n' "$*" >> "$FIXTURE_CALLS"
+  printf 'network%s:%s\n' "\${APT_DEADLINE:+@$APT_DEADLINE}" "$*" >> "$FIXTURE_CALLS"
   return "$FIXTURE_EXIT"
 }
 apt-get() {
@@ -554,7 +554,7 @@ test("local package archives install in one bounded step because apt cannot pre-
     expect(result.stderr.toString()).toBe("");
     expect(result.exitCode).toBe(0);
     expect(readFileSync(join(directory, "apt.calls"), "utf8")).toBe(
-      "network:install -y --no-install-recommends /tmp/a.deb /tmp/b.deb\n",
+      "network@600:install -y --no-install-recommends /tmp/a.deb /tmp/b.deb\n",
     );
     expect(existsSync(join(directory, "policy-rc.d"))).toBe(false);
   } finally {

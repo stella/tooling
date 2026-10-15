@@ -214,3 +214,14 @@ echo after
   expect(failed.exitCode).not.toBe(0);
   expect(failed.stdout.toString()).toBe("");
 });
+
+test("APT deadline defaults to 180 s and callers may extend the whole call", () => {
+  const stub = `
+apt-get() { if [[ "$*" == '--print-uris update' ]]; then printf "'https://apt.postgresql.org/x' f 0\\n"; fi; }
+timeout() { printf 'deadline:%s\\n' "$3"; }
+`;
+  const fallback = run(`${stub}apt_network install x`);
+  expect(fallback.stdout.toString()).toContain("deadline:180s");
+  const extended = run(`${stub}APT_DEADLINE=600 apt_network install x`);
+  expect(extended.stdout.toString()).toContain("deadline:600s");
+});
