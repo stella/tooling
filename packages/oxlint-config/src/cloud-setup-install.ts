@@ -177,7 +177,7 @@ const postgresInstall = String.raw`
       rm -- "$key"
       printf '%s\n' '@PGDG_SOURCE@' > /etc/apt/sources.list.d/stll-pgdg.list
     fi
-    apt_network update
+    apt_refresh_for postgresql-@POSTGRES@ postgresql-client-@POSTGRES@
     apt_install postgresql-@POSTGRES@ postgresql-client-@POSTGRES@
   fi
   postgres_ready || fail 'PostgreSQL toolchain is incomplete or differs from the policy major'
@@ -201,7 +201,7 @@ const valkeyInstall = String.raw`
       [[ "$(dpkg-deb -f "$scratch/$package.deb" Version)" == '@VALKEY@-1.noble' ]] || fail 'Valkey artifact version mismatch'
       [[ "$(dpkg-deb -f "$scratch/$package.deb" Architecture)" == "$ARCH" ]] || fail 'Valkey artifact architecture mismatch'
     done
-    apt_network update
+    apt_refresh_for "$scratch/valkey-server.deb" "$scratch/valkey-tools.deb"
     apt_install "$scratch/valkey-server.deb" "$scratch/valkey-tools.deb"
     rm -rf -- "$scratch"
   fi

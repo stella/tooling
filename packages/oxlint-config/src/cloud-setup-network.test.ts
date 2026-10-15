@@ -185,3 +185,32 @@ network_run github.com 120 fixture-command
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("APT refreshes indexes unless the install downloads nothing", () => {
+  const stub = (uris: string, status: number, network = "printf 'refresh:%s\\n' \"$*\"") => `
+apt-get() {
+  [[ "$1" == --print-uris && "$2" == -qq && "$3" == -y ]] || exit 91
+  printf '%b' '${uris}'
+  return ${status}
+}
+apt_network() { ${network}; }
+apt_refresh_for curl ./valkey-server.deb
+echo after
+`;
+  const nothing = run(stub("", 0));
+  expect(nothing.exitCode).toBe(0);
+  expect(nothing.stdout.toString()).toBe("after\n");
+  // Cached indexes resolve, but the install would download: a stale index
+  // could name a file the mirror no longer serves, so refresh first.
+  const downloads = run(
+    stub("http://archive.ubuntu.com/ubuntu/pool/main/c/curl/curl.deb curl.deb 1 SHA256:00\\n", 0),
+  );
+  expect(downloads.exitCode).toBe(0);
+  expect(downloads.stdout.toString()).toBe("refresh:update\nafter\n");
+  const unresolved = run(stub("", 100));
+  expect(unresolved.exitCode).toBe(0);
+  expect(unresolved.stdout.toString()).toBe("refresh:update\nafter\n");
+  const failed = run(stub("", 100, "return 7"));
+  expect(failed.exitCode).not.toBe(0);
+  expect(failed.stdout.toString()).toBe("");
+});

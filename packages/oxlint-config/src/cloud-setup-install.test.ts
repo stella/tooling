@@ -127,9 +127,11 @@ test("service installation uses shared bounded network helpers for every downloa
     expect(rendered).toContain(
       'DEBIAN_FRONTEND=noninteractive apt_network install -y --no-install-recommends "$@"',
     );
-    expect([...rendered.matchAll(/\bapt_network update\b/g)].length).toBe(
-      services.length,
-    );
+    expect(rendered).not.toContain("apt_network update");
+    const refreshes = [...rendered.matchAll(/^ *apt_refresh_for (.+)\n *apt_install (.+)$/gm)];
+    expect(refreshes.length).toBe(services.length);
+    for (const [, refreshed, installed] of refreshes)
+      expect(refreshed).toBe(installed);
     expect(
       rendered.includes(
         'download_file https://www.postgresql.org/media/keys/ACCC4CF8.asc "$key" 45',

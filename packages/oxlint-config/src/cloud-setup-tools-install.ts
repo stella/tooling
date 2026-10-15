@@ -56,7 +56,7 @@ rust_ready() {
 verify_rust() { rust_ready || fail 'Pinned Rust, components or targets are unavailable; run install'; }
 install_rust() (
   if ! command -v cc >/dev/null || ! command -v ld >/dev/null || [[ ! -f /usr/include/stdlib.h ]]; then
-    apt_network update
+    apt_refresh_for build-essential
     apt_install build-essential
   fi
   local artifact_url artifact_sha

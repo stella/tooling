@@ -107,6 +107,16 @@ const parseTools = (input: unknown) => {
 };
 
 export const cloudInstallCommand = "bun install --frozen-lockfile";
+// Lifecycle scripts (postinstall code generation) can outlast a cloud setup
+// budget; a repository opts out and lets tasks generate what they need.
+export const cloudInstallCommands = [
+  cloudInstallCommand,
+  `${cloudInstallCommand} --ignore-scripts`,
+] as const;
+export type CloudInstallCommand = (typeof cloudInstallCommands)[number];
+
+const cloudInstall = (value: unknown): value is CloudInstallCommand =>
+  cloudInstallCommands.some((command) => value === command);
 
 const cloudService = (value: unknown): value is CloudService =>
   cloudServices.some((service) => value === service);
@@ -155,8 +165,11 @@ export const parseCloudSetup = (input: unknown) => {
   const selected = "services" in input ? input.services : [];
   if (!Array.isArray(selected))
     throw new Error("cloud.services must be an array when provided");
-  if (!("install" in input) || input.install !== cloudInstallCommand)
-    throw new Error(`cloud.install must be exactly ${cloudInstallCommand}`);
+  if (!("install" in input) || !cloudInstall(input.install))
+    throw new Error(
+      `cloud.install must be exactly one of: ${cloudInstallCommands.join(", ")}`,
+    );
+  const install = input.install;
   const seen = new Set<CloudService>();
   const services = Array.from(selected, (service: unknown) => {
     if (!cloudService(service))
@@ -170,7 +183,7 @@ export const parseCloudSetup = (input: unknown) => {
     throw new Error("cloud.envFile is not allowed without services");
   return {
     services,
-    install: cloudInstallCommand,
+    install,
     ...extensions,
     ...(services.length === 0 ? {} : { envFile: parseEnvFile(input) }),
   } as const;

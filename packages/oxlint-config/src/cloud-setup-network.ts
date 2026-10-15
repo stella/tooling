@@ -34,4 +34,13 @@ apt_network() {
   [[ -n "$hosts" ]] || hosts='configured APT hosts'
   network_run "$hosts" 180 apt-get -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o Acquire::Retries=3 -o APT::Update::Error-Mode=any "$@"
 }
+apt_refresh_for() {
+  # Skip the refresh only when the install downloads nothing: then no package
+  # source is contacted and stale cached indexes cannot point at missing files.
+  local uris
+  if uris="$(DEBIAN_FRONTEND=noninteractive apt-get --print-uris -qq -y --no-install-recommends install "$@" 2>/dev/null)" && [[ -z "$uris" ]]; then
+    return 0
+  fi
+  apt_network update
+}
 `;
