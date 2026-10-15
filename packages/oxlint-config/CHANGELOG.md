@@ -1,5 +1,11 @@
 # @stll/oxlint-config
 
+## 1.2.4
+
+### Patch Changes
+
+- [#136](https://github.com/stella/tooling/pull/136) [`7d83a9d`](https://github.com/stella/tooling/commit/7d83a9d30deb76fd4a0c0b8210e5e0e5426bb7f9) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Give local package archive installs in the cloud setup a longer whole-call deadline, since their package scripts run in the same call.
+
 ## 1.2.3
 
 ### Patch Changes
