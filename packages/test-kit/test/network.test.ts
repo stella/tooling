@@ -8,7 +8,7 @@ import {
 } from "../src/network.js";
 import { serve } from "./network-server.js";
 import { rejectionOf } from "./rejection.js";
-import { afterEach, describe, expect, test } from "./runner.js";
+import { afterEach, describe, expect, spyOn, test } from "./runner.js";
 
 const servers: Awaited<ReturnType<typeof serve>>[] = [];
 const startServer: typeof serve = async (handler) => {
@@ -120,6 +120,12 @@ describe("network guard", () => {
           case "/hop":
             response.writeHead(307, { location: "/final" }).end();
             return;
+          case "/permanent":
+            response.writeHead(308, { location: "/final" }).end();
+            return;
+          case "/double-hop":
+            response.writeHead(307, { location: "/hop" }).end();
+            return;
           case "/see-other":
             response.writeHead(303, { location: "/final" }).end();
             return;
@@ -160,6 +166,26 @@ describe("network guard", () => {
       expect(await switched.text()).toBe("GET ");
     });
 
+    test.each(["/hop", "/permanent", "/double-hop"])(
+      "a Request payload survives the redirect at %s",
+      async (pathname) => {
+        uninstall = installNetworkGuard({ environment: {} });
+        const server = await serveRedirects();
+        const request = new Request(
+          `http://127.0.0.1:${String(server.port)}${pathname}`,
+          {
+            method: "POST",
+            body: "payload",
+          },
+        );
+        const response = await fetch(request);
+        expect(await response.text()).toBe("POST payload");
+        expect(response.url).toBe(
+          `http://127.0.0.1:${String(server.port)}/final`,
+        );
+      },
+    );
+
     test("a streamed upload is not buffered before the request starts", async () => {
       uninstall = installNetworkGuard({ environment: {} });
       const server = await startServer((request, response) => {
@@ -184,6 +210,70 @@ describe("network guard", () => {
       await writer.close().catch(() => undefined);
       writer.releaseLock();
     });
+
+    test.each(["success", "303", "remote redirect", "fetch rejection"])(
+      "an unused Request clone is canceled after %s",
+      async (outcome) => {
+        const originalFetch = globalThis.fetch;
+        const request = new Request("http://127.0.0.1:1/start", {
+          method: "POST",
+          body: "payload",
+        });
+        const copy = request.clone();
+        if (copy.body === null) {
+          throw new Error("The Request fixture must have a body");
+        }
+        const clone = spyOn(request, "clone").mockReturnValue(copy);
+        const cancel = spyOn(copy.body, "cancel");
+        const failure = new Error("fetch fixture rejection");
+        const reached: string[] = [];
+        Reflect.set(globalThis, "fetch", async (input: unknown) => {
+          reached.push(requestedUrl(input));
+          if (!(input instanceof Request)) {
+            return new Response("done");
+          }
+          expect(await input.text()).toBe("payload");
+          switch (outcome) {
+            case "303":
+              return new Response(null, {
+                status: 303,
+                headers: { location: "/final" },
+              });
+            case "remote redirect":
+              return Response.redirect("https://example.com/elsewhere", 307);
+            case "fetch rejection":
+              throw failure;
+            default:
+              return new Response("done");
+          }
+        });
+        try {
+          uninstall = installNetworkGuard({ environment: {} });
+          if (outcome === "remote redirect") {
+            expect(await rejectionOf(fetch(request))).toBeInstanceOf(
+              NetworkAccessError,
+            );
+          } else if (outcome === "fetch rejection") {
+            expect(await rejectionOf(fetch(request))).toBe(failure);
+          } else {
+            expect(await (await fetch(request)).text()).toBe("done");
+          }
+          expect(clone).toHaveBeenCalledTimes(1);
+          expect(cancel).toHaveBeenCalledTimes(1);
+          expect(reached).toEqual(
+            outcome === "303"
+              ? [request.url, "http://127.0.0.1:1/final"]
+              : [request.url],
+          );
+        } finally {
+          uninstall?.();
+          uninstall = undefined;
+          Reflect.set(globalThis, "fetch", originalFetch);
+          cancel.mockRestore();
+          clone.mockRestore();
+        }
+      },
+    );
 
     describe("under a recording fake", () => {
       type Call = { url: string; init: RequestInit | undefined };
@@ -353,6 +443,32 @@ describe("network guard", () => {
         expect(error).toHaveProperty("host", "proxy.example");
       }
     });
+
+    test.skipIf(typeof globalThis.Bun !== "undefined")(
+      "Node refuses a remote URL even when init.unix is set",
+      async () => {
+        const original = globalThis.fetch;
+        const reached: string[] = [];
+        // Keep the regression safe even when the guard is deliberately broken.
+        Reflect.set(globalThis, "fetch", async (input: unknown) => {
+          reached.push(requestedUrl(input));
+          return new Response("unguarded");
+        });
+        try {
+          uninstall = installNetworkGuard({ environment: {} });
+          const init: RequestInit = {};
+          Reflect.set(init, "unix", "/tmp/test-kit.sock");
+          const error = await rejectionOf(fetch("https://example.com/", init));
+          expect(error).toBeInstanceOf(NetworkAccessError);
+          expect(error).toHaveProperty("host", "example.com");
+          expect(reached).toEqual([]);
+        } finally {
+          uninstall?.();
+          uninstall = undefined;
+          Reflect.set(globalThis, "fetch", original);
+        }
+      },
+    );
 
     test("an undefined unix option is not a Unix socket", async () => {
       uninstall = installNetworkGuard({ environment: {} });

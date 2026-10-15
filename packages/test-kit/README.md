@@ -94,9 +94,9 @@ await withTestTmpDir(async (tmp) => {
 
 The preload/setup entry points install the guard. For custom setup, call `installNetworkGuard({ allowHosts: ["database"] })`; its return value uninstalls that instance. Only one instance may be installed at a time.
 
-The guard covers `fetch` (including redirect hops), `node:net`, and `node:tls`. Under Bun it also covers `Bun.connect` and `fetch.preconnect`. Loopback addresses, Unix sockets, and local URL schemes remain available. Additional hosts require explicit names. Remote proxy settings refuse installation; custom tests can pass an explicit `environment` map.
+The guard covers `fetch` (including redirect hops), `node:net`, and `node:tls`. Under Bun it also covers `Bun.connect` and `fetch.preconnect`. Loopback addresses and local URL schemes remain available. Bun's `init.unix` keeps its Unix-socket behavior; Node ignores that extension and still checks the URL host. Additional hosts require explicit names. Remote proxy settings refuse installation; custom tests can pass an explicit `environment` map.
 
-Install before importing code that captures transport functions. The guard is a test backstop, not an operating-system network sandbox; it does not cover native clients or transports such as UDP and HTTP/2 that bypass these functions. Redirect responses retain the final hop's URL; `redirected` is false because the guard follows redirects itself.
+Install before importing code that captures transport functions. The guard is a test backstop, not an operating-system network sandbox; it does not cover native clients or transports such as UDP and HTTP/2 that bypass these functions. Request bodies are cloned before the first hop and buffered if a redirect needs to replay them, including 307/308. Bodies supplied directly through `init` keep their native path: a caller-supplied stream is never buffered and produces an explicit error if a redirect would resend it. Redirect responses retain the final hop's URL; `redirected` is false because the guard follows redirects itself.
 
 ## Drizzle database clock
 
