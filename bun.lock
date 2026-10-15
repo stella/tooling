@@ -21,7 +21,7 @@
     },
     "packages/oxlint-config": {
       "name": "@stll/oxlint-config",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "bin": {
         "stll-cloud-setup": "./dist/cloud-setup-cli.mjs",
         "stll-consumer-compat": "./dist/consumer-compat-cli.mjs",
