@@ -186,29 +186,31 @@ network_run github.com 120 fixture-command
   }
 });
 
-test("APT refreshes indexes only when cached indexes cannot resolve the install", () => {
-  const stub = (simulation: number) => `
+test("APT refreshes indexes unless the install downloads nothing", () => {
+  const stub = (uris: string, status: number, network = "printf 'refresh:%s\\n' \"$*\"") => `
 apt-get() {
-  if [[ "$1" == --simulate ]]; then
-    printf 'simulate:%s\\n' "$*" >&2
-    return ${simulation}
-  fi
-  printf 'network:%s\\n' "$*"
+  [[ "$1" == --print-uris && "$2" == -qq && "$3" == -y ]] || exit 91
+  printf '%b' '${uris}'
+  return ${status}
 }
-apt_network() { printf 'refresh:%s\\n' "$*"; }
+apt_network() { ${network}; }
 apt_refresh_for curl ./valkey-server.deb
 echo after
 `;
-  const cached = run(stub(0));
-  expect(cached.exitCode).toBe(0);
-  expect(cached.stdout.toString()).toBe("after\n");
-  const stale = run(stub(100));
-  expect(stale.exitCode).toBe(0);
-  expect(stale.stdout.toString()).toBe("refresh:update\nafter\n");
-  const failed = run(stub(100).replace(
-    "apt_network() { printf 'refresh:%s\\n' \"$*\"; }",
-    "apt_network() { return 7; }",
-  ));
+  const nothing = run(stub("", 0));
+  expect(nothing.exitCode).toBe(0);
+  expect(nothing.stdout.toString()).toBe("after\n");
+  // Cached indexes resolve, but the install would download: a stale index
+  // could name a file the mirror no longer serves, so refresh first.
+  const downloads = run(
+    stub("http://archive.ubuntu.com/ubuntu/pool/main/c/curl/curl.deb curl.deb 1 SHA256:00\\n", 0),
+  );
+  expect(downloads.exitCode).toBe(0);
+  expect(downloads.stdout.toString()).toBe("refresh:update\nafter\n");
+  const unresolved = run(stub("", 100));
+  expect(unresolved.exitCode).toBe(0);
+  expect(unresolved.stdout.toString()).toBe("refresh:update\nafter\n");
+  const failed = run(stub("", 100, "return 7"));
   expect(failed.exitCode).not.toBe(0);
   expect(failed.stdout.toString()).toBe("");
 });
