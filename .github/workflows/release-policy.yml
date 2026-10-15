@@ -20,6 +20,6 @@ jobs:
     name: Enforce release boundaries
     permissions:
       contents: read
-    uses: stella/.github/.github/workflows/release-policy.yml@77914b407c334cdebcaf21c69457075c9b255a8b
+    uses: stella/.github/.github/workflows/release-policy.yml@5764ab66e4df84cfd2e642c7d7e4678261e668f8
     with:
       workflow: .github/workflows/publish.yml
