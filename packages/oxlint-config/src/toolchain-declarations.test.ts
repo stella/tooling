@@ -317,6 +317,42 @@ for (const mutation of mutations)
     });
   });
 
+for (const [name, replacement] of [
+  ["another repository", { repository: "example/other", path: "base" }],
+  ["an expression path", { ref: "main", path: "${{ github.workspace }}/base" }],
+] as const)
+  test(`a later checkout of ${name} unmaps the same-repository checkout it may replace`, async () => {
+    await withSnapshots(
+      {
+        name: `replaced checkout: ${name}`,
+        before: {
+          ".github/workflows/replay.yml": {
+            on: { pull_request: {} },
+            jobs: {
+              replay: {
+                "runs-on": "ubuntu-latest",
+                steps: [
+                  { uses: checkoutAction, with: { ref: "main", path: "base" } },
+                  { uses: checkoutAction, with: replacement },
+                  {
+                    uses: bunAction,
+                    with: { "bun-version-file": "base/config/runtime.txt" },
+                  },
+                ],
+              },
+            },
+          },
+          "config/runtime.txt": "1.4.3\n",
+        },
+        after: { "README.md": "unrelated\n" },
+      },
+      async ({ repo, since }) => {
+        const result = await detectToolchainChanges({ repo, since });
+        expect(result.status).toBe("unreadable");
+      },
+    );
+  });
+
 test("a same-repository checkout path selector is compared, and another repository's is not", async () => {
   await withSnapshots(
     {

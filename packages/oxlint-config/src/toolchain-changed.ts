@@ -214,69 +214,95 @@ const snapshotText = ({
   return snapshotText({ snapshot, file: target, visited });
 };
 /** Read declared selector files too, without executing workflows or inspecting installed tools. */
+type CheckoutStep =
+  | { kind: "root" }
+  | { kind: "unknown" }
+  | { kind: "path"; path: string; sameRepository: boolean };
+
 /**
- * The directory where one step checks out this same repository again.
+ * What one `actions/checkout` step puts where, or `undefined` for any other step.
  *
- * A selector such as `base/package.json` after a checkout with `path: base`
- * names the repository's own `package.json` at another ref, so it is read
- * as that tracked file. Checkouts of another repository, or paths built from
- * expressions, return nothing: their selectors stay outside the snapshot.
+ * A selector such as `base/package.json` after a checkout of this repository
+ * with `path: base` names the repository's own `package.json` at another ref,
+ * so it is read as that tracked file. A path built from an expression could
+ * replace any directory, so it is `unknown`.
  */
-const sameRepositoryCheckoutPath = (step: unknown): string | undefined => {
+const checkoutStep = (step: unknown): CheckoutStep | undefined => {
   if (!changedRecord(step)) return undefined;
   const uses = step["uses"];
   if (typeof uses !== "string" || !uses.startsWith("actions/checkout@"))
     return undefined;
-  const options = step["with"];
-  if (!changedRecord(options)) return undefined;
+  const options = changedRecord(step["with"]) ? step["with"] : {};
   const repository = options["repository"];
-  if (repository !== undefined && repository !== "${{ github.repository }}")
-    return undefined;
+  const sameRepository =
+    repository === undefined || repository === "${{ github.repository }}";
   const checkoutPath = options["path"];
+  if (checkoutPath === undefined) return { kind: "root" };
   if (
     typeof checkoutPath !== "string" ||
     checkoutPath.includes("${{") ||
     path.posix.isAbsolute(checkoutPath)
   )
-    return undefined;
+    return { kind: "unknown" };
   const normalized = path.posix.normalize(checkoutPath).replace(/\/+$/, "");
-  if (
-    normalized === "" ||
-    normalized === "." ||
-    normalized.split("/").includes("..")
-  )
-    return undefined;
-  return normalized;
+  if (normalized === "" || normalized === ".") return { kind: "root" };
+  if (normalized.split("/").includes("..")) return { kind: "unknown" };
+  return { kind: "path", path: normalized, sameRepository };
 };
 
-/** The tracked file a declared selector names, given the checkouts that precede its step. */
+/** Checked-out directories, each owned by this repository or another, in step order. */
+type CheckoutScope = ReadonlyMap<string, boolean>;
+
+/**
+ * The tracked file a declared selector names under the checkouts preceding its step.
+ * The most specific checkout directory decides; one holding another repository
+ * leaves the selector outside the snapshot.
+ */
 const resolveCheckoutSelector = (
   declared: string,
-  checkouts: readonly string[],
+  checkouts: CheckoutScope,
 ): string => {
   const file = path.posix.normalize(declared);
-  const checkout = checkouts.find((prefix) => file.startsWith(`${prefix}/`));
-  return checkout === undefined ? file : file.slice(checkout.length + 1);
+  let owner: string | undefined;
+  for (const directory of checkouts.keys())
+    if (
+      file.startsWith(`${directory}/`) &&
+      (owner === undefined || directory.length > owner.length)
+    )
+      owner = directory;
+  if (owner === undefined || checkouts.get(owner) !== true) return file;
+  return file.slice(owner.length + 1);
 };
 
-/** Visit each step with only the same-repository checkouts that precede it. */
+/** Visit each step with only the checkouts that precede it. */
 const visitStepsInOrder = (
   steps: readonly unknown[],
-  checkouts: readonly string[],
-  visitStep: (step: unknown, checkouts: readonly string[]) => void,
+  checkouts: CheckoutScope,
+  visitStep: (step: unknown, checkouts: CheckoutScope) => void,
 ) => {
-  // Each visit completes before the next checkout joins the scope.
-  const scope = [...checkouts];
+  // Each visit completes before the next checkout changes the scope.
+  const scope = new Map(checkouts);
   for (const step of steps) {
     visitStep(step, scope);
-    const checkout = sameRepositoryCheckoutPath(step);
-    if (checkout !== undefined) scope.push(checkout);
+    const checkout = checkoutStep(step);
+    if (checkout === undefined || checkout.kind === "root") continue;
+    if (checkout.kind === "unknown") {
+      scope.clear();
+      continue;
+    }
+    for (const directory of scope.keys())
+      if (
+        directory === checkout.path ||
+        directory.startsWith(`${checkout.path}/`)
+      )
+        scope.delete(directory);
+    scope.set(checkout.path, checkout.sameRepository);
   }
 };
 
 const selectorFiles = (snapshot: GitSnapshot) => {
   const files = new Map<string, Set<ToolchainChangedTool>>();
-  const visit = (value: unknown, checkouts: readonly string[] = []) => {
+  const visit = (value: unknown, checkouts: CheckoutScope = new Map()) => {
     if (Array.isArray(value)) {
       for (const entry of value) visit(entry, checkouts);
       return;
@@ -880,7 +906,7 @@ const setupRuntimeFileVersion = ({
 
 const setupRuntimeVersions = (snapshot: GitSnapshot) => {
   const versions: { file: string; runtime: string; version: string }[] = [];
-  const step = (value: unknown, file: string, checkouts: readonly string[]) => {
+  const step = (value: unknown, file: string, checkouts: CheckoutScope) => {
     if (!changedRecord(value) || typeof value["uses"] !== "string") return;
     const action = value["uses"].split("@").at(0)?.toLowerCase();
     let runtime = /(?:^|\/)setup-([^/]+)$/.exec(action ?? "")?.[1];
@@ -955,7 +981,7 @@ const setupRuntimeVersions = (snapshot: GitSnapshot) => {
     if (!changedRecord(value)) return;
     for (const [key, entry] of Object.entries(value)) {
       if (key === "steps" && Array.isArray(entry)) {
-        visitStepsInOrder(entry, [], (child, checkouts) =>
+        visitStepsInOrder(entry, new Map(), (child, checkouts) =>
           step(child, file, checkouts),
         );
       } else visit(entry, file);
