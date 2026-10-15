@@ -272,7 +272,10 @@ export const checkRustReferences = (options: RustReferenceOptions) => {
         const version = tag === undefined ? undefined : rustImageVersion(tag);
         select(version, "Rust service image", lineOf(value));
       } else if (Array.isArray(value)) value.forEach(images);
-      else if (record(value)) Object.values(value).forEach(images);
+      else if (record(value))
+        for (const [key, entry] of Object.entries(value)) {
+          if (key !== "name") images(entry);
+        }
     };
     try {
       images(JSON.parse(text));
