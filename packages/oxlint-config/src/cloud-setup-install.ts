@@ -44,9 +44,11 @@ apt_install() (
   local package
   for package in "$@"; do
     if [[ "$package" == */* ]]; then
-      # apt cannot fetch local archives with --download-only; their installs stay
-      # bounded as a whole (dependencies are normally present already).
-      DEBIAN_FRONTEND=noninteractive apt_network install -y --no-install-recommends "$@"
+      # apt cannot fetch local archives with --download-only, so their installs
+      # stay one call. Package triggers can be slow on cloud filesystems; the
+      # longer whole-call deadline covers them while Acquire timeouts still
+      # bound each network request.
+      APT_DEADLINE=600 DEBIAN_FRONTEND=noninteractive apt_network install -y --no-install-recommends "$@"
       return
     fi
   done

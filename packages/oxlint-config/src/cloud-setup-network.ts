@@ -32,7 +32,8 @@ apt_network() {
   # --print-uris reads configured indexes without contacting their servers.
   hosts="$(set -o pipefail; apt-get --print-uris update | awk -F/ '/^\047https?:\/\// { host=$3; sub(/.*@/, "", host); if (!seen[host]++) { printf "%s%s", separator, host; separator="," } }')" || return "$?"
   [[ -n "$hosts" ]] || hosts='configured APT hosts'
-  network_run "$hosts" 180 apt-get -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o Acquire::Retries=3 -o APT::Update::Error-Mode=any "$@"
+  # APT_DEADLINE: whole-call seconds; callers that also unpack packages may extend it.
+  network_run "$hosts" "${"$"}{APT_DEADLINE:-180}" apt-get -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o Acquire::Retries=3 -o APT::Update::Error-Mode=any "$@"
 }
 apt_refresh_for() {
   # Skip the refresh only when the install downloads nothing: then no package
