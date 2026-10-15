@@ -3,6 +3,12 @@
     "install": "bun install --frozen-lockfile",
     "tools": {
       "time": "1.9"
+    },
+    "rust": {
+      "components": [
+        "clippy",
+        "rustfmt"
+      ]
     }
   },
   "engineFloors": [
