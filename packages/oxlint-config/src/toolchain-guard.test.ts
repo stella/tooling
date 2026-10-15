@@ -13,6 +13,11 @@ import path from "node:path";
 
 import toolchain from "../toolchain.json";
 import { cloudSetupPath, generateCloudSetup } from "./cloud-setup";
+import {
+  cloudClaudeSettingsPath,
+  cloudSessionStartHook,
+  mergeCloudSessionStartHook,
+} from "./cloud-setup-claude";
 import type { parseCloudSetup } from "./cloud-setup-schema";
 import { readGitTrackedOutput } from "./git-tracked-output";
 import {
@@ -583,6 +588,7 @@ const cloudDeclaration = {
   install: "bun install --frozen-lockfile",
 } as const;
 const cloudFixtureFiles = () => ({
+  [cloudClaudeSettingsPath]: mergeCloudSessionStartHook(undefined),
   "stll-toolchain.json": JSON.stringify({
     optOuts: [],
     cloud: cloudDeclaration,
@@ -1008,5 +1014,60 @@ test("optional shebang discovery skips symlinks without tracked regular targets"
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }
+  }
+});
+
+test("cloud drift requires the tracked remote-only SessionStart hook while preserving script checks", () => {
+  const files = cloudFixtureFiles();
+  const script = generateCloudSetup({
+    policy,
+    cloud: { ...cloudDeclaration, services: [] },
+    nodeVersion: "26.10.0",
+  });
+  for (const settings of [
+    undefined,
+    "{}",
+    "{",
+    JSON.stringify({
+      disableAllHooks: true,
+      hooks: { SessionStart: [cloudSessionStartHook] },
+    }),
+    JSON.stringify({
+      hooks: {
+        SessionStart: [{ ...cloudSessionStartHook, matcher: "startup" }],
+      },
+    }),
+  ]) {
+    const tracked = {
+      ...Object.fromEntries(
+        Object.entries(files).filter(
+          ([file]) => file !== cloudClaudeSettingsPath,
+        ),
+      ),
+      [cloudSetupPath]: script,
+      ...(settings === undefined
+        ? {}
+        : { [cloudClaudeSettingsPath]: settings }),
+    };
+    expect(fixture(tracked)).toContainEqual(
+      expect.objectContaining({
+        path: cloudClaudeSettingsPath,
+        rule: "cloud-setup-drift",
+      }),
+    );
+    expect(
+      fixture(tracked).some(({ path: file }) => file === cloudSetupPath),
+    ).toBe(false);
+    if (settings === undefined)
+      expect(
+        fixture(tracked, {
+          [cloudClaudeSettingsPath]: files[cloudClaudeSettingsPath],
+        }),
+      ).toContainEqual(
+        expect.objectContaining({
+          path: cloudClaudeSettingsPath,
+          rule: "cloud-setup-drift",
+        }),
+      );
   }
 });

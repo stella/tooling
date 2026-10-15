@@ -268,14 +268,30 @@ test("dependency installation uses the invoking user, home, private cache and pi
   withRepository((root) => {
     const generated = generate(declaration);
     const start = generated.indexOf("\ndependency_install() {");
-    const closing = generated.indexOf("\n}\n", start);
+    const closing = generated.indexOf("\n}\n\n", start);
     if (start < 0 || closing < start)
       throw new Error("Missing emitted dependency installer boundary");
     mkdirSync(join(root, "home"));
+    writeFileSync(
+      join(root, "bun.lock"),
+      JSON.stringify({
+        packages: {
+          fixture: [
+            "fixture@1.0.0",
+            "https://user:secret@packages.example.test/fixture.tgz",
+          ],
+        },
+      }),
+    );
+    writeFileSync(
+      join(root, ".npmrc"),
+      "registry=https://registry.example.test\n",
+    );
     const cacheParent = join(root, "cache");
     const helper = generated
       .slice(start, closing + 3)
-      .replaceAll("/var/cache/stll-cloud", cacheParent);
+      .replaceAll("/var/cache/stll-cloud", cacheParent)
+      .replaceAll('"$NODE_DIR/bin/node"', '"$TEST_NODE"');
     expect(helper).not.toMatch(/\b(?:curl|wget|apt-get|systemctl)\b/);
     const assignments = ["BUN_VERSION", "BUN_DIR", "NODE_VERSION", "NODE_DIR"]
       .map((name) => {
@@ -321,21 +337,38 @@ stat() {
   else fail 'Unexpected stat target'; fi
 }
 runuser() {
-  [[ "$#" == 10 && "$1" == -u && "$2" == "$OUTPUT_USER" && "$3" == -- && "$4" == env ]] || fail 'Dependencies do not run as the caller'
+  [[ "$#" == 11 && "$1" == -u && "$2" == "$OUTPUT_USER" && "$3" == -- && "$4" == env ]] || fail 'Dependencies do not run as the caller'
   [[ "$5" == "HOME=$OUTPUT_HOME" && "$6" == "BUN_INSTALL_CACHE_DIR=$BUN_CACHE" && "$7" == "PATH=$EXPECTED_PATH" ]] || fail 'Caller environment is missing'
-  [[ "$8" == '/opt/stll-cloud/bun/${policy.bun}/bun' && "$9" == install ]] || fail 'Pinned install is missing'
+  [[ "$8" == BUN_CONFIG_HTTP_IDLE_TIMEOUT=20 ]] || fail 'Verified Bun socket timeout is missing'
+  [[ "$9" == '/opt/stll-cloud/bun/${policy.bun}/bun' ]] || fail 'Pinned install is missing'
   shift 9
-  [[ "$1" == --frozen-lockfile ]] || fail 'Frozen install is missing'
+  [[ "$1" == install && "$2" == --frozen-lockfile ]] || fail 'Frozen install is missing'
   printf '%s:%s\n' "$OUTPUT_UID" "$OUTPUT_USER"
+}
+network_run() {
+  [[ "$1" == environment.example.test,packages.example.test,registry.example.test,registry.npmjs.org && "$2" == 240 && "$3" == runuser ]] || fail 'Install deadline or safe download hosts differ'
+  shift 2
+  "$@"
 }
 ${helper}
 dependency_install
 dependency_install`,
       ],
-      { cwd: root, env: { ...process.env, FIXTURE_ROOT: root } },
+      {
+        cwd: root,
+        env: {
+          ...process.env,
+          FIXTURE_ROOT: root,
+          TEST_NODE: process.execPath,
+          BUN_CONFIG_REGISTRY: "",
+          NPM_CONFIG_REGISTRY: "https://user:secret@environment.example.test",
+          npm_config_registry: "",
+          XDG_CONFIG_HOME: join(root, "home"),
+        },
+      },
     );
-    expect(result.exitCode).toBe(0);
     expect(result.stderr.toString()).toBe("");
+    expect(result.exitCode).toBe(0);
     expect(result.stdout.toString()).toBe(
       "4242:fixture-caller\n4242:fixture-caller\n",
     );

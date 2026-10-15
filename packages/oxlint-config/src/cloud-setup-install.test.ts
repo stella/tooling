@@ -17,6 +17,7 @@ import { join } from "node:path";
 
 import policy from "../toolchain.json";
 import { renderCloudServiceInstall } from "./cloud-setup-install";
+import { cloudServices } from "./cloud-setup-schema";
 import { parseToolchainPolicy } from "./toolchain-schema";
 
 const fragment = renderCloudServiceInstall({
@@ -37,7 +38,7 @@ const runInstall = (directory: string, exitCode: number) => {
       `
 fail() { printf '%s\\n' "$1" >&2; exit 1; }
 flock() { [[ "$*" == '-x -w 120 8' ]]; }
-apt-get() {
+apt_network() {
   [[ "$DEBIAN_FRONTEND" == noninteractive ]]
   [[ "$(cat "$FIXTURE_POLICY")" == $'#!/bin/sh\\nexit 101' ]]
   [[ -x "$FIXTURE_POLICY" ]]
@@ -61,9 +62,9 @@ apt_install fixture-package
   );
 };
 
-test("package installation restores policy bytes and mode across success and failure", () => {
+test("package installation restores policy bytes and mode across success, failure and timeout", () => {
   const original = "#!/bin/sh\n# Existing host policy\nexit 0\n";
-  for (const exitCode of [0, 17]) {
+  for (const exitCode of [0, 17, 124]) {
     for (const existing of [true, false]) {
       const directory = mkdtempSync(join(tmpdir(), "cloud-apt-test-"));
       try {
@@ -111,6 +112,101 @@ test("package installation refuses symlink policies before invoking apt", () => 
 const pgdgFragment = renderCloudServiceInstall({
   ...parseToolchainPolicy(policy),
   services: ["postgres"],
+});
+
+test("service installation uses shared bounded network helpers for every download and package operation", () => {
+  for (let mask = 0; mask < 2 ** cloudServices.length; mask += 1) {
+    const services = cloudServices.filter(
+      (_, index) => (mask & (1 << index)) !== 0,
+    );
+    const rendered = renderCloudServiceInstall({
+      ...parseToolchainPolicy(policy),
+      services,
+    });
+    expect(rendered).not.toMatch(/\b(?:curl|wget|apt-get)\b/);
+    expect(rendered).toContain(
+      'DEBIAN_FRONTEND=noninteractive apt_network install -y --no-install-recommends "$@"',
+    );
+    expect([...rendered.matchAll(/\bapt_network update\b/g)].length).toBe(
+      services.length,
+    );
+    expect(
+      rendered.includes(
+        'download_file https://www.postgresql.org/media/keys/ACCC4CF8.asc "$key" 45',
+      ),
+    ).toBe(services.includes("postgres"));
+    for (const artifact of ["server", "tools"])
+      expect(
+        rendered.includes(
+          `download_file "$${artifact}_url" "$scratch/valkey-${artifact}.deb" 120`,
+        ),
+      ).toBe(services.includes("valkey"));
+  }
+});
+
+test("service provisioning passes explicit download deadlines and stops before package installation on failure", () => {
+  const directory = mkdtempSync(join(tmpdir(), "cloud-download-test-"));
+  try {
+    for (const service of cloudServices) {
+      for (const arch of ["amd64", "arm64"] as const) {
+        const calls = join(directory, "download.calls");
+        const isolated = renderCloudServiceInstall({
+          ...parseToolchainPolicy(policy),
+          services: [service],
+        }).replaceAll(
+          `/usr/lib/postgresql/${policy.postgres}/bin`,
+          "$FIXTURE_PG_BIN",
+        );
+        const result = Bun.spawnSync(
+          [
+            "bash",
+            "-eu",
+            "-c",
+            `
+fail() { printf '%s\\n' "$1" >&2; exit 1; }
+${isolated}
+id() { return 0; }
+service_account_ready() { :; }
+pgdg_sources_ready() { PGDG_SOURCE_STATE=missing; }
+valkey-server() { return 1; }
+valkey-cli() { return 1; }
+mktemp() {
+  if [[ "$*" == -d ]]; then
+    mkdir -p "$FIXTURE_TMP/scratch"
+    printf '%s\\n' "$FIXTURE_TMP/scratch"
+  else printf '%s\\n' "$FIXTURE_TMP/signing-key"; fi
+}
+download_file() { printf '%s\\t%s\\t%s' "$1" "$2" "$3" > "$FIXTURE_CALLS"; exit 73; }
+apt_network() { fail 'Unexpected package operation after failed download'; }
+install_services
+`,
+          ],
+          {
+            env: {
+              ...process.env,
+              ARCH: arch,
+              TMPDIR: directory,
+              FIXTURE_TMP: directory,
+              FIXTURE_CALLS: calls,
+              FIXTURE_PG_BIN: join(directory, "missing-bin"),
+            },
+          },
+        );
+        expect(result.exitCode).toBe(73);
+        expect(result.stderr.toString()).toBe("");
+        const [url, output, deadline] = readFileSync(calls, "utf8").split("\t");
+        expect(url).toBe(
+          service === "postgres"
+            ? "https://www.postgresql.org/media/keys/ACCC4CF8.asc"
+            : policy.valkeyArtifacts[arch].server.url,
+        );
+        expect(output?.startsWith(`${directory}/`)).toBe(true);
+        expect(deadline).toBe(service === "postgres" ? "45" : "120");
+      }
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 type SourcePreflightOptions = {
@@ -225,7 +321,7 @@ test("PGDG preflight reuses verified managed sources and precedes provisioning",
     pgdgFragment.indexOf(
       "pgdg_sources_ready /etc/apt/sources.list.d/stll-pgdg.list",
     ),
-  ).toBeLessThan(pgdgFragment.indexOf("curl --fail"));
+  ).toBeLessThan(pgdgFragment.indexOf("download_file "));
   for (const text of [
     `${canonical}\n`,
     "# existing unmanaged content\n",
@@ -288,8 +384,8 @@ ${isolated}
 id() { return 0; }
 service_account_ready() { :; }
 pgdg_sources_ready() { echo 'unexpected source preflight' >&2; exit 90; }
-curl() { echo 'unexpected network' >&2; exit 91; }
-apt-get() { echo 'unexpected apt' >&2; exit 92; }
+download_file() { echo 'unexpected network' >&2; exit 91; }
+apt_network() { echo 'unexpected apt' >&2; exit 92; }
 install_services
 `,
       ],

@@ -1,4 +1,5 @@
 import { cloudSetupPath } from "./cloud-setup";
+import { cloudClaudeSettingsPath } from "./cloud-setup-claude";
 import {
   isComposeDefinitionPath,
   isKubernetesDefinitionPath,
@@ -79,7 +80,12 @@ export const isShellScript = (file: string, text = "") =>
 
 /** Lockfiles establish ecosystem presence without reading their dependency graphs. */
 export const toolchainInputKind = (file: string, text = "") => {
-  if (file === cloudSetupPath) return "config";
+  if (
+    file === cloudSetupPath ||
+    file === cloudClaudeSettingsPath ||
+    file === "Cargo.lock"
+  )
+    return "config";
   if (githubAutomationFileKind(file) !== undefined) return "config";
   if (excludedInputPath(file)) return undefined;
   if (

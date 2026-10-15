@@ -298,7 +298,16 @@ Add an explicit declaration to tracked root `stll-toolchain.json`:
   "cloud": {
     "services": ["postgres", "valkey"],
     "install": "bun install --frozen-lockfile",
-    "envFile": ".env.cloud"
+    "envFile": ".env.cloud",
+    "rust": {
+      "components": ["clippy", "rustfmt"],
+      "targets": ["wasm32-unknown-unknown"]
+    },
+    "tools": {
+      "cargo-nextest": "0.9.148",
+      "wasm-bindgen-cli": "0.2.126",
+      "uv": "0.13.1"
+    }
   }
 }
 ```
@@ -314,6 +323,26 @@ repository-relative path; its existing parent must be safe at runtime. Track an 
 bunx --no-install stll-cloud-setup
 ```
 
+Rust is optional. A tracked root `rust-toolchain.toml` enables it automatically;
+otherwise declare `cloud.rust` to enable it. `cloud.rust.toolchain`, when given,
+must be an exact stable Rust patch. The root toolchain file supplies the pin when
+present; without either pin, the installed shared policy supplies it. Conflicting
+pins fail generation. The selected pin must match the shared policy or a recorded
+`rustExceptions` pin. `components` and `targets` select additional rustup
+components and compilation targets; the root toolchain file also contributes
+its selections. A declared root profile must be `minimal`. Rust installation uses
+the minimal profile and a pinned, checksum-verified rustup installer. Rust-enabled
+setup also provisions Ubuntu's `build-essential` package for native compilation
+and linking.
+
+`cloud.tools` is a closed object: the supported keys are `cargo-nextest`,
+`wasm-bindgen-cli`, and `uv`. Each value must be an exact release supported by
+the installed tooling package. Unknown tools and unsupported versions fail
+generation. These tools use versioned upstream Linux binaries with committed
+SHA256 pins for amd64 and arm64; setup does not build them with `cargo install`.
+`wasm-bindgen-cli` requires the matching `wasm-bindgen` crate version in tracked
+root `Cargo.lock`. Regenerate after updating the lockfile or any tool pin.
+
 Generation uses the installed policy's Bun, Node, PostgreSQL, and Valkey pins.
 PostgreSQL uses the PGDG major-version packages; minor updates within the pinned
 major are accepted for the disposable database. Before adding PGDG, provisioning
@@ -323,8 +352,18 @@ binary DEBs for the declared release and architecture, verifies the policy's
 SHA256 pins, and installs those local files with apt. It does not resolve Valkey
 from a mutable package index.
 The command writes `.agents/cloud-setup.sh` with executable permissions and
-refuses symlink parents or destinations and hard-linked destinations. `stll-toolchain-check` rejects missing,
-drifted, or undeclared tracked scripts with mandatory `cloud-setup-drift`.
+merges a `SessionStart` hook into `.claude/settings.json`. The hook runs
+`bash .agents/cloud-setup.sh start` only when `CLAUDE_CODE_REMOTE=true`, including
+sessions that reuse cached filesystems. After successful startup, it appends the
+managed shell profile's literal exports to `CLAUDE_ENV_FILE` when available, so
+subsequent Claude commands select pinned runtimes and tools before preinstalled
+versions while retaining their inherited `PATH`. Existing environment-file
+content, unrelated settings, and hooks are preserved. Invalid JSON, disabled
+hooks, or conflicting cloud startup entries stop generation with a repair
+instruction. Commit both generated files.
+Generation refuses symlink parents or destinations and hard-linked destinations.
+`stll-toolchain-check` rejects missing, drifted, or undeclared tracked scripts and
+missing or conflicting startup hooks with mandatory `cloud-setup-drift`.
 Regenerate after changing the policy or declaration. `stll-cloud-setup --help`
 prints usage without reading repository configuration.
 
@@ -337,11 +376,19 @@ Both commands can be rerun. Missing or unknown subcommands print usage and
 exit 2; there is no implicit lifecycle mode. The script supports Ubuntu 24.04
 with root access or passwordless sudo and fails when required capabilities
 or pinned installations are unavailable. `install` provisions runtimes,
-dependencies, and declared services; `start` restores local services after
+dependencies, and declared services; `start` refreshes the managed shell environment
+and restores local services after
 cached environments lose running processes. Services bind only to localhost.
 System provisioning runs as root; frozen dependencies run as the invoking user
 with that user's home and a private, user-owned Bun cache. Package installation
 does not permit automatic downgrades.
+Runtime commands and declared tools are exposed through `/usr/local/bin`, so a
+fresh shell can use Bun, Node, Rust, and the tools without sourcing `.cargo/env`
+or changing `PATH`. Rust proxies select the provisioned system toolchain.
+Installation also writes `/etc/profile.d/stll-cloud.sh` and sources it from the
+invoking user's Bash startup files. The profile puts pinned Node and Bun ahead
+of inherited runtime directories while preserving unrelated paths and existing
+startup settings. Rerunning installation does not duplicate these source entries.
 If a newer Valkey package is already installed, provisioning fails rather than
 downgrading it; use an environment compatible with the pinned release.
 The environment file contains `NODE_ENV=test` and declared local connection
@@ -352,6 +399,40 @@ commands and repository adoption are separate configuration steps.
 Environments may cache filesystems without preserving service processes.
 Run `start` at every session start, including sessions that reuse installed files.
 The supported OS, privileges, and pinned runtime requirements are checked explicitly.
+
+### Network hosts
+
+Downloads use a 20-second connection timeout, three retries, and a total deadline
+(45 seconds for manifests and keys; 120 seconds for binary archives). APT uses
+20-second Acquire timeouts, three retries, and a 180-second command deadline.
+Rust provisioning commands have a 180-second deadline. Frozen dependency
+installation uses a 20-second Bun HTTP idle timeout and a 240-second overall
+deadline, including lifecycle scripts. Timeout failures name the download host
+or the configured package hosts; a redirected download names its original host.
+
+Allow these direct download hosts for the generated installer:
+
+| Host                   | Downloads                                                                |
+| ---------------------- | ------------------------------------------------------------------------ |
+| `nodejs.org`           | Node archives and SHA256 manifests                                       |
+| `github.com`           | Bun archives and checksums; pinned nextest, wasm-bindgen and uv releases |
+| `static.rust-lang.org` | Pinned rustup-init, Rust manifests, toolchains, components and targets   |
+| `www.postgresql.org`   | PostgreSQL repository signing key                                        |
+| `apt.postgresql.org`   | PostgreSQL packages and repository metadata                              |
+| `download.valkey.io`   | Pinned Valkey binary packages                                            |
+
+GitHub release downloads redirect to `release-assets.githubusercontent.com`;
+allow that host as well. This includes Bun and the optional prebuilt tools.
+Rust provisioning uses `static.rust-lang.org` for both distribution and update endpoints.
+
+System prerequisites use the image's configured Ubuntu apt repositories:
+standard Ubuntu 24.04 images use `archive.ubuntu.com`, `security.ubuntu.com`,
+or `ports.ubuntu.com`, depending on architecture. Images configured with a
+mirror need that mirror's host instead. Frozen Bun installation also needs
+the package registry (normally `registry.npmjs.org`) and any download hosts
+referenced by that repository's lockfile or dependency lifecycle scripts.
+Those repository-specific hosts are not chosen by this generator. `start`
+performs no downloads.
 
 ## Published package contracts
 
