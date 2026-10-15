@@ -583,6 +583,48 @@ test("Bun resolution locations prevent root/member compiler swaps from looking u
     });
 });
 
+test("a nested version 2 Bun lockfile beside a version 1 root is compared", async () => {
+  const { repo, write, commit } = fixture();
+  write("package.json", {
+    packageManager: "bun@1.4.3",
+    devDependencies: { typescript: "6.0.3" },
+  });
+  write("bun.lock", {
+    lockfileVersion: 1,
+    workspaces: { "": { devDependencies: { typescript: "6.0.3" } } },
+    packages: { typescript: ["typescript@6.0.3"] },
+  });
+  const extensionLock = (version: string) => ({
+    lockfileVersion: 2,
+    configVersion: 1,
+    workspaces: { "": { devDependencies: { typescript: version } } },
+    packages: {
+      typescript: [`typescript@${version}`, "", {}, "sha512-fixture"],
+    },
+  });
+  write("plugins/extension/package.json", {
+    devDependencies: { typescript: "6.0.3" },
+  });
+  write("plugins/extension/bun.lock", extensionLock("6.0.3"));
+  const since = commit();
+  write("README.md", "unrelated\n");
+  commit();
+  expect(await detectToolchainChanges({ repo, since })).toMatchObject({
+    status: "compared",
+    changed: false,
+  });
+  write("plugins/extension/package.json", {
+    devDependencies: { typescript: "6.0.4" },
+  });
+  write("plugins/extension/bun.lock", extensionLock("6.0.4"));
+  commit();
+  expect(await detectToolchainChanges({ repo, since })).toMatchObject({
+    status: "compared",
+    changed: true,
+    tools: ["typescript"],
+  });
+});
+
 test("pnpm importer alias swaps detect changes with an unchanged global package pool", async () => {
   const { repo, write, commit } = fixture();
   write("package.json", {
