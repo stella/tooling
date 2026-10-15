@@ -468,7 +468,7 @@ describe("consumer compatibility policy", () => {
         });
         expect(check(actual, committed)).toEqual([]);
       }
-    for (const node of [undefined, "", ">=26", "latest"]) {
+    for (const node of [undefined, ">=26", "latest"]) {
       const actual = {
         engines: { bun: ">=1.4.3", ...(node === undefined ? {} : { node }) },
       };
@@ -480,6 +480,15 @@ describe("consumer compatibility policy", () => {
       expect(
         check(actual, committed).some(({ field }) => field === "engines.bun"),
       ).toBe(true);
+    }
+  });
+
+  test("contract parsing rejects empty runtime engine declarations", () => {
+    for (const engine of ["node", "bun"]) {
+      const manifest = { engines: { [engine]: "" } };
+      expect(() =>
+        resolveManifestContract({ packer: "pnpm", manifest, target }),
+      ).toThrow(`engines.${engine} must be a nonempty string`);
     }
   });
 

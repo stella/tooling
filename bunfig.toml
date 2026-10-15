@@ -3,5 +3,5 @@
 minimumReleaseAge = 432_000
 minimumReleaseAgeExcludes = [
   # First-party dependency consumed from the registry.
-  "@stll/time", # quarantine-excluded-since: 2026-10-15
+  "@stll/time", # quarantine-excluded-since: 2026-10-15T12:59:08.000Z
 ]
