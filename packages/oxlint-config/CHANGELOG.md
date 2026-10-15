@@ -1,5 +1,11 @@
 # @stll/oxlint-config
 
+## 1.2.3
+
+### Patch Changes
+
+- [#134](https://github.com/stella/tooling/pull/134) [`e68b544`](https://github.com/stella/tooling/commit/e68b5447f19c1d162e12102496870d9e87313bda) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Keep the cloud setup network deadline on package downloads only; package installation and configuration run offline afterwards.
+
 ## 1.2.2
 
 ### Patch Changes
