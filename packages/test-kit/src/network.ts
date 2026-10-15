@@ -68,6 +68,15 @@ const REQUEST_BODY_HEADERS = [
 
 type FetchRefusal = (url: URL) => NetworkAccessError | undefined;
 
+const NORMALIZED_METHODS = new Set([
+  "DELETE",
+  "GET",
+  "HEAD",
+  "OPTIONS",
+  "POST",
+  "PUT",
+]);
+
 // What a hop needs from the caller's request, whichever form it came in.
 const requestParts = (
   input: Parameters<typeof fetch>[0],
@@ -85,9 +94,11 @@ const requestParts = (
   ) {
     bodyReplay = "request";
   }
+  const method = init?.method ?? request?.method ?? "GET";
+  const normalized = method.toUpperCase();
   return {
     headers: new Headers(init?.headers ?? request?.headers),
-    method: (init?.method ?? request?.method ?? "GET").toUpperCase(),
+    method: NORMALIZED_METHODS.has(normalized) ? normalized : method,
     redirect: init?.redirect ?? request?.redirect ?? "follow",
     // A Request's own signal must keep cancelling the later hops.
     signal: init?.signal ?? request?.signal ?? null,

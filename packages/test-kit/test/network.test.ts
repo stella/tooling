@@ -318,6 +318,29 @@ describe("network guard", () => {
           ? new Response(null, { headers: { location: "/next" }, status })
           : new Response("done");
 
+      test.each([
+        ["myMethod", "myMethod"],
+        ["post", "POST"],
+        ["dElEtE", "DELETE"],
+        ["get", "GET"],
+        ["head", "HEAD"],
+        ["options", "OPTIONS"],
+        ["put", "PUT"],
+        ["patch", "patch"],
+      ])(
+        "a 307 preserves fetch method normalization for %s",
+        async (method, expected) => {
+          await withFake(redirectOnce(307), async (calls) => {
+            await fetch("https://localhost:8443/start", { method });
+            // The transport normalizes each hop's Request before sending it.
+            expect(
+              calls.map((call) => new Request(call.url, call.init).method),
+            ).toEqual([expected, expected]);
+            expect(calls[1]?.init?.method).toBe(expected);
+          });
+        },
+      );
+
       test("every hop keeps the caller's transport options", async () => {
         await withFake(redirectOnce(307), async (calls) => {
           const tlsOptions = { rejectUnauthorized: false };
