@@ -622,8 +622,8 @@ ranges, expressions, empty
 values, or omitted runtime versions report an unreadable snapshot and run parity
 even when their committed text is unchanged.
 
-On pull requests, run the repository's ordinary Bun typecheck and the probe,
-then select parity using the same detector:
+On pull requests, run the repository's ordinary Bun typecheck and select
+parity with the same detector; run the probe on demand:
 
 ```sh
 stll-typecheck-probe --project packages/api/tsconfig.json --seed-dir packages/api/src -- bun run typecheck
@@ -640,8 +640,16 @@ Repeat the probe for independently checked projects as needed.
 
 Conditional parity runs when Bun, TypeScript, or shared declarations change;
 otherwise it prints `parity skipped: toolchain unchanged since ...`. An unreadable
-reference runs full parity. Nightly jobs omit `--changed-since` to run full parity.
-Node and lint-tool changes still force full CI through the shared detector.
+reference runs full parity. Omit `--changed-since` to run full parity on demand.
+This repository runs conditional parity in CI, so a change to the compiler or
+toolchain is proven on the pull request that makes it. The probe, timed
+TypeScript checks and full parity run only through
+`.github/workflows/typecheck-proofs.yml` (`workflow_dispatch`), whose required
+`changed_since` input names the base of the change to prove: the detector
+compares the toolchain at that base with the head, so a default such as the
+previous commit could miss a change made earlier on the branch. It has no
+automatic or scheduled trigger. Node and lint-tool changes still force full CI
+through the shared detector.
 
 Workflow, composite-action, Docker, mise, and tool-version declarations are
 conservatively fingerprinted for compiler parity, including referenced tracked
