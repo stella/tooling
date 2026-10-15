@@ -425,6 +425,13 @@ cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo ci-stella-lint
 ```
 
+## Cloud setup
+
+This repository adopts its own shared cloud setup with pinned Bun, Node, and
+Rust (Clippy and rustfmt). Provision a cloud environment with
+`bash .agents/cloud-setup.sh install`; run `bash .agents/cloud-setup.sh start`
+at each session start (the committed Claude `SessionStart` hook does this).
+
 ## Releasing packages
 
 Add a Changeset for every pull request that changes a published package. Choose
