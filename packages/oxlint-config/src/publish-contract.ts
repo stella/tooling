@@ -341,12 +341,11 @@ export const checkPublishContract = ({
     if (range !== undefined && !satisfies(version, range))
       add(field, `${field} must support consumer version ${version}`);
   };
-  if (
-    !consumerNodeSupportMatches({
-      range: current.engines["node"],
-      node: policy.node,
-    })
-  )
+  const supportsConsumerNode = consumerNodeSupportMatches({
+    range: current.engines["node"],
+    node: policy.node,
+  });
+  if (!supportsConsumerNode)
     add(
       "engines.node",
       `engines.node must support consumer version ${policy.node}`,
@@ -361,8 +360,14 @@ export const checkPublishContract = ({
     current.peerDependencies["typescript"],
     policy.typescript,
   );
-  if ("bun" in current.engines)
-    add("engines.bun", "published packages must not require Bun");
+  if (
+    "bun" in current.engines &&
+    (current.engines["node"] === undefined || !supportsConsumerNode)
+  )
+    add(
+      "engines.bun",
+      "published packages declaring Bun must explicitly support the consumer Node version",
+    );
   for (const peer of ["bun", "bun-types", "@types/bun", "@typescript/native"])
     if (Object.hasOwn(current.peerDependencies, peer))
       add(

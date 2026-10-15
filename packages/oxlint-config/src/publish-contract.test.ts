@@ -457,6 +457,50 @@ describe("consumer compatibility policy", () => {
       }
   });
 
+  test("Bun engine support requires explicit compatible Node support", () => {
+    for (const node of ["*", ">=20", "^22"])
+      for (const bun of ["*", ">=1.4.3"]) {
+        const actual = { engines: { node, bun } };
+        const committed = resolveManifestContract({
+          packer: "pnpm",
+          manifest: actual,
+          target,
+        });
+        expect(check(actual, committed)).toEqual([]);
+      }
+    for (const node of [undefined, "", ">=26", "latest"]) {
+      const actual = {
+        engines: { bun: ">=1.4.3", ...(node === undefined ? {} : { node }) },
+      };
+      const committed = resolveManifestContract({
+        packer: "pnpm",
+        manifest: actual,
+        target,
+      });
+      expect(
+        check(actual, committed).some(({ field }) => field === "engines.bun"),
+      ).toBe(true);
+    }
+  });
+
+  test("compatible Node and Bun engine declarations do not permit a Bun-only target", () => {
+    const actual = { engines: { node: ">=20", bun: ">=1.4.3" } };
+    const bunTarget = { type: "javascript", targets: ["bun1.4.3"] } as const;
+    expect(
+      checkPublishContract({
+        packer: "pnpm",
+        manifest: actual,
+        target: bunTarget,
+        contract: resolveManifestContract({
+          packer: "pnpm",
+          manifest: actual,
+          target: bunTarget,
+        }),
+        policy,
+      }),
+    ).toMatchObject([{ field: "target" }]);
+  });
+
   test("a contract update cannot permit incompatible engines, peers or runtime targets", () => {
     for (const node of ["26.x", ">=26", ">22.12.0", "<22", "latest"]) {
       const actual = { engines: { node } };

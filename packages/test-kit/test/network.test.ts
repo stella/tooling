@@ -1,5 +1,8 @@
-import net, { connect as connectNet } from "node:net";
-import tls from "node:tls";
+import net, {
+  connect as connectNet,
+  createConnection as createNetConnection,
+} from "node:net";
+import tls, { connect as connectTls } from "node:tls";
 
 import {
   NetworkAccessError,
@@ -554,9 +557,6 @@ describe("network guard", () => {
     expect(() => tls.connect({ host: "example.com", port: 443 })).toThrow(
       NetworkAccessError,
     );
-    expect(() => connectNet({ host: "203.0.113.7", port: 5432 })).toThrow(
-      NetworkAccessError,
-    );
     // The (port, options) overload carries the host in the second argument.
     expect(() => tls.connect(443, { host: "example.com" })).toThrow(
       NetworkAccessError,
@@ -581,6 +581,52 @@ describe("network guard", () => {
         }),
       );
       expect(error).toBeInstanceOf(NetworkAccessError);
+    },
+  );
+
+  test.skipIf(typeof Bun !== "undefined")(
+    "socket named exports follow installation and restore original identities",
+    () => {
+      const originalNet = net;
+      const originalTls = tls;
+      const originalConnect = connectNet;
+      const originalCreateConnection = createNetConnection;
+      const originalTlsConnect = connectTls;
+      uninstall = installNetworkGuard({ environment: {} });
+      try {
+        expect(net).toBe(originalNet);
+        expect(tls).toBe(originalTls);
+        expect(connectNet).toBe(net.connect);
+        expect(createNetConnection).toBe(net.createConnection);
+        expect(connectTls).toBe(tls.connect);
+        expect(connectNet).not.toBe(originalConnect);
+        expect(createNetConnection).not.toBe(originalCreateConnection);
+        expect(connectTls).not.toBe(originalTlsConnect);
+      } finally {
+        uninstall();
+        uninstall = undefined;
+      }
+      expect(net).toBe(originalNet);
+      expect(tls).toBe(originalTls);
+      expect(connectNet).toBe(originalConnect);
+      expect(createNetConnection).toBe(originalCreateConnection);
+      expect(connectTls).toBe(originalTlsConnect);
+    },
+  );
+
+  test.skipIf(typeof Bun !== "undefined")(
+    "named socket factories reject remote hosts on Node",
+    () => {
+      uninstall = installNetworkGuard({ environment: {} });
+      expect(() => connectNet({ host: "203.0.113.7", port: 5432 })).toThrow(
+        NetworkAccessError,
+      );
+      expect(() =>
+        createNetConnection({ host: "203.0.113.7", port: 5432 }),
+      ).toThrow(NetworkAccessError);
+      expect(() => connectTls({ host: "example.com", port: 443 })).toThrow(
+        NetworkAccessError,
+      );
     },
   );
 

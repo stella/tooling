@@ -9,4 +9,4 @@ export {
 } from "vitest";
 export { vi } from "vitest";
 import { vi } from "vitest";
-export const spyOn = vi.spyOn;
+export const spyOn: typeof vi.spyOn = vi.spyOn;
