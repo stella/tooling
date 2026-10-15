@@ -95,7 +95,7 @@ const guard = async <T>(
 export const settledWithin = async <T>(
   promise: Promise<T>,
   options: HangGuard,
-): Promise<T> => guard(promise, options);
+): Promise<T> => await guard(promise, options);
 
 /** Resolves with the next `type` event on `target`. */
 export const waitForEvent = async (
@@ -106,7 +106,7 @@ export const waitForEvent = async (
   const { promise, resolve } = Promise.withResolvers<Event>();
   const listener = (event: Event) => resolve(event);
   target.addEventListener(type, listener, { once: true });
-  return guard(promise, {
+  return await guard(promise, {
     description: `a "${type}" event`,
     ...options,
   }).finally(() => target.removeEventListener(type, listener));

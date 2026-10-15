@@ -70,7 +70,7 @@ const abortableTimeout = async (
   };
   wait(milliseconds);
   signal?.addEventListener("abort", onAbort, { once: true });
-  return promise;
+  return await promise;
 };
 
 /** The real clock. The only place in the kit that reads ambient time. */
@@ -81,7 +81,7 @@ export const systemClock: Clock = {
   monotonic: () => performance.now(),
   sleep: async (milliseconds, options) => {
     assertDuration(milliseconds, "sleep");
-    return abortableTimeout(milliseconds, options);
+    return await abortableTimeout(milliseconds, options);
   },
 };
 
@@ -98,7 +98,7 @@ type Sleeper = {
 
 // A macrotask turn: lets the promise chain a woken sleeper resumes run to its
 // next await (often a new sleep) before the clock moves again. No time passes.
-const settle = async () =>
+const settle = () =>
   new Promise<undefined>((resolve) => {
     setImmediate(() => resolve(undefined));
   });
@@ -177,11 +177,11 @@ export const createTestClock = ({
       };
       sleepers.add(sleeper);
       signal?.addEventListener("abort", onAbort, { once: true });
-      return promise;
+      return await promise;
     },
     advance: async (milliseconds) => {
       assertDuration(milliseconds, "advance");
-      return advanceTo(mono + milliseconds);
+      return await advanceTo(mono + milliseconds);
     },
     advanceToNext: async () => {
       const next = earliest();

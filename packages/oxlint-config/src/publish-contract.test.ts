@@ -485,9 +485,9 @@ describe("consumer compatibility policy", () => {
 
   test("contract parsing rejects empty runtime engine declarations", () => {
     for (const engine of ["node", "bun"]) {
-      const manifest = { engines: { [engine]: "" } };
+      const actual = { engines: { [engine]: "" } };
       expect(() =>
-        resolveManifestContract({ packer: "pnpm", manifest, target }),
+        resolveManifestContract({ packer: "pnpm", manifest: actual, target }),
       ).toThrow(`engines.${engine} must be a nonempty string`);
     }
   });

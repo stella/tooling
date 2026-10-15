@@ -30,7 +30,9 @@ describe("test temp dirs", () => {
       created = dir.path;
       throw new Error("body failed");
     });
-    await expect(failing).rejects.toThrow("body failed");
+    expect(await rejectionOf(failing)).toMatchObject({
+      message: "body failed",
+    });
     expect(created).not.toBe("");
     expect(existsSync(created)).toBe(false);
   });
@@ -63,7 +65,9 @@ describe("test temp dirs", () => {
   });
 
   test("refuses a prefix that is not short kebab-case", async () => {
-    await expect(createTestTmpDir("../up")).rejects.toThrow("kebab-case");
+    expect(await rejectionOf(createTestTmpDir("../up"))).toMatchObject({
+      message: expect.stringContaining("kebab-case"),
+    });
   });
 });
 
@@ -91,7 +95,9 @@ describe("temp dir slot", () => {
     await slot.open();
     const running = slot.current().path;
     try {
-      await expect(slot.open()).rejects.toThrow("one test at a time");
+      expect(await rejectionOf(slot.open())).toMatchObject({
+        message: expect.stringContaining("one test at a time"),
+      });
       // The refused test's teardown runs first and must leave the directory.
       await slot.close();
       expect(existsSync(running)).toBe(true);
