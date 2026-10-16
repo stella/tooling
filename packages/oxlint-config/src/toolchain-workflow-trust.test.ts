@@ -21,6 +21,7 @@ type JobFixtureOptions = {
   needs?: string;
   jobIf?: string | boolean;
   stepIf?: string | boolean;
+  shell?: string;
 };
 
 const workflow = ({
@@ -29,6 +30,7 @@ const workflow = ({
   needs,
   jobIf,
   stepIf,
+  shell,
 }: JobFixtureOptions = {}) => `on: ${events}
 jobs:
   trust-check:
@@ -49,7 +51,7 @@ jobs:
 ${needs === undefined ? "" : `    needs: ${needs}\n`}${jobIf === undefined ? "" : `    if: ${JSON.stringify(jobIf)}\n`}    steps:
       - run: echo metadata-only
       - run: ${JSON.stringify(command)}
-${stepIf === undefined ? "" : `        if: ${JSON.stringify(stepIf)}\n`}`;
+${stepIf === undefined ? "" : `        if: ${JSON.stringify(stepIf)}\n`}${shell === undefined ? "" : `        shell: ${JSON.stringify(shell)}\n`}`;
 
 const expectUnsafe = (source: string, job = "inspect", step = 1) => {
   const findings = check(source);
@@ -159,7 +161,75 @@ const corepackCommands = [
   "corepack --help=pnpm",
 ];
 
+const formerlyExemptCommands = [
+  "bun --version",
+  "node --version",
+  "npm --version",
+  "npm install --ignore-scripts",
+  "npm ci --ignore-scripts",
+  "env CI=true npm ci --ignore-scripts",
+  "command npm install --ignore-scripts",
+  "bash -c 'npm ci --ignore-scripts'",
+  '\"${RUNNER_TEMP}/actionlint\" -color',
+  "command -v bunx",
+  "command -V npx",
+  "command -pv bunx",
+  "command -pV npx",
+  "bun install --frozen-lockfile --ignore-scripts",
+  'bun install "--ignore-scripts"',
+  "bun install --ignore-scripts=true",
+  "bun --cwd packages/core install --ignore-scripts",
+  "npm --prefix packages/core ci --ignore-scripts --no-audit",
+  "npm --ignore-scripts ci",
+  "bun --cwd packages/core install --frozen-lockfile --ignore-scripts",
+];
+
+const unknownCommands = [
+  "then echo ready",
+  "else echo ready",
+  "fi",
+  "elif test -n value; then echo ready; fi",
+  "if test -n value; then echo ready; else echo absent; else echo duplicate; fi",
+  "echo 'unclosed",
+  "if custom-check value; then echo ready; fi",
+  "if [ -f package.json ]; then echo present",
+  'echo value >> "$GITHUB_ENV"',
+  "RUN_COMMAND='bunx --no-install shared-check'",
+  "printf -v RESULT '%s' value",
+  "true ignored-argument",
+  "false ignored-argument",
+  "exit unknown-status",
+  'cat "$INPUT_FILE"',
+  'head -n "$LIMIT" README.md',
+  "jq '.changed | input' changes.json",
+  "gh api repos/stella/tooling/pulls/150 --method GET --input payload.json",
+  "gh api repos/stella/tooling/pulls/150 --method GET -H 'X-Custom: value'",
+  "stll-toolchain-changed --since origin/main",
+  "custom-check --version",
+  "unknown-command --help",
+  "bash ./scripts/check",
+  "source scripts/check.sh",
+  ". ./scripts/check.sh",
+  "sh -c ./scripts/check",
+  'echo "$(custom-check)"',
+  'printf "%s" "$(custom-check)"',
+  'test -f "$(custom-check)"',
+  "git diff --ext-diff",
+  "git --exec-path=./scripts diff --name-only",
+  "git -c core.sshCommand=./scripts/check fetch origin",
+  "git fetch ext::./scripts/check",
+  "gh api repos/stella/tooling/issues --method POST -f title=example",
+  "gh api repos/stella/tooling/issues -f title=example",
+  "gh pr checkout 150",
+  "jq -f scripts/filter.jq data.json",
+  "yq --inplace '.x = 1' data.yml",
+  "yq eval '.jobs | load(\"scripts/config.yml\")' ci.yml",
+  'cat "$(custom-check)"',
+];
+
 const commands = [
+  ...formerlyExemptCommands,
+  ...unknownCommands,
   ...corepackCommands,
   ...interpreterCommands,
   ...managerCommands,
@@ -216,7 +286,7 @@ test.each(commands)(
   },
 );
 
-const informationCommands = [
+const formerInformationCommands = [
   ...["--version", "-v", "--help", "-h"].map((flag) => `corepack ${flag}`),
   '"corepack" "--version"',
   "env CI=true corepack --version",
@@ -238,42 +308,26 @@ const informationCommands = [
   "bash -c 'python3 -V'",
 ];
 
-test.each(informationCommands)(
-  "exact informational invocation %s needs no trust gate",
+test.each(formerInformationCommands)(
+  "runtime metadata invocation %s requires the declared trust gate",
   (command) => {
-    expect(check(workflow({ command }))).toEqual([]);
+    expectUnsafe(workflow({ command }));
+    expect(
+      check(workflow({ command, needs: "trust-check", jobIf: canonical })),
+    ).toEqual([]);
   },
 );
 
-test("quoted documentation and script-free installation do not execute dependencies", () => {
+test("literal quoted documentation does not execute commands", () => {
   for (const command of [
     'echo "bunx --no-install shared-check"',
     "echo npx shared-check",
     "printf '%s\\n' './node_modules/.bin/oxlint .; bun run check:toolchain'",
-    "RUN_COMMAND='bunx --no-install shared-check'",
     "# bunx --no-install shared-check\necho metadata-only",
-    "bun --version",
-    "node --version",
-    "npm --version",
-    "npm install --ignore-scripts",
-    "npm ci --ignore-scripts",
-    "env CI=true npm ci --ignore-scripts",
-    "command npm install --ignore-scripts",
-    "bash -c 'npm ci --ignore-scripts'",
     'echo "npm run lint; pnpm install; yarn test"',
-    "git diff --name-only",
-    '"${RUNNER_TEMP}/actionlint" -color',
-    "command -v bunx",
-    "command -V npx",
-    "command -pv bunx",
-    "command -pV npx",
     'echo "node scripts/check.mjs"',
     'echo "corepack pnpm test; corepack npm ci --ignore-scripts"',
     "printf '%s\\n' 'node --test; python3 -m pytest'",
-    "bun install --frozen-lockfile --ignore-scripts",
-    'bun install "--ignore-scripts"',
-    "bun install --ignore-scripts=true",
-    "bun --cwd packages/core install --ignore-scripts",
   ]) {
     expect(check(workflow({ command }))).toEqual([]);
   }
@@ -671,7 +725,7 @@ test("Actions event comparisons use case-insensitive string equality", () => {
   );
 });
 
-test("unknown package-manager flags and inline execution never establish install-only status", () => {
+test("package-manager flags never establish pre-trust execution permission", () => {
   for (const command of [
     "bun --eval=process.exit(0)",
     "bun --eval=process.exit(0) install --ignore-scripts",
@@ -684,15 +738,140 @@ test("unknown package-manager flags and inline execution never establish install
     "bun install --ignore-scripts && bun run check",
   ])
     expectUnsafe(workflow({ command }));
-  for (const command of [
-    "npm --prefix packages/core ci --ignore-scripts --no-audit",
-    "npm --ignore-scripts ci",
-    "bun --cwd packages/core install --frozen-lockfile --ignore-scripts",
-  ])
-    expect(check(workflow({ command }))).toEqual([]);
 });
 
 test.each(["./scripts/check", "scripts/check", "../shared/check"])(
   "relative executable %s follows the declared trust gate",
   (command) => expectUnsafe(workflow({ command })),
 );
+
+const readOnlyCommands = [
+  "test -n value",
+  "test -z ''",
+  "test -e package.json",
+  "test -d .github",
+  "test ready = ready",
+  "[ ready != absent ]",
+  "[[ ready == ready ]]",
+  "if [ -f package.json ]; then echo present; else echo absent; fi",
+  "if test -n value; then echo present; elif test -z ''; then echo empty; fi",
+  "if test -n value; then if test -f package.json; then echo ready; fi; else echo absent; fi",
+  "echo ready",
+  "printf '%s\\n' ready",
+  "test -f package.json",
+  "[ -f package.json ]",
+  "[[ -f package.json ]]",
+  "true",
+  "false",
+  "exit 0",
+  "cat package.json",
+  "ls .github/workflows",
+  "head -n 5 README.md",
+  "tail -n 5 README.md",
+  "wc -l README.md",
+  "jq -r '.changed' changes.json",
+  "yq eval '.jobs' .github/workflows/ci.yml",
+  "git diff --name-only",
+  "git log -n5 --format=%H",
+  "git log -n 5 --oneline",
+  "git ls-files -z",
+  "git show --stat HEAD",
+  "git rev-parse HEAD",
+  "git merge-base HEAD origin/main",
+  "git ls-files --cached",
+  "git fetch --no-tags origin main",
+  "gh api --method GET repos/stella/tooling/pulls/150",
+  "gh api repos/stella/tooling/pulls/150",
+  "gh api repos/stella/tooling/pulls/150 --method GET",
+  "gh api repos/stella/tooling/pulls/150 -X GET",
+  "gh pr view 150 --repo stella/tooling --json number,headRefOid",
+];
+
+test.each(readOnlyCommands)(
+  "bounded metadata command %s is allowed before trust",
+  (command) => {
+    expect(check(workflow({ command }))).toEqual([]);
+  },
+);
+
+test("repository-provided step shells require trust even for literal data commands", () => {
+  const options = {
+    command: "echo metadata-only",
+    shell: "./scripts/shell {0}",
+  };
+  expectUnsafe(workflow(options));
+  expect(
+    check(workflow({ ...options, needs: "trust-check", jobIf: canonical })),
+  ).toEqual([]);
+});
+
+test.each([
+  "PATH",
+  "BASH_ENV",
+  "ENV",
+  "SHELLOPTS",
+  "BASHOPTS",
+  "CDPATH",
+  "GIT_EXTERNAL_DIFF",
+  "GIT_CONFIG_GLOBAL",
+  "NODE_OPTIONS",
+  "UNKNOWN_CONTEXT",
+])("environment %s cannot change pre-trust execution", (name) => {
+  for (const gated of [false, true]) {
+    const document = parseDocument(
+      workflow({
+        command: "echo metadata-only",
+        ...(gated ? { needs: "trust-check", jobIf: canonical } : {}),
+      }),
+    );
+    document.setIn(["jobs", "inspect", "steps", 1, "env"], {
+      [name]: "./scripts/check",
+    });
+    if (gated) expect(check(document.toString())).toEqual([]);
+    else expectUnsafe(document.toString());
+  }
+});
+
+test("explicit metadata environment retains safe literal commands", () => {
+  const document = parseDocument(workflow({ command: "echo metadata-only" }));
+  document.setIn(["jobs", "inspect", "steps", 1, "env"], {
+    HEAD_REPO: "stella/tooling",
+    BASE_REPO: "stella/tooling",
+    HAS_RUN_CI_LABEL: "false",
+    GH_TOKEN: "${{ github.token }}",
+    GITHUB_TOKEN: "${{ github.token }}",
+  });
+  expect(check(document.toString())).toEqual([]);
+});
+
+test.each([
+  { uses: "actions/checkout@v4" },
+  {
+    uses: `actions/github-script@${"a".repeat(40)}`,
+    with: { script: "require('./scripts/check.cjs')" },
+  },
+  {
+    uses: `actions/checkout@${"a".repeat(40)}`,
+    env: { NODE_OPTIONS: "--require=./scripts/register.cjs" },
+  },
+])("external action boundary requires trust: %j", (action) => {
+  for (const gated of [false, true]) {
+    const document = parseDocument(
+      workflow(gated ? { needs: "trust-check", jobIf: canonical } : {}),
+    );
+    document.setIn(["jobs", "inspect", "steps", 1], action);
+    if (gated) expect(check(document.toString())).toEqual([]);
+    else expectUnsafe(document.toString());
+  }
+});
+
+test("pinned external action without repository inputs remains metadata-safe", () => {
+  for (const action of [
+    { uses: `actions/checkout@${"a".repeat(40)}` },
+    { uses: `actions/checkout@${"a".repeat(40)}`, with: {} },
+  ]) {
+    const document = parseDocument(workflow());
+    document.setIn(["jobs", "inspect", "steps", 1], action);
+    expect(check(document.toString())).toEqual([]);
+  }
+});
