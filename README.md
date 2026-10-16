@@ -161,7 +161,7 @@ rule opt-outs; literal pins and local-action provenance remain enforced.
 
 The named rules are `bun-pins`, `package-pins`, `typescript-layout`,
 `node-engine`, `node-version`, `python-version`, `rust-version`,
-`runtime-manager`, `runtime-docker`, `runtime-workflow`, `action-pins`,
+`runtime-manager`, `runtime-docker`, `runtime-workflow`, `action-pins`, `workflow-trust`,
 `dependabot-policy`, and `cloud-setup-drift`. Non-Rust rule exceptions require a
 tracked root `stll-toolchain.json` listing the rule and its reason:
 
@@ -187,7 +187,7 @@ fixtures do not. Package-manager selection follows the nearest declaration or lo
 workspace members share their owner's update entry. Bundler `Gemfile`/`Gemfile.lock`
 and Composer `composer.json`/`composer.lock` declare roots at their own directories.
 
-`rust-version`, `node-engine` and `cloud-setup-drift` are mandatory: opt-outs cannot bypass the
+`rust-version`, `node-engine`, `workflow-trust` and `cloud-setup-drift` are mandatory: opt-outs cannot bypass the
 shared Node support range or generated cloud setup requirements.
 
 Unknown rules, empty reasons, duplicate rules, and malformed configurations
@@ -628,6 +628,36 @@ It prints one JSON object with `changed`, `tools`, and `status`; the detector
 exits successfully even when history is unreadable, reporting `changed: true`
 and `status: "unreadable"`. Use `changed` to force the full CI depth on both
 pull requests and merge-queue runs. An unreadable snapshot never skips checks.
+
+Run repository-installed tools only after the workflow's existing trust decision.
+The mandatory `workflow-trust` rule applies to PR workflows declaring a
+`trust-check` job: jobs executing repository commands must directly depend on it
+and require its `trusted == 'true'` output for PR events. This covers `bunx`,
+`npx`, Bun scripts and dependency bins, `node_modules/.bin`, local actions, and
+explicit Node/shell/Python script files. Dependency installation before trust
+requires `--ignore-scripts`. For example, keep the existing trust job and gate
+the entire detector job, including dependency installation:
+
+```yaml
+check-changes:
+  needs: [trust-check]
+  if: >-
+    always() && !cancelled()
+    && ((github.event_name != 'pull_request'
+         && github.event_name != 'pull_request_target')
+        || needs.trust-check.outputs.trusted == 'true')
+  runs-on: ubuntu-latest
+  steps:
+    # Check out, set up Bun, install dependencies, then run the shared detector.
+    - run: bunx --no-install stll-toolchain-changed --since "$BASE_REF"
+```
+
+The trust job must classify each PR trigger used by the workflow. Main/manual
+jobs remain runnable when the PR-only trust job is skipped. Job or step
+conditions may prove that execution is limited to non-PR events. The guard
+checks static commands and supported boolean conditions; it does not validate
+the trust job's authorization policy or dynamically constructed shell programs.
+Workflows with no declared trust job retain their existing fork-CI policy.
 
 The comparison includes Bun declarations, Node selectors and support ranges,
 resolved TypeScript compiler versions (including workspace and compatibility

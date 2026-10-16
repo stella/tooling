@@ -863,6 +863,12 @@ const cases = [
     pass: `runs:\n  using: composite\n  steps:\n    - uses: 'actions/checkout@${sha}' # v5`,
     fail: "runs:\n  using: composite\n  steps:\n    - uses: 'actions/checkout@v5' # v5",
   },
+  {
+    rule: "workflow-trust",
+    file: ".github/workflows/ci.yml",
+    pass: "on: pull_request\njobs:\n  trust-check: {runs-on: ubuntu-latest, steps: [{run: 'echo trusted'}]}\n  detector:\n    needs: trust-check\n    if: needs.trust-check.outputs.trusted == 'true'\n    steps: [{run: 'bunx --no-install stll-toolchain-changed --since origin/main'}]\n",
+    fail: "on: pull_request\njobs:\n  trust-check: {runs-on: ubuntu-latest, steps: [{run: 'echo trusted'}]}\n  detector:\n    steps: [{run: 'bunx --no-install stll-toolchain-changed --since origin/main'}]\n",
+  },
 ] satisfies {
   rule: (typeof runtimeRules)[number];
   file: string;

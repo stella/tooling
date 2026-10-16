@@ -107,6 +107,10 @@ export const parseToolchainConfiguration = (input: unknown) => {
       throw new Error(
         "node-engine cannot be opted out; engines.node must support the shared Node series",
       );
+    if (entry["rule"] === "workflow-trust")
+      throw new Error(
+        "workflow-trust cannot be opted out; repository commands must follow the declared trust decision",
+      );
     if (entry["rule"] === "cloud-setup-drift")
       throw new Error(
         "cloud-setup-drift cannot be opted out; generated setup must match shared policy",

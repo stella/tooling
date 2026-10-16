@@ -28,6 +28,10 @@ import {
 } from "./toolchain-inputs";
 import { nodeSelectorMatches } from "./toolchain-node";
 import { checkRustReferences, type RustException } from "./toolchain-rust";
+import {
+  checkWorkflowTrust,
+  workflowTrustRules,
+} from "./toolchain-workflow-trust";
 
 export const runtimeRules = [
   "bun-pins",
@@ -38,6 +42,7 @@ export const runtimeRules = [
   "runtime-docker",
   "runtime-workflow",
   "action-pins",
+  ...workflowTrustRules,
 ] as const;
 
 type RuntimeRule = (typeof runtimeRules)[number];
@@ -1835,8 +1840,18 @@ export const checkRuntimeFile = ({
   };
   try {
     // Resolve aliases first with an expansion bound before visiting executable fields.
-    document.toJS({ maxAliasCount: 100 });
+    const workflow = document.toJS({ maxAliasCount: 100 });
     if (automationKind === "workflow") {
+      for (const finding of checkWorkflowTrust(workflow)) {
+        const jobNode = getNode(getNode(document.contents, "jobs"), finding.job);
+        const steps = resolveNode(getNode(jobNode, "steps"));
+        const step = isSeq(steps) ? steps.items.at(finding.step) : undefined;
+        add({
+          rule: "workflow-trust",
+          line: nodeLine(getNode(step, "run") ?? getNode(step, "uses") ?? jobNode),
+          message: finding.message,
+        });
+      }
       const jobs = getNode(document.contents, "jobs");
       if (isMap(jobs))
         for (const key of keysOf(jobs)) {

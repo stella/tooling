@@ -97,6 +97,8 @@ const commands = [
   "bun install --frozen-lockfile",
   "bun --cwd packages/core install --frozen-lockfile",
   "bun install --ignore-scripts=false",
+  "bun install --ignore-scripts --ignore-scripts=false",
+  "bun install --ignore-scripts=false --ignore-scripts",
   "bun install --ignore-scripts && bunx --no-install shared-check",
 ];
 
@@ -128,6 +130,7 @@ test("quoted documentation and script-free installation do not execute dependenc
     'echo "node scripts/check.mjs"',
     "bun install --frozen-lockfile --ignore-scripts",
     'bun install "--ignore-scripts"',
+    "bun install --ignore-scripts=true",
     "bun --cwd packages/core install --ignore-scripts",
   ]) {
     expect(check(workflow({ command }))).toEqual([]);
