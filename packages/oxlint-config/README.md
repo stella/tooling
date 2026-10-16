@@ -349,6 +349,14 @@ matching package is reused without network access.
 `wasm-bindgen-cli` requires the matching `wasm-bindgen` crate version in tracked
 root `Cargo.lock`. Regenerate after updating the lockfile or any tool pin.
 
+`cloud.prepare` (optional) names one root `package.json` script and a time bound,
+for example `{ "script": "generate:cloud", "seconds": 300 }`. The install phase
+runs it once after dependencies, as the invoking user, with stdin closed and
+`timeout` killing the whole process group at the bound (1 to 900 seconds). Use it
+for cheap derived sources that tasks need when `install` skips lifecycle scripts;
+it gets no network allowance. Generation fails when the script is not in the
+root `package.json`.
+
 Generation uses the installed policy's Bun, Node, PostgreSQL, and Valkey pins.
 PostgreSQL uses the PGDG major-version packages; minor updates within the pinned
 major are accepted for the disposable database. Before adding PGDG, provisioning
