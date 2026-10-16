@@ -90,7 +90,44 @@ const managerCommands = [
   ]),
 ];
 
+const interpreterCommands = [
+  ...["node", "nodejs"].flatMap((interpreter) => [
+    `${interpreter} --test`,
+    `${interpreter} --test --test-name-pattern smoke`,
+    `${interpreter} --test --test-reporter=spec`,
+    `${interpreter} --eval='import("./scripts/check.mjs")'`,
+    `${interpreter} -e 'import("./scripts/check.mjs")'`,
+    `${interpreter} --print='process.cwd()'`,
+    `${interpreter} --require=./scripts/register.cjs --test`,
+    `${interpreter} --import=./scripts/register.mjs --test`,
+    `${interpreter} --loader=./scripts/loader.mjs --test`,
+    `${interpreter} --input-type=module`,
+    `${interpreter}`,
+    `${interpreter} --version --require=./scripts/register.cjs`,
+  ]),
+  ...["python", "python2", "python3", "python3.13"].flatMap((interpreter) => [
+    `${interpreter} -m unittest discover`,
+    `${interpreter} -m pytest`,
+    `${interpreter} -c 'import unittest; unittest.main(module=None)'`,
+    `${interpreter} -v`,
+    `${interpreter}`,
+    `${interpreter} -`,
+    `${interpreter} --version -m pytest`,
+  ]),
+  '\"node\" --test',
+  "env NODE_ENV=test node --test",
+  "command node --test",
+  "bash -c 'node --test'",
+  "result=$(node --test)",
+  '\"python3\" -m unittest discover',
+  "env PYTHONPATH=. python3 -m unittest discover",
+  "command python3 -m unittest discover",
+  "bash -c 'python3 -m unittest discover'",
+  "result=$(python3 -m unittest discover)",
+];
+
 const commands = [
+  ...interpreterCommands,
   ...managerCommands,
   "bunx --no-install stll-toolchain-changed --since origin/main",
   "npx --no-install shared-check",
@@ -145,6 +182,29 @@ test.each(commands)(
   },
 );
 
+const informationCommands = [
+  ...["node", "nodejs"].flatMap((interpreter) =>
+    ["--version", "-v", "--help", "-h"].map((flag) => `${interpreter} ${flag}`),
+  ),
+  ...["python", "python2", "python3", "python3.13"].flatMap((interpreter) =>
+    ["--version", "-V", "--help", "-h"].map((flag) => `${interpreter} ${flag}`),
+  ),
+  '\"node\" \"--version\"',
+  "env CI=true node --version",
+  "command node --version",
+  "bash -c 'node --version'",
+  "env CI=true python3 -V",
+  "command python3 -V",
+  "bash -c 'python3 -V'",
+];
+
+test.each(informationCommands)(
+  "exact informational invocation %s needs no trust gate",
+  (command) => {
+    expect(check(workflow({ command }))).toEqual([]);
+  },
+);
+
 test("quoted documentation and script-free installation do not execute dependencies", () => {
   for (const command of [
     'echo "bunx --no-install shared-check"',
@@ -168,6 +228,7 @@ test("quoted documentation and script-free installation do not execute dependenc
     "command -pv bunx",
     "command -pV npx",
     'echo "node scripts/check.mjs"',
+    "printf '%s\\n' 'node --test; python3 -m pytest'",
     "bun install --frozen-lockfile --ignore-scripts",
     'bun install "--ignore-scripts"',
     "bun install --ignore-scripts=true",
@@ -513,33 +574,61 @@ jobs:
   ]);
 });
 
-
 test.each(["pnpx shared-check", "yarnpkg test"])(
   "package-manager alias %s follows the declared trust gate",
   (command) => {
     expectUnsafe(workflow({ command }));
-    expect(check(workflow({ command, needs: "trust-check", jobIf: canonical })))
-      .toEqual([]);
+    expect(
+      check(workflow({ command, needs: "trust-check", jobIf: canonical })),
+    ).toEqual([]);
   },
 );
 
-
 test("Actions event comparisons use case-insensitive string equality", () => {
   for (const event of ["pull_request", "pull_request_target"]) {
-    for (const literal of [event, event.toUpperCase(), event.replaceAll("request", "ReQuEsT")]) {
-      expectUnsafe(workflow({ events: event, jobIf: `github.event_name == '${literal}'` }));
-      expectUnsafe(workflow({ events: event, stepIf: `github.event_name == '${literal}'` }));
-      expect(check(workflow({ events: event, jobIf: `github.event_name != '${literal}'` })))
-        .toEqual([]);
+    for (const literal of [
+      event,
+      event.toUpperCase(),
+      event.replaceAll("request", "ReQuEsT"),
+    ]) {
+      expectUnsafe(
+        workflow({ events: event, jobIf: `github.event_name == '${literal}'` }),
+      );
+      expectUnsafe(
+        workflow({
+          events: event,
+          stepIf: `github.event_name == '${literal}'`,
+        }),
+      );
+      expect(
+        check(
+          workflow({
+            events: event,
+            jobIf: `github.event_name != '${literal}'`,
+          }),
+        ),
+      ).toEqual([]);
     }
     // Unknown bare names cannot prove an event exclusion.
-    expectUnsafe(workflow({ events: event, jobIf: "github.event_name == PULL_REQUEST" }));
+    expectUnsafe(
+      workflow({ events: event, jobIf: "github.event_name == PULL_REQUEST" }),
+    );
   }
-  expect(check(workflow({ needs: "trust-check", jobIf: "needs.trust-check.outputs.trusted == 'TRUE'" })))
-    .toEqual([]);
-  expectUnsafe(workflow({ needs: "trust-check", jobIf: "needs.trust-check.outputs.trusted == 'FALSE'" }));
+  expect(
+    check(
+      workflow({
+        needs: "trust-check",
+        jobIf: "needs.trust-check.outputs.trusted == 'TRUE'",
+      }),
+    ),
+  ).toEqual([]);
+  expectUnsafe(
+    workflow({
+      needs: "trust-check",
+      jobIf: "needs.trust-check.outputs.trusted == 'FALSE'",
+    }),
+  );
 });
-
 
 test("unknown package-manager flags and inline execution never establish install-only status", () => {
   for (const command of [
@@ -552,14 +641,15 @@ test("unknown package-manager flags and inline execution never establish install
     "bun --cwd --ignore-scripts install",
     "npm ci --ignore-scripts && npm run check",
     "bun install --ignore-scripts && bun run check",
-  ]) expectUnsafe(workflow({ command }));
+  ])
+    expectUnsafe(workflow({ command }));
   for (const command of [
     "npm --prefix packages/core ci --ignore-scripts --no-audit",
     "npm --ignore-scripts ci",
     "bun --cwd packages/core install --frozen-lockfile --ignore-scripts",
-  ]) expect(check(workflow({ command }))).toEqual([]);
+  ])
+    expect(check(workflow({ command }))).toEqual([]);
 });
-
 
 test.each(["./scripts/check", "scripts/check", "../shared/check"])(
   "relative executable %s follows the declared trust gate",
