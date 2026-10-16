@@ -1,5 +1,11 @@
 # @stll/oxlint-config
 
+## 1.2.5
+
+### Patch Changes
+
+- [#138](https://github.com/stella/tooling/pull/138) [`996e593`](https://github.com/stella/tooling/commit/996e593cdb9cd2daf6862d91c9f4c1f98846f3ef) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Write cloud setup network command output to a file instead of a pipe, and end processes left holding that log once the command exits, so package scripts cannot hold a setup step open.
+
 ## 1.2.4
 
 ### Patch Changes
