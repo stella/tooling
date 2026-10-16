@@ -683,6 +683,11 @@ help/version arguments are recognized as informational. This includes
 Bun/npm installation before trust requires
 `--ignore-scripts`; explicit lifecycle commands remain gated with that flag.
 Unknown manager flags retain the trust requirement.
+[Corepack](https://github.com/nodejs/corepack#when-authoring-packages) selects the
+manager implementation from project declarations. Its dispatch and other
+non-informational modes require trust, including manager help/version calls and
+installs with disabled lifecycle scripts. Only Corepack's own exact single
+help/version argument is informational.
 The guard keeps pnpm/Yarn commands gated because repository-owned
 [pnpm configuration hooks](https://pnpm.io/pnpmfile) and
 [Yarn manager paths](https://yarnpkg.com/configuration/yarnrc#yarnPath)

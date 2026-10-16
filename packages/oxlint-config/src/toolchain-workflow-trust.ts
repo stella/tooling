@@ -90,6 +90,19 @@ const excludesUntrusted = ({
   return comparison.at(1) === "==" ? !equal : equal;
 };
 
+const STANDARD_INFORMATION_FLAGS = ["--version", "-v", "--help", "-h"] as const;
+const PYTHON_INFORMATION_FLAGS = ["--version", "-V", "--help", "-h"] as const;
+
+type InformationInvocationOptions = {
+  words: readonly string[];
+  flags?: readonly string[];
+};
+const informationOnly = ({
+  words,
+  flags = STANDARD_INFORMATION_FLAGS,
+}: InformationInvocationOptions) =>
+  words.length === 2 && flags.includes(words.at(1) ?? "");
+
 const invokesRepositoryCode = (command: string) =>
   shellCommandSegments(command).some((segment) => {
     let words = executableShellWords(segment).map(decodeShellWord);
@@ -133,16 +146,17 @@ const invokesRepositoryCode = (command: string) =>
     }
     const name = path.posix.basename(executable);
     if (["bunx", "npx", "pnpx"].includes(name)) return true;
+    // Corepack selects the manager implementation from project declarations.
+    // Dispatch and unknown modes need trust even when manager scripts are disabled.
+    if (name === "corepack") return !informationOnly({ words });
     const nodeRuntime = name === "node" || name === "nodejs";
     if (nodeRuntime || /^python(?:[23](?:\.\d+)?)?$/u.test(name)) {
       // Discovery, module, inline, preload, and stdin modes execute without a
       // filename. Unknown runtime modes therefore retain the trust requirement.
-      const informationFlags = nodeRuntime
-        ? ["--version", "-v", "--help", "-h"]
-        : ["--version", "-V", "--help", "-h"];
-      return !(
-        words.length === 2 && informationFlags.includes(words.at(1) ?? "")
-      );
+      return !informationOnly({
+        words,
+        flags: nodeRuntime ? STANDARD_INFORMATION_FLAGS : PYTHON_INFORMATION_FLAGS,
+      });
     }
     if (name === "bash" || name === "sh")
       return words.slice(1).some((word) =>
@@ -153,10 +167,7 @@ const invokesRepositoryCode = (command: string) =>
     if (["pnpm", "yarn", "yarnpkg"].includes(name)) return true;
     if (name !== "bun" && name !== "npm") return false;
     const argumentsAfterOptions = words.slice(1);
-    if (
-      argumentsAfterOptions.length === 1 &&
-      ["--version", "-v", "--help", "-h"].includes(argumentsAfterOptions.at(0) ?? "")
-    ) return false;
+    if (informationOnly({ words })) return false;
     const installationArguments: string[] = [];
     for (let index = 0; index < argumentsAfterOptions.length; index++) {
       const argument = argumentsAfterOptions.at(index) ?? "";

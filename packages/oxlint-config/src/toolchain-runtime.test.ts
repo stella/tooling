@@ -930,6 +930,22 @@ jobs:
       .toMatchObject([{ rule: "workflow-trust", path: file, line: 7 }]);
   }
 });
+
+test("workflow trust diagnostics locate Corepack package-manager dispatch", () => {
+  const file = ".github/workflows/ci.yml";
+  for (const command of ["corepack pnpm test", "corepack yarn test", "corepack npm ci --ignore-scripts"]) {
+    const source = `on: pull_request
+jobs:
+  trust-check:
+    steps: [{run: echo trust-decision}]
+  build:
+    steps:
+      - run: ${command}
+`;
+    expect(check(file, source).filter(({ rule }) => rule === "workflow-trust"))
+      .toMatchObject([{ rule: "workflow-trust", path: file, line: 7 }]);
+  }
+});
 for (const fixture of cases) {
   test(`${fixture.rule} accepts its shared pin and rejects a mutation`, () => {
     expect(check(fixture.file, fixture.pass)).toEqual([]);
