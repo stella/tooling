@@ -1,5 +1,11 @@
 # @stll/oxlint-config
 
+## 1.2.6
+
+### Patch Changes
+
+- [#140](https://github.com/stella/tooling/pull/140) [`04023a0`](https://github.com/stella/tooling/commit/04023a029c6bd6424047d9b9fe7fee7773dc8283) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Cloud setup bounded commands no longer read from the caller terminal.
+
 ## 1.2.5
 
 ### Patch Changes
