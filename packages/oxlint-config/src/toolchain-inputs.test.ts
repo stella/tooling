@@ -112,6 +112,57 @@ test("JavaScript installation lockfiles are tracked as presence without reading 
     expect(toolchainInputKind(file)).not.toBe("presence");
 });
 
+test("presence snapshots omit deleted tracked declarations across every dependency ecosystem", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "stll-deleted-inputs-"));
+  const paths = [
+    ...Object.keys(dependabotManifestEcosystems),
+    ...javascriptDependencyLockfiles,
+    "Pipfile.lock",
+    "uv.lock",
+  ].flatMap((name) => [name, `nested/${name}`]);
+  try {
+    execFileSync("git", ["init", "-q", root]);
+    mkdirSync(path.join(root, "nested"));
+    for (const file of paths) {
+      expect(toolchainInputKind(file)).toBe("presence");
+      writeFileSync(path.join(root, file), "presence only");
+    }
+    execFileSync("git", ["add", "."], { cwd: root });
+    expect(Object.keys(readToolchainInputs(root).files).sort()).toEqual(
+      paths.toSorted(),
+    );
+    for (const file of paths) rmSync(path.join(root, file));
+    const deleted = readToolchainInputs(root);
+    expect(deleted.trackedFiles).toEqual(new Set(paths));
+    expect(deleted.files).toEqual({});
+    expect(deleted.diagnostics).toEqual([]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("non-absence presence probe failures remain configuration diagnostics", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "stll-input-failure-"));
+  try {
+    execFileSync("git", ["init", "-q", root]);
+    mkdirSync(path.join(root, "nested"));
+    writeFileSync(path.join(root, "nested/Gemfile"), "presence only");
+    execFileSync("git", ["add", "."], { cwd: root });
+    rmSync(path.join(root, "nested"), { recursive: true });
+    writeFileSync(path.join(root, "nested"), "not a directory");
+    expect(readToolchainInputs(root).diagnostics).toEqual([
+      {
+        rule: "configuration",
+        path: "nested/Gemfile",
+        line: 1,
+        message: "cannot read tracked configuration file",
+      },
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("tracked executable action metadata remains discoverable under dependency-named directories", () => {
   for (const prefix of [
     "vendor",
