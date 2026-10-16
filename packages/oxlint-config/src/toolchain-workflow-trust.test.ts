@@ -875,3 +875,39 @@ test("pinned external action without repository inputs remains metadata-safe", (
     expect(check(document.toString())).toEqual([]);
   }
 });
+
+test("Hawk metadata does not prevent the existing PR trust decision", () => {
+  expect(
+    check(`env:
+  HAWK_RUST_TOOLCHAIN: "1.97.1"
+  HAWK_VERSION: "0.1.12"
+  HAWK_X86_64_UNKNOWN_LINUX_GNU_SHA256: "f9cafbbc5777b2b00c362619b8b62af942d2900a121acae2e73210a8ebffd857"
+on:
+  pull_request:
+jobs:
+  trust-check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      trusted: \${{ steps.check.outputs.trusted }}
+    steps:
+      - name: Check if PR is trusted
+        id: check
+        env:
+          HEAD_REPO: >-
+            \${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: \${{ github.repository }}
+        run: |
+          if [[ "$HEAD_REPO" == "$BASE_REPO" ]]; then
+            echo "trusted=true" >> "$GITHUB_OUTPUT"
+          elif [[ '\${{ contains(github.event.pull_request.labels.*.name, 'run-ci') }}' == 'true' ]]; then
+            echo "trusted=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "trusted=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Fork PR without 'run-ci' label — CI skipped."
+          fi
+`),
+  ).toEqual([]);
+});
