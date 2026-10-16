@@ -600,7 +600,11 @@ ${needs === undefined ? "" : `    needs: ${needs}\n`}${jobIf === undefined ? "" 
 const expectUnsafeJob = (source: string) => {
   const findings = check(source);
   expect(findings, source).toHaveLength(1);
-  expect(findings.at(0)).toMatchObject({ type: "job", job: "build" });
+  expect(findings.at(0)).toMatchObject({
+    type: "job",
+    property: "uses",
+    job: "build",
+  });
   expect(findings.at(0)).not.toHaveProperty("step");
   expect(findings.at(0)?.message.length).toBeGreaterThan(0);
 };
@@ -746,7 +750,11 @@ test.each(["./scripts/check", "scripts/check", "../shared/check"])(
 );
 
 test("metadata printf keeps data out of formats and assignment targets", () => {
-  for (const command of ['printf "$PR_TITLE"', "printf '%n' target", "printf '%d' value"])
+  for (const command of [
+    'printf "$PR_TITLE"',
+    "printf '%n' target",
+    "printf '%d' value",
+  ])
     expectUnsafe(workflow({ command }));
   expect(check(workflow({ command: "printf '%s\\n' value" }))).toEqual([]);
 });
@@ -1019,3 +1027,87 @@ test.each([
     }
   },
 );
+
+const startupCases = [
+  { property: "container", value: "node:26" },
+  { property: "container", value: { image: "node:26" } },
+  { property: "container", value: `node@sha256:${"a".repeat(64)}` },
+  { property: "container", value: { image: `node@sha256:${"a".repeat(64)}` } },
+  { property: "container", value: "${{ github.event.pull_request.title }}" },
+  { property: "services", value: { postgres: "postgres:17" } },
+  { property: "services", value: { postgres: { image: "postgres:17" } } },
+  {
+    property: "services",
+    value: { postgres: { image: `postgres@sha256:${"a".repeat(64)}` } },
+  },
+  {
+    property: "services",
+    value: { postgres: { image: "${{ github.event.pull_request.title }}" } },
+  },
+];
+
+test.each(startupCases)(
+  "job startup $property=$value requires a job-level trust gate",
+  ({ property, value }) => {
+    const fixture = (options: JobFixtureOptions = {}) => {
+      const document = parseDocument(
+        workflow({
+          command: "echo metadata-only",
+          events: "[pull_request, pull_request_target, push]",
+          ...options,
+        }),
+      );
+      document.setIn(["jobs", "inspect", property], value);
+      return document;
+    };
+    for (const options of [
+      {},
+      { needs: "trust-check" },
+      { jobIf: trusted },
+      { needs: "trust-check", stepIf: trusted },
+      { needs: "metadata", jobIf: trusted },
+      { needs: "trust-check", jobIf: `${trusted} || always()` },
+    ]) {
+      const findings = check(fixture(options).toString());
+      expect(findings).toHaveLength(1);
+      expect(findings.at(0)).toMatchObject({
+        type: "job",
+        property,
+        job: "inspect",
+      });
+      expect(findings.at(0)).not.toHaveProperty("step");
+    }
+    expect(
+      check(fixture({ needs: "trust-check", jobIf: trusted }).toString()),
+    ).toEqual([]);
+    expect(
+      check(fixture({ jobIf: "github.event_name == 'push'" }).toString()),
+    ).toEqual([]);
+
+    const noSteps = fixture();
+    noSteps.deleteIn(["jobs", "inspect", "steps"]);
+    expect(check(noSteps.toString())).toMatchObject([
+      { type: "job", property, job: "inspect" },
+    ]);
+
+    noSteps.setIn(["jobs", "inspect", "needs"], "trust-check");
+    noSteps.setIn(["jobs", "inspect", "if"], trusted);
+    expect(check(noSteps.toString())).toEqual([]);
+
+    const selfGate = parseDocument(workflow({ command: "echo metadata-only" }));
+    selfGate.setIn(["jobs", "trust-check", property], value);
+    selfGate.setIn(["jobs", "trust-check", "needs"], "trust-check");
+    selfGate.setIn(["jobs", "trust-check", "if"], trusted);
+    expect(check(selfGate.toString())).toMatchObject([
+      { type: "job", property, job: "trust-check" },
+    ]);
+  },
+);
+
+test("empty services and absent containers do not invent startup execution", () => {
+  const document = parseDocument(workflow({ command: "echo metadata-only" }));
+  expect(check(document.toString())).toEqual([]);
+  document.setIn(["jobs", "inspect", "services"], {});
+  document.setIn(["jobs", "trust-check", "services"], {});
+  expect(check(document.toString())).toEqual([]);
+});
