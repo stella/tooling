@@ -295,7 +295,9 @@ unknown arguments fail.
 
 Run `bunx --no-install stll-dependabot` from the repository root. It reads tracked
 configuration and writes canonical `.github/dependabot.yml`, preserving an existing
-`.github/dependabot.yaml` spelling. Both files together are rejected. Repeated runs
+`.github/dependabot.yaml` spelling, including when the indexed output has been
+deleted from the working tree. Conflicting indexed or existing spellings are
+rejected, and unrelated unreadable inputs still stop generation. Repeated runs
 produce identical bytes; linked output files and directories are rejected.
 
 For programmatic generation, the package entry point exports
@@ -420,6 +422,8 @@ generation with a repair instruction. Startup or environment persistence failure
 produce actionable session context and a stderr reason; SessionStart cannot block
 a session. Successful startup is silent on stdout. Commit both generated files.
 Generation refuses symlink parents or destinations and hard-linked destinations.
+Generation recreates its deleted tracked output files and requires unrelated
+tracked inputs to remain readable.
 `stll-toolchain-check` rejects missing, drifted, or undeclared tracked scripts,
 missing or conflicting startup hooks, and missing or different attribution
 settings with mandatory `cloud-setup-drift`.

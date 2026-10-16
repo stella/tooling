@@ -141,6 +141,70 @@ test("preserves the existing yaml spelling and rejects conflicting outputs", asy
   });
 });
 
+test("recreates a deleted tracked output at its indexed spelling", async () => {
+  for (const extension of ["yml", "yaml"]) {
+    for (const removeParent of [false, true]) {
+      await withRepository(async (root) => {
+        const relative = `.github/dependabot.${extension}`;
+        const output = join(root, relative);
+        await mkdir(join(root, ".github"));
+        await writeFile(output, "version: 2\n");
+        execFileSync("git", ["add", relative], { cwd: root });
+        await rm(removeParent ? join(root, ".github") : output, {
+          recursive: removeParent,
+        });
+        const expected = generateDependabotConfig({
+          files: readToolchainInputs(root).files,
+          policy,
+        });
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const result = invoke(root);
+          expect(result.status, result.stderr).toBe(0);
+          expect(result.stdout).toContain(relative);
+          expect(await readFile(output, "utf8")).toBe(expected);
+        }
+        const alternative = join(
+          root,
+          `.github/dependabot.${extension === "yml" ? "yaml" : "yml"}`,
+        );
+        await expect(stat(alternative)).rejects.toMatchObject({ code: "ENOENT" });
+      });
+    }
+  }
+});
+
+test("missing unrelated inputs and conflicting indexed output spellings never write", async () => {
+  await withRepository(async (root) => {
+    expect(invoke(root).status).toBe(0);
+    const output = join(root, ".github/dependabot.yml");
+    execFileSync("git", ["add", ".github/dependabot.yml"], { cwd: root });
+    const original = await readFile(output, "utf8");
+    await rm(join(root, "package.json"));
+    const result = invoke(root);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      "package.json: cannot read tracked configuration file",
+    );
+    expect(await readFile(output, "utf8")).toBe(original);
+  });
+  await withRepository(async (root) => {
+    await mkdir(join(root, ".github"));
+    for (const extension of ["yml", "yaml"])
+      await writeFile(join(root, `.github/dependabot.${extension}`), "sentinel\n");
+    execFileSync("git", ["add", ".github"], { cwd: root });
+    await rm(join(root, ".github/dependabot.yaml"));
+    const result = invoke(root);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("exactly one Dependabot configuration");
+    expect(await readFile(join(root, ".github/dependabot.yml"), "utf8")).toBe(
+      "sentinel\n",
+    );
+    await expect(
+      stat(join(root, ".github/dependabot.yaml")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+});
+
 test("help needs no repository and invalid options never write", async () => {
   const root = await mkdtemp(join(tmpdir(), "dependabot-help-"));
   try {

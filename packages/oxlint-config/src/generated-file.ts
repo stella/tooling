@@ -35,6 +35,24 @@ export const checkGeneratedOutput = async (destination: string) => {
   return destinationStat;
 };
 
+type GenerationDiagnosticsOptions = {
+  diagnostics: readonly { path: string; message: string }[];
+  outputs: readonly { relative: string; destination: string }[];
+};
+
+/** Only absent owned outputs may be recovered while reading tracked inputs. */
+export const generationDiagnostics = async ({
+  diagnostics,
+  outputs,
+}: GenerationDiagnosticsOptions) => {
+  const missing = new Set<string>();
+  for (const { relative, destination } of outputs) {
+    if ((await checkGeneratedOutput(destination)) === undefined)
+      missing.add(relative);
+  }
+  return diagnostics.filter(({ path }) => !missing.has(path));
+};
+
 type GeneratedFileOptions = {
   destination: string;
   text: string;

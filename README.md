@@ -461,6 +461,8 @@ versioned `stella/.github` contract. Package tags use the immutable
 Declare `cloud` in tracked root `stll-toolchain.json`, then run
 `bunx --no-install stll-cloud-setup` to generate `.agents/cloud-setup.sh` and merge
 its remote-only Claude `SessionStart` hook into `.claude/settings.json`.
+Generation recreates its deleted tracked output files and requires unrelated
+tracked inputs to remain readable.
 The declaration requires `install` exactly `bun install --frozen-lockfile` or
 `bun install --frozen-lockfile --ignore-scripts`. Use the second when lifecycle
 scripts (for example postinstall code generation) are too heavy for cloud setup;
