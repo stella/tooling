@@ -273,7 +273,7 @@ type WorkflowTrustFinding = {
   job: string;
   message: string;
 } & (
-  | { type: "job" }
+  | { type: "job"; property: "uses" | "container" | "services" }
   | { type: "step"; step: number }
 );
 
@@ -323,7 +323,16 @@ export const checkWorkflowTrust = (workflow: unknown) => {
       !safeAction(jobUses, job["with"]) &&
       !permitsExecution(undefined)
     )
-      findings.push({ type: "job", job: name, message });
+      findings.push({ type: "job", property: "uses", job: name, message });
+    // Containers and services start before steps, so a step condition cannot
+    // authorize them. No image approval catalog is implicit in a digest pin.
+    if (!permitsExecution(undefined)) {
+      if (job["container"] !== undefined)
+        findings.push({ type: "job", property: "container", job: name, message });
+      const services = job["services"];
+      if (services !== undefined && (!record(services) || Object.keys(services).length > 0))
+        findings.push({ type: "job", property: "services", job: name, message });
+    }
     if (!Array.isArray(job["steps"])) continue;
     for (const [index, step] of job["steps"].entries()) {
       if (!record(step)) continue;

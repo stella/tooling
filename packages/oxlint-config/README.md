@@ -677,6 +677,10 @@ Before that boundary, commands must match a small metadata allowlist: shell
 output and bounded comparisons, static file reads, simple jq/yq selectors,
 selected read-only Git commands, and GET-only GitHub CLI reads. The trust job's
 `if`/`elif` comparisons and writes to `GITHUB_OUTPUT` use the same checks.
+Job containers and nonempty services require the job-level trust gate because
+they start before steps and supply executable code. A step condition cannot
+authorize their startup. Digest pinning alone does not approve an image for
+pre-trust execution; the guard has no implicit image approval catalog.
 Pinned external actions without inputs may run before trust; local actions,
 reusable workflows with inputs, and unknown action forms require the gate.
 

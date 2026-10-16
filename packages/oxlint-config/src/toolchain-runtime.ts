@@ -1847,7 +1847,7 @@ export const checkRuntimeFile = ({
         let source: unknown;
         switch (finding.type) {
           case "job":
-            source = getNode(jobNode, "uses");
+            source = getNode(jobNode, finding.property);
             break;
           case "step": {
             const steps = resolveNode(getNode(jobNode, "steps"));
