@@ -157,7 +157,7 @@ const artifactToolInstall = ({
 }: Extract<CloudToolEntry, { type: "artifact" }>) => {
   const directory = `/opt/stll-cloud/tools/${tool}/${release.version}`;
   const command = tool === "wasm-bindgen-cli" ? "wasm-bindgen" : tool;
-  const versionPrefix = tool === "cargo-nextest" ? "cargo-nextest" : command;
+  const versionPrefix = tool === "gitleaks" ? "gitleaks version" : command;
   const marker = `${versionPrefix} ${release.version}`;
   return {
     name: tool.replaceAll("-", "_"),

@@ -169,6 +169,7 @@ trap 'echo "Fresh shell check failed at line $LINENO" >&2' ERR
 [[ "$(rustup --version 2>/dev/null)" == "rustup $RUSTUP_VERSION "* ]]
 nextest_version="$(cargo nextest --version)"
 [[ "$nextest_version" == "cargo-nextest $NEXTEST_VERSION" || "$nextest_version" == "cargo-nextest $NEXTEST_VERSION "* ]]
+[[ "$(gitleaks --version)" == "gitleaks version $GITLEAKS_VERSION" ]]
 [[ "$(wasm-bindgen --version)" == "wasm-bindgen $WASM_BINDGEN_VERSION" ]]
 uv_version="$(uv --version)"
 uvx_version="$(uvx --version)"
@@ -178,7 +179,7 @@ uvx_version="$(uvx --version)"
 [[ "$(rustup target list --installed)" == *wasm32-unknown-unknown* ]]
 components="$(rustup component list --installed)"
 [[ "$components" == *clippy-* && "$components" == *rustfmt-* ]]
-for tool in bun node rustc cargo rustup cargo-nextest wasm-bindgen wasm-bindgen-test-runner wasm2es6js uv uvx; do
+for tool in bun node rustc cargo rustup cargo-nextest wasm-bindgen wasm-bindgen-test-runner wasm2es6js gitleaks uv uvx; do
   executable="$(readlink -f "$(command -v "$tool")")"
   printf '%s %s ' "$tool" "$executable"
   stat -c '%i:%s:%y' "$executable"
@@ -206,6 +207,7 @@ done
         `RUSTUP_VERSION=${cloudSetupArtifacts["rustup-init"].version}`,
         `NEXTEST_VERSION=${cloudSetupArtifacts["cargo-nextest"].version}`,
         `WASM_BINDGEN_VERSION=${cloudSetupArtifacts["wasm-bindgen-cli"].version}`,
+        `GITLEAKS_VERSION=${cloudSetupArtifacts.gitleaks.version}`,
         `UV_VERSION=${cloudSetupArtifacts.uv.version}`,
         "bash",
         "--noprofile",
@@ -817,6 +819,7 @@ if (fs.statSync(path.join(vite, "consumer-cache")).uid !== uid) process.exit(1);
           tools: {
             "cargo-nextest": cloudSetupArtifacts["cargo-nextest"].version,
             "wasm-bindgen-cli": cloudSetupArtifacts["wasm-bindgen-cli"].version,
+            gitleaks: cloudSetupArtifacts.gitleaks.version,
             uv: cloudSetupArtifacts.uv.version,
             time: cloudSetupPackages.time.version,
           },

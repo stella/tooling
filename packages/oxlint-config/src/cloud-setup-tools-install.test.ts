@@ -114,9 +114,14 @@ esac
   ) => {
     const path = toolPath(tool, binary);
     mkdirSync(join(path, ".."), { recursive: true });
-    writeFileSync(path, `#!/bin/sh\nprintf '%s\\n' '${binary} ${version}'\n`, {
-      mode: 0o755,
-    });
+    const identity = binary === "gitleaks" ? "gitleaks version" : binary;
+    writeFileSync(
+      path,
+      `#!/bin/sh\nprintf '%s\\n' '${identity} ${version}'\n`,
+      {
+        mode: 0o755,
+      },
+    );
   };
   for (const tool of cloudArtifactTools)
     for (const binary of Object.keys(cloudSetupArtifacts[tool].amd64.binaries))
@@ -284,6 +289,32 @@ test("every declared tool rejects incomplete cached binaries and version prefix 
         .sort(),
     );
     expect(run("verify_tools").exitCode).toBe(0);
+  });
+});
+
+test("cached gitleaks installs restore the launcher without downloading", () => {
+  withFixture(({ run, directory, toolPath }) => {
+    const bin = join(directory, "bin");
+    mkdirSync(bin);
+    const result = run(`
+      fetch_verified() { echo 'Unexpected download' >&2; return 99; }
+      # macOS ln lacks GNU -T; the fixture still checks the generated arguments.
+      ln() {
+        [[ "$1" == -sfnT && "$2" == -- ]] || return 98
+        shift 2
+        command ln -sfn "$@"
+      }
+      install_gitleaks
+      install_gitleaks
+      export PATH='${bin}':"$PATH"
+      [[ "$(command -v gitleaks)" == '${bin}/gitleaks' ]]
+      [[ "$(gitleaks --version)" == 'gitleaks version 8.30.1' ]]
+    `);
+    expect(result.stderr.toString()).toBe("");
+    expect(result.exitCode).toBe(0);
+    expect(readFileSync(join(bin, "gitleaks"), "utf8")).toBe(
+      readFileSync(toolPath("gitleaks", "gitleaks"), "utf8"),
+    );
   });
 });
 

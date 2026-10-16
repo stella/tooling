@@ -34,6 +34,7 @@ test("artifact catalog pins safe upstream downloads and explicit binary paths", 
           .some(
             (part) =>
               part === release.version ||
+              part === `v${release.version}` ||
               part === `cargo-nextest-${release.version}`,
           ),
       ).toBe(true);
@@ -61,6 +62,7 @@ test("artifact lookup accepts every explicit version and rejects unsupported ver
   const tools = [
     "rustup-init",
     "cargo-nextest",
+    "gitleaks",
     "wasm-bindgen-cli",
     "uv",
   ] as const satisfies readonly CloudSetupArtifactTool[];
@@ -89,6 +91,51 @@ test("artifact lookup accepts every explicit version and rejects unsupported ver
         `Unsupported ${tool} version ${version}; supported versions: ${versions.join(", ")}`,
       );
   }
+});
+
+test("gitleaks generation pins both release artifacts and exposes the binary on the persisted PATH", () => {
+  const generate = (version: string) => {
+    const cloud = parseCloudSetup({
+      install: cloudInstallCommand,
+      tools: { gitleaks: version },
+    });
+    if (cloud === undefined) throw new Error("cloud declaration absent");
+    return generateCloudSetup({
+      policy: parseToolchainPolicy(policyInput),
+      cloud,
+      nodeVersion: "26.10.0",
+    });
+  };
+  const script = generate("8.30.1");
+  for (const [archive, checksum] of [
+    [
+      "gitleaks_8.30.1_linux_x64.tar.gz",
+      "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb",
+    ],
+    [
+      "gitleaks_8.30.1_linux_arm64.tar.gz",
+      "e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080",
+    ],
+  ] as const) {
+    expect(script).toContain(
+      `https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/${archive}`,
+    );
+    expect(script).toContain(checksum);
+  }
+  expect(script).toContain(
+    `install -m 755 "$scratch/gitleaks" '/opt/stll-cloud/tools/gitleaks/8.30.1/gitleaks'`,
+  );
+  expect(script).toContain(
+    "ln -sfnT -- '/opt/stll-cloud/tools/gitleaks/8.30.1/gitleaks' '/usr/local/bin/gitleaks'",
+  );
+  expect(script).toMatch(/^export PATH=.*:\/usr\/local\/bin'/m);
+  expect(script).toContain("gitleaks version 8.30.1");
+  const syntax = Bun.spawnSync(["bash", "-n"], { stdin: Buffer.from(script) });
+  expect(syntax.stderr.toString()).toBe("");
+  expect(syntax.exitCode).toBe(0);
+  expect(() => generate("8.30.0")).toThrow(
+    "Unsupported gitleaks version 8.30.0; supported versions: 8.30.1",
+  );
 });
 
 test("package catalog accepts only the Ubuntu 24.04 release", () => {
