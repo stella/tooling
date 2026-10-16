@@ -100,13 +100,13 @@ const guard = async <T>(
 };
 
 /** Waits for a promise to settle, failing with `description` if it hangs. */
-export const settledWithin = async <T>(
+export const settledWithin = <T>(
   promise: Promise<T>,
   options: HangGuard,
 ): Promise<T> => guard(promise, options);
 
 /** Resolves with the next `type` event on `target`. */
-export const waitForEvent = async (
+export const waitForEvent = (
   target: EventTarget,
   type: string,
   options: Partial<HangGuard> = {},

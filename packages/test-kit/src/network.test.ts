@@ -391,11 +391,14 @@ describe("network guard", () => {
     uninstall = installNetworkGuard();
     // net.connect hands Socket#connect one array of normalised arguments.
     const normalised = [{ host: "203.0.113.7", port: 5432 }, null];
-    expect(() =>
-      Reflect.apply(net.Socket.prototype.connect, new net.Socket(), [
-        normalised,
-      ]),
-    ).toThrow(NetworkAccessError);
+    const socket = new net.Socket();
+    const connect: unknown = Reflect.get(socket, "connect");
+    if (typeof connect !== "function") {
+      throw new TypeError("Socket#connect is not a function");
+    }
+    expect(() => Reflect.apply(connect, socket, [normalised])).toThrow(
+      NetworkAccessError,
+    );
   });
 
   test("Bun.connect to a remote host rejects", async () => {
@@ -422,13 +425,15 @@ describe("network guard", () => {
 
   test("uninstall restores the originals and a second install panics", () => {
     const originalFetch = globalThis.fetch;
-    const originalConnect = net.Socket.prototype.connect;
+    const socketConnect = (): unknown =>
+      Reflect.get(net.Socket.prototype, "connect");
+    const originalConnect = socketConnect();
     const originalNetConnect = net.connect;
     const remove = installNetworkGuard();
     expect(() => installNetworkGuard()).toThrow("already installed");
     remove();
     expect(globalThis.fetch).toBe(originalFetch);
-    expect(net.Socket.prototype.connect).toBe(originalConnect);
+    expect(socketConnect()).toBe(originalConnect);
     expect(net.connect).toBe(originalNetConnect);
   });
 });
