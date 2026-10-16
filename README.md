@@ -634,10 +634,16 @@ pull requests and merge-queue runs. An unreadable snapshot never skips checks.
 Run repository-installed tools only after the workflow's existing trust decision.
 The mandatory `workflow-trust` rule applies to PR workflows declaring a
 `trust-check` job: jobs executing repository commands must directly depend on it
-and require its `trusted == 'true'` output for PR events. This covers `bunx`,
-`npx`, Bun scripts and dependency bins, `node_modules/.bin`, local actions, and
-explicit Node/shell/Python script files. Dependency installation before trust
-requires `--ignore-scripts`. For example, keep the existing trust job and gate
+and require its `trusted == 'true'` output for PR events. This covers Bun/npm
+scripts and dependency bins, pnpm/Yarn commands, `bunx`/`npx`/`pnpx`,
+`node_modules/.bin`, local actions and reusable workflow jobs, and explicit
+Node/shell/Python script files and relative executables. Bun/npm installation before trust requires
+`--ignore-scripts`; explicit lifecycle commands remain gated with that flag.
+Unknown manager flags retain the trust requirement.
+The guard keeps pnpm/Yarn commands gated because repository-owned
+[pnpm configuration hooks](https://pnpm.io/pnpmfile) and
+[Yarn manager paths](https://yarnpkg.com/configuration/yarnrc#yarnPath)
+require separate execution decisions. For example, keep the existing trust job and gate
 the entire detector job, including dependency installation:
 
 ```yaml
@@ -656,7 +662,8 @@ check-changes:
 
 The trust job must classify each PR trigger used by the workflow. Main/manual
 jobs remain runnable when the PR-only trust job is skipped. Job or step
-conditions may prove that execution is limited to non-PR events. The guard
+conditions may prove that execution is limited to non-PR events; event string
+comparisons follow Actions case-insensitive equality. The guard
 checks static commands and supported boolean conditions; it does not validate
 the trust job's authorization policy or dynamically constructed shell programs.
 Workflows with no declared trust job retain their existing fork-CI policy.

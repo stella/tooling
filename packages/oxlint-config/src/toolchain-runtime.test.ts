@@ -879,6 +879,41 @@ const cases = [
 test("fixture coverage equals the declared runtime rules", () => {
   expect(new Set(cases.map(({ rule }) => rule))).toEqual(new Set(runtimeRules));
 });
+
+test("workflow trust diagnostics locate local reusable workflow jobs", () => {
+  const file = ".github/workflows/ci.yml";
+  const source = `on: pull_request
+jobs:
+  trust-check:
+    steps: [{run: echo trust-decision}]
+  build:
+    uses: ./.github/workflows/build.yml
+`;
+  expect(check(file, source).filter(({ rule }) => rule === "workflow-trust"))
+    .toMatchObject([{ rule: "workflow-trust", path: file, line: 6 }]);
+  const gated = source.replace(
+    "  build:\n",
+    "  build:\n    needs: trust-check\n    if: needs.trust-check.outputs.trusted == 'true'\n",
+  );
+  expect(check(file, gated).filter(({ rule }) => rule === "workflow-trust"))
+    .toEqual([]);
+});
+
+test("workflow trust diagnostics locate non-Bun manager commands", () => {
+  const file = ".github/workflows/ci.yml";
+  for (const command of ["npm test", "pnpm install", "yarn test"]) {
+    const source = `on: pull_request
+jobs:
+  trust-check:
+    steps: [{run: echo trust-decision}]
+  build:
+    steps:
+      - run: ${command}
+`;
+    expect(check(file, source).filter(({ rule }) => rule === "workflow-trust"))
+      .toMatchObject([{ rule: "workflow-trust", path: file, line: 7 }]);
+  }
+});
 for (const fixture of cases) {
   test(`${fixture.rule} accepts its shared pin and rejects a mutation`, () => {
     expect(check(fixture.file, fixture.pass)).toEqual([]);

@@ -1844,11 +1844,25 @@ export const checkRuntimeFile = ({
     if (automationKind === "workflow") {
       for (const finding of checkWorkflowTrust(workflow)) {
         const jobNode = getNode(getNode(document.contents, "jobs"), finding.job);
-        const steps = resolveNode(getNode(jobNode, "steps"));
-        const step = isSeq(steps) ? steps.items.at(finding.step) : undefined;
+        let source: unknown;
+        switch (finding.type) {
+          case "job":
+            source = getNode(jobNode, "uses");
+            break;
+          case "step": {
+            const steps = resolveNode(getNode(jobNode, "steps"));
+            const step = isSeq(steps) ? steps.items.at(finding.step) : undefined;
+            source = getNode(step, "run") ?? getNode(step, "uses");
+            break;
+          }
+          default: {
+            const unexpected: never = finding;
+            throw new Error("unknown workflow finding", { cause: unexpected });
+          }
+        }
         add({
           rule: "workflow-trust",
-          line: nodeLine(getNode(step, "run") ?? getNode(step, "uses") ?? jobNode),
+          line: nodeLine(source ?? jobNode),
           message: finding.message,
         });
       }

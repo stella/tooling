@@ -162,6 +162,7 @@ test("quoted documentation and script-free installation do not execute dependenc
     "bash -c 'npm ci --ignore-scripts'",
     'echo "npm run lint; pnpm install; yarn test"',
     "git diff --name-only",
+    '"${RUNNER_TEMP}/actionlint" -color',
     "command -v bunx",
     "command -V npx",
     "command -pv bunx",
@@ -511,3 +512,56 @@ jobs:
     { type: "job", job: "build-again" },
   ]);
 });
+
+
+test.each(["pnpx shared-check", "yarnpkg test"])(
+  "package-manager alias %s follows the declared trust gate",
+  (command) => {
+    expectUnsafe(workflow({ command }));
+    expect(check(workflow({ command, needs: "trust-check", jobIf: canonical })))
+      .toEqual([]);
+  },
+);
+
+
+test("Actions event comparisons use case-insensitive string equality", () => {
+  for (const event of ["pull_request", "pull_request_target"]) {
+    for (const literal of [event, event.toUpperCase(), event.replaceAll("request", "ReQuEsT")]) {
+      expectUnsafe(workflow({ events: event, jobIf: `github.event_name == '${literal}'` }));
+      expectUnsafe(workflow({ events: event, stepIf: `github.event_name == '${literal}'` }));
+      expect(check(workflow({ events: event, jobIf: `github.event_name != '${literal}'` })))
+        .toEqual([]);
+    }
+    // Unknown bare names cannot prove an event exclusion.
+    expectUnsafe(workflow({ events: event, jobIf: "github.event_name == PULL_REQUEST" }));
+  }
+  expect(check(workflow({ needs: "trust-check", jobIf: "needs.trust-check.outputs.trusted == 'TRUE'" })))
+    .toEqual([]);
+  expectUnsafe(workflow({ needs: "trust-check", jobIf: "needs.trust-check.outputs.trusted == 'FALSE'" }));
+});
+
+
+test("unknown package-manager flags and inline execution never establish install-only status", () => {
+  for (const command of [
+    "bun --eval=process.exit(0)",
+    "bun --eval=process.exit(0) install --ignore-scripts",
+    "bun --preload=./scripts/start.ts install --ignore-scripts",
+    "bun install --ignore-scripts --future-option",
+    "npm ci --ignore-scripts --future-option",
+    "npm --future-option",
+    "bun --cwd --ignore-scripts install",
+    "npm ci --ignore-scripts && npm run check",
+    "bun install --ignore-scripts && bun run check",
+  ]) expectUnsafe(workflow({ command }));
+  for (const command of [
+    "npm --prefix packages/core ci --ignore-scripts --no-audit",
+    "npm --ignore-scripts ci",
+    "bun --cwd packages/core install --frozen-lockfile --ignore-scripts",
+  ]) expect(check(workflow({ command }))).toEqual([]);
+});
+
+
+test.each(["./scripts/check", "scripts/check", "../shared/check"])(
+  "relative executable %s follows the declared trust gate",
+  (command) => expectUnsafe(workflow({ command })),
+);

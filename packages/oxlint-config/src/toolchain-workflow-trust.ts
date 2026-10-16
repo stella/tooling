@@ -79,15 +79,14 @@ const excludesUntrusted = ({
     return conjuncts.some((part) =>
       excludesUntrusted({ condition: part, event, allowTrust }),
     );
-  if (
-    allowTrust &&
-    /^needs\.trust-check\.outputs\.trusted\s*==\s*'true'$/u.test(source)
-  )
+  const trustComparison = /^needs\.trust-check\.outputs\.trusted\s*==\s*'([^']*)'$/u.exec(source);
+  if (allowTrust && trustComparison?.at(1)?.toLowerCase() === "true")
     return true;
   if (source === "false") return true;
   const comparison = /^github\.event_name\s*(==|!=)\s*'([^']+)'$/u.exec(source);
   if (comparison === null) return false;
-  const equal = comparison.at(2) === event;
+  // Actions compares string values without regard to case.
+  const equal = comparison.at(2)?.toLowerCase() === event.toLowerCase();
   return comparison.at(1) === "==" ? !equal : equal;
 };
 
@@ -121,7 +120,11 @@ const invokesRepositoryCode = (command: string) =>
       words = executableShellWords(words.slice(start));
     }
     const executable = words.at(0) ?? "";
-    if (/(?:^|\/)node_modules\/\.bin\//u.test(executable)) return true;
+    if (
+      executable.startsWith("./") || executable.startsWith("../") ||
+      (!path.posix.isAbsolute(executable) && !executable.includes("$") && executable.includes("/")) ||
+      /(?:^|\/)node_modules\/\.bin\//u.test(executable)
+    ) return true;
     if (words.some((word) => /(?:^|\/)node_modules\/\.bin\//u.test(word))) {
       if (
         ["node", "bun", "bash", "sh"].includes(path.posix.basename(executable))
@@ -129,40 +132,57 @@ const invokesRepositoryCode = (command: string) =>
         return true;
     }
     const name = path.posix.basename(executable);
-    if (name === "bunx" || name === "npx") return true;
+    if (["bunx", "npx", "pnpx"].includes(name)) return true;
     if (["node", "bash", "sh", "python", "python3"].includes(name))
       return words.slice(1).some((word) =>
         /^(?!-)(?:\.?\.?\/)?[^$]*\.(?:[cm]?[jt]s|sh|py)$/u.test(word),
       );
-    if (name !== "bun") return false;
-    // Dependency installation is non-executing only with lifecycle scripts disabled.
-    // Other Bun commands may resolve a repository script or dependency executable.
+    // These managers can load repository-owned manager code or configuration
+    // hooks independently of lifecycle-script suppression.
+    if (["pnpm", "yarn", "yarnpkg"].includes(name)) return true;
+    if (name !== "bun" && name !== "npm") return false;
     const argumentsAfterOptions = words.slice(1);
+    if (
+      argumentsAfterOptions.length === 1 &&
+      ["--version", "-v", "--help", "-h"].includes(argumentsAfterOptions.at(0) ?? "")
+    ) return false;
+    const installationArguments: string[] = [];
     for (let index = 0; index < argumentsAfterOptions.length; index++) {
       const argument = argumentsAfterOptions.at(index) ?? "";
-      if (["--cwd", "-C", "--filter", "-F"].includes(argument)) {
+      if (["--cwd", "-C", "--filter", "-F", "--prefix", "--workspace", "-w"].includes(argument)) {
+        // A missing or option-shaped value cannot establish an install-only command.
+        const value = argumentsAfterOptions.at(index + 1);
+        if (value === undefined || value.startsWith("-")) return true;
         index++;
         continue;
       }
-      if (argument.startsWith("-")) continue;
-      if (["install", "i", "ci"].includes(argument)) {
-        const scriptOptions = argumentsAfterOptions.filter((option) =>
-          option === "--ignore-scripts" || option.startsWith("--ignore-scripts="),
-        );
-        return scriptOptions.length === 0 || scriptOptions.some((option) =>
-          option !== "--ignore-scripts" && option !== "--ignore-scripts=true",
-        );
-      }
-      return true;
+      installationArguments.push(argument);
     }
-    return false;
+    const commandIndex = installationArguments.findIndex((argument) => !argument.startsWith("-"));
+    const subcommand = installationArguments.at(commandIndex);
+    if (commandIndex < 0 || !["install", "i", "ci"].includes(subcommand ?? "")) return true;
+    // Only a statically understood install with disabled scripts can precede trust.
+    // Unknown flags (including eval/preload forms) always retain the trust requirement.
+    const flags = installationArguments.filter((_argument, index) => index !== commandIndex);
+    const scriptsDisabled = flags.some((flag) => flag === "--ignore-scripts" || flag === "--ignore-scripts=true");
+    return !scriptsDisabled || flags.some((flag) =>
+      !/^(?:--frozen-lockfile|--ignore-scripts(?:=true)?|--no-(?:audit|fund|progress|save|cache|summary)|--production|--prefer-offline|--offline|--(?:audit|fund|progress)=false)$/u.test(flag),
+    );
   });
 
 export const workflowTrustRules = ["workflow-trust"] as const;
 
+type WorkflowTrustFinding = {
+  job: string;
+  message: string;
+} & (
+  | { type: "job" }
+  | { type: "step"; step: number }
+);
+
 /** Enforce a workflow's declared trust boundary before repository dependency execution. */
 export const checkWorkflowTrust = (workflow: unknown) => {
-  const findings: { job: string; step: number; message: string }[] = [];
+  const findings: WorkflowTrustFinding[] = [];
   if (!record(workflow) || !record(workflow["jobs"])) return findings;
   const jobs = workflow["jobs"];
   if (!record(jobs["trust-check"])) return findings;
@@ -181,12 +201,33 @@ export const checkWorkflowTrust = (workflow: unknown) => {
   );
   if (pullRequests.length === 0) return findings;
   for (const [name, job] of Object.entries(jobs)) {
-    if (!record(job) || !Array.isArray(job["steps"])) continue;
+    if (!record(job)) continue;
     const needs = job["needs"];
     const ordered =
       name !== "trust-check" &&
       (needs === "trust-check" ||
         (Array.isArray(needs) && needs.includes("trust-check")));
+    const permitsExecution = (stepCondition: unknown) => {
+      const guarded = pullRequests.every((event) =>
+        excludesUntrusted({ condition: job["if"], event }) ||
+        excludesUntrusted({ condition: stepCondition, event }),
+      );
+      if (ordered && guarded) return true;
+      // Non-PR-only execution needs no dependency on a PR-only trust decision.
+      return pullRequests.every((event) =>
+        excludesUntrusted({ condition: job["if"], event, allowTrust: false }) ||
+        excludesUntrusted({ condition: stepCondition, event, allowTrust: false }),
+      );
+    };
+    const message = `jobs.${name} repository commands require needs: trust-check and a condition requiring its trusted output on pull requests`;
+    const jobUses = job["uses"];
+    if (
+      typeof jobUses === "string" &&
+      jobUses.startsWith("./") &&
+      !permitsExecution(undefined)
+    )
+      findings.push({ type: "job", job: name, message });
+    if (!Array.isArray(job["steps"])) continue;
     for (const [index, step] of job["steps"].entries()) {
       if (!record(step)) continue;
       const run = step["run"];
@@ -196,25 +237,8 @@ export const checkWorkflowTrust = (workflow: unknown) => {
         !(typeof uses === "string" && uses.startsWith("./"))
       )
         continue;
-      const guarded = pullRequests.every(
-        (event) =>
-          excludesUntrusted({ condition: job["if"], event }) ||
-          excludesUntrusted({ condition: step["if"], event }),
-      );
-      if (ordered && guarded) continue;
-      // Non-PR-only jobs need no dependency on a PR-only trust decision.
-      if (
-        pullRequests.every((event) =>
-          excludesUntrusted({ condition: job["if"], event, allowTrust: false }) ||
-          excludesUntrusted({ condition: step["if"], event, allowTrust: false }),
-        )
-      )
-        continue;
-      findings.push({
-        job: name,
-        step: index,
-        message: `jobs.${name} repository commands require needs: trust-check and a condition requiring its trusted output on pull requests`,
-      });
+      if (permitsExecution(step["if"])) continue;
+      findings.push({ type: "step", job: name, step: index, message });
     }
   }
   return findings;
