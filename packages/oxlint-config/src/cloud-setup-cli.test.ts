@@ -100,7 +100,7 @@ test("cloud CLI refuses symlinks and hard links without modifying outside target
         }
         const result = invoke(root);
         expect(result.status).toBe(1);
-        expect(result.stderr).toContain("cloud setup");
+        expect(result.stderr).toContain("generated output");
         expect(await readFile(sentinel, "utf8")).toBe("unchanged");
       } finally {
         await rm(outside, { recursive: true, force: true });
