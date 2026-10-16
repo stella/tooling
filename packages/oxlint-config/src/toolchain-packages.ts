@@ -129,7 +129,7 @@ type ShellToken = {
 };
 
 // Keep expansion bodies in their word: substitutions are inspected separately as executable sources.
-const shellTokens = (source: string) => {
+export const shellTokens = (source: string) => {
   const tokens: ShellToken[] = [];
   for (let index = 0; index < source.length;) {
     const character = source.at(index);

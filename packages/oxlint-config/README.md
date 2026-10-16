@@ -671,28 +671,21 @@ pull requests and merge-queue runs. An unreadable snapshot never skips checks.
 
 Run repository-installed tools only after the workflow's existing trust decision.
 The mandatory `workflow-trust` rule applies to PR workflows declaring a
-`trust-check` job: jobs executing repository commands must directly depend on it
-and require its `trusted == 'true'` output for PR events. This covers Bun/npm
-scripts and dependency bins, pnpm/Yarn commands, `bunx`/`npx`/`pnpx`,
-`node_modules/.bin`, local actions and reusable workflow jobs, shell script files,
-relative executables, and Node/Python execution modes. Runtime discovery, inline,
-module and stdin modes require trust without an explicit filename; exact single
-help/version arguments are recognized as informational. This includes
-[Node test discovery](https://nodejs.org/api/cli.html#--test) and
-[Python module execution](https://docs.python.org/3/using/cmdline.html#cmdoption-m).
-Bun/npm installation before trust requires
-`--ignore-scripts`; explicit lifecycle commands remain gated with that flag.
-Unknown manager flags retain the trust requirement.
-[Corepack](https://github.com/nodejs/corepack#when-authoring-packages) selects the
-manager implementation from project declarations. Its dispatch and other
-non-informational modes require trust, including manager help/version calls and
-installs with disabled lifecycle scripts. Only Corepack's own exact single
-help/version argument is informational.
-The guard keeps pnpm/Yarn commands gated because repository-owned
-[pnpm configuration hooks](https://pnpm.io/pnpmfile) and
-[Yarn manager paths](https://yarnpkg.com/configuration/yarnrc#yarnPath)
-require separate execution decisions. For example, keep the existing trust job and gate
-the entire detector job, including dependency installation:
+`trust-check` job. Repository execution requires a direct dependency and a
+condition requiring its `trusted == 'true'` output for every PR trigger.
+Before that boundary, commands must match a small metadata allowlist: shell
+output and bounded comparisons, static file reads, simple jq/yq selectors,
+selected read-only Git commands, and GET-only GitHub CLI reads. The trust job's
+`if`/`elif` comparisons and writes to `GITHUB_OUTPUT` use the same checks.
+Pinned external actions without inputs may run before trust; local actions,
+reusable workflows with inputs, and unknown action forms require the gate.
+
+Interpreters, sourced files, executable paths, package managers (including
+metadata and script-disabled install modes), launchers, custom shells, and
+unknown commands or syntax require trust. File operands are data only for the
+explicit read commands; they never authorize a repository executable. Unsupported
+options and query programs also require the gate. For example, gate the entire
+detector job, including dependency installation:
 
 ```yaml
 check-changes:
@@ -712,8 +705,9 @@ The trust job must classify each PR trigger used by the workflow. Main/manual
 jobs remain runnable when the PR-only trust job is skipped. Job or step
 conditions may prove that execution is limited to non-PR events; event string
 comparisons follow Actions case-insensitive equality. The guard
-checks static commands and supported boolean conditions; it does not validate
-the trust job's authorization policy or dynamically constructed shell programs.
+proves only supported static metadata commands and boolean conditions; unknown
+commands and conditions cannot authorize execution. It does not validate the
+trust job's authorization policy.
 Workflows with no declared trust job retain their existing fork-CI policy.
 
 The comparison includes Bun declarations, Node selectors and support ranges,

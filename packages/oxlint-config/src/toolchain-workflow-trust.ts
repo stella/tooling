@@ -1,8 +1,6 @@
-import path from "node:path";
-
 import {
   decodeShellWord,
-  executableShellWords,
+  shellTokens,
   shellCommandSegments,
 } from "./toolchain-packages";
 
@@ -90,107 +88,171 @@ const excludesUntrusted = ({
   return comparison.at(1) === "==" ? !equal : equal;
 };
 
-const STANDARD_INFORMATION_FLAGS = ["--version", "-v", "--help", "-h"] as const;
-const PYTHON_INFORMATION_FLAGS = ["--version", "-V", "--help", "-h"] as const;
-
-type InformationInvocationOptions = {
-  words: readonly string[];
-  flags?: readonly string[];
+// This is a deliberately small proof language for pre-trust metadata commands.
+// Unknown commands, options, shell constructs, and action inputs require trust.
+const staticData = (word: string) =>
+  !/[`$\\]/u.test(word) && !/[<>]/u.test(word);
+const metadataWord = (raw: string) => {
+  if (/^'[^']*'$/u.test(raw)) return true;
+  let quote: "'" | '"' | undefined;
+  for (const character of raw) {
+    if (character === quote) quote = undefined;
+    else if (quote === undefined && (character === "'" || character === '"')) quote = character;
+  }
+  if (quote !== undefined) return false;
+  const withoutKnownExpressions = raw.replace(
+    /\$\{\{\s*contains\(github\.event\.pull_request\.labels\.\*\.name, 'run-ci'\)\s*\}\}/gu,
+    "true",
+  ).replace(/\$\{[A-Za-z_][A-Za-z_0-9]*\}|\$[A-Za-z_][A-Za-z_0-9]*/gu, "value");
+  return !/[`$\\]/u.test(withoutKnownExpressions);
 };
-const informationOnly = ({
-  words,
-  flags = STANDARD_INFORMATION_FLAGS,
-}: InformationInvocationOptions) =>
-  words.length === 2 && flags.includes(words.at(1) ?? "");
+const fileArguments = (words: readonly string[], flags: RegExp) =>
+  words.every((word) => staticData(word) && (!word.startsWith("-") || flags.test(word)));
 
-const invokesRepositoryCode = (command: string) =>
-  shellCommandSegments(command).some((segment) => {
-    let words = executableShellWords(segment).map(decodeShellWord);
-    while (["command", "exec"].includes(words.at(0) ?? "")) {
-      const wrapper = words.at(0);
-      let start = 1;
-      while (start < words.length) {
-        const option = words.at(start) ?? "";
-        if (option === "--") {
-          start++;
-          break;
-        }
-        if (wrapper === "command" && /^-[pVv]+$/u.test(option)) {
-          if (/[vV]/u.test(option)) return false;
-          start++;
-          continue;
-        }
-        if (wrapper === "exec" && option === "-a") {
-          start += 2;
-          continue;
-        }
-        if (wrapper === "exec" && /^-[cl]+$/u.test(option)) {
-          start++;
-          continue;
-        }
-        break;
-      }
-      words = executableShellWords(words.slice(start));
+const safeComparison = (words: readonly string[]) => {
+  const first = words.at(0);
+  if (!["test", "[", "[["].includes(first ?? "")) return false;
+  const end = first === "[[" ? "]]" : first === "[" ? "]" : undefined;
+  if (end !== undefined && words.at(-1) !== end) return false;
+  const operands = words.slice(1, end === undefined ? undefined : -1);
+  if (operands.length === 1) return true;
+  if (operands.length === 2)
+    return ["-n", "-z", "-e", "-f", "-d"].includes(operands.at(0) ?? "");
+  return operands.length === 3 && ["=", "==", "!="].includes(operands.at(1) ?? "");
+};
+
+const safeGit = (words: readonly string[]) => {
+  const subcommand = words.at(1);
+  const arguments_ = words.slice(2);
+  if (!arguments_.every(staticData)) return false;
+  if (subcommand === "log") {
+    const count = arguments_.indexOf("-n");
+    if (count >= 0) {
+      if (!/^[0-9]+$/u.test(arguments_.at(count + 1) ?? "")) return false;
+      arguments_.splice(count, 2);
     }
-    const executable = words.at(0) ?? "";
-    if (
-      executable.startsWith("./") || executable.startsWith("../") ||
-      (!path.posix.isAbsolute(executable) && !executable.includes("$") && executable.includes("/")) ||
-      /(?:^|\/)node_modules\/\.bin\//u.test(executable)
-    ) return true;
-    if (words.some((word) => /(?:^|\/)node_modules\/\.bin\//u.test(word))) {
-      if (
-        ["node", "bun", "bash", "sh"].includes(path.posix.basename(executable))
-      )
-        return true;
+  }
+  const flags = /^(?:--|--name-only|--name-status|--quiet|--exit-code|--stat|--short|--verify|--is-ancestor|--all|--cached|--others|--exclude-standard|--no-pager|--oneline|-z|--no-ext-diff|--no-textconv|--format=[A-Za-z0-9%:._ -]+|-n[0-9]+)$/u;
+  if (["diff", "log", "show", "rev-parse", "merge-base", "ls-files"].includes(subcommand ?? ""))
+    return arguments_.every((argument) => !argument.startsWith("-") || flags.test(argument));
+  // Fetch uses only a named remote, never an alternate transport/helper program.
+  if (subcommand !== "fetch") return false;
+  return arguments_.every((argument) => /^(?:--no-tags|--prune|--depth=[0-9]+)$/u.test(argument) || (!argument.startsWith("-") && /^[A-Za-z0-9_.:/-]+$/u.test(argument))) &&
+    !arguments_.some((argument) => argument.includes(":") || argument.startsWith("/"));
+};
+
+const safeGh = (words: readonly string[]) => {
+  if (!words.every(staticData)) return false;
+  if (words.at(1) === "api") {
+    const arguments_ = words.slice(2);
+    if (["--method", "-X"].includes(arguments_.at(0) ?? "") && arguments_.at(1) === "GET") arguments_.splice(0, 2);
+    if (!arguments_.at(0) || arguments_.at(0)?.startsWith("-")) return false;
+    for (let index = 1; index < arguments_.length; index++) {
+      const argument = arguments_.at(index);
+      if ((argument === "--method" || argument === "-X") && arguments_.at(index + 1) === "GET") index++;
+      else if (["--jq", "-q"].includes(argument ?? "") && /^\.[A-Za-z0-9_.[\]" -]*$/u.test(arguments_.at(index + 1) ?? "")) index++;
+      else return false;
     }
-    const name = path.posix.basename(executable);
-    if (["bunx", "npx", "pnpx"].includes(name)) return true;
-    // Corepack selects the manager implementation from project declarations.
-    // Dispatch and unknown modes need trust even when manager scripts are disabled.
-    if (name === "corepack") return !informationOnly({ words });
-    const nodeRuntime = name === "node" || name === "nodejs";
-    if (nodeRuntime || /^python(?:[23](?:\.\d+)?)?$/u.test(name)) {
-      // Discovery, module, inline, preload, and stdin modes execute without a
-      // filename. Unknown runtime modes therefore retain the trust requirement.
-      return !informationOnly({
-        words,
-        flags: nodeRuntime ? STANDARD_INFORMATION_FLAGS : PYTHON_INFORMATION_FLAGS,
-      });
+    return /^\/?repos\/[A-Za-z0-9_./-]+$/u.test(arguments_.at(0) ?? "");
+  }
+  if (words.at(1) !== "pr" || words.at(2) !== "view") return false;
+  const arguments_ = words.slice(3);
+  for (let index = 0; index < arguments_.length; index++) {
+    const argument = arguments_.at(index) ?? "";
+    if (["--json", "--repo", "-R", "--jq", "-q"].includes(argument)) {
+      if (!arguments_.at(++index) || arguments_.at(index)?.startsWith("-")) return false;
+    } else if (!/^[0-9]+$/u.test(argument)) return false;
+  }
+  return true;
+};
+
+const safeCommand = (raw: readonly string[]): boolean => {
+  if (raw.length === 0) return true;
+  if (!raw.every(metadataWord)) return false;
+  const words = raw.map(decodeShellWord);
+  const name = words.at(0);
+  // A quoted/dynamic executable is never proved to resolve to a known builtin.
+  if (raw.at(0) !== name) return false;
+  if (name === "if" || name === "elif") return safeComparison(words.slice(1));
+  if (["then", "else"].includes(name ?? "")) return safeCommand(raw.slice(1));
+  if (name === "fi") return words.length === 1;
+  if (["test", "[", "[["].includes(name ?? "")) return safeComparison(words);
+  if (["true", "false"].includes(name ?? "")) return words.length === 1;
+  if (name === "exit") return words.length === 1 || (words.length === 2 && /^[0-9]+$/u.test(words.at(1) ?? ""));
+  if (name === "echo") return true;
+  if (name === "printf") return words.length > 1 && !words.at(1)?.startsWith("-");
+  if (name === "cat") return fileArguments(words.slice(1), /^(?:--|-n|-b|-s|-E|-T|-v)$/u);
+  if (name === "ls") return fileArguments(words.slice(1), /^(?:--|-[ladAh1]+)$/u);
+  if (name === "wc") return fileArguments(words.slice(1), /^(?:--|-[lcwmL]+)$/u);
+  if (name === "head" || name === "tail") {
+    const arguments_ = words.slice(1);
+    for (let index = 0; index < arguments_.length; index++) {
+      const argument = arguments_.at(index) ?? "";
+      if (["-n", "-c"].includes(argument)) {
+        if (!/^[0-9]+$/u.test(arguments_.at(++index) ?? "")) return false;
+      } else if (!staticData(argument) || (argument.startsWith("-") && !/^-[nc][0-9]+$/u.test(argument))) return false;
     }
-    if (name === "bash" || name === "sh")
-      return words.slice(1).some((word) =>
-        /^(?!-)(?:\.?\.?\/)?[^$]*\.(?:[cm]?[jt]s|sh|py)$/u.test(word),
-      );
-    // These managers can load repository-owned manager code or configuration
-    // hooks independently of lifecycle-script suppression.
-    if (["pnpm", "yarn", "yarnpkg"].includes(name)) return true;
-    if (name !== "bun" && name !== "npm") return false;
-    const argumentsAfterOptions = words.slice(1);
-    if (informationOnly({ words })) return false;
-    const installationArguments: string[] = [];
-    for (let index = 0; index < argumentsAfterOptions.length; index++) {
-      const argument = argumentsAfterOptions.at(index) ?? "";
-      if (["--cwd", "-C", "--filter", "-F", "--prefix", "--workspace", "-w"].includes(argument)) {
-        // A missing or option-shaped value cannot establish an install-only command.
-        const value = argumentsAfterOptions.at(index + 1);
-        if (value === undefined || value.startsWith("-")) return true;
-        index++;
-        continue;
-      }
-      installationArguments.push(argument);
+    return true;
+  }
+  if (name === "jq" || name === "yq") {
+    const arguments_ = words.slice(1);
+    while (["-r", "-c", "-e"].includes(arguments_.at(0) ?? "")) arguments_.shift();
+    if (name === "yq" && arguments_.at(0) === "eval") arguments_.shift();
+    const query = arguments_.shift();
+    return query !== undefined && /^\.[A-Za-z0-9_.[\]" -]*$/u.test(query) && fileArguments(arguments_, /^--$/u);
+  }
+  if (name === "git") return safeGit(words);
+  if (name === "gh") return safeGh(words);
+  return false;
+};
+
+const invokesRepositoryCode = (command: string) => {
+  // The shared command scanner intentionally omits redirects. Prove their
+  // destinations separately; metadata may only write Actions outputs or discard.
+  const tokens = shellTokens(command);
+  for (const [index, token] of tokens.entries()) {
+    if (token.kind !== "redirect") continue;
+    const target = tokens.at(index + 1);
+    if (![">", ">>"].includes(token.value) || target?.kind !== "word" ||
+      !['"$GITHUB_OUTPUT"', '"${GITHUB_OUTPUT}"', "/dev/null"].includes(target.value)) return true;
+  }
+  const branches: ("condition" | "then" | "else")[] = [];
+  for (let words of shellCommandSegments(command, "tokens")) {
+    if (!safeCommand(words)) return true;
+    while (["then", "else"].includes(words.at(0) ?? "")) {
+      const keyword = words.at(0);
+      const previous = branches.pop();
+      if (keyword === "then" && previous === "condition") branches.push("then");
+      else if (keyword === "else" && previous === "then") branches.push("else");
+      else return true;
+      words = words.slice(1);
     }
-    const commandIndex = installationArguments.findIndex((argument) => !argument.startsWith("-"));
-    const subcommand = installationArguments.at(commandIndex);
-    if (commandIndex < 0 || !["install", "i", "ci"].includes(subcommand ?? "")) return true;
-    // Only a statically understood install with disabled scripts can precede trust.
-    // Unknown flags (including eval/preload forms) always retain the trust requirement.
-    const flags = installationArguments.filter((_argument, index) => index !== commandIndex);
-    const scriptsDisabled = flags.some((flag) => flag === "--ignore-scripts" || flag === "--ignore-scripts=true");
-    return !scriptsDisabled || flags.some((flag) =>
-      !/^(?:--frozen-lockfile|--ignore-scripts(?:=true)?|--no-(?:audit|fund|progress|save|cache|summary)|--production|--prefer-offline|--offline|--(?:audit|fund|progress)=false)$/u.test(flag),
-    );
-  });
+    const keyword = words.at(0);
+    if (keyword === "if") branches.push("condition");
+    if (keyword === "elif") {
+      if (branches.pop() !== "then") return true;
+      branches.push("condition");
+    }
+    if (keyword === "fi") {
+      const previous = branches.pop();
+      if (previous !== "then" && previous !== "else") return true;
+    }
+  }
+  return branches.length !== 0;
+};
+
+const safeAction = (uses: unknown, inputs: unknown) =>
+  typeof uses === "string" && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_./-]+@[a-f0-9]{40}$/u.test(uses) &&
+  (inputs === undefined || (record(inputs) && Object.keys(inputs).length === 0));
+
+const safeShell = (shell: unknown) =>
+  shell === undefined || shell === "bash" || shell === "sh";
+const safeEnvironment = (value: unknown) =>
+  value === undefined || (record(value) && Object.keys(value).every((name) =>
+    ["HEAD_REPO", "BASE_REPO", "HAS_RUN_CI_LABEL", "GH_TOKEN", "GITHUB_TOKEN",
+      "HAWK_RUST_TOOLCHAIN", "HAWK_VERSION", "HAWK_X86_64_UNKNOWN_LINUX_GNU_SHA256"].includes(name)));
+const configuredShell = (value: unknown) =>
+  record(value) && record(value["run"]) ? value["run"]["shell"] : undefined;
 
 export const workflowTrustRules = ["workflow-trust"] as const;
 
@@ -245,7 +307,7 @@ export const checkWorkflowTrust = (workflow: unknown) => {
     const jobUses = job["uses"];
     if (
       typeof jobUses === "string" &&
-      jobUses.startsWith("./") &&
+      !safeAction(jobUses, job["with"]) &&
       !permitsExecution(undefined)
     )
       findings.push({ type: "job", job: name, message });
@@ -255,8 +317,11 @@ export const checkWorkflowTrust = (workflow: unknown) => {
       const run = step["run"];
       const uses = step["uses"];
       if (
-        !(typeof run === "string" && invokesRepositoryCode(run)) &&
-        !(typeof uses === "string" && uses.startsWith("./"))
+        !(typeof run === "string" && (invokesRepositoryCode(run) ||
+          !safeShell(step["shell"] ?? configuredShell(job["defaults"]) ?? configuredShell(workflow["defaults"])) ||
+          ![workflow["env"], job["env"], step["env"]].every(safeEnvironment))) &&
+        !(typeof uses === "string" && (!safeAction(uses, step["with"]) ||
+          ![workflow["env"], job["env"], step["env"]].every(safeEnvironment)))
       )
         continue;
       if (permitsExecution(step["if"])) continue;

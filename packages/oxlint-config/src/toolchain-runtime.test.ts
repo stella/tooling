@@ -946,6 +946,21 @@ jobs:
       .toMatchObject([{ rule: "workflow-trust", path: file, line: 7 }]);
   }
 });
+test("workflow trust diagnostics locate commands outside the metadata allowlist", () => {
+  const file = ".github/workflows/ci.yml";
+  for (const command of ["bash ./scripts/check", "source scripts/check.sh", ". ./x", "unknown-command"]) {
+    const source = `on: pull_request
+jobs:
+  trust-check:
+    steps: [{run: echo trust-decision}]
+  build:
+    steps:
+      - run: ${command}
+`;
+    expect(check(file, source).filter(({ rule }) => rule === "workflow-trust"))
+      .toMatchObject([{ rule: "workflow-trust", path: file, line: 7 }]);
+  }
+});
 for (const fixture of cases) {
   test(`${fixture.rule} accepts its shared pin and rejects a mutation`, () => {
     expect(check(fixture.file, fixture.pass)).toEqual([]);
