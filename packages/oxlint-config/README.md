@@ -257,10 +257,13 @@ Peer ranges declare support: they must include the policy compiler release and t
 compatibility release when the selected layout uses it. Ranges do not contribute
 to the installed compiler inventory.
 
-JavaScript update roots come from the repository root, declared workspace membership,
+JavaScript update roots include the repository root, declared workspace membership,
 and directories with their own `bun.lock`, `package-lock.json`, `yarn.lock`, or
-`pnpm-lock.yaml`. Other package manifests do not create update roots; directory names
-have no special meaning. Workspace members share their owner's update entry.
+`pnpm-lock.yaml`. Independent manifests with dependencies, an explicit package manager,
+or dependency-bearing workspace members also create update roots. Metadata-only
+fixtures do not. Package-manager selection follows the nearest declaration or lock;
+workspace members share their owner's update entry. Bundler `Gemfile`/`Gemfile.lock`
+and Composer `composer.json`/`composer.lock` declare roots at their own directories.
 
 `node-engine` and `cloud-setup-drift` are mandatory: opt-outs cannot bypass the
 shared Node support range or generated cloud setup requirements.
@@ -287,6 +290,32 @@ is unnecessary. Their original reference metadata is preserved without
 discovering or building referenced projects. Missing, unreadable, and zero-input
 selected configs fail the check. `--help` prints usage and exits successfully;
 unknown arguments fail.
+
+## Generate dependency update configuration
+
+Run `bunx --no-install stll-dependabot` from the repository root. It reads tracked
+configuration and writes canonical `.github/dependabot.yml`, preserving an existing
+`.github/dependabot.yaml` spelling. Both files together are rejected. Repeated runs
+produce identical bytes; linked output files and directories are rejected.
+
+For programmatic generation, the package entry point exports
+`generateDependabotConfig({ files, policy })` and `parseToolchainPolicy`:
+
+```ts
+import {
+  generateDependabotConfig,
+  parseToolchainPolicy,
+} from "@stll/oxlint-config";
+import sharedPolicy from "@stll/oxlint-config/toolchain.json";
+
+const yaml = generateDependabotConfig({
+  files: trackedConfiguration,
+  policy: parseToolchainPolicy(sharedPolicy).dependabot,
+});
+```
+
+`files` maps tracked repository-relative configuration paths to their text. Use the
+CLI when a tracked snapshot is not already available; no source imports are needed.
 
 ## Shared cloud setup
 
@@ -337,6 +366,13 @@ the minimal profile and a pinned, checksum-verified rustup installer. Rust-enabl
 setup also provisions Ubuntu's `build-essential` package for native compilation
 and linking.
 
+`cloud.rust.additionalToolchains` explicitly selects extra exact compiler releases.
+Each must match the shared pin or a valid `rustExceptions` entry and differ from the
+primary compiler. Extras are installed once with the minimal profile and verified
+offline at session start. An exception alone authorizes a version; it does not
+provision it. This setting installs neither Hawk nor extra compiler components.
+Generated scripts contain no trailing whitespace and end with one newline.
+
 `cloud.tools` is a closed object: the supported keys are `cargo-nextest`,
 `wasm-bindgen-cli`, `gitleaks`, `uv`, and `time`. Each value must be an exact release supported by
 the installed tooling package. Unknown tools and unsupported versions fail
@@ -371,8 +407,8 @@ The command writes `.agents/cloud-setup.sh` with executable permissions and
 merges a `SessionStart` hook into `.claude/settings.json`. The hook runs
 `bash "$CLAUDE_PROJECT_DIR/.agents/cloud-setup.sh" start` only when
 `CLAUDE_CODE_REMOTE=true`, including sessions that reuse cached filesystems and
-sessions started from a repository subdirectory. Generation replaces the
-relative-path hook written by 1.1.0 in place. After successful startup, it appends the
+sessions started from a repository subdirectory. Generation replaces the exact hooks written by 1.1.0 and 1.3.1 in place.
+After successful startup, it appends the
 managed shell profile's literal exports to `CLAUDE_ENV_FILE` when available, so
 subsequent Claude commands select pinned runtimes and tools before preinstalled
 versions while retaining their inherited `PATH`. The settings also set
@@ -380,7 +416,9 @@ versions while retaining their inherited `PATH`. The settings also set
 attribution to commits or pull requests. Existing environment-file
 content, unrelated settings, and hooks are preserved. Invalid JSON, disabled
 hooks, conflicting cloud startup entries, or a different `attribution` value stop
-generation with a repair instruction. Commit both generated files.
+generation with a repair instruction. Startup or environment persistence failures
+produce actionable session context and a stderr reason; SessionStart cannot block
+a session. Successful startup is silent on stdout. Commit both generated files.
 Generation refuses symlink parents or destinations and hard-linked destinations.
 `stll-toolchain-check` rejects missing, drifted, or undeclared tracked scripts,
 missing or conflicting startup hooks, and missing or different attribution

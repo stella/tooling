@@ -179,10 +179,13 @@ Peer ranges declare support: they must include the policy compiler release and t
 compatibility release when the selected layout uses it. Ranges do not contribute
 to the installed compiler inventory.
 
-JavaScript update roots come from the repository root, declared workspace membership,
+JavaScript update roots include the repository root, declared workspace membership,
 and directories with their own `bun.lock`, `package-lock.json`, `yarn.lock`, or
-`pnpm-lock.yaml`. Other package manifests do not create update roots; directory names
-have no special meaning. Workspace members share their owner's update entry.
+`pnpm-lock.yaml`. Independent manifests with dependencies, an explicit package manager,
+or dependency-bearing workspace members also create update roots. Metadata-only
+fixtures do not. Package-manager selection follows the nearest declaration or lock;
+workspace members share their owner's update entry. Bundler `Gemfile`/`Gemfile.lock`
+and Composer `composer.json`/`composer.lock` declare roots at their own directories.
 
 `rust-version`, `node-engine` and `cloud-setup-drift` are mandatory: opt-outs cannot bypass the
 shared Node support range or generated cloud setup requirements.
@@ -200,8 +203,11 @@ includes only the root, matching the current pnpm contract; declare member
 patterns explicitly to keep membership stable across pnpm versions.
 The generator derives the reference from the same policy and ecosystem
 registry as the guard: run `bun scripts/write-dependabot-policy.ts` after
-policy changes. Consumers can copy its applicable entries and directory paths;
-the CLI rejects missing coverage and policy drift. Owned package pins follow
+policy changes. Consumers run `bunx --no-install stll-dependabot` from their
+repository root; the command reads tracked declarations and writes canonical
+`.github/dependabot.yml` (or updates an existing `.yaml`). `stll-toolchain-check`
+rejects missing coverage and policy drift. The published package also exports
+`generateDependabotConfig` and `parseToolchainPolicy` for programmatic generation. Owned package pins follow
 release metadata. The `changeset:version` command first includes the policy
 package in the release plan whenever an owned workspace pin changes, then
 synchronizes pins through `bun scripts/check-lockfile-workspace-versions.ts
@@ -466,7 +472,11 @@ as `.env.cloud`, is required with services and rejected without services.
 Runtime-only scripts emit no environment file code. A tracked root
 `.node-version` must select an exact stable patch within the shared Node series.
 Root `rust-toolchain.toml` enables pinned Rust automatically; `cloud.rust` can
-also declare its toolchain, components, and targets. Optional `cloud.tools`
+also declare its toolchain, components, and targets. To provision another authorized
+compiler, explicitly select `cloud.rust.additionalToolchains: ["1.97.1"]`; each
+extra must match the shared pin or a valid `rustExceptions` entry. Extras use the
+minimal Rust profile. Exceptions alone authorize versions and install nothing;
+additional compilers do not install Hawk or its required components. Optional `cloud.tools`
 installs exact supported releases of `cargo-nextest`, `wasm-bindgen-cli`, and
 `uv` from verified prebuilt artifacts. The wasm-bindgen CLI pin must match the
 crate in `Cargo.lock`. Installed commands work in a fresh shell without sourcing
