@@ -1,5 +1,15 @@
 # @stll/oxlint-config
 
+## 1.3.0
+
+### Minor Changes
+
+- [#142](https://github.com/stella/tooling/pull/142) [`36b215e`](https://github.com/stella/tooling/commit/36b215e67a0f05b507cf5113cd8b098d8e9dea69) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Cloud setup can run one root package script after dependencies (`cloud.prepare`), offline and time-bounded, to produce derived sources an install with `--ignore-scripts` skips.
+
+### Patch Changes
+
+- [#143](https://github.com/stella/tooling/pull/143) [`df9ca3a`](https://github.com/stella/tooling/commit/df9ca3aac1728a6ca2d0eb603910bc3b51d15e93) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Cloud setup verifies managed service executables as the service user.
+
 ## 1.2.6
 
 ### Patch Changes
