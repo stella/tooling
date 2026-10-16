@@ -270,3 +270,17 @@ network_run example.test 20 fixture-install
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("bounded commands never read the caller's input", () => {
+  const result = Bun.spawnSync(
+    [
+      "bash",
+      "-eu",
+      "-c",
+      `fail() { echo "$*" >&2; exit 1; }\n${renderCloudNetwork()}\ntimeout() { shift 3; "$@"; }\nnetwork_run example.test 20 cat`,
+    ],
+    { stdin: new TextEncoder().encode("caller input\n") },
+  );
+  expect(result.exitCode).toBe(0);
+  expect(result.stdout.toString()).toBe("");
+});
