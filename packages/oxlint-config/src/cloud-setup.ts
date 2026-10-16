@@ -108,6 +108,10 @@ install_runtimes() (
     apt_refresh_for ca-certificates curl unzip xz-utils openssl gnupg util-linux libatomic1
     DEBIAN_FRONTEND=noninteractive apt_install ca-certificates curl unzip xz-utils openssl gnupg util-linux libatomic1
   fi
+  if [[ ! -s /etc/ssl/certs/ca-certificates.crt ]]; then
+    update-ca-certificates
+  fi
+  [[ -s /etc/ssl/certs/ca-certificates.crt ]] || fail 'System CA certificate bundle is unavailable after repair'
   local node_archive bun_archive bun_folder
   # Subshell scope retains scratch for EXIT cleanup after a failed command.
   scratch="$(mktemp -d)"

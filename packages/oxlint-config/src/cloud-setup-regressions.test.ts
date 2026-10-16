@@ -119,6 +119,12 @@ test("runtime scratch is removed when download, verification or extraction exits
     withFixture((root) => {
       binary(join(root, "node/bin/node"), "v26.10.0");
       // An interrupted extraction left node executable but no npm/npx.
+      const bundle = join(root, "ca-certificates.crt");
+      writeFileSync(bundle, "fixture certificate bundle");
+      const functions = runtimeFunctions().replaceAll(
+        "/etc/ssl/certs/ca-certificates.crt",
+        bundle,
+      );
       const result = Bun.spawnSync(
         [
           "bash",
@@ -143,7 +149,7 @@ download_file() {
 sha256sum() { [[ "$PHASE" != checksum ]] || return 74; cat >/dev/null; }
 tar() { [[ "$PHASE" != extraction ]] || return 75; return 97; }
 ln() { exit 96; }
-${runtimeFunctions()}
+${functions}
 install_runtimes
 printf '%s\\n' unreachable
 `,
@@ -175,49 +181,99 @@ printf '%s\\n' unreachable
   }
 });
 
-test("runtime bootstrap repairs missing or empty certificate bundles before downloads", () => {
-  for (const certificates of [undefined, "", "fixture certificate bundle"]) {
-    withFixture((root) => {
-      const bundle = join(root, "ca-certificates.crt");
-      if (certificates !== undefined) writeFileSync(bundle, certificates);
-      const functions = runtimeFunctions();
-      expect(functions).toContain(
-        "[[ ! -s /etc/ssl/certs/ca-certificates.crt ]]",
-      );
-      const rewritten = functions.replaceAll(
-        "/etc/ssl/certs/ca-certificates.crt",
-        bundle,
-      );
-      const marker = join(root, "apt-calls");
-      const result = Bun.spawnSync(
-        [
-          "bash",
-          "-euo",
-          "pipefail",
-          "-c",
-          `
-command() { [[ "$1" == -v ]]; }
+test("runtime bootstrap rebuilds a missing CA bundle even when apt packages are already current", () => {
+  for (const initial of ["missing", "empty", "populated"] as const) {
+    const outcomes =
+      initial === "populated"
+        ? ["unchanged"]
+        : ["repaired", "failed", "unchanged"];
+    for (const outcome of outcomes) {
+      withFixture((root) => {
+        const bundle = join(root, "ca-certificates.crt");
+        if (initial !== "missing")
+          writeFileSync(
+            bundle,
+            initial === "empty" ? "" : "fixture certificate bundle",
+          );
+        const functions = runtimeFunctions();
+        expect(functions).toContain(
+          "[[ ! -s /etc/ssl/certs/ca-certificates.crt ]]",
+        );
+        const rewritten = functions.replaceAll(
+          "/etc/ssl/certs/ca-certificates.crt",
+          bundle,
+        );
+        const marker = join(root, "apt-calls");
+        const download = join(root, "download-attempt");
+        const result = Bun.spawnSync(
+          [
+            "bash",
+            "-euo",
+            "pipefail",
+            "-c",
+            `
+fail() { printf '%s\\n' "$*" >&2; exit 1; }
+command() { if [[ "$1" == -v ]]; then return 0; fi; builtin command "$@"; }
 ldconfig() { printf '%s\\n' libatomic.so.1; }
 apt_refresh_for() { printf '%s\\n' "refresh $*" >> "$MARKER"; }
+# An already-current ca-certificates package does not recreate the bundle.
 apt_install() { printf '%s\\n' "install $*" >> "$MARKER"; }
-mktemp() { return 93; }
+update-ca-certificates() {
+  printf '%s\\n' update >> "$MARKER"
+  case "$OUTCOME" in
+    repaired) printf '%s\\n' 'fixture rebuilt bundle' > "$BUNDLE" ;;
+    failed) return 74 ;;
+    unchanged) : ;;
+  esac
+}
+mktemp() { command mktemp -d "$FIXTURE/scratch.XXXXXX"; }
+download_file() {
+  printf '%s\\n' attempted >> "$DOWNLOAD_MARKER"
+  [[ -s "$BUNDLE" ]] || return 97
+  return 93
+}
 ${rewritten}
 install_runtimes
 `,
-        ],
-        { env: { ...process.env, MARKER: marker } },
-      );
-      expect(result.exitCode, result.stderr.toString()).toBe(93);
-      expect(result.stdout.toString()).toBe("");
-      if (certificates === undefined || certificates === "") {
-        const packages =
-          "ca-certificates curl unzip xz-utils openssl gnupg util-linux libatomic1";
-        expect(readFileSync(marker, "utf8")).toBe(
-          `refresh ${packages}\ninstall ${packages}\n`,
+          ],
+          {
+            env: {
+              ...process.env,
+              MARKER: marker,
+              BUNDLE: bundle,
+              OUTCOME: outcome,
+              FIXTURE: root,
+              DOWNLOAD_MARKER: download,
+              NODE_DIR: join(root, "node"),
+              NODE_VERSION: "26.10.0",
+              NODE_ARCH: "x64",
+              BUN_DIR: join(root, "bun"),
+              BUN_VERSION: policy.bun,
+              BUN_ARCH: "x64",
+            },
+          },
         );
-      } else {
-        expect(existsSync(marker)).toBe(false);
-      }
-    });
+        const ready = initial === "populated" || outcome === "repaired";
+        expect(result.exitCode, result.stderr.toString()).toBe(
+          ready ? 93 : outcome === "failed" ? 74 : 1,
+        );
+        expect(existsSync(download)).toBe(ready);
+        expect(result.stdout.toString()).toBe("");
+        if (initial === "populated") {
+          expect(existsSync(marker)).toBe(false);
+        } else {
+          const packages =
+            "ca-certificates curl unzip xz-utils openssl gnupg util-linux libatomic1";
+          expect(readFileSync(marker, "utf8")).toBe(
+            `refresh ${packages}\ninstall ${packages}\nupdate\n`,
+          );
+        }
+        if (!ready && outcome === "unchanged") {
+          expect(result.stderr.toString()).toContain(
+            "CA certificate bundle is unavailable after repair",
+          );
+        }
+      });
+    }
   }
 });
