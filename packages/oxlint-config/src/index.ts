@@ -1,8 +1,5 @@
 import { defineConfig, type OxlintConfig, type OxlintOverride } from "oxlint";
 
-export { generateDependabotConfig } from "./toolchain-dependabot";
-export { parseToolchainPolicy } from "./toolchain-schema";
-
 type Rules = NonNullable<OxlintConfig["rules"]>;
 type JsPlugins = NonNullable<OxlintConfig["jsPlugins"]>;
 type Options = NonNullable<OxlintConfig["options"]>;

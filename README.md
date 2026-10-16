@@ -206,7 +206,7 @@ registry as the guard: run `bun scripts/write-dependabot-policy.ts` after
 policy changes. Consumers run `bunx --no-install stll-dependabot` from their
 repository root; the command reads tracked declarations and writes canonical
 `.github/dependabot.yml` (or updates an existing `.yaml`). `stll-toolchain-check`
-rejects missing coverage and policy drift. The published package also exports
+rejects missing coverage and policy drift. The published `@stll/oxlint-config/dependabot` subpath exports
 `generateDependabotConfig` and `parseToolchainPolicy` for programmatic generation. Owned package pins follow
 release metadata. The `changeset:version` command first includes the policy
 package in the release plan whenever an owned workspace pin changes, then
@@ -643,8 +643,10 @@ Job containers and nonempty services require the job-level trust gate because
 they start before steps and supply executable code. A step condition cannot
 authorize their startup. Digest pinning alone does not approve an image for
 pre-trust execution; the guard has no implicit image approval catalog.
-Pinned external step actions without inputs may run before trust; local actions
-and unknown step action forms require the gate. Every job-level reusable workflow
+Before trust, step actions must use a full SHA and match the explicit bootstrap
+catalog: `actions/checkout`, `oven-sh/setup-bun` or `actions/setup-node`, with
+bounded selector inputs. Other actions and unsupported inputs require the
+job-level gate; a step condition cannot authorize them. Every job-level reusable workflow
 call requires the job-level trust condition, including pinned calls without inputs.
 
 Interpreters, sourced files, executable paths, package managers (including

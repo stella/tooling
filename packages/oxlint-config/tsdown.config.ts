@@ -7,6 +7,7 @@ export default defineConfig({
     "src/no-raw-colors.ts",
     "src/toolchain-check-cli.ts",
     "src/dependabot-cli.ts",
+    "src/dependabot.ts",
     "src/cloud-setup-cli.ts",
     "src/publish-contract-cli.ts",
     "src/publish-build-target-nuxt-helper.ts",

@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import policyInput from "../toolchain.json";
-import { generateDependabotConfig, parseToolchainPolicy } from "./index";
+import { generateDependabotConfig, parseToolchainPolicy } from "./dependabot";
 import { checkDependabot } from "./toolchain-dependabot";
 import { readToolchainInputs } from "./toolchain-guard";
 
@@ -89,7 +89,7 @@ test.skipIf(process.env["CI"] !== "true")(
       });
       for (const format of ["mjs", "cjs"]) {
         const entry = fileURLToPath(
-          new URL(`../dist/index.${format}`, import.meta.url),
+          new URL(`../dist/dependabot.${format}`, import.meta.url),
         );
         const result = spawnSync(
           "node",
@@ -167,7 +167,9 @@ test("recreates a deleted tracked output at its indexed spelling", async () => {
           root,
           `.github/dependabot.${extension === "yml" ? "yaml" : "yml"}`,
         );
-        await expect(stat(alternative)).rejects.toMatchObject({ code: "ENOENT" });
+        await expect(stat(alternative)).rejects.toMatchObject({
+          code: "ENOENT",
+        });
       });
     }
   }
@@ -190,7 +192,10 @@ test("missing unrelated inputs and conflicting indexed output spellings never wr
   await withRepository(async (root) => {
     await mkdir(join(root, ".github"));
     for (const extension of ["yml", "yaml"])
-      await writeFile(join(root, `.github/dependabot.${extension}`), "sentinel\n");
+      await writeFile(
+        join(root, `.github/dependabot.${extension}`),
+        "sentinel\n",
+      );
     execFileSync("git", ["add", ".github"], { cwd: root });
     await rm(join(root, ".github/dependabot.yaml"));
     const result = invoke(root);

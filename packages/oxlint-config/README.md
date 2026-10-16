@@ -300,14 +300,14 @@ deleted from the working tree. Conflicting indexed or existing spellings are
 rejected, and unrelated unreadable inputs still stop generation. Repeated runs
 produce identical bytes; linked output files and directories are rejected.
 
-For programmatic generation, the package entry point exports
+For programmatic generation, the `@stll/oxlint-config/dependabot` subpath exports
 `generateDependabotConfig({ files, policy })` and `parseToolchainPolicy`:
 
 ```ts
 import {
   generateDependabotConfig,
   parseToolchainPolicy,
-} from "@stll/oxlint-config";
+} from "@stll/oxlint-config/dependabot";
 import sharedPolicy from "@stll/oxlint-config/toolchain.json";
 
 const yaml = generateDependabotConfig({
@@ -316,7 +316,10 @@ const yaml = generateDependabotConfig({
 });
 ```
 
-`files` maps tracked repository-relative configuration paths to their text. Use the
+The root lint-config entry does not load the tooling parser dependencies
+`yaml`, `picomatch` or `smol-toml`; they belong to the tooling subpath and CLIs.
+`files` maps existing tracked repository-relative configuration paths to their text.
+Deleted tracked manifests are absent from the generator snapshot. Use the
 CLI when a tracked snapshot is not already available; no source imports are needed.
 
 ## Shared cloud setup
@@ -435,8 +438,10 @@ prints usage without reading repository configuration.
 | Networked install       | `bash .agents/cloud-setup.sh install` |
 | Offline session startup | `bash .agents/cloud-setup.sh start`   |
 
-Runtime installation rebuilds and verifies a missing or empty system CA bundle
-before HTTPS downloads, including when the certificate package is already current.
+Runtime installation repairs and verifies a missing or empty system CA bundle
+offline before any apt refresh or download, including when the certificate package
+is already current. If the certificate updater is unavailable or cannot restore
+trust, restore the base image offline before rerunning installation.
 
 Both commands can be rerun. Missing or unknown subcommands print usage and
 exit 2; there is no implicit lifecycle mode. The script supports Ubuntu 24.04
@@ -681,8 +686,10 @@ Job containers and nonempty services require the job-level trust gate because
 they start before steps and supply executable code. A step condition cannot
 authorize their startup. Digest pinning alone does not approve an image for
 pre-trust execution; the guard has no implicit image approval catalog.
-Pinned external step actions without inputs may run before trust; local actions
-and unknown step action forms require the gate. Every job-level reusable workflow
+Before trust, step actions must use a full SHA and match the explicit bootstrap
+catalog: `actions/checkout`, `oven-sh/setup-bun` or `actions/setup-node`, with
+bounded selector inputs. Other actions and unsupported inputs require the
+job-level gate; a step condition cannot authorize them. Every job-level reusable workflow
 call requires the job-level trust condition, including pinned calls without inputs.
 
 Interpreters, sourced files, executable paths, package managers (including

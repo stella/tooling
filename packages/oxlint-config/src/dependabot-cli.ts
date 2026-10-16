@@ -2,14 +2,13 @@
 import { readFile, realpath } from "node:fs/promises";
 import { join } from "node:path";
 
+import { generateDependabotConfig, parseToolchainPolicy } from "./dependabot";
 import {
   checkGeneratedOutput,
   generationDiagnostics,
   writeGeneratedFile,
 } from "./generated-file";
-import { generateDependabotConfig } from "./toolchain-dependabot";
 import { readToolchainInputs } from "./toolchain-guard";
-import { parseToolchainPolicy } from "./toolchain-schema";
 
 const usage =
   "Usage: stll-dependabot (run from repository root)\n       stll-dependabot --help";

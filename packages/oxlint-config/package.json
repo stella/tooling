@@ -82,6 +82,17 @@
         "default": "./dist/publish-build-target-vite-dts-helper.cjs"
       },
       "default": "./dist/publish-build-target-vite-dts-helper.mjs"
+    },
+    "./dependabot": {
+      "import": {
+        "types": "./dist/dependabot.d.mts",
+        "default": "./dist/dependabot.mjs"
+      },
+      "require": {
+        "types": "./dist/dependabot.d.cts",
+        "default": "./dist/dependabot.cjs"
+      },
+      "default": "./dist/dependabot.mjs"
     }
   },
   "publishConfig": {
