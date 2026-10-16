@@ -83,6 +83,55 @@ test("cloud CLI generates byte-stable executable output shared with the mandator
   });
 });
 
+test("cloud CLI restores each deleted tracked output and reaches a fixed point", async () => {
+  const outputs = [cloudSetupPath, cloudClaudeSettingsPath];
+  for (const deleted of [
+    [cloudSetupPath],
+    [cloudClaudeSettingsPath],
+    outputs,
+  ]) {
+    await withRepository(async (root) => {
+      expect(invoke(root).status).toBe(0);
+      execFileSync("git", ["add", ...outputs], { cwd: root });
+      const expected = await Promise.all(
+        outputs.map((output) => readFile(join(root, output), "utf8")),
+      );
+      for (const output of deleted) await rm(join(root, output));
+      for (let iteration = 0; iteration < 2; iteration += 1) {
+        const result = invoke(root);
+        expect(result.status).toBe(0);
+        expect(result.stderr).toBe("");
+        expect(
+          await Promise.all(
+            outputs.map((output) => readFile(join(root, output), "utf8")),
+          ),
+        ).toEqual(expected);
+      }
+      expect((await stat(join(root, cloudSetupPath))).mode & 0o777).toBe(0o755);
+      expect(
+        checkToolchain({ root, policy: parseToolchainPolicy(policyInput) }),
+      ).toEqual([]);
+    });
+  }
+});
+
+test("cloud CLI refuses missing tracked inputs while its generated outputs are absent", async () => {
+  await withRepository(async (root) => {
+    expect(invoke(root).status).toBe(0);
+    const outputs = [cloudSetupPath, cloudClaudeSettingsPath];
+    execFileSync("git", ["add", ...outputs], { cwd: root });
+    for (const output of [...outputs, ".node-version"])
+      await rm(join(root, output));
+    const result = invoke(root);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(".node-version");
+    for (const output of outputs)
+      expect(
+        await stat(join(root, output)).catch(() => undefined),
+      ).toBeUndefined();
+  });
+});
+
 test("cloud CLI refuses symlinks and hard links without modifying outside targets", async () => {
   for (const target of ["parent", "destination", "hard-link"]) {
     await withRepository(async (root) => {

@@ -9,7 +9,11 @@ import {
   cloudSessionStartFix,
   mergeCloudClaudeSettings,
 } from "./cloud-setup-claude";
-import { checkGeneratedOutput, writeGeneratedFile } from "./generated-file";
+import {
+  checkGeneratedOutput,
+  generationDiagnostics,
+  writeGeneratedFile,
+} from "./generated-file";
 import {
   parseToolchainConfiguration,
   readToolchainInputs,
@@ -52,9 +56,20 @@ const main = async () => {
   if (args.length !== 0) throw new Error(usage);
   const root = await realpath(process.cwd());
   const { files, diagnostics } = readToolchainInputs(root);
-  if (diagnostics.length > 0)
+  const destination = join(root, cloudSetupPath);
+  const settingsDestination = join(root, cloudClaudeSettingsPath);
+  // Validate settings separately to retain actionable merge diagnostics.
+  const settings = await readClaudeSettings(settingsDestination);
+  const remainingDiagnostics = await generationDiagnostics({
+    diagnostics,
+    outputs: [
+      { relative: cloudSetupPath, destination },
+      { relative: cloudClaudeSettingsPath, destination: settingsDestination },
+    ],
+  });
+  if (remainingDiagnostics.length > 0)
     throw new Error(
-      diagnostics
+      remainingDiagnostics
         .map(
           ({ path, message }) =>
             `${path}: ${message}${path === cloudClaudeSettingsPath ? `; ${cloudSessionStartFix}` : ""}`,
@@ -84,10 +99,6 @@ const main = async () => {
     files,
     rustExceptions,
   });
-  const destination = join(root, cloudSetupPath);
-  await checkGeneratedOutput(destination);
-  const settingsDestination = join(root, cloudClaudeSettingsPath);
-  const settings = await readClaudeSettings(settingsDestination);
   const mergedSettings = mergeCloudClaudeSettings(settings?.text);
   await writeGeneratedFile({ destination, text: script, mode: 0o755 });
   if (mergedSettings !== settings?.text)
