@@ -142,6 +142,36 @@ const parseEnvFile = (input: object) => {
   return envFile;
 };
 
+// One package script the install snapshot runs after dependencies, for
+// derived sources a repository's tasks need but its install skips (for
+// example with --ignore-scripts). It is offline work, so it gets a hard
+// time bound instead of a network allowance.
+export const cloudPrepareMaxSeconds = 900;
+const cloudPrepareScript = /^[a-z0-9][a-z0-9:._-]*$/;
+
+const parsePrepare = (input: unknown) => {
+  if (input === undefined) return undefined;
+  if (typeof input !== "object" || input === null || Array.isArray(input))
+    throw new Error("cloud.prepare must be an object");
+  for (const key of Object.keys(input))
+    if (key !== "script" && key !== "seconds")
+      throw new Error(`unsupported cloud.prepare key: ${key}`);
+  const script = "script" in input ? input.script : undefined;
+  if (typeof script !== "string" || !cloudPrepareScript.test(script))
+    throw new Error("cloud.prepare.script must name a package script");
+  const seconds = "seconds" in input ? input.seconds : undefined;
+  if (
+    typeof seconds !== "number" ||
+    !Number.isInteger(seconds) ||
+    seconds < 1 ||
+    seconds > cloudPrepareMaxSeconds
+  )
+    throw new Error(
+      `cloud.prepare.seconds must be an integer from 1 to ${cloudPrepareMaxSeconds}`,
+    );
+  return { script, seconds } as const;
+};
+
 /** Parse an explicit declaration without assuming services for undeclared repositories. */
 export const parseCloudSetup = (input: unknown) => {
   if (input === undefined) return undefined;
@@ -153,14 +183,17 @@ export const parseCloudSetup = (input: unknown) => {
       key !== "install" &&
       key !== "envFile" &&
       key !== "rust" &&
-      key !== "tools"
+      key !== "tools" &&
+      key !== "prepare"
     )
       throw new Error(`unsupported cloud key: ${key}`);
   const rust = parseRust("rust" in input ? input.rust : undefined);
   const tools = parseTools("tools" in input ? input.tools : undefined);
+  const prepare = parsePrepare("prepare" in input ? input.prepare : undefined);
   const extensions = {
     ...(rust === undefined ? {} : { rust }),
     ...(tools === undefined ? {} : { tools }),
+    ...(prepare === undefined ? {} : { prepare }),
   };
   const selected = "services" in input ? input.services : [];
   if (!Array.isArray(selected))

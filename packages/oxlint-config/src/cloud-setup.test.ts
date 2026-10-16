@@ -447,3 +447,49 @@ test("every lifecycle phase runs through the timed step logger", () => {
   expect(failed.stdout.toString()).toBe("");
   expect(failed.stderr.toString()).not.toContain("demo done");
 });
+
+const prepared = {
+  install: `${cloudInstallCommand} --ignore-scripts`,
+  prepare: { script: "generate:cloud", seconds: 300 },
+};
+const manifest = JSON.stringify({
+  scripts: { "generate:cloud": "turbo run generate:route-tree" },
+});
+const generatePrepared = (files: Record<string, string>) => {
+  const cloud = parseCloudSetup(prepared);
+  if (cloud === undefined) throw new Error("Missing cloud declaration");
+  return generateCloudSetup({ policy, cloud, nodeVersion: "26.10.0", files });
+};
+
+test("a prepare script runs once after dependencies, offline and time-bounded", () => {
+  const generated = generatePrepared({ "package.json": manifest });
+  expect(generated).toContain(
+    `timeout --kill-after=10 300 runuser -u "$OUTPUT_USER" -- env HOME="$OUTPUT_HOME" PATH="$PATH" "$BUN_DIR/bun" run 'generate:cloud' </dev/null`,
+  );
+  const install = generated.slice(
+    generated.indexOf('if [[ "$MODE" == install ]]; then'),
+  );
+  const dependencies = install.indexOf("step dependencies dependency_install");
+  const prepare = install.indexOf("step prepare prepare_sources");
+  expect(dependencies).toBeGreaterThan(-1);
+  expect(prepare).toBeGreaterThan(dependencies);
+  expect(prepare).toBeLessThan(install.indexOf("exit 0"));
+  expect(generated.match(/step prepare prepare_sources/g)).toHaveLength(1);
+  const syntax = Bun.spawnSync(["bash", "-n"], {
+    stdin: Buffer.from(generated),
+  });
+  expect(syntax.stderr.toString()).toBe("");
+  expect(syntax.exitCode).toBe(0);
+  expect(generate(declaration)).not.toContain("prepare_sources");
+});
+
+test("a prepare script must be a root package script", () => {
+  expect(() => generatePrepared({})).toThrow(
+    "cloud.prepare requires a tracked root package.json",
+  );
+  for (const scripts of [undefined, {}, { other: "true" }]) {
+    expect(() =>
+      generatePrepared({ "package.json": JSON.stringify({ scripts }) }),
+    ).toThrow("cloud.prepare.script generate:cloud is not a root package script");
+  }
+});
