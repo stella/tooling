@@ -184,3 +184,62 @@ test("an unreferenced nondefault config cannot claim ownership but a solution re
     ).toEqual([]);
   });
 });
+
+test("workspace inventories preserve package cwd and ignore validation-only tasks and root orphans", () => {
+  withInventoryFixture((root, trackedFiles) => {
+    const manifest = {
+      ...fixtureManifest,
+      workspaces: ["packages/*"],
+      scripts: { lint: "turbo run lint" },
+    };
+    const writeTracked = (file: string, contents: string) => {
+      mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+      writeFileSync(path.join(root, file), contents);
+      trackedFiles.add(file);
+    };
+    writeTracked("package.json", JSON.stringify(manifest));
+    trackedFiles.add(".oxlintrc.json");
+    writeTracked("root-orphan.js", "export const value = 1;\n");
+    writeTracked(
+      "packages/a/package.json",
+      JSON.stringify({
+        name: "@fixture/a",
+        scripts: { lint: "oxlint -c ../../.oxlintrc.json ." },
+      }),
+    );
+    writeTracked("packages/a/src/owned.ts", "export const value = 1;\n");
+    const orphan = "packages/a/orphan.mjs";
+    writeTracked(orphan, "export const value = 1;\n");
+    const project = {
+      compilerOptions: { allowJs: true, noEmit: true },
+      include: ["**/*.ts", "**/*.mjs"],
+    };
+    writeTracked(
+      "packages/a/tsconfig.json",
+      JSON.stringify({
+        ...project,
+        exclude: ["orphan.mjs"],
+      }),
+    );
+    writeTracked(
+      "packages/b/package.json",
+      JSON.stringify({
+        name: "@fixture/b",
+        scripts: { lint: "bun run scripts/validate.ts" },
+      }),
+    );
+    writeTracked(
+      "packages/b/scripts/validate.ts",
+      'throw new Error("validation task must not execute during inventory");\n',
+    );
+
+    const diagnostics = checkNodeProjects({ root, manifest, trackedFiles });
+    expect(diagnostics.map(({ path: file }) => file)).toEqual([orphan]);
+    expect(
+      diagnostics.every(({ message }) => message.includes("inferred project")),
+    ).toBe(true);
+
+    writeTracked("packages/a/tsconfig.json", JSON.stringify(project));
+    expect(checkNodeProjects({ root, manifest, trackedFiles })).toEqual([]);
+  });
+});
