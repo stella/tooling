@@ -431,6 +431,9 @@ prints usage without reading repository configuration.
 | Networked install       | `bash .agents/cloud-setup.sh install` |
 | Offline session startup | `bash .agents/cloud-setup.sh start`   |
 
+Runtime installation rebuilds and verifies a missing or empty system CA bundle
+before HTTPS downloads, including when the certificate package is already current.
+
 Both commands can be rerun. Missing or unknown subcommands print usage and
 exit 2; there is no implicit lifecycle mode. The script supports Ubuntu 24.04
 with root access or passwordless sudo and fails when required capabilities
