@@ -62,7 +62,7 @@ const fragment = renderCloudToolInstall(
   }),
 );
 
-const createFixture = () => {
+const createFixture = (selection = fragment) => {
   const directory = mkdtempSync(join(tmpdir(), "cloud-tools-test-"));
   const managed = join(directory, "managed");
   const cargoBin = join(managed, "cargo/bin");
@@ -134,7 +134,7 @@ esac
       { mode: 0o755 },
     );
   writeTime("time (GNU Time) UNKNOWN");
-  const rewritten = fragment
+  const rewritten = selection
     .replaceAll("/opt/stll-cloud", managed)
     .replaceAll("/usr/local/bin", join(directory, "bin"))
     .replaceAll(cloudSetupPackages.time.binary, timePath);
@@ -382,7 +382,7 @@ test("both Rust provisioning entrypoints stop on bounded network failure before 
         apt_refresh_for() { [[ "$*" == build-essential ]] || exit 89; }
         apt_install() { [[ "$*" == build-essential ]] || exit 88; }
         fetch_verified() { printf '%s' fixture > "$3"; }
-        rust_ready() { return 1; }
+        primary_rust_ready() { return 1; }
         install_rust
       `,
         {
@@ -503,4 +503,81 @@ test("GNU time installation skips present packages and otherwise uses bounded ap
     );
     expect(existsSync(networkCalls)).toBe(false);
   });
+});
+
+test("explicit additional Rust installs once and is required by offline readiness", () => {
+  const selected = parseCloudSetup({
+    install: cloudInstallCommand,
+    rust: { additionalToolchains: ["1.97.1"] },
+  });
+  if (selected === undefined) throw new Error("Cloud fixture absent");
+  const fixture = createFixture(
+    renderCloudToolInstall(
+      resolveCloudToolchains({
+        cloud: selected,
+        files: {},
+        rust: policy.rust,
+        rustExceptions: [
+          {
+            pin: "1.97.1",
+            reason: "Compiler dependency",
+            tracking: "https://github.com/stella/tooling/issues/99",
+            expires: "2099-01-01",
+          },
+        ],
+      }),
+    ),
+  );
+  try {
+    const installed = join(fixture.directory, "additional-installed");
+    const cargoBin = join(fixture.directory, "managed/cargo/bin");
+    mkdirSync(join(fixture.directory, "bin"));
+    writeFileSync(
+      join(cargoBin, "rustc"),
+      `#!/bin/sh
+[ "$RUSTUP_AUTO_INSTALL" = 0 ] || exit 95
+case "$*" in
+  "+$FIXTURE_TOOLCHAIN --version") printf '%s\\n' "rustc $FIXTURE_TOOLCHAIN (fixture)" ;;
+  "+$FIXTURE_TOOLCHAIN -vV") printf '%s\\n' "host: ${host}" ;;
+  "+1.97.1 --version") [ -f "$FIXTURE_ADDITIONAL_INSTALLED" ] || exit 1; printf '%s\\n' 'rustc 1.97.1 (fixture)' ;;
+  *) exit 94 ;;
+esac
+`,
+      { mode: 0o755 },
+    );
+    writeFileSync(
+      join(cargoBin, "rustup"),
+      `#!/bin/sh
+[ "$RUSTUP_AUTO_INSTALL" = 0 ] || exit 95
+case "$*" in
+  --version) printf '%s\\n' 'rustup ${cloudSetupArtifacts["rustup-init"].version} (fixture)' ;;
+  "set auto-self-update disable"|"default $FIXTURE_TOOLCHAIN") : ;;
+  "toolchain install 1.97.1 --profile minimal --no-self-update") printf '%s' installed > "$FIXTURE_ADDITIONAL_INSTALLED" ;;
+  *) exit 94 ;;
+esac
+`,
+      { mode: 0o755 },
+    );
+    const env = { FIXTURE_ADDITIONAL_INSTALLED: installed };
+    const missing = fixture.run("verify_rust", env);
+    expect(missing.exitCode).toBe(1);
+    expect(missing.stderr.toString()).toContain("run install");
+    expect(existsSync(fixture.networkCalls)).toBe(false);
+    const command = `apt_refresh_for() { :; }; apt_install() { :; }; install_rust; verify_rust`;
+    const first = fixture.run(command, env);
+    expect(first.stderr.toString()).toBe("");
+    expect(first.exitCode).toBe(0);
+    const calls = readFileSync(fixture.networkCalls, "utf8");
+    expect(calls).toContain("static.rust-lang.org\n180\nrunuser");
+    expect(
+      calls.split("\n").filter((value) => value === "1.97.1"),
+    ).toHaveLength(1);
+    expect(calls.split("\n")).not.toContain(policy.rust);
+    const cached = fixture.run(command, env);
+    expect(cached.stderr.toString()).toBe("");
+    expect(cached.exitCode).toBe(0);
+    expect(readFileSync(fixture.networkCalls, "utf8")).toBe(calls);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
 });

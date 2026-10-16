@@ -71,6 +71,21 @@ export const resolveCloudToolchains = ({
         "cloud.rust.toolchain conflicts with root Rust toolchain",
       );
   }
+  // Authorization permits a version; cloud provisioning selects extras explicitly.
+  const additionalToolchains = cloud.rust?.additionalToolchains ?? [];
+  for (const pin of additionalToolchains) {
+    if (pin === channel)
+      throw new Error(
+        "cloud.rust.additionalToolchains must not repeat the primary toolchain",
+      );
+    if (
+      pin !== rust &&
+      !rustExceptions.some(({ pin: authorized }) => authorized === pin)
+    )
+      throw new Error(
+        `cloud.rust.additionalToolchains ${pin} requires an authorized rustExceptions pin`,
+      );
+  }
   const components = [
     ...new Set([
       ...parseCloudRustNames(declared?.["components"], "components"),
@@ -128,6 +143,7 @@ export const resolveCloudToolchains = ({
       rustEnabled && typeof channel === "string"
         ? {
             channel,
+            additionalToolchains: [...additionalToolchains].sort(),
             components,
             targets,
             installer: cloudSetupArtifacts["rustup-init"],

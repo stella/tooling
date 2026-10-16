@@ -67,16 +67,40 @@ const parseRust = (input: unknown) => {
   if (
     !object(input) ||
     Object.keys(input).some(
-      (key) => !["toolchain", "components", "targets"].includes(key),
+      (key) =>
+        ![
+          "toolchain",
+          "components",
+          "targets",
+          "additionalToolchains",
+        ].includes(key),
     )
   )
     throw new Error(
-      "cloud.rust accepts only toolchain, components and targets",
+      "cloud.rust accepts only toolchain, components, targets and additionalToolchains",
     );
   const toolchain = input["toolchain"];
   if (toolchain !== undefined && !exactPin(toolchain))
     throw new Error("cloud.rust.toolchain must be an exact stable release");
+  const additional = input["additionalToolchains"];
+  if (additional !== undefined && !Array.isArray(additional))
+    throw new Error(
+      "cloud.rust.additionalToolchains requires exact stable releases",
+    );
+  const additionalToolchains =
+    additional === undefined
+      ? []
+      : Array.from(additional, (pin: unknown) => {
+          if (!exactPin(pin))
+            throw new Error(
+              "cloud.rust.additionalToolchains requires exact stable releases",
+            );
+          return pin;
+        });
+  if (new Set(additionalToolchains).size !== additionalToolchains.length)
+    throw new Error("cloud.rust.additionalToolchains contains duplicates");
   return {
+    additionalToolchains,
     ...(toolchain === undefined ? {} : { toolchain }),
     components: parseCloudRustNames(input["components"], "components"),
     targets: parseCloudRustNames(input["targets"], "targets"),
