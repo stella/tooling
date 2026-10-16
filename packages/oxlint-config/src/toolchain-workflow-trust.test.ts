@@ -54,11 +54,44 @@ ${stepIf === undefined ? "" : `        if: ${JSON.stringify(stepIf)}\n`}`;
 const expectUnsafe = (source: string, job = "inspect", step = 1) => {
   const findings = check(source);
   expect(findings, source).toHaveLength(1);
-  expect(findings.at(0)).toMatchObject({ job, step });
+  expect(findings.at(0)).toMatchObject({ type: "step", job, step });
   expect(findings.at(0)?.message.length).toBeGreaterThan(0);
 };
 
+const managerCommands = [
+  "npm run lint",
+  "npm test",
+  "npm exec -- oxlint .",
+  "npm install",
+  "npm ci",
+  "npm add fast-check",
+  "npm run lint --ignore-scripts",
+  "npm test --ignore-scripts",
+  "npm --ignore-scripts test",
+  "npm install --ignore-scripts=false",
+  "npm ci --ignore-scripts --ignore-scripts=false",
+  ...["pnpm", "yarn"].flatMap((manager) => [
+    `${manager} test`,
+    `${manager} run lint`,
+    `${manager} exec oxlint .`,
+    `${manager} dlx shared-check`,
+    `${manager} add fast-check`,
+    `${manager} install`,
+    `${manager} ci`,
+    `${manager} --version`,
+    `${manager} --help`,
+    `${manager} install --ignore-scripts`,
+    `${manager} ci --ignore-scripts`,
+  ]),
+  ...["npm", "pnpm", "yarn"].flatMap((manager) => [
+    `env CI=true ${manager} run lint`,
+    `command ${manager} run lint`,
+    `bash -c '${manager} run lint'`,
+  ]),
+];
+
 const commands = [
+  ...managerCommands,
   "bunx --no-install stll-toolchain-changed --since origin/main",
   "npx --no-install shared-check",
   "./node_modules/.bin/oxlint .",
@@ -122,6 +155,12 @@ test("quoted documentation and script-free installation do not execute dependenc
     "bun --version",
     "node --version",
     "npm --version",
+    "npm install --ignore-scripts",
+    "npm ci --ignore-scripts",
+    "env CI=true npm ci --ignore-scripts",
+    "command npm install --ignore-scripts",
+    "bash -c 'npm ci --ignore-scripts'",
+    'echo "npm run lint; pnpm install; yarn test"',
     "git diff --name-only",
     "command -v bunx",
     "command -V npx",
@@ -265,6 +304,12 @@ test("local actions are dependency execution and external pinned actions are not
   ).toEqual([]);
 });
 
+const stepCoordinates = (findings: ReturnType<typeof checkWorkflowTrust>) =>
+  findings.map((finding) => {
+    if (finding.type !== "step") throw new Error("expected a step finding");
+    return { type: finding.type, job: finding.job, step: finding.step };
+  });
+
 test("YAML aliases preserve execution checks and zero-based step locations", () => {
   const steps = check(`on: pull_request
 jobs:
@@ -277,9 +322,9 @@ jobs:
         run: bunx --no-install shared-check
       - *execute
 `);
-  expect(steps.map(({ job, step }) => ({ job, step }))).toEqual([
-    { job: "inspect", step: 1 },
-    { job: "inspect", step: 2 },
+  expect(stepCoordinates(steps)).toEqual([
+    { type: "step", job: "inspect", step: 1 },
+    { type: "step", job: "inspect", step: 2 },
   ]);
   const jobs = check(`on: pull_request
 jobs:
@@ -289,9 +334,9 @@ jobs:
     steps: [{run: bunx --no-install shared-check}]
   inspect-again: *execute
 `);
-  expect(jobs.map(({ job, step }) => ({ job, step }))).toEqual([
-    { job: "inspect", step: 0 },
-    { job: "inspect-again", step: 0 },
+  expect(stepCoordinates(jobs)).toEqual([
+    { type: "step", job: "inspect", step: 0 },
+    { type: "step", job: "inspect-again", step: 0 },
   ]);
 });
 
@@ -342,7 +387,11 @@ test("the documented workflow example obeys the trust contract", () => {
       jobs: { ...sample.jobs, "check-changes": unordered },
     });
     expect(findings).toHaveLength(1);
-    expect(findings.at(0)).toMatchObject({ job: "check-changes", step: 0 });
+    expect(findings.at(0)).toMatchObject({
+      type: "step",
+      job: "check-changes",
+      step: 0,
+    });
   }
 });
 
@@ -364,4 +413,101 @@ test("non-PR-only or never-running steps need no PR trust dependency", () => {
       }),
     ),
   ).toEqual([]);
+});
+
+type ReusableFixtureOptions = {
+  events?: string;
+  needs?: string;
+  jobIf?: string;
+  uses?: string;
+};
+
+const reusableWorkflow = ({
+  events = "[pull_request, pull_request_target, push]",
+  needs,
+  jobIf,
+  uses = "./.github/workflows/build.yml",
+}: ReusableFixtureOptions = {}) => `on: ${events}
+jobs:
+  trust-check:
+    runs-on: ubuntu-latest
+    steps: [{run: echo trust-decision}]
+  metadata:
+    needs: trust-check
+    runs-on: ubuntu-latest
+    steps: [{run: echo metadata-only}]
+  build:
+${needs === undefined ? "" : `    needs: ${needs}\n`}${jobIf === undefined ? "" : `    if: ${JSON.stringify(jobIf)}\n`}    uses: ${uses}
+`;
+
+const expectUnsafeJob = (source: string) => {
+  const findings = check(source);
+  expect(findings, source).toHaveLength(1);
+  expect(findings.at(0)).toMatchObject({ type: "job", job: "build" });
+  expect(findings.at(0)).not.toHaveProperty("step");
+  expect(findings.at(0)?.message.length).toBeGreaterThan(0);
+};
+
+test("local reusable workflows require the same direct trust gate as executable steps", () => {
+  for (const events of [
+    "pull_request",
+    "pull_request_target",
+    "[pull_request, pull_request_target, push]",
+  ]) {
+    expectUnsafeJob(reusableWorkflow({ events }));
+    expectUnsafeJob(reusableWorkflow({ events, needs: "trust-check" }));
+    expectUnsafeJob(reusableWorkflow({ events, jobIf: trusted }));
+    expectUnsafeJob(
+      reusableWorkflow({ events, needs: "metadata", jobIf: trusted }),
+    );
+    expectUnsafeJob(
+      reusableWorkflow({
+        events,
+        needs: "trust-check",
+        jobIf: `${trusted} || always()`,
+      }),
+    );
+    expect(
+      check(
+        reusableWorkflow({
+          events,
+          needs: "[metadata, trust-check]",
+          jobIf: trusted,
+        }),
+      ),
+    ).toEqual([]);
+    expect(
+      check(reusableWorkflow({ events, jobIf: "github.event_name == 'push'" })),
+    ).toEqual([]);
+  }
+  expectUnsafeJob(reusableWorkflow({ needs: "trust-check", jobIf: canonical }));
+  expect(
+    check(
+      reusableWorkflow({
+        uses: `stella/.github/.github/workflows/build.yml@${"a".repeat(40)}`,
+      }),
+    ),
+  ).toEqual([]);
+});
+
+test("YAML aliases retain job findings without invented step coordinates", () => {
+  const findings = check(`on: [pull_request, pull_request_target]
+jobs:
+  trust-check:
+    runs-on: ubuntu-latest
+    steps: [{run: echo trust-decision}]
+  build: &reusable
+    uses: ./.github/workflows/build.yml
+  build-again: *reusable
+`);
+  expect(findings).toHaveLength(2);
+  const jobs = findings.map((finding) => {
+    if (finding.type !== "job") throw new Error("expected a job finding");
+    expect(finding).not.toHaveProperty("step");
+    return { type: finding.type, job: finding.job };
+  });
+  expect(jobs).toEqual([
+    { type: "job", job: "build" },
+    { type: "job", job: "build-again" },
+  ]);
 });
