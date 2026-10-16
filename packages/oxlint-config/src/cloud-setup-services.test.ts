@@ -400,7 +400,10 @@ const processFixture = ({
       `
 fail() { echo "$*" >&2; exit 93; }
 kill() { fail 'Unexpected process signal'; }
-service_run() { fail 'Unexpected service launch'; }
+service_run() {
+  [[ "$#" == 3 && "$1" == readlink && "$2" == -f && "$3" == "$FIXTURE_ROOT/proc/123/exe" ]] || fail 'Unexpected service launch'
+  AS_OWNER=1 "$@"
+}
 SERVICE_UID=1000
 stat() {
   [[ "$#" == 3 && "$1" == -c && "$2" == '%u' && "$3" == "$FIXTURE_ROOT/proc/123" ]] || fail 'Unexpected ownership query'
@@ -413,6 +416,8 @@ readlink() {
   [[ "$RESOLUTION" != empty ]] || return 0
   case "$2" in
     "$FIXTURE_ROOT/proc/123/exe")
+      # Only the owning user can read the link, as in containers without the ptrace capability.
+      [[ "\${AS_OWNER:-}" == 1 ]] || return 0
       if [[ "$RESOLUTION" == deleted ]]; then printf '%s (deleted)' "$PROC_EXECUTABLE"; else printf '%s' "$PROC_EXECUTABLE"; fi ;;
     /managed-service) printf '/managed-service' ;;
     *) fail 'Unexpected executable path' ;;
@@ -529,6 +534,7 @@ test.skipIf(!existsSync("/proc/self/exe"))(
         `
 fail() { echo "$*" >&2; exit 93; }
 kill() { fail 'Unexpected process signal'; }
+service_run() { "$@"; }
 SERVICE_UID="$(id -u)"
 ${helpers}
 if service_process_matches "$LIVE_PID" "$LIVE_EXECUTABLE"; then echo matches; else echo different; fi

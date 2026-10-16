@@ -38,7 +38,9 @@ service_process_matches() {
   owner="$(stat -c '%u' "/proc/$pid" 2>/dev/null)" || return 2
   [[ "$owner" =~ ^[0-9]+$ ]] || return 2
   [[ "$owner" == "$SERVICE_UID" ]] || return 1
-  actual="$(readlink -f "/proc/$pid/exe" 2>/dev/null)" || return 2
+  # Read the executable link as its verified owner: container root may lack the ptrace
+  # capability that reading another user's /proc/<pid>/exe requires.
+  actual="$(service_run readlink -f "/proc/$pid/exe" 2>/dev/null)" || return 2
   expected="$(readlink -f "$executable")" || return 2
   [[ -n "$actual" && -n "$expected" && "$actual" != *' (deleted)' ]] || return 2
   [[ "$actual" == "$expected" ]]
