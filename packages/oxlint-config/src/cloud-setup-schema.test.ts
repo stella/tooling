@@ -185,3 +185,31 @@ test("install accepts the frozen command with or without lifecycle scripts and n
       "cloud.install must be exactly one of",
     );
 });
+
+test("prepare names one package script with a bounded time", () => {
+  const install = cloudInstallCommand;
+  expect(
+    parseCloudSetup({ install, prepare: { script: "generate:cloud", seconds: 900 } }),
+  ).toEqual({
+    services: [],
+    install,
+    prepare: { script: "generate:cloud", seconds: 900 },
+  });
+  for (const [prepare, message] of [
+    [null, "cloud.prepare must be an object"],
+    [[], "cloud.prepare must be an object"],
+    [{ script: "a", seconds: 1, extra: 1 }, "unsupported cloud.prepare key: extra"],
+    [{ seconds: 10 }, "cloud.prepare.script must name a package script"],
+    [{ script: "", seconds: 10 }, "cloud.prepare.script must name a package script"],
+    [{ script: "a b", seconds: 10 }, "cloud.prepare.script must name a package script"],
+    [{ script: "a;rm", seconds: 10 }, "cloud.prepare.script must name a package script"],
+    [{ script: "-a", seconds: 10 }, "cloud.prepare.script must name a package script"],
+    [{ script: "a" }, "cloud.prepare.seconds must be an integer from 1 to 900"],
+    [{ script: "a", seconds: 0 }, "cloud.prepare.seconds must be an integer from 1 to 900"],
+    [{ script: "a", seconds: 901 }, "cloud.prepare.seconds must be an integer from 1 to 900"],
+    [{ script: "a", seconds: 1.5 }, "cloud.prepare.seconds must be an integer from 1 to 900"],
+    [{ script: "a", seconds: "10" }, "cloud.prepare.seconds must be an integer from 1 to 900"],
+  ] as const) {
+    expect(() => parseCloudSetup({ install, prepare })).toThrow(message);
+  }
+});

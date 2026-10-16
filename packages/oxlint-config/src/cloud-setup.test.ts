@@ -447,3 +447,128 @@ test("every lifecycle phase runs through the timed step logger", () => {
   expect(failed.stdout.toString()).toBe("");
   expect(failed.stderr.toString()).not.toContain("demo done");
 });
+
+const prepared = {
+  install: `${cloudInstallCommand} --ignore-scripts`,
+  prepare: { script: "generate:cloud", seconds: 300 },
+};
+const manifest = JSON.stringify({
+  scripts: { "generate:cloud": "turbo run generate:route-tree" },
+});
+const generatePrepared = (files: Record<string, string>) => {
+  const cloud = parseCloudSetup(prepared);
+  if (cloud === undefined) throw new Error("Missing cloud declaration");
+  return generateCloudSetup({ policy, cloud, nodeVersion: "26.10.0", files });
+};
+
+test("a prepare script runs once after dependencies, offline and time-bounded", () => {
+  const generated = generatePrepared({ "package.json": manifest });
+  expect(generated).toContain(
+    `timeout --kill-after=10 300 runuser -u "$OUTPUT_USER" -- env HOME="$OUTPUT_HOME" PATH="$PATH" "$BUN_DIR/bun" run 'generate:cloud' </dev/null &`,
+  );
+  expect(generated).toContain('kill -KILL -- "-$leader" 2>/dev/null || true');
+  const install = generated.slice(
+    generated.indexOf('if [[ "$MODE" == install ]]; then'),
+  );
+  const dependencies = install.indexOf("step dependencies dependency_install");
+  const prepare = install.indexOf("step prepare prepare_sources");
+  expect(dependencies).toBeGreaterThan(-1);
+  expect(prepare).toBeGreaterThan(dependencies);
+  expect(prepare).toBeLessThan(install.indexOf("exit 0"));
+  expect(generated.match(/step prepare prepare_sources/g)).toHaveLength(1);
+  const syntax = Bun.spawnSync(["bash", "-n"], {
+    stdin: Buffer.from(generated),
+  });
+  expect(syntax.stderr.toString()).toBe("");
+  expect(syntax.exitCode).toBe(0);
+  expect(generate(declaration)).not.toContain("prepare_sources");
+});
+
+test("a prepare script must be a root package script", () => {
+  expect(() => generatePrepared({})).toThrow(
+    "cloud.prepare requires a tracked root package.json",
+  );
+  for (const scripts of [
+    undefined,
+    {},
+    { other: "true" },
+    { "generate:cloud": null },
+    { "generate:cloud": ["turbo"] },
+  ]) {
+    expect(() =>
+      generatePrepared({ "package.json": JSON.stringify({ scripts }) }),
+    ).toThrow("cloud.prepare.script generate:cloud is not a root package script");
+  }
+});
+
+test("an inherited name is not a root package script", () => {
+  const cloud = parseCloudSetup({
+    install: cloudInstallCommand,
+    prepare: { script: "constructor", seconds: 5 },
+  });
+  if (cloud === undefined) throw new Error("Missing cloud declaration");
+  expect(() =>
+    generateCloudSetup({
+      policy,
+      cloud,
+      nodeVersion: "26.10.0",
+      files: { "package.json": JSON.stringify({ scripts: {} }) },
+    }),
+  ).toThrow("cloud.prepare.script constructor is not a root package script");
+});
+
+// The bound must hold for descendants that ignore TERM: timeout only escalates
+// while its direct child runs, so the step kills what is left of its group.
+test.skipIf(Bun.which("timeout") === null)(
+  "prepare kills a TERM-ignoring descendant once the bound passes",
+  () => {
+    const directory = mkdtempSync(join(tmpdir(), "cloud-prepare-"));
+    try {
+      const pidFile = join(directory, "descendant.pid");
+      const bin = join(directory, "bin");
+      mkdirSync(bin);
+      // Stand-ins for runuser and bun: the script leaves a TERM-ignoring
+      // descendant behind and exits as soon as it is signalled.
+      writeFileSync(
+        join(bin, "runuser"),
+        '#!/usr/bin/env bash\nwhile [[ "$1" != -- ]]; do shift; done\nshift\nexec "$@"\n',
+        { mode: 0o755 },
+      );
+      writeFileSync(
+        join(bin, "bun"),
+        `#!/usr/bin/env bash\nbash -c 'trap "" TERM; echo $$ > ${pidFile}; exec sleep 60' &\nsleep 60\n`,
+        { mode: 0o755 },
+      );
+      const generated = generatePrepared({ "package.json": manifest }).replace(
+        "--kill-after=10 300",
+        "--kill-after=1 1",
+      );
+      const definition = generated.slice(
+        generated.indexOf("prepare_sources() {"),
+        generated.indexOf("\n}\n", generated.indexOf("prepare_sources() {")) +
+          3,
+      );
+      const run = Bun.spawnSync(
+        [
+          "bash",
+          "-c",
+          `${definition}\nOUTPUT_USER=x OUTPUT_HOME=${directory} BUN_DIR=${bin} PATH=${bin}:$PATH prepare_sources; echo "status=$?"`,
+        ],
+        { stdout: "pipe", stderr: "pipe", timeout: 20_000 },
+      );
+      expect(run.stdout.toString()).toMatch(/status=(124|137)/);
+      const pid = Number(readFileSync(pidFile, "utf-8").trim());
+      expect(Number.isSafeInteger(pid)).toBe(true);
+      // Reaping can lag the kill by a moment; poll briefly.
+      let alive = true;
+      for (let attempt = 0; attempt < 50 && alive; attempt += 1) {
+        alive = Bun.spawnSync(["kill", "-0", String(pid)]).exitCode === 0;
+        if (alive) Bun.sleepSync(100);
+      }
+      expect(alive).toBe(false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+  30_000,
+);

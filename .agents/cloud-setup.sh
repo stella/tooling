@@ -422,12 +422,15 @@ verify_shell_environment() {
 
 
 
+
+
 if [[ "$MODE" == install ]]; then
   step runtimes install_runtimes
   step services install_services
   step tools install_tools
   step shell install_shell_environment
   step dependencies dependency_install
+
   exit 0
 fi
 step runtime-check runtime_ready

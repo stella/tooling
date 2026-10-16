@@ -165,12 +165,15 @@ process.stdout.write([...hosts].sort().join(","));
 
 @ENV_FUNCTIONS@
 
+@PREPARE_FUNCTION@
+
 if [[ "$MODE" == install ]]; then
   step runtimes install_runtimes
   step services install_services
   step tools install_tools
   step shell install_shell_environment
   step dependencies dependency_install
+@PREPARE_STEP@
   exit 0
 fi
 step runtime-check runtime_ready
@@ -213,6 +216,44 @@ write_environment() {
 `;
 
 const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+
+// Offline and time-bounded: stdin is closed so a prompt cannot hold the
+// snapshot. timeout leads its own process group (its pid), but it stops
+// escalating once its direct child exits, so whatever is left in that group
+// afterwards (a descendant that ignored TERM) is killed unconditionally.
+const renderPrepare = (
+  prepare: { script: string; seconds: number } | undefined,
+  files: Readonly<Record<string, string>>,
+) => {
+  if (prepare === undefined) return "";
+  const manifest = files["package.json"];
+  if (manifest === undefined)
+    throw new Error("cloud.prepare requires a tracked root package.json");
+  const parsed: unknown = JSON.parse(manifest);
+  const scripts =
+    typeof parsed === "object" && parsed !== null && "scripts" in parsed
+      ? parsed.scripts
+      : undefined;
+  if (
+    typeof scripts !== "object" ||
+    scripts === null ||
+    !Object.hasOwn(scripts, prepare.script) ||
+    typeof Reflect.get(scripts, prepare.script) !== "string"
+  )
+    throw new Error(
+      `cloud.prepare.script ${prepare.script} is not a root package script`,
+    );
+  return [
+    "prepare_sources() {",
+    "  local leader status=0",
+    `  timeout --kill-after=10 ${prepare.seconds} runuser -u "$OUTPUT_USER" -- env HOME="$OUTPUT_HOME" PATH="$PATH" "$BUN_DIR/bun" run ${shellQuote(prepare.script)} </dev/null &`,
+    "  leader=$!",
+    '  wait "$leader" || status=$?',
+    '  kill -KILL -- "-$leader" 2>/dev/null || true',
+    '  return "$status"',
+    "}",
+  ].join("\n");
+};
 
 export const generateCloudSetup = ({
   policy,
@@ -293,6 +334,11 @@ export const generateCloudSetup = ({
         : "DATABASE_URL=''\nREDIS_URL=''\nvalidate_environment",
     ],
     ["@ENV_WRITE@", selected.envFile === undefined ? "" : "write_environment"],
+    ["@PREPARE_FUNCTION@", renderPrepare(selected.prepare, files)],
+    [
+      "@PREPARE_STEP@",
+      selected.prepare === undefined ? "" : "  step prepare prepare_sources",
+    ],
     [
       "@SERVICE_INSTALL@",
       renderCloudServiceInstall({
