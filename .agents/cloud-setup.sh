@@ -136,14 +136,15 @@ runtime_ready() {
   [[ -x "$BUN_DIR/bun" && "$($BUN_DIR/bun --version)" == "$BUN_VERSION" ]] || fail 'Pinned Bun is unavailable; run install'
 }
 install_runtimes() (
-  if [[ ! -s /etc/ssl/certs/ca-certificates.crt ]] || ! command -v curl >/dev/null || ! command -v unzip >/dev/null || ! command -v xz >/dev/null || ! command -v openssl >/dev/null || ! command -v gpg >/dev/null || ! ldconfig -p | awk '$1 == "libatomic.so.1" { found=1 } END { exit !found }'; then
+  if [[ ! -s /etc/ssl/certs/ca-certificates.crt ]]; then
+    command -v update-ca-certificates >/dev/null || fail 'System CA certificate bundle is missing; restore ca-certificates in the base image offline before install'
+    update-ca-certificates || fail 'System CA certificate bundle could not be repaired offline; restore ca-certificates in the base image before install'
+  fi
+  [[ -s /etc/ssl/certs/ca-certificates.crt ]] || fail 'System CA certificate bundle is unavailable after offline repair; restore ca-certificates in the base image before install'
+  if ! command -v curl >/dev/null || ! command -v unzip >/dev/null || ! command -v xz >/dev/null || ! command -v openssl >/dev/null || ! command -v gpg >/dev/null || ! ldconfig -p | awk '$1 == "libatomic.so.1" { found=1 } END { exit !found }'; then
     apt_refresh_for ca-certificates curl unzip xz-utils openssl gnupg util-linux libatomic1
     DEBIAN_FRONTEND=noninteractive apt_install ca-certificates curl unzip xz-utils openssl gnupg util-linux libatomic1
   fi
-  if [[ ! -s /etc/ssl/certs/ca-certificates.crt ]]; then
-    update-ca-certificates
-  fi
-  [[ -s /etc/ssl/certs/ca-certificates.crt ]] || fail 'System CA certificate bundle is unavailable after repair'
   local node_archive bun_archive bun_folder
   # Subshell scope retains scratch for EXIT cleanup after a failed command.
   scratch="$(mktemp -d)"
