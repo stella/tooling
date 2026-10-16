@@ -448,6 +448,49 @@ test("every lifecycle phase runs through the timed step logger", () => {
   expect(failed.stderr.toString()).not.toContain("demo done");
 });
 
+test.skipIf(!existsSync("/proc/self/fd"))(
+  "service commands inherit no descriptor beyond stdio from the caller",
+  () => {
+    const generated = generate(declaration);
+    const start = generated.indexOf("\nservice_run() (");
+    const end = generated.indexOf("\n)\n", start);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const serviceRun = generated.slice(start, end + 3);
+    const bin = mkdtempSync(join(tmpdir(), "cloud-service-run-"));
+    try {
+      // Stands in for runuser: checks the fixed service identity, then runs the command.
+      writeFileSync(
+        join(bin, "runuser"),
+        '#!/bin/sh\n[ "$1 $2 $3" = "-u stll-cloud --" ] || exit 97\nshift 3\nexec "$@"\n',
+        { mode: 0o755 },
+      );
+      const result = Bun.spawnSync(
+        [
+          "bash",
+          "-eu",
+          "-c",
+          // Descriptors 30 and 31 model a runner terminal passed beyond stdio; 9 is the state lock.
+          `${serviceRun}\nexec 9</dev/null 30</dev/null 31</dev/null\nservice_run sh -c 'ls /proc/$$/fd; :'\nls /proc/$$/fd`,
+        ],
+        { env: { ...process.env, PATH: `${bin}:${process.env["PATH"]}` } },
+      );
+      expect(result.stderr.toString()).toBe("");
+      expect(result.exitCode).toBe(0);
+      const [service, caller] = result.stdout
+        .toString()
+        .trim()
+        .split(/\n(?=0\n)/)
+        .map((block) => block.split("\n"));
+      expect(service).toEqual(["0", "1", "2"]);
+      // The caller keeps its own descriptors; only the service process sheds them.
+      expect(caller).toEqual(expect.arrayContaining(["30", "31", "9"]));
+    } finally {
+      rmSync(bin, { recursive: true, force: true });
+    }
+  },
+);
+
 const prepared = {
   install: `${cloudInstallCommand} --ignore-scripts`,
   prepare: { script: "generate:cloud", seconds: 300 },
