@@ -1,12 +1,22 @@
 /// <reference types="bun-types" />
 
 import { expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { parseDocument } from "yaml";
 
 import toolchain from "../toolchain.json";
 import { containerDocumentImages } from "./toolchain-container-inputs";
-import { generateDependabotConfig } from "./toolchain-dependabot";
 import {
+  checkDependabot,
+  generateDependabotConfig,
+} from "./toolchain-dependabot";
+import { readToolchainInputs } from "./toolchain-guard";
+import {
+  dependabotManifestEcosystem,
+  dependabotManifestEcosystems,
   githubAutomationFileKind,
   isDependabotGithubActionsPath,
   isDockerDefinitionPath,
@@ -19,6 +29,7 @@ import { parseToolchainPolicy } from "./toolchain-schema";
 
 test("both input readers exclude dependency trees for every accepted input kind", () => {
   const inputs = [
+    ...Object.keys(dependabotManifestEcosystems),
     "package.json",
     "consumer-compat.json",
     ...javascriptDependencyLockfiles,
@@ -44,6 +55,52 @@ test("both input readers exclude dependency trees for every accepted input kind"
   expect(githubAutomationFileKind("")).toBeUndefined();
   expect(toolchainInputKind("vendor-example/package.json")).toBe("config");
   expect(githubAutomationFileKind("vendor-example/action.yml")).toBe("action");
+});
+
+test("every declared dependency ecosystem enters tracked snapshots as presence", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "stll-dependency-inputs-"));
+  try {
+    execFileSync("git", ["init", "-q", root]);
+    const expected: Record<string, string> = {};
+    for (const [name, ecosystem] of Object.entries(
+      dependabotManifestEcosystems,
+    )) {
+      for (const prefix of ["", "nested/"]) {
+        const file = `${prefix}${name}`;
+        expect(dependabotManifestEcosystem(file)).toBe(ecosystem);
+        expect(toolchainInputKind(file)).toBe("presence");
+        mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+        writeFileSync(
+          path.join(root, file),
+          "dependency graph bytes are not read",
+        );
+        expected[file] = "";
+      }
+      for (const prefix of ["vendor/", "nested/node_modules/"]) {
+        const file = `${prefix}${name}`;
+        expect(dependabotManifestEcosystem(file)).toBeUndefined();
+        mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+        writeFileSync(path.join(root, file), "ignored dependency graph");
+      }
+    }
+    execFileSync("git", ["add", "-f", "."], { cwd: root });
+    const snapshot = readToolchainInputs(root);
+    expect(snapshot.diagnostics).toEqual([]);
+    expect(snapshot.files).toEqual(expected);
+    const policy = parseToolchainPolicy(toolchain).dependabot;
+    const generated = generateDependabotConfig({
+      files: snapshot.files,
+      policy,
+    });
+    expect(
+      checkDependabot({
+        files: { ...snapshot.files, ".github/dependabot.yml": generated },
+        policy,
+      }),
+    ).toEqual([]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("JavaScript installation lockfiles are tracked as presence without reading dependency graphs", () => {
