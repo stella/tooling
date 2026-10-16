@@ -126,7 +126,41 @@ const interpreterCommands = [
   "result=$(python3 -m unittest discover)",
 ];
 
+const corepackCommands = [
+  ...["pnpm", "yarn", "npm"].flatMap((manager) => [
+    `corepack ${manager} test`,
+    `corepack ${manager} run lint`,
+    `corepack ${manager} exec oxlint .`,
+    `corepack ${manager} install --ignore-scripts`,
+    `corepack ${manager} --version`,
+  ]),
+  "corepack npm ci --ignore-scripts",
+  "corepack pnpm@10.0.0 test",
+  "corepack yarn@4.0.0 test",
+  "corepack npm@10.0.0 run lint",
+  "corepack pnpm --dir packages/core test",
+  "corepack yarn --cwd packages/core test",
+  "corepack npm --prefix packages/core run lint",
+  '\"corepack\" pnpm test',
+  "env CI=true corepack pnpm test",
+  "command corepack yarn test",
+  "exec corepack npm test",
+  "bash -c 'corepack pnpm exec oxlint .'",
+  "result=$(corepack yarn test)",
+  "/usr/local/bin/corepack pnpm test",
+  "corepack install --global pnpm@10.0.0",
+  "corepack enable",
+  "corepack future-manager run lint",
+  "corepack --future-mode",
+  "corepack",
+  "corepack --version --help",
+  "corepack --version npm test",
+  "corepack --version=1",
+  "corepack --help=pnpm",
+];
+
 const commands = [
+  ...corepackCommands,
   ...interpreterCommands,
   ...managerCommands,
   "bunx --no-install stll-toolchain-changed --since origin/main",
@@ -183,6 +217,12 @@ test.each(commands)(
 );
 
 const informationCommands = [
+  ...["--version", "-v", "--help", "-h"].map((flag) => `corepack ${flag}`),
+  '"corepack" "--version"',
+  "env CI=true corepack --version",
+  "command corepack --version",
+  "exec corepack --version",
+  "bash -c 'corepack --version'",
   ...["node", "nodejs"].flatMap((interpreter) =>
     ["--version", "-v", "--help", "-h"].map((flag) => `${interpreter} ${flag}`),
   ),
@@ -228,6 +268,7 @@ test("quoted documentation and script-free installation do not execute dependenc
     "command -pv bunx",
     "command -pV npx",
     'echo "node scripts/check.mjs"',
+    'echo "corepack pnpm test; corepack npm ci --ignore-scripts"',
     "printf '%s\\n' 'node --test; python3 -m pytest'",
     "bun install --frozen-lockfile --ignore-scripts",
     'bun install "--ignore-scripts"',
