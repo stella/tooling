@@ -281,6 +281,26 @@ Use the library TypeScript preset:
 }
 ```
 
+Node scripts need an explicit TypeScript project when the library project's
+`include` does not cover them. Install `@types/node` as a direct development
+dependency of the consumer, then add `scripts/tsconfig.json`:
+
+```json
+{
+  "extends": "@stll/typescript-config/node.json",
+  "include": ["**/*.js", "**/*.mjs", "**/*.cjs"]
+}
+```
+
+The existing Node preset selects Node ambient types; the local `include` assigns
+ownership of scripts to that project. Keep the library project unchanged. For
+scripts in another directory, put the same project declaration in that directory.
+Oxlint discovers the nearest `tsconfig.json`; run the ordinary type-aware lint
+command from the repository root. Missing Node ambient types can otherwise appear
+as `TS2591` on `node:fs` or `require`, followed by misleading `any` diagnostics on
+Node API results. Adding casts or changing conditionals does not repair resolution.
+No additional preset, compiler overrides, or config import side effects are needed.
+
 Use the oxlint preset with local exceptions:
 
 ```ts
