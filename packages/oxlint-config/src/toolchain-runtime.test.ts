@@ -961,6 +961,23 @@ jobs:
       .toMatchObject([{ rule: "workflow-trust", path: file, line: 7 }]);
   }
 });
+test("workflow trust checks Actions interpolation before shell quoting", () => {
+  const file = ".github/workflows/ci.yml";
+  for (const quote of ["'", '"', ""]) {
+    const source = `on: pull_request
+jobs:
+  trust-check:
+    steps: [{run: echo trust-decision}]
+  build:
+    steps:
+      - run: ${JSON.stringify(`echo ${quote}\${{ github.event.pull_request.title }}${quote}`)}
+`;
+    expect(check(file, source).filter(({ rule }) => rule === "workflow-trust"))
+      .toMatchObject([{ rule: "workflow-trust", path: file, line: 7 }]);
+    expect(check(file, source.replace("github.event.pull_request.title", "github.sha"))
+      .filter(({ rule }) => rule === "workflow-trust")).toEqual([]);
+  }
+});
 for (const fixture of cases) {
   test(`${fixture.rule} accepts its shared pin and rejects a mutation`, () => {
     expect(check(fixture.file, fixture.pass)).toEqual([]);

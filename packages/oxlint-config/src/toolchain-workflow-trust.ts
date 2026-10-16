@@ -92,6 +92,16 @@ const excludesUntrusted = ({
 // Unknown commands, options, shell constructs, and action inputs require trust.
 const staticData = (word: string) =>
   !/[`$\\]/u.test(word) && !/[<>]/u.test(word);
+const metadataScript = (command: string) => {
+  let unknown = false;
+  // Actions interpolates before the shell sees quotes or comments. Only these
+  // bounded identity values can be substituted into the metadata proof language.
+  const source = command.replace(/\$\{\{([\s\S]*?)\}\}/gu, (_match, expression: string) => {
+    if (!["github.sha", "github.run_id", "github.run_attempt", "github.repository"].includes(expression.trim())) unknown = true;
+    return "stll-metadata";
+  });
+  return unknown || source.includes("${{") ? undefined : source;
+};
 const metadataWord = (raw: string) => {
   if (/^'[^']*'$/u.test(raw)) return true;
   let quote: "'" | '"' | undefined;
@@ -100,10 +110,7 @@ const metadataWord = (raw: string) => {
     else if (quote === undefined && (character === "'" || character === '"')) quote = character;
   }
   if (quote !== undefined) return false;
-  const withoutKnownExpressions = raw.replace(
-    /\$\{\{\s*contains\(github\.event\.pull_request\.labels\.\*\.name, 'run-ci'\)\s*\}\}/gu,
-    "true",
-  ).replace(/\$\{[A-Za-z_][A-Za-z_0-9]*\}|\$[A-Za-z_][A-Za-z_0-9]*/gu, "value");
+  const withoutKnownExpressions = raw.replace(/\$\{[A-Za-z_][A-Za-z_0-9]*\}|\$[A-Za-z_][A-Za-z_0-9]*/gu, "value");
   return !/[`$\\]/u.test(withoutKnownExpressions);
 };
 const fileArguments = (words: readonly string[], flags: RegExp) =>
@@ -180,7 +187,11 @@ const safeCommand = (raw: readonly string[]): boolean => {
   if (["true", "false"].includes(name ?? "")) return words.length === 1;
   if (name === "exit") return words.length === 1 || (words.length === 2 && /^[0-9]+$/u.test(words.at(1) ?? ""));
   if (name === "echo") return true;
-  if (name === "printf") return words.length > 1 && !words.at(1)?.startsWith("-");
+  if (name === "printf") {
+    const format = words.at(1);
+    // Data variables may be arguments, never a format or assignment target.
+    return format !== undefined && !format.startsWith("-") && /^(?:[^%$`]|%%|%s)*$/u.test(format);
+  }
   if (name === "cat") return fileArguments(words.slice(1), /^(?:--|-n|-b|-s|-E|-T|-v)$/u);
   if (name === "ls") return fileArguments(words.slice(1), /^(?:--|-[ladAh1]+)$/u);
   if (name === "wc") return fileArguments(words.slice(1), /^(?:--|-[lcwmL]+)$/u);
@@ -207,9 +218,11 @@ const safeCommand = (raw: readonly string[]): boolean => {
 };
 
 const invokesRepositoryCode = (command: string) => {
+  const source = metadataScript(command);
+  if (source === undefined) return true;
   // The shared command scanner intentionally omits redirects. Prove their
   // destinations separately; metadata may only write Actions outputs or discard.
-  const tokens = shellTokens(command);
+  const tokens = shellTokens(source);
   for (const [index, token] of tokens.entries()) {
     if (token.kind !== "redirect") continue;
     const target = tokens.at(index + 1);
@@ -217,7 +230,7 @@ const invokesRepositoryCode = (command: string) => {
       !['"$GITHUB_OUTPUT"', '"${GITHUB_OUTPUT}"', "/dev/null"].includes(target.value)) return true;
   }
   const branches: ("condition" | "then" | "else")[] = [];
-  for (let words of shellCommandSegments(command, "tokens")) {
+  for (let words of shellCommandSegments(source, "tokens")) {
     if (!safeCommand(words)) return true;
     while (["then", "else"].includes(words.at(0) ?? "")) {
       const keyword = words.at(0);
@@ -249,7 +262,7 @@ const safeShell = (shell: unknown) =>
   shell === undefined || shell === "bash" || shell === "sh";
 const safeEnvironment = (value: unknown) =>
   value === undefined || (record(value) && Object.keys(value).every((name) =>
-    ["HEAD_REPO", "BASE_REPO", "HAS_RUN_CI_LABEL", "GH_TOKEN", "GITHUB_TOKEN",
+    ["HEAD_REPO", "BASE_REPO", "HAS_RUN_CI_LABEL", "PR_TITLE", "HEAD_REF", "ISSUE_BODY", "COMMENT_BODY", "GH_TOKEN", "GITHUB_TOKEN",
       "HAWK_RUST_TOOLCHAIN", "HAWK_VERSION", "HAWK_X86_64_UNKNOWN_LINUX_GNU_SHA256"].includes(name)));
 const configuredShell = (value: unknown) =>
   record(value) && record(value["run"]) ? value["run"]["shell"] : undefined;

@@ -745,6 +745,12 @@ test.each(["./scripts/check", "scripts/check", "../shared/check"])(
   (command) => expectUnsafe(workflow({ command })),
 );
 
+test("metadata printf keeps data out of formats and assignment targets", () => {
+  for (const command of ['printf "$PR_TITLE"', "printf '%n' target", "printf '%d' value"])
+    expectUnsafe(workflow({ command }));
+  expect(check(workflow({ command: "printf '%s\\n' value" }))).toEqual([]);
+});
+
 const readOnlyCommands = [
   "test -n value",
   "test -z ''",

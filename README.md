@@ -663,6 +663,20 @@ check-changes:
     - run: bunx --no-install stll-toolchain-changed --since "$BASE_REF"
 ```
 
+Actions interpolation is checked before shell quoting or comments. Only the
+bounded identity expressions `github.sha`, `github.run_id`, `github.run_attempt`
+and `github.repository` may appear directly in pre-trust scripts. Other contexts,
+functions and matrix values require environment indirection or the trust gate;
+the guard does not infer that an expression is safe from its shell quotes.
+Pass contributor-controlled metadata through a supported data environment key
+(`PR_TITLE`, `HEAD_REF`, `ISSUE_BODY` or `COMMENT_BODY`) and quote its expansion:
+
+```yaml
+- env:
+    PR_TITLE: ${{ github.event.pull_request.title }}
+  run: echo "$PR_TITLE"
+```
+
 The trust job must classify each PR trigger used by the workflow. Main/manual
 jobs remain runnable when the PR-only trust job is skipped. Job or step
 conditions may prove that execution is limited to non-PR events; event string
