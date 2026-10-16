@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -50,6 +51,23 @@ fi`,
   ],
 };
 
+// The exact project-root hook emitted by 1.3.1 into persisted consumer settings.
+const relativeCommand = releasedHook.hooks.at(0)?.command;
+if (relativeCommand === undefined)
+  throw new Error("Released hook fixture missing");
+const releasedProjectHook = {
+  matcher: "",
+  hooks: [
+    {
+      type: "command",
+      command: relativeCommand.replace(
+        "bash .agents/cloud-setup.sh",
+        'bash "$CLAUDE_PROJECT_DIR/.agents/cloud-setup.sh"',
+      ),
+    },
+  ],
+};
+
 test("Claude settings merge preserves unrelated settings and reaches a byte-stable fixed point", () => {
   const unrelated = {
     permissions: { allow: ["Read"], deny: ["Bash(rm:*)"] },
@@ -90,26 +108,40 @@ test("Claude settings merge preserves unrelated settings and reaches a byte-stab
   expect(mergeCloudClaudeSettings(compact)).toBe(compact);
 });
 
-test("Claude settings merge replaces the released relative hook in place", () => {
+test("Claude settings merge replaces both released exact forms in place and reaches a fixed point", () => {
   const unrelated = {
     matcher: "startup",
     hooks: [{ type: "command", command: "echo existing" }],
   };
-  const merged = mergeCloudClaudeSettings(
-    JSON.stringify({
+  for (const previous of [releasedHook, releasedProjectHook]) {
+    const merged = mergeCloudClaudeSettings(
+      JSON.stringify({
+        env: { EXAMPLE: "value" },
+        hooks: { SessionStart: [previous, unrelated] },
+      }),
+    );
+    expect(JSON.parse(merged)).toEqual({
       env: { EXAMPLE: "value" },
-      hooks: { SessionStart: [releasedHook, unrelated] },
-    }),
-  );
-  expect(JSON.parse(merged)).toEqual({
-    env: { EXAMPLE: "value" },
-    attribution: cloudAttribution,
-    hooks: { SessionStart: [cloudSessionStartHook, unrelated] },
-  });
-  expect(hasCloudSessionStartHook(settingsWith([releasedHook]))).toBe(false);
+      attribution: cloudAttribution,
+      hooks: { SessionStart: [cloudSessionStartHook, unrelated] },
+    });
+    expect(mergeCloudClaudeSettings(merged)).toBe(merged);
+    expect(hasCloudSessionStartHook(settingsWith([previous]))).toBe(false);
+    expect(() =>
+      mergeCloudClaudeSettings(settingsWith([previous, cloudSessionStartHook])),
+    ).toThrow(cloudSessionStartFix);
+  }
+  expect(() =>
+    mergeCloudClaudeSettings(settingsWith([releasedHook, releasedProjectHook])),
+  ).toThrow(cloudSessionStartFix);
   expect(() =>
     mergeCloudClaudeSettings(
-      settingsWith([releasedHook, cloudSessionStartHook]),
+      settingsWith([
+        {
+          ...releasedProjectHook,
+          matcher: "startup",
+        },
+      ]),
     ),
   ).toThrow(cloudSessionStartFix);
 });
@@ -175,7 +207,7 @@ test("Claude hook unsafe merges fail with the exact manual fix and drift rejects
   expect(hasCloudSessionStartHook("{}")).toBe(false);
 });
 
-test("Claude SessionStart starts services only for the exact remote environment and preserves failures", () => {
+test("Claude SessionStart reports remote startup failure as visible context and leaves local sessions silent", () => {
   const root = mkdtempSync(join(tmpdir(), "cloud-claude-hook-"));
   try {
     mkdirSync(join(root, ".agents"));
@@ -190,7 +222,22 @@ test("Claude SessionStart starts services only for the exact remote environment 
       env["CLAUDE_PROJECT_DIR"] = root;
       if (remote !== undefined) env["CLAUDE_CODE_REMOTE"] = remote;
       const result = spawnSync("bash", ["-c", command], { cwd: root, env });
-      expect(result.status).toBe(remote === "true" ? 7 : 0);
+      expect(result.status).toBe(0);
+      if (remote === "true") {
+        expect(result.stdout.toString()).toContain(
+          "Cloud setup could not establish a verified session environment",
+        );
+        expect(result.stdout.toString()).toContain(
+          "bash .agents/cloud-setup.sh install",
+        );
+        expect(result.stdout.toString()).toContain(
+          "bash .agents/cloud-setup.sh start",
+        );
+        expect(result.stderr.toString()).toContain("startup failed");
+      } else {
+        expect(result.stdout.toString()).toBe("");
+        expect(result.stderr.toString()).toBe("");
+      }
     }
     expect(readFileSync(join(root, "calls"), "utf8")).toBe("start\n");
   } finally {
@@ -208,22 +255,28 @@ test("remote Claude SessionStart resolves the setup script from the project root
       join(root, ".agents/cloud-setup.sh"),
       'printf "%s %s\\n" "$1" "$PWD" >> "$CLAUDE_PROJECT_DIR/calls"\n',
     );
-    const env = { ...process.env };
-    delete env["CLAUDE_ENV_FILE"];
-    const result = spawnSync(
-      "bash",
-      ["-c", cloudSessionStartHook.hooks[0].command],
-      {
-        cwd: subdirectory,
-        env: { ...env, CLAUDE_CODE_REMOTE: "true", CLAUDE_PROJECT_DIR: root },
-        encoding: "utf8",
-      },
+    const profile = join(root, "stll-cloud.sh");
+    const environment = join(root, "claude.env");
+    const exports = "export CLOUD_HOOK_SUBDIRECTORY=ready\n";
+    writeFileSync(profile, exports);
+    writeFileSync(environment, "");
+    const command = cloudSessionStartHook.hooks[0].command.replaceAll(
+      cloudShellProfilePath,
+      profile,
     );
+    const env = { ...process.env, CLAUDE_ENV_FILE: environment };
+    const result = spawnSync("bash", ["-c", command], {
+      cwd: subdirectory,
+      env: { ...env, CLAUDE_CODE_REMOTE: "true", CLAUDE_PROJECT_DIR: root },
+      encoding: "utf8",
+    });
+    expect(result.stdout).toBe("");
     expect(result.stderr).toBe("");
     expect(result.status).toBe(0);
     expect(readFileSync(join(root, "calls"), "utf8")).toBe(
-      `start ${subdirectory}\n`,
+      `start ${realpathSync(subdirectory)}\n`,
     );
+    expect(readFileSync(environment, "utf8")).toBe(`\n${exports}`);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -270,6 +323,8 @@ test("Claude SessionStart persists literal pinned exports after start while reta
         encoding: "utf8",
       });
       expect(result.status).toBe(0);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toBe("");
       expect(readFileSync(environment, "utf8")).toBe(
         remote === "true" ? `${original}\n${exports}` : original,
       );
@@ -301,20 +356,30 @@ test("Claude SessionStart persists literal pinned exports after start while reta
       cwd: root,
       env: { ...env, CLAUDE_CODE_REMOTE: "true", START_EXIT: "7" },
     });
-    expect(failed.status).toBe(7);
+    expect(failed.status).toBe(0);
+    expect(failed.stdout.toString()).toContain(
+      "Cloud setup could not establish a verified session environment",
+    );
+    expect(failed.stderr.toString()).toContain("startup failed");
     expect(readFileSync(environment, "utf8")).toBe(original);
 
-    rmSync(profile);
-    const missing = spawnSync("/bin/bash", ["-c", command], {
-      cwd: root,
-      env: { ...env, CLAUDE_CODE_REMOTE: "true" },
-      encoding: "utf8",
-    });
-    expect(missing.status).toBe(1);
-    expect(missing.stderr).toContain(
-      "cloud shell profile is unavailable; run install",
-    );
-    expect(readFileSync(environment, "utf8")).toBe(original);
+    for (const content of [undefined, "", "\n"]) {
+      if (content === undefined) rmSync(profile);
+      else writeFileSync(profile, content);
+      const missing = spawnSync("/bin/bash", ["-c", command], {
+        cwd: root,
+        env: { ...env, CLAUDE_CODE_REMOTE: "true" },
+        encoding: "utf8",
+      });
+      expect(missing.status).toBe(0);
+      expect(missing.stdout).toContain(
+        "Cloud setup could not establish a verified session environment",
+      );
+      expect(missing.stderr).toContain(
+        "cloud shell profile is unavailable; run install",
+      );
+      expect(readFileSync(environment, "utf8")).toBe(original);
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -339,4 +404,53 @@ catch (error) { process.stdout.write(error.message); }
   expect(result.stdout).toContain("settings must contain valid JSON");
   expect(result.stdout).toContain(cloudSessionStartFix);
   expect(result.stdout).not.toContain(marker);
+});
+
+test("SessionStart profile reads and single appends fail visibly without changing existing environment", () => {
+  const root = mkdtempSync(join(tmpdir(), "cloud-claude-write-failure-"));
+  try {
+    mkdirSync(join(root, ".agents"));
+    writeFileSync(
+      join(root, ".agents/cloud-setup.sh"),
+      "printf '%s\\n' 'fixture-untrusted-start-output'\n",
+    );
+    const profile = join(root, "stll-cloud.sh");
+    const environment = join(root, "claude.env");
+    const original = "export KEEP=retained\n";
+    writeFileSync(profile, "export FIXTURE_HOOK_SECRET=private-value\n");
+    const command = cloudSessionStartHook.hooks[0].command.replaceAll(
+      cloudShellProfilePath,
+      profile,
+    );
+    for (const operation of ["read", "append"]) {
+      writeFileSync(environment, original);
+      const failure =
+        operation === "read"
+          ? "cat() { return 74; }"
+          : String.raw`printf() { if [ "$1" = '\n%s\n' ]; then return 73; fi; builtin printf "$@"; }`;
+      const result = spawnSync("bash", ["-c", `${failure}\n${command}`], {
+        cwd: root,
+        env: {
+          ...process.env,
+          CLAUDE_CODE_REMOTE: "true",
+          CLAUDE_PROJECT_DIR: root,
+          CLAUDE_ENV_FILE: environment,
+        },
+        encoding: "utf8",
+      });
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain(
+        "Cloud setup could not establish a verified session environment",
+      );
+      expect(result.stdout).toContain("bash .agents/cloud-setup.sh install");
+      expect(result.stdout).not.toContain("fixture-untrusted-start-output");
+      expect(result.stdout).not.toContain("private-value");
+      expect(result.stderr).toContain(
+        operation === "read" ? "could not be read" : "could not be persisted",
+      );
+      expect(readFileSync(environment, "utf8")).toBe(original);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

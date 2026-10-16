@@ -174,3 +174,50 @@ printf '%s\\n' unreachable
     });
   }
 });
+
+test("runtime bootstrap repairs missing or empty certificate bundles before downloads", () => {
+  for (const certificates of [undefined, "", "fixture certificate bundle"]) {
+    withFixture((root) => {
+      const bundle = join(root, "ca-certificates.crt");
+      if (certificates !== undefined) writeFileSync(bundle, certificates);
+      const functions = runtimeFunctions();
+      expect(functions).toContain(
+        "[[ ! -s /etc/ssl/certs/ca-certificates.crt ]]",
+      );
+      const rewritten = functions.replaceAll(
+        "/etc/ssl/certs/ca-certificates.crt",
+        bundle,
+      );
+      const marker = join(root, "apt-calls");
+      const result = Bun.spawnSync(
+        [
+          "bash",
+          "-euo",
+          "pipefail",
+          "-c",
+          `
+command() { [[ "$1" == -v ]]; }
+ldconfig() { printf '%s\\n' libatomic.so.1; }
+apt_refresh_for() { printf '%s\\n' "refresh $*" >> "$MARKER"; }
+apt_install() { printf '%s\\n' "install $*" >> "$MARKER"; }
+mktemp() { return 93; }
+${rewritten}
+install_runtimes
+`,
+        ],
+        { env: { ...process.env, MARKER: marker } },
+      );
+      expect(result.exitCode, result.stderr.toString()).toBe(93);
+      expect(result.stdout.toString()).toBe("");
+      if (certificates === undefined || certificates === "") {
+        const packages =
+          "ca-certificates curl unzip xz-utils openssl gnupg util-linux libatomic1";
+        expect(readFileSync(marker, "utf8")).toBe(
+          `refresh ${packages}\ninstall ${packages}\n`,
+        );
+      } else {
+        expect(existsSync(marker)).toBe(false);
+      }
+    });
+  }
+});
