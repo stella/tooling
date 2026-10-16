@@ -245,7 +245,8 @@ const checkoutStep = (step: unknown): CheckoutStep | undefined => {
   )
     return { kind: "unknown" };
   const normalized = path.posix.normalize(checkoutPath).replace(/\/+$/, "");
-  if (normalized === "" || normalized === ".") return { kind: "root", sameRepository };
+  if (normalized === "" || normalized === ".")
+    return { kind: "root", sameRepository };
   if (normalized.split("/").includes("..")) return { kind: "unknown" };
   return { kind: "path", path: normalized, sameRepository };
 };
@@ -1513,12 +1514,28 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
         const range = effectiveSpecifier.startsWith("npm:")
           ? effectiveSpecifier.slice(effectiveSpecifier.lastIndexOf("@") + 1)
           : effectiveSpecifier;
+        // A registry range a workspace member satisfies links that member;
+        // its manifest version is the resolved version.
+        const resolvedVersion = (version: string): unknown =>
+          version.startsWith("workspace:")
+            ? manifests.get(
+                path.posix.join(
+                  lockDirectory,
+                  version.slice("workspace:".length),
+                  "package.json",
+                ),
+              )?.["version"]
+            : version;
         if (
           validRange(range) &&
-          !resolved.some(
-            (item) =>
-              valid(item.version) !== null && satisfies(item.version, range),
-          )
+          !resolved.some((item) => {
+            const version = resolvedVersion(item.version);
+            return (
+              typeof version === "string" &&
+              valid(version) !== null &&
+              satisfies(version, range)
+            );
+          })
         )
           throw new Error(
             `Toolchain lock resolution does not satisfy manifest: ${file}:${dependency}`,

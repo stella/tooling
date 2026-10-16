@@ -1,0 +1,57 @@
+{
+  "name": "@stll/time",
+  "version": "0.3.0",
+  "description": "Time helpers: named duration constants, calendar-date parsing and arithmetic, and a side-effect-free Temporal.",
+  "keywords": [
+    "date",
+    "duration",
+    "temporal",
+    "time"
+  ],
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stella/tooling.git",
+    "directory": "packages/time"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "dist/index.mjs",
+  "types": "dist/index.d.mts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      },
+      "default": "./dist/index.mjs"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "bun check",
+    "test": "bun test src"
+  },
+  "dependencies": {
+    "better-result": "3.0.1",
+    "temporal-polyfill": "1.0.5"
+  },
+  "devDependencies": {
+    "@stll/typescript-config": "workspace:*",
+    "fast-check": "4.10.2"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  }
+}
