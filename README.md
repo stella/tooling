@@ -14,6 +14,9 @@ This repo intentionally contains only portable tooling policy:
 - `@stll/oxlint-plugin`: portable static-safety rules for unsafe type
   assertions, incomplete union-keyed records, raw DOM HTML sinks, and
   route-query waterfalls.
+- `@stll/time`: named duration constants, calendar-date parsing and
+  arithmetic, the calendar day in a time zone, and a side-effect-free
+  `Temporal`.
 - `rust/`: source-of-truth Rust formatting, lint, and Cargo profile templates.
 - `rust-lints/`: Dylint libraries for stella-specific Rust rules.
 
