@@ -65,7 +65,10 @@ const excludesUntrusted = ({
   if (condition === false) return true;
   if (typeof condition !== "string") return false;
   const source = withoutOuterParentheses(
-    condition.trim().replace(/^\$\{\{([\s\S]*)\}\}$/u, "$1").trim(),
+    condition
+      .trim()
+      .replace(/^\$\{\{([\s\S]*)\}\}$/u, "$1")
+      .trim(),
   );
   const alternatives = booleanParts(source, "||");
   if (alternatives.length > 1)
@@ -77,7 +80,8 @@ const excludesUntrusted = ({
     return conjuncts.some((part) =>
       excludesUntrusted({ condition: part, event, allowTrust }),
     );
-  const trustComparison = /^needs\.trust-check\.outputs\.trusted\s*==\s*'([^']*)'$/u.exec(source);
+  const trustComparison =
+    /^needs\.trust-check\.outputs\.trusted\s*==\s*'([^']*)'$/u.exec(source);
   if (allowTrust && trustComparison?.at(1)?.toLowerCase() === "true")
     return true;
   if (source === "false") return true;
@@ -96,10 +100,21 @@ const metadataScript = (command: string) => {
   let unknown = false;
   // Actions interpolates before the shell sees quotes or comments. Only these
   // bounded identity values can be substituted into the metadata proof language.
-  const source = command.replace(/\$\{\{([\s\S]*?)\}\}/gu, (_match, expression: string) => {
-    if (!["github.sha", "github.run_id", "github.run_attempt", "github.repository"].includes(expression.trim())) unknown = true;
-    return "stll-metadata";
-  });
+  const source = command.replace(
+    /\$\{\{([\s\S]*?)\}\}/gu,
+    (_match, expression: string) => {
+      if (
+        ![
+          "github.sha",
+          "github.run_id",
+          "github.run_attempt",
+          "github.repository",
+        ].includes(expression.trim())
+      )
+        unknown = true;
+      return "stll-metadata";
+    },
+  );
   return unknown || source.includes("${{") ? undefined : source;
 };
 const metadataWord = (raw: string) => {
@@ -107,14 +122,20 @@ const metadataWord = (raw: string) => {
   let quote: "'" | '"' | undefined;
   for (const character of raw) {
     if (character === quote) quote = undefined;
-    else if (quote === undefined && (character === "'" || character === '"')) quote = character;
+    else if (quote === undefined && (character === "'" || character === '"'))
+      quote = character;
   }
   if (quote !== undefined) return false;
-  const withoutKnownExpressions = raw.replace(/\$\{[A-Za-z_][A-Za-z_0-9]*\}|\$[A-Za-z_][A-Za-z_0-9]*/gu, "value");
+  const withoutKnownExpressions = raw.replace(
+    /\$\{[A-Za-z_][A-Za-z_0-9]*\}|\$[A-Za-z_][A-Za-z_0-9]*/gu,
+    "value",
+  );
   return !/[`$\\]/u.test(withoutKnownExpressions);
 };
 const fileArguments = (words: readonly string[], flags: RegExp) =>
-  words.every((word) => staticData(word) && (!word.startsWith("-") || flags.test(word)));
+  words.every(
+    (word) => staticData(word) && (!word.startsWith("-") || flags.test(word)),
+  );
 
 const safeComparison = (words: readonly string[]) => {
   const first = words.at(0);
@@ -125,7 +146,9 @@ const safeComparison = (words: readonly string[]) => {
   if (operands.length === 1) return true;
   if (operands.length === 2)
     return ["-n", "-z", "-e", "-f", "-d"].includes(operands.at(0) ?? "");
-  return operands.length === 3 && ["=", "==", "!="].includes(operands.at(1) ?? "");
+  return (
+    operands.length === 3 && ["=", "==", "!="].includes(operands.at(1) ?? "")
+  );
 };
 
 const safeGit = (words: readonly string[]) => {
@@ -139,25 +162,52 @@ const safeGit = (words: readonly string[]) => {
       arguments_.splice(count, 2);
     }
   }
-  const flags = /^(?:--|--name-only|--name-status|--quiet|--exit-code|--stat|--short|--verify|--is-ancestor|--all|--cached|--others|--exclude-standard|--no-pager|--oneline|-z|--no-ext-diff|--no-textconv|--format=[A-Za-z0-9%:._ -]+|-n[0-9]+)$/u;
-  if (["diff", "log", "show", "rev-parse", "merge-base", "ls-files"].includes(subcommand ?? ""))
-    return arguments_.every((argument) => !argument.startsWith("-") || flags.test(argument));
+  const flags =
+    /^(?:--|--name-only|--name-status|--quiet|--exit-code|--stat|--short|--verify|--is-ancestor|--all|--cached|--others|--exclude-standard|--no-pager|--oneline|-z|--no-ext-diff|--no-textconv|--format=[A-Za-z0-9%:._ -]+|-n[0-9]+)$/u;
+  if (
+    ["diff", "log", "show", "rev-parse", "merge-base", "ls-files"].includes(
+      subcommand ?? "",
+    )
+  )
+    return arguments_.every(
+      (argument) => !argument.startsWith("-") || flags.test(argument),
+    );
   // Fetch uses only a named remote, never an alternate transport/helper program.
   if (subcommand !== "fetch") return false;
-  return arguments_.every((argument) => /^(?:--no-tags|--prune|--depth=[0-9]+)$/u.test(argument) || (!argument.startsWith("-") && /^[A-Za-z0-9_.:/-]+$/u.test(argument))) &&
-    !arguments_.some((argument) => argument.includes(":") || argument.startsWith("/"));
+  return (
+    arguments_.every(
+      (argument) =>
+        /^(?:--no-tags|--prune|--depth=[0-9]+)$/u.test(argument) ||
+        (!argument.startsWith("-") && /^[A-Za-z0-9_.:/-]+$/u.test(argument)),
+    ) &&
+    !arguments_.some(
+      (argument) => argument.includes(":") || argument.startsWith("/"),
+    )
+  );
 };
 
 const safeGh = (words: readonly string[]) => {
   if (!words.every(staticData)) return false;
   if (words.at(1) === "api") {
     const arguments_ = words.slice(2);
-    if (["--method", "-X"].includes(arguments_.at(0) ?? "") && arguments_.at(1) === "GET") arguments_.splice(0, 2);
+    if (
+      ["--method", "-X"].includes(arguments_.at(0) ?? "") &&
+      arguments_.at(1) === "GET"
+    )
+      arguments_.splice(0, 2);
     if (!arguments_.at(0) || arguments_.at(0)?.startsWith("-")) return false;
     for (let index = 1; index < arguments_.length; index++) {
       const argument = arguments_.at(index);
-      if ((argument === "--method" || argument === "-X") && arguments_.at(index + 1) === "GET") index++;
-      else if (["--jq", "-q"].includes(argument ?? "") && /^\.[A-Za-z0-9_.[\]" -]*$/u.test(arguments_.at(index + 1) ?? "")) index++;
+      if (
+        (argument === "--method" || argument === "-X") &&
+        arguments_.at(index + 1) === "GET"
+      )
+        index++;
+      else if (
+        ["--jq", "-q"].includes(argument ?? "") &&
+        /^\.[A-Za-z0-9_.[\]" -]*$/u.test(arguments_.at(index + 1) ?? "")
+      )
+        index++;
       else return false;
     }
     return /^\/?repos\/[A-Za-z0-9_./-]+$/u.test(arguments_.at(0) ?? "");
@@ -167,7 +217,8 @@ const safeGh = (words: readonly string[]) => {
   for (let index = 0; index < arguments_.length; index++) {
     const argument = arguments_.at(index) ?? "";
     if (["--json", "--repo", "-R", "--jq", "-q"].includes(argument)) {
-      if (!arguments_.at(++index) || arguments_.at(index)?.startsWith("-")) return false;
+      if (!arguments_.at(++index) || arguments_.at(index)?.startsWith("-"))
+        return false;
     } else if (!/^[0-9]+$/u.test(argument)) return false;
   }
   return true;
@@ -185,32 +236,52 @@ const safeCommand = (raw: readonly string[]): boolean => {
   if (name === "fi") return words.length === 1;
   if (["test", "[", "[["].includes(name ?? "")) return safeComparison(words);
   if (["true", "false"].includes(name ?? "")) return words.length === 1;
-  if (name === "exit") return words.length === 1 || (words.length === 2 && /^[0-9]+$/u.test(words.at(1) ?? ""));
+  if (name === "exit")
+    return (
+      words.length === 1 ||
+      (words.length === 2 && /^[0-9]+$/u.test(words.at(1) ?? ""))
+    );
   if (name === "echo") return true;
   if (name === "printf") {
     const format = words.at(1);
     // Data variables may be arguments, never a format or assignment target.
-    return format !== undefined && !format.startsWith("-") && /^(?:[^%$`]|%%|%s)*$/u.test(format);
+    return (
+      format !== undefined &&
+      !format.startsWith("-") &&
+      /^(?:[^%$`]|%%|%s)*$/u.test(format)
+    );
   }
-  if (name === "cat") return fileArguments(words.slice(1), /^(?:--|-n|-b|-s|-E|-T|-v)$/u);
-  if (name === "ls") return fileArguments(words.slice(1), /^(?:--|-[ladAh1]+)$/u);
-  if (name === "wc") return fileArguments(words.slice(1), /^(?:--|-[lcwmL]+)$/u);
+  if (name === "cat")
+    return fileArguments(words.slice(1), /^(?:--|-n|-b|-s|-E|-T|-v)$/u);
+  if (name === "ls")
+    return fileArguments(words.slice(1), /^(?:--|-[ladAh1]+)$/u);
+  if (name === "wc")
+    return fileArguments(words.slice(1), /^(?:--|-[lcwmL]+)$/u);
   if (name === "head" || name === "tail") {
     const arguments_ = words.slice(1);
     for (let index = 0; index < arguments_.length; index++) {
       const argument = arguments_.at(index) ?? "";
       if (["-n", "-c"].includes(argument)) {
         if (!/^[0-9]+$/u.test(arguments_.at(++index) ?? "")) return false;
-      } else if (!staticData(argument) || (argument.startsWith("-") && !/^-[nc][0-9]+$/u.test(argument))) return false;
+      } else if (
+        !staticData(argument) ||
+        (argument.startsWith("-") && !/^-[nc][0-9]+$/u.test(argument))
+      )
+        return false;
     }
     return true;
   }
   if (name === "jq" || name === "yq") {
     const arguments_ = words.slice(1);
-    while (["-r", "-c", "-e"].includes(arguments_.at(0) ?? "")) arguments_.shift();
+    while (["-r", "-c", "-e"].includes(arguments_.at(0) ?? ""))
+      arguments_.shift();
     if (name === "yq" && arguments_.at(0) === "eval") arguments_.shift();
     const query = arguments_.shift();
-    return query !== undefined && /^\.[A-Za-z0-9_.[\]" -]*$/u.test(query) && fileArguments(arguments_, /^--$/u);
+    return (
+      query !== undefined &&
+      /^\.[A-Za-z0-9_.[\]" -]*$/u.test(query) &&
+      fileArguments(arguments_, /^--$/u)
+    );
   }
   if (name === "git") return safeGit(words);
   if (name === "gh") return safeGh(words);
@@ -226,8 +297,14 @@ const invokesRepositoryCode = (command: string) => {
   for (const [index, token] of tokens.entries()) {
     if (token.kind !== "redirect") continue;
     const target = tokens.at(index + 1);
-    if (![">", ">>"].includes(token.value) || target?.kind !== "word" ||
-      !['"$GITHUB_OUTPUT"', '"${GITHUB_OUTPUT}"', "/dev/null"].includes(target.value)) return true;
+    if (
+      ![">", ">>"].includes(token.value) ||
+      target?.kind !== "word" ||
+      !['"$GITHUB_OUTPUT"', '"${GITHUB_OUTPUT}"', "/dev/null"].includes(
+        target.value,
+      )
+    )
+      return true;
   }
   const branches: ("condition" | "then" | "else")[] = [];
   for (let words of shellCommandSegments(source, "tokens")) {
@@ -254,16 +331,72 @@ const invokesRepositoryCode = (command: string) => {
   return branches.length !== 0;
 };
 
-const safeAction = (uses: unknown, inputs: unknown) =>
-  typeof uses === "string" && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_./-]+@[a-f0-9]{40}$/u.test(uses) &&
-  (inputs === undefined || (record(inputs) && Object.keys(inputs).length === 0));
+// These bootstrap actions may run before the repository's trust decision.
+// Input keys are explicit: accepting a repository script input would cross it.
+const metadataActionInputs = {
+  "actions/checkout": [
+    "fetch-depth",
+    "persist-credentials",
+    "ref",
+    "repository",
+    "path",
+    "submodules",
+  ],
+  "oven-sh/setup-bun": ["bun-version", "bun-version-file", "no-cache"],
+  "actions/setup-node": [
+    "node-version",
+    "node-version-file",
+    "check-latest",
+    "architecture",
+    "package-manager-cache",
+  ],
+} as const;
+
+const safeAction = (uses: unknown, inputs: unknown) => {
+  if (
+    typeof uses !== "string" ||
+    !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_./-]+@[a-f0-9]{40}$/u.test(uses)
+  )
+    return false;
+  const repository = uses.split("@").at(0);
+  const approved = Object.entries(metadataActionInputs).find(
+    ([name]) => name === repository,
+  );
+  if (approved === undefined) return false;
+  if (inputs === undefined) return true;
+  if (!record(inputs)) return false;
+  const [, allowedInputs] = approved;
+  return Object.entries(inputs).every(
+    ([name, value]) =>
+      allowedInputs.some((allowed) => allowed === name) &&
+      ["string", "boolean", "number"].includes(typeof value) &&
+      (name !== "package-manager-cache" ||
+        value === false ||
+        value === "false"),
+  );
+};
 
 const safeShell = (shell: unknown) =>
   shell === undefined || shell === "bash" || shell === "sh";
 const safeEnvironment = (value: unknown) =>
-  value === undefined || (record(value) && Object.keys(value).every((name) =>
-    ["HEAD_REPO", "BASE_REPO", "HAS_RUN_CI_LABEL", "PR_TITLE", "HEAD_REF", "ISSUE_BODY", "COMMENT_BODY", "GH_TOKEN", "GITHUB_TOKEN",
-      "HAWK_RUST_TOOLCHAIN", "HAWK_VERSION", "HAWK_X86_64_UNKNOWN_LINUX_GNU_SHA256"].includes(name)));
+  value === undefined ||
+  (record(value) &&
+    Object.keys(value).every((name) =>
+      [
+        "HEAD_REPO",
+        "BASE_REPO",
+        "HAS_RUN_CI_LABEL",
+        "PR_TITLE",
+        "HEAD_REF",
+        "ISSUE_BODY",
+        "COMMENT_BODY",
+        "GH_TOKEN",
+        "GITHUB_TOKEN",
+        "HAWK_RUST_TOOLCHAIN",
+        "HAWK_VERSION",
+        "HAWK_X86_64_UNKNOWN_LINUX_GNU_SHA256",
+      ].includes(name),
+    ));
 const configuredShell = (value: unknown) =>
   record(value) && record(value["run"]) ? value["run"]["shell"] : undefined;
 
@@ -305,15 +438,25 @@ export const checkWorkflowTrust = (workflow: unknown) => {
       (needs === "trust-check" ||
         (Array.isArray(needs) && needs.includes("trust-check")));
     const permitsExecution = (stepCondition: unknown) => {
-      const guarded = pullRequests.every((event) =>
-        excludesUntrusted({ condition: job["if"], event }) ||
-        excludesUntrusted({ condition: stepCondition, event }),
+      const guarded = pullRequests.every(
+        (event) =>
+          excludesUntrusted({ condition: job["if"], event }) ||
+          excludesUntrusted({ condition: stepCondition, event }),
       );
       if (ordered && guarded) return true;
       // Non-PR-only execution needs no dependency on a PR-only trust decision.
-      return pullRequests.every((event) =>
-        excludesUntrusted({ condition: job["if"], event, allowTrust: false }) ||
-        excludesUntrusted({ condition: stepCondition, event, allowTrust: false }),
+      return pullRequests.every(
+        (event) =>
+          excludesUntrusted({
+            condition: job["if"],
+            event,
+            allowTrust: false,
+          }) ||
+          excludesUntrusted({
+            condition: stepCondition,
+            event,
+            allowTrust: false,
+          }),
       );
     };
     const message = `jobs.${name} repository commands require needs: trust-check and a condition requiring its trusted output on pull requests`;
@@ -324,25 +467,45 @@ export const checkWorkflowTrust = (workflow: unknown) => {
     // authorize them. No image approval catalog is implicit in a digest pin.
     if (!permitsExecution(undefined)) {
       if (job["container"] !== undefined)
-        findings.push({ type: "job", property: "container", job: name, message });
+        findings.push({
+          type: "job",
+          property: "container",
+          job: name,
+          message,
+        });
       const services = job["services"];
-      if (services !== undefined && (!record(services) || Object.keys(services).length > 0))
-        findings.push({ type: "job", property: "services", job: name, message });
+      if (
+        services !== undefined &&
+        (!record(services) || Object.keys(services).length > 0)
+      )
+        findings.push({
+          type: "job",
+          property: "services",
+          job: name,
+          message,
+        });
     }
     if (!Array.isArray(job["steps"])) continue;
     for (const [index, step] of job["steps"].entries()) {
       if (!record(step)) continue;
       const run = step["run"];
       const uses = step["uses"];
-      if (
-        !(typeof run === "string" && (invokesRepositoryCode(run) ||
-          !safeShell(step["shell"] ?? configuredShell(job["defaults"]) ?? configuredShell(workflow["defaults"])) ||
-          ![workflow["env"], job["env"], step["env"]].every(safeEnvironment))) &&
-        !(typeof uses === "string" && (!safeAction(uses, step["with"]) ||
-          ![workflow["env"], job["env"], step["env"]].every(safeEnvironment)))
-      )
-        continue;
-      if (permitsExecution(step["if"])) continue;
+      const unsafeRun =
+        typeof run === "string" &&
+        (invokesRepositoryCode(run) ||
+          !safeShell(
+            step["shell"] ??
+              configuredShell(job["defaults"]) ??
+              configuredShell(workflow["defaults"]),
+          ) ||
+          ![workflow["env"], job["env"], step["env"]].every(safeEnvironment));
+      const unsafeAction =
+        uses !== undefined &&
+        (!safeAction(uses, step["with"]) ||
+          ![workflow["env"], job["env"], step["env"]].every(safeEnvironment));
+      if (!unsafeRun && !unsafeAction) continue;
+      // Unknown actions can read the caller's workspace before any later step.
+      if (permitsExecution(unsafeAction ? undefined : step["if"])) continue;
       findings.push({ type: "step", job: name, step: index, message });
     }
   }

@@ -437,7 +437,7 @@ test("string, list and mapping trigger declarations select the same trust policy
   }
 });
 
-test("local actions are dependency execution and external pinned actions are not", () => {
+test("local actions require trust while approved pinned bootstrap actions may run first", () => {
   const source = workflow().replace(
     /      - run: "bunx[^\n]+"\n/u,
     "      - uses: ./.github/actions/setup-workspace\n",
@@ -880,7 +880,7 @@ test.each([
   }
 });
 
-test("pinned external action without repository inputs remains metadata-safe", () => {
+test("approved pinned bootstrap action without inputs remains metadata-safe", () => {
   for (const action of [
     { uses: `actions/checkout@${"a".repeat(40)}` },
     { uses: `actions/checkout@${"a".repeat(40)}`, with: {} },
@@ -1111,4 +1111,102 @@ test("empty services and absent containers do not invent startup execution", () 
   document.setIn(["jobs", "inspect", "services"], {});
   document.setIn(["jobs", "trust-check", "services"], {});
   expect(check(document.toString())).toEqual([]);
+});
+
+const actionFixture = (action: unknown, options: JobFixtureOptions = {}) => {
+  const document = parseDocument(
+    workflow({ command: "echo metadata-only", ...options }),
+  );
+  document.setIn(["jobs", "inspect", "steps", 1], action);
+  return document;
+};
+
+test.each([
+  `attacker/run-caller-code@${"a".repeat(40)}`,
+  `actions/github-script@${"a".repeat(40)}`,
+  `actions/checkout-malicious@${"a".repeat(40)}`,
+  `attacker/actions/checkout@${"a".repeat(40)}`,
+  `actions/checkout/nested@${"a".repeat(40)}`,
+  "actions/checkout@v4",
+  "oven-sh/setup-bun@v2",
+  "actions/setup-node@v5",
+  `actions/checkout@${"A".repeat(40)}`,
+])("unapproved action %s requires the job-level trust decision", (uses) => {
+  const action = { uses };
+  expectUnsafe(actionFixture(action).toString());
+  const stepGated = actionFixture(
+    { ...action, if: trusted },
+    { needs: "trust-check" },
+  );
+  expectUnsafe(stepGated.toString());
+  expect(
+    check(
+      actionFixture(action, {
+        needs: "trust-check",
+        jobIf: trusted,
+      }).toString(),
+    ),
+  ).toEqual([]);
+  expect(
+    check(
+      actionFixture(action, {
+        jobIf: "github.event_name == 'push'",
+      }).toString(),
+    ),
+  ).toEqual([]);
+});
+
+test.each([
+  {
+    uses: `actions/checkout@${"a".repeat(40)}`,
+    with: { "fetch-depth": 0, "persist-credentials": false },
+  },
+  {
+    uses: `oven-sh/setup-bun@${"a".repeat(40)}`,
+    with: { "bun-version-file": "package.json", "no-cache": true },
+  },
+  {
+    uses: `actions/setup-node@${"a".repeat(40)}`,
+    with: {
+      "node-version-file": ".node-version",
+      "package-manager-cache": false,
+    },
+  },
+])("approved bootstrap selectors remain pre-trust data: %j", (action) => {
+  expect(check(actionFixture(action).toString())).toEqual([]);
+});
+
+test.each([
+  {
+    uses: `actions/checkout@${"a".repeat(40)}`,
+    with: { script: "./scripts/check" },
+  },
+  {
+    uses: `oven-sh/setup-bun@${"a".repeat(40)}`,
+    with: { "bun-download-url": "https://example.invalid/runner" },
+  },
+  { uses: `actions/setup-node@${"a".repeat(40)}`, with: { cache: "yarn" } },
+  {
+    uses: `actions/setup-node@${"a".repeat(40)}`,
+    with: { "package-manager-cache": true },
+  },
+  {
+    uses: `actions/setup-node@${"a".repeat(40)}`,
+    with: { "node-version": { script: "./scripts/check" } },
+  },
+])("unknown bootstrap inputs require the job gate: %j", (action) => {
+  expectUnsafe(actionFixture(action).toString());
+  const stepGated = actionFixture(
+    { ...action, if: trusted },
+    { needs: "trust-check" },
+  );
+  expectUnsafe(stepGated.toString());
+  expect(
+    check(
+      actionFixture(action, {
+        needs: "trust-check",
+        jobIf: trusted,
+      }).toString(),
+    ),
+  ).toEqual([]);
 });
