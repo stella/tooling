@@ -473,7 +473,7 @@ test.skipIf(!existsSync("/proc/self/fd"))(
           // Descriptors 30 and 31 model a runner terminal passed beyond stdio; 9 is the state lock.
           `${serviceRun}\nexec 9</dev/null 30</dev/null 31</dev/null\nservice_run sh -c 'ls /proc/$$/fd; :'\nls /proc/$$/fd`,
         ],
-        { env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } },
+        { env: { ...process.env, PATH: `${bin}:${process.env["PATH"]}` } },
       );
       expect(result.stderr.toString()).toBe("");
       expect(result.exitCode).toBe(0);
