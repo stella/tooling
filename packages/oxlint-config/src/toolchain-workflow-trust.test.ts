@@ -876,9 +876,8 @@ test("pinned external action without repository inputs remains metadata-safe", (
   }
 });
 
-test("Hawk metadata does not prevent the existing PR trust decision", () => {
-  expect(
-    check(`env:
+test("Hawk trust decision moves Actions functions out of shell source", () => {
+  const source = `env:
   HAWK_RUST_TOOLCHAIN: "1.97.1"
   HAWK_VERSION: "0.1.12"
   HAWK_X86_64_UNKNOWN_LINUX_GNU_SHA256: "f9cafbbc5777b2b00c362619b8b62af942d2900a121acae2e73210a8ebffd857"
@@ -908,6 +907,90 @@ jobs:
             echo "trusted=false" >> "$GITHUB_OUTPUT"
             echo "::notice::Fork PR without 'run-ci' label — CI skipped."
           fi
-`),
-  ).toEqual([]);
+`;
+  expectUnsafe(source, "trust-check", 0);
+  const document = parseDocument(source);
+  document.setIn(
+    ["jobs", "trust-check", "steps", 0, "env", "HAS_RUN_CI_LABEL"],
+    "${{ contains(github.event.pull_request.labels.*.name, 'run-ci') }}",
+  );
+  const command: unknown = document.getIn([
+    "jobs",
+    "trust-check",
+    "steps",
+    0,
+    "run",
+  ]);
+  if (typeof command !== "string")
+    throw new Error("expected trust decision script");
+  document.setIn(
+    ["jobs", "trust-check", "steps", 0, "run"],
+    command.replace(
+      "'${{ contains(github.event.pull_request.labels.*.name, 'run-ci') }}'",
+      '"$HAS_RUN_CI_LABEL"',
+    ),
+  );
+  expect(check(document.toString())).toEqual([]);
 });
+
+const quoteForms = ["", "'", '"'];
+const untrustedExpressions = [
+  "github.event.pull_request.title",
+  "github.head_ref",
+  "github.event.issue.body",
+  "github.event.comment.body",
+];
+
+for (const expression of untrustedExpressions) {
+  test.each(quoteForms)(
+    `Actions interpolation ${expression} requires trust inside %j quotes`,
+    (quote) => {
+      const command = `echo ${quote}\${{ ${expression} }}${quote}`;
+      expectUnsafe(workflow({ command }));
+      expect(
+        check(workflow({ command, needs: "trust-check", jobIf: canonical })),
+      ).toEqual([]);
+    },
+  );
+}
+
+for (const expression of [
+  "github.sha",
+  "github.run_id",
+  "github.run_attempt",
+  "github.repository",
+]) {
+  test.each(quoteForms)(
+    `bounded Actions metadata ${expression} is safe inside %j quotes`,
+    (quote) => {
+      expect(
+        check(
+          workflow({ command: `echo ${quote}\${{ ${expression} }}${quote}` }),
+        ),
+      ).toEqual([]);
+    },
+  );
+}
+
+for (const interpolation of [
+  "${{ unknown.context }}",
+  "${{ github.event.future_field }}",
+  "${{ contains(github.event.pull_request.labels.*.name, 'run-ci') }}",
+  "${{ format('{0}', github.sha) }}",
+  "${{ github.sha",
+]) {
+  test.each([
+    `echo ${interpolation}`,
+    `echo '${interpolation}'`,
+    `echo "${interpolation}"`,
+    `# ${interpolation}\necho ready`,
+  ])(
+    "unrecognized or unterminated Actions interpolation cannot hide in %s",
+    (command) => {
+      expectUnsafe(workflow({ command }));
+      expect(
+        check(workflow({ command, needs: "trust-check", jobIf: canonical })),
+      ).toEqual([]);
+    },
+  );
+}
