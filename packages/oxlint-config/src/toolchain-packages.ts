@@ -416,7 +416,7 @@ const shellExecutableSource = (command: string) => {
     .join("\n");
 };
 
-export const executableShellWords = (words: readonly string[]) => {
+export const executableShellWords = (words: readonly string[]): string[] => {
   let start = 0;
   const skipAssignments = () => {
     while (
