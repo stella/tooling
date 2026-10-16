@@ -1,9 +1,14 @@
 {
-  "extends": "./packages/typescript-config/library.json",
+  "extends": "./packages/typescript-config/bun.json",
   "include": [
     "oxlint.config.ts",
     "packages/oxlint-config/src/**/*.ts",
-    "scripts/**/*.ts"
+    "scripts/**/*.ts",
+    "scripts/**/*.js",
+    "scripts/**/*.mjs",
+    "scripts/**/*.cjs",
+    "packages/*/tsdown.config.ts",
+    "packages/*/fixtures/**/*.ts"
   ],
   "exclude": ["node_modules", "packages/oxlint-config/dist"]
 }

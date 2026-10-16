@@ -12,6 +12,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { parseToolchainConfiguration } from "./toolchain-guard";
 import {
   checkNodeProjects,
   checkProjectOwnership,
@@ -24,6 +25,14 @@ const sources = [
   "scripts/c.cjs",
   "scripts/d.ts",
 ];
+
+test("project ownership cannot be disabled with a repository opt-out", () => {
+  expect(() =>
+    parseToolchainConfiguration({
+      optOuts: [{ rule: nodeProjectRule, reason: "scripts are inferred" }],
+    }),
+  ).toThrow("cannot be opted out");
+});
 
 test("project ownership flags precisely the unowned part of every script extension set", () => {
   for (let mask = 0; mask < 2 ** sources.length; mask++) {

@@ -702,3 +702,5 @@ another exact stable release. Each record contains exactly `pin`, `reason`,
 `tracking` (a GitHub issue URL) and `expires` (a future `YYYY-MM-DD` date).
 Channels, expired records and `rust-version` rule opt-outs fail validation.
 See the [root policy guide](../../README.md) for a complete declaration.
+
+`stll-toolchain-check` requires tracked JavaScript and TypeScript files selected by type-aware lint to belong to declared TypeScript projects. See the [Node scripts project recipe](https://github.com/stella/tooling/blob/main/README.md) for scripts outside the library project. The check inventories Oxlint-selected files and expands compiler configurations; it does not run lint or type checking.

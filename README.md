@@ -288,7 +288,16 @@ dependency of the consumer, then add `scripts/tsconfig.json`:
 ```json
 {
   "extends": "@stll/typescript-config/node.json",
-  "include": ["**/*.js", "**/*.mjs", "**/*.cjs"]
+  "include": [
+    "**/*.js",
+    "**/*.mjs",
+    "**/*.cjs",
+    "**/*.ts",
+    "../.github/tools/**/*.js",
+    "../.github/tools/**/*.mjs",
+    "../.github/tools/**/*.cjs",
+    "../.github/tools/**/*.ts"
+  ]
 }
 ```
 
@@ -299,7 +308,9 @@ Oxlint discovers the nearest `tsconfig.json`; run the ordinary type-aware lint
 command from the repository root. Missing Node ambient types can otherwise appear
 as `TS2591` on `node:fs` or `require`, followed by misleading `any` diagnostics on
 Node API results. Adding casts or changing conditionals does not repair resolution.
-No additional preset, compiler overrides, or config import side effects are needed.
+Use the existing `bun.json` preset for Bun tests and benchmarks. Include root
+configuration files in their declared project as well. No additional preset,
+compiler overrides, or config import side effects are needed.
 
 `stll-toolchain-check` enforces this ownership with `type-aware-projects` when the
 root manifest declares `oxlint-tsgolint`. It compares the files selected by the
