@@ -169,7 +169,15 @@ export const runTypecheckProbe = async ({
       throw new Error(
         `typecheck probe expected the seeded command to fail: ${seedLocation}`,
       );
-    if (!diagnosticSet(seeded.output, root).includes(`${seedLocation}:1:2322`))
+    // Workspace runners may report compiler paths from the declared project.
+    // Only the exact owned seed under either known command origin is accepted.
+    const origins = new Set([root, dirname(config)]);
+    const attributed = [...origins].some((origin) =>
+      diagnosticSet(seeded.output, origin).includes(
+        `${relative(origin, seed).replaceAll("\\", "/")}:1:2322`,
+      ),
+    );
+    if (!attributed)
       throw new Error(
         `typecheck probe expected TS2322 attributed to ${seedLocation}; the declared project may exclude the seed`,
       );
