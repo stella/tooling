@@ -13,6 +13,7 @@ test("consumers without the type-aware engine do not enable inventory", () => {
       commands: [],
       errors: [],
       enabled: false,
+      workspaceTask: false,
     });
   }
   expect(
@@ -32,6 +33,7 @@ test("native package lint scripts retain scope and diagnostic flags without requ
     ),
   ).toEqual({
     enabled: true,
+    workspaceTask: false,
     errors: [],
     commands: [
       [
@@ -43,6 +45,46 @@ test("native package lint scripts retain scope and diagnostic flags without requ
       ],
     ],
   });
+});
+
+test("literal Turbo lint delegates workspace discovery without executing Turbo", () => {
+  expect(lintInventoryCommands(manifest({ lint: "turbo run lint" }))).toEqual({
+    enabled: true,
+    workspaceTask: true,
+    errors: [],
+    commands: [],
+  });
+  expect(
+    lintInventoryCommands(
+      { scripts: { lint: "oxlint -c ../../oxlint.config.ts ." } },
+      true,
+    ),
+  ).toEqual({
+    enabled: true,
+    workspaceTask: false,
+    errors: [],
+    commands: [["-c", "../../oxlint.config.ts", "."]],
+  });
+});
+
+test("workspace delegation rejects filters, options, prefixes, and dynamic tasks", () => {
+  for (const command of [
+    "turbo run lint --filter core",
+    "turbo --filter=core run lint",
+    "turbo run lint build",
+    "turbo run lint --",
+    "turbo lint",
+    "CI=1 turbo run lint",
+    "env -C subdir turbo run lint",
+    "turbo run $TASK",
+  ]) {
+    const result = lintInventoryCommands(
+      manifest({ lint: `oxlint root.mjs && ${command}` }),
+    );
+    expect(result.errors.length, command).toBeGreaterThan(0);
+    expect(result.workspaceTask, command).toBe(false);
+    expect(result.commands, command).toEqual([]);
+  }
 });
 
 test("workspace lint aliases recurse without executing preparation commands", () => {
@@ -58,6 +100,7 @@ test("workspace lint aliases recurse without executing preparation commands", ()
   );
   expect(result).toEqual({
     enabled: true,
+    workspaceTask: true,
     errors: [],
     commands: [["-c", "oxlint.config.ts", "--deny-warnings", "."]],
   });
@@ -80,6 +123,7 @@ test("supported literal launchers preserve ordered file-selection arguments", ()
       ),
     ).toEqual({
       enabled: true,
+      workspaceTask: false,
       errors: [],
       commands: [
         [
@@ -105,6 +149,7 @@ test("shared shell parsing distinguishes executable nested programs from quoted 
     ),
   ).toEqual({
     enabled: true,
+    workspaceTask: false,
     errors: [],
     commands: [["-c", "oxlint.config.ts", "."]],
   });
@@ -150,7 +195,7 @@ test("cwd changes, cyclic aliases, missing scripts, and absent oxlint are diagno
     { lint: "bun run missing" },
     { lint: "bun run $SCRIPT" },
     { lint: "bun run lint:core -- --fix", "lint:core": "oxlint ." },
-    { lint: "turbo run lint" },
+    { lint: "turbo run lint --filter core" },
   ];
   for (const scripts of cases) {
     expect(

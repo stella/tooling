@@ -121,22 +121,35 @@ const inventoryArguments = (raw: readonly string[]) => {
 };
 
 /** Extract argument vectors for the pinned inventory binary; never execute package-script shell text. */
-export const lintInventoryCommands = (manifest: unknown) => {
+export const lintInventoryCommands = (
+  manifest: unknown,
+  forceEnabled = false,
+) => {
   const commands: string[][] = [];
   const errors: string[] = [];
+  let workspaceTask = false;
   const enabled =
-    record(manifest) &&
-    [manifest["dependencies"], manifest["devDependencies"]].some(
-      (dependencies) =>
-        record(dependencies) && "oxlint-tsgolint" in dependencies,
-    );
-  if (!enabled || !record(manifest)) return { commands, errors, enabled };
+    forceEnabled ||
+    (record(manifest) &&
+      [manifest["dependencies"], manifest["devDependencies"]].some(
+        (dependencies) =>
+          record(dependencies) && "oxlint-tsgolint" in dependencies,
+      ));
+  if (!enabled) return { commands, errors, enabled, workspaceTask };
+  if (!record(manifest))
+    return {
+      commands,
+      errors: ["lint inventory requires an object package manifest"],
+      enabled,
+      workspaceTask,
+    };
   const scripts = manifest["scripts"];
   if (!record(scripts))
     return {
       commands,
       errors: ["type-aware linting requires a root lint script"],
       enabled,
+      workspaceTask,
     };
   const active = new Set<string>();
   const visited = new Set<string>();
@@ -163,6 +176,20 @@ export const lintInventoryCommands = (manifest: unknown) => {
         continue;
       }
       if (first === "echo" || first === "printf") continue;
+      if (first === "turbo") {
+        if (
+          words.length === 3 &&
+          words.at(1) === "run" &&
+          words.at(2) === "lint" &&
+          raw.every(literalWord)
+        )
+          workspaceTask = true;
+        else if (words.includes("lint") || !raw.every(literalWord))
+          errors.push(
+            `${name}: workspace lint delegation requires literal turbo run lint without options`,
+          );
+        continue;
+      }
       if (first === "bun" && words.at(1) === "run") {
         if (raw.length !== 3 || !raw.every(literalWord)) {
           errors.push(
@@ -200,6 +227,7 @@ export const lintInventoryCommands = (manifest: unknown) => {
           words.some(
             (word, index) => word === "bun" && words.at(index + 1) === "run",
           ) ||
+          (words.includes("turbo") && words.includes("lint")) ||
           (first === "bun" &&
             words.length === 2 &&
             !["test", "build", "check", "install", "x"].includes(
@@ -224,7 +252,12 @@ export const lintInventoryCommands = (manifest: unknown) => {
     visited.add(name);
   };
   visit("lint");
-  if (commands.length === 0)
+  if (commands.length === 0 && !workspaceTask)
     errors.push("root lint scripts contain no supported oxlint invocation");
-  return { commands: errors.length === 0 ? commands : [], errors, enabled };
+  return {
+    commands: errors.length === 0 ? commands : [],
+    errors,
+    enabled,
+    workspaceTask: errors.length === 0 && workspaceTask,
+  };
 };
