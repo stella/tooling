@@ -301,6 +301,8 @@ test("the trust decision itself must not execute repository dependency code", ()
 });
 
 test("the documented workflow example obeys the trust contract", () => {
+  const isRecord = (value: unknown): value is Record<string, unknown> =>
+    value !== null && typeof value === "object" && !Array.isArray(value);
   for (const file of ["../../../README.md", "../README.md"]) {
     const source = readFileSync(new URL(file, import.meta.url), "utf8");
     const section = source
@@ -311,14 +313,33 @@ test("the documented workflow example obeys the trust contract", () => {
     expect(yaml).toBeDefined();
     const document = parseDocument(yaml ?? "");
     expect(document.errors).toEqual([]);
-    document.set("on", { pull_request: null });
-    if (document.getIn(["jobs", "trust-check"]) === undefined) {
-      document.setIn(["jobs", "trust-check"], {
-        "runs-on": "ubuntu-latest",
-        steps: [{ run: "echo trust-decision" }],
-      });
-    }
-    expect(checkWorkflowTrust(document.toJS())).toEqual([]);
+    const snippet: unknown = document.toJS();
+    if (!isRecord(snippet))
+      throw new Error("documented jobs must be a mapping");
+    const detector = snippet["check-changes"];
+    if (!isRecord(detector))
+      throw new Error("documented detector job is missing");
+    const sample = {
+      on: ["pull_request", "pull_request_target"],
+      jobs: {
+        "trust-check": {
+          "runs-on": "ubuntu-latest",
+          steps: [{ run: "echo trust-decision" }],
+        },
+        ...snippet,
+      },
+    };
+    expect(Object.hasOwn(sample.jobs, "check-changes")).toBe(true);
+    expect(checkWorkflowTrust(sample)).toEqual([]);
+
+    const unordered = { ...detector };
+    delete unordered["needs"];
+    const findings = checkWorkflowTrust({
+      ...sample,
+      jobs: { ...sample.jobs, "check-changes": unordered },
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings.at(0)).toMatchObject({ job: "check-changes", step: 0 });
   }
 });
 
