@@ -30,8 +30,9 @@ machine. `setTime()` changes only the wall clock, like a system clock change.
 
 ## Waits
 
-Every wait takes a `description`. The hang guard (20 s by default; keep it
-below the runner's per-test timeout) fails with "waiting for <description>", so a stuck test
+Every wait takes a `description`. The hang guard (4 s by default, below
+`bun test`'s default 5 s per-test timeout; give a wait its own `timeoutMs` when
+a suite raises that timeout) fails with "waiting for <description>", so a stuck test
 says what it was waiting for. The guard is never a statement about speed: do
 not shorten it to assert that something is fast. Assert work counts instead.
 

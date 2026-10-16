@@ -23,8 +23,22 @@ const importEntries = (cwd: string, entries: readonly string[]) =>
     stdout: "pipe",
   });
 
+// Builds from the current sources first, so the check never reads a missing
+// or stale `dist`.
+const build = (directory: string) => {
+  const result = Bun.spawnSync({
+    cmd: [process.execPath, "run", "build"],
+    cwd: directory,
+    stderr: "pipe",
+    stdout: "pipe",
+  });
+  expect(result.exitCode).toBe(0);
+};
+
 describe("optional drizzle-orm peer", () => {
   test("core entries load without drizzle-orm; only /db needs it", async () => {
+    build(resolveFrom("@stll/time", packageRoot));
+    build(packageRoot);
     await using consumer = await createTestTmpDir("kit-consumer");
     const modules = consumer.join("node_modules");
     const installed = path.join(modules, "@stll", "test-kit");
@@ -72,5 +86,5 @@ describe("optional drizzle-orm peer", () => {
     const db = importEntries(consumer.path, ["@stll/test-kit/db"]);
     expect(db.exitCode).not.toBe(0);
     expect(db.stderr.toString()).toContain("drizzle-orm");
-  });
+  }, 60_000);
 });

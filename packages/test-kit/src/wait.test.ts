@@ -3,6 +3,8 @@ import { describe, expect, test } from "bun:test";
 import { createTestClock } from "./clock.ts";
 import { rejectionOf } from "./rejection-support.ts";
 import {
+  BUN_TEST_DEFAULT_TIMEOUT_MS,
+  DEFAULT_WAIT_TIMEOUT_MS,
   WaitTimeoutError,
   deferred,
   settledWithin,
@@ -49,6 +51,25 @@ describe("hang guards", () => {
     expect(error).toHaveProperty(
       "message",
       "Timed out after 1000 ms waiting for the task to stop",
+    );
+  });
+
+  test("the default guard fires before bun test's default per-test timeout", async () => {
+    expect(DEFAULT_WAIT_TIMEOUT_MS).toBeLessThan(BUN_TEST_DEFAULT_TIMEOUT_MS);
+    const clock = createTestClock();
+    const never = deferred();
+    const waiting = settledWithin(never.promise, {
+      clock,
+      description: "the default guard",
+    });
+    const outcome = waiting.catch((error: unknown) => error);
+    await clock.advance(DEFAULT_WAIT_TIMEOUT_MS - 1);
+    expect(never.settled()).toBe(false);
+    expect(clock.pendingSleepers()).toBe(1);
+    await clock.advance(1);
+    expect(await outcome).toHaveProperty(
+      "message",
+      `Timed out after ${DEFAULT_WAIT_TIMEOUT_MS} ms waiting for the default guard`,
     );
   });
 

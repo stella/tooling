@@ -9,11 +9,15 @@ import { type Clock, systemClock } from "./clock.ts";
  * assertion about speed.
  */
 
+/** `bun test`'s default per-test timeout. */
+export const BUN_TEST_DEFAULT_TIMEOUT_MS = 5000;
+
 /**
- * Default hang guard. Keep it below the test runner's per-test timeout so the
- * reason prints before the runner gives up.
+ * Default hang guard: below `bun test`'s default per-test timeout, so the
+ * reason prints before the runner gives up. A suite with a longer per-test
+ * timeout gives its slow waits their own `timeoutMs`.
  */
-export const DEFAULT_WAIT_TIMEOUT_MS = 20_000;
+export const DEFAULT_WAIT_TIMEOUT_MS = 4000;
 
 export class WaitTimeoutError extends Error {
   override readonly name = "WaitTimeoutError";

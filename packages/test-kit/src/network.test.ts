@@ -387,6 +387,17 @@ describe("network guard", () => {
     );
   });
 
+  test("Socket#connect with pre-normalised [options, callback] arguments is checked", () => {
+    uninstall = installNetworkGuard();
+    // net.connect hands Socket#connect one array of normalised arguments.
+    const normalised = [{ host: "203.0.113.7", port: 5432 }, null];
+    expect(() =>
+      Reflect.apply(net.Socket.prototype.connect, new net.Socket(), [
+        normalised,
+      ]),
+    ).toThrow(NetworkAccessError);
+  });
+
   test("Bun.connect to a remote host rejects", async () => {
     uninstall = installNetworkGuard();
     const error = await rejectionOf(

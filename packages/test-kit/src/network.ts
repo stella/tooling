@@ -236,7 +236,11 @@ type SocketTarget = {
 // `(options)`, `(port, host?, options?)`, `(port, options)` and `(path)`.
 // The guard refuses the call if any of them is refused, so an overload that
 // places the host somewhere unexpected cannot slip past as "localhost".
-const socketHosts = (args: readonly unknown[]): string[] => {
+// `net.connect` hands `Socket#connect` its arguments already normalised as
+// one array (`[options, callback]`), which is read like the arguments it holds.
+const socketHosts = (received: readonly unknown[]): string[] => {
+  const head: unknown = received[0];
+  const args: readonly unknown[] = Array.isArray(head) ? head : received;
   const [first, second] = args;
   if (typeof first === "string" && !/^\d+$/u.test(first)) {
     return []; // a Unix socket path
