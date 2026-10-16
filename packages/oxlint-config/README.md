@@ -351,8 +351,9 @@ root `Cargo.lock`. Regenerate after updating the lockfile or any tool pin.
 
 `cloud.prepare` (optional) names one root `package.json` script and a time bound,
 for example `{ "script": "generate:cloud", "seconds": 300 }`. The install phase
-runs it once after dependencies, as the invoking user, with stdin closed and
-`timeout` killing the whole process group at the bound (1 to 900 seconds). Use it
+runs it once after dependencies, as the invoking user, with stdin closed. At the
+bound (1 to 900 seconds) the script receives TERM and, 10 seconds later, KILL;
+when it ends, anything still running in its process group is killed. Use it
 for cheap derived sources that tasks need when `install` skips lifecycle scripts;
 it gets no network allowance. Generation fails when the script is not in the
 root `package.json`.
