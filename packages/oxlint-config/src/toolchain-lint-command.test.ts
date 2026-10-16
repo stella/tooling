@@ -67,6 +67,55 @@ test("literal Turbo lint delegates workspace discovery without executing Turbo",
   });
 });
 
+test("validation-only workspace leaves do not claim a type-aware lint scope", () => {
+  const scripts = {
+    lint: "bun run scripts/validate-triggers.ts && bun run check:city-loaders",
+    "check:city-loaders": "bun run scripts/generate-city-loaders.ts --check",
+  };
+  expect(lintInventoryCommands({ scripts }, true)).toEqual({
+    enabled: false,
+    workspaceTask: false,
+    errors: [],
+    commands: [],
+  });
+  const root = lintInventoryCommands(manifest(scripts));
+  expect(root.enabled).toBe(true);
+  expect(root.errors).toEqual([
+    "root lint scripts contain no supported oxlint invocation",
+  ]);
+});
+
+test("literal validation files remain preparation steps alongside real oxlint commands", () => {
+  for (const extension of ["ts", "js", "mjs", "cjs"]) {
+    expect(
+      lintInventoryCommands(
+        manifest({
+          lint: `bun run scripts/validate.${extension} --check 'literal argument' && oxlint .`,
+        }),
+      ),
+    ).toEqual({
+      enabled: true,
+      workspaceTask: false,
+      errors: [],
+      commands: [["."]],
+    });
+  }
+  expect(
+    lintInventoryCommands(
+      manifest({
+        lint: "bun run lint.ts",
+        "lint.ts": "oxlint .",
+      }),
+    ).commands,
+  ).toEqual([["."]]);
+  expect(
+    lintInventoryCommands(
+      { scripts: { lint: "bun run scripts/validate.ts $ARGS" } },
+      true,
+    ).errors.length,
+  ).toBeGreaterThan(0);
+});
+
 test("workspace delegation rejects filters, options, prefixes, and dynamic tasks", () => {
   for (const command of [
     "turbo run lint --filter core",

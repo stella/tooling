@@ -128,13 +128,13 @@ export const lintInventoryCommands = (
   const commands: string[][] = [];
   const errors: string[] = [];
   let workspaceTask = false;
-  const enabled =
-    forceEnabled ||
-    (record(manifest) &&
-      [manifest["dependencies"], manifest["devDependencies"]].some(
-        (dependencies) =>
-          record(dependencies) && "oxlint-tsgolint" in dependencies,
-      ));
+  const declaresEngine =
+    record(manifest) &&
+    [manifest["dependencies"], manifest["devDependencies"]].some(
+      (dependencies) =>
+        record(dependencies) && "oxlint-tsgolint" in dependencies,
+    );
+  const enabled = forceEnabled || declaresEngine;
   if (!enabled) return { commands, errors, enabled, workspaceTask };
   if (!record(manifest))
     return {
@@ -191,6 +191,18 @@ export const lintInventoryCommands = (
         continue;
       }
       if (first === "bun" && words.at(1) === "run") {
+        const target = words.at(2);
+        if (
+          target !== undefined &&
+          /\.(?:[cm]?js|ts)$/.test(target) &&
+          typeof scripts[target] !== "string"
+        ) {
+          if (!raw.every(literalWord))
+            errors.push(
+              `${name}: validation file commands require literal arguments`,
+            );
+          continue;
+        }
         if (raw.length !== 3 || !raw.every(literalWord)) {
           errors.push(
             `${name}: package script aliases must have one literal name`,
@@ -252,6 +264,14 @@ export const lintInventoryCommands = (
     visited.add(name);
   };
   visit("lint");
+  if (
+    forceEnabled &&
+    !declaresEngine &&
+    commands.length === 0 &&
+    !workspaceTask &&
+    errors.length === 0
+  )
+    return { commands, errors, enabled: false, workspaceTask };
   if (commands.length === 0 && !workspaceTask)
     errors.push("root lint scripts contain no supported oxlint invocation");
   return {
