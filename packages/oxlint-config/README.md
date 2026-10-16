@@ -674,8 +674,13 @@ The mandatory `workflow-trust` rule applies to PR workflows declaring a
 `trust-check` job: jobs executing repository commands must directly depend on it
 and require its `trusted == 'true'` output for PR events. This covers Bun/npm
 scripts and dependency bins, pnpm/Yarn commands, `bunx`/`npx`/`pnpx`,
-`node_modules/.bin`, local actions and reusable workflow jobs, and explicit
-Node/shell/Python script files and relative executables. Bun/npm installation before trust requires
+`node_modules/.bin`, local actions and reusable workflow jobs, shell script files,
+relative executables, and Node/Python execution modes. Runtime discovery, inline,
+module and stdin modes require trust without an explicit filename; exact single
+help/version arguments are recognized as informational. This includes
+[Node test discovery](https://nodejs.org/api/cli.html#--test) and
+[Python module execution](https://docs.python.org/3/using/cmdline.html#cmdoption-m).
+Bun/npm installation before trust requires
 `--ignore-scripts`; explicit lifecycle commands remain gated with that flag.
 Unknown manager flags retain the trust requirement.
 The guard keeps pnpm/Yarn commands gated because repository-owned

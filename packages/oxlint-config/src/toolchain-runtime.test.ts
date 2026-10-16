@@ -914,6 +914,22 @@ jobs:
       .toMatchObject([{ rule: "workflow-trust", path: file, line: 7 }]);
   }
 });
+
+test("workflow trust diagnostics locate runtime discovery modes without filenames", () => {
+  const file = ".github/workflows/ci.yml";
+  for (const command of ["node --test", "python3 -m unittest discover"]) {
+    const source = `on: pull_request
+jobs:
+  trust-check:
+    steps: [{run: echo trust-decision}]
+  build:
+    steps:
+      - run: ${command}
+`;
+    expect(check(file, source).filter(({ rule }) => rule === "workflow-trust"))
+      .toMatchObject([{ rule: "workflow-trust", path: file, line: 7 }]);
+  }
+});
 for (const fixture of cases) {
   test(`${fixture.rule} accepts its shared pin and rejects a mutation`, () => {
     expect(check(fixture.file, fixture.pass)).toEqual([]);

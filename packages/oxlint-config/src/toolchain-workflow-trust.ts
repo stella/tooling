@@ -133,7 +133,18 @@ const invokesRepositoryCode = (command: string) =>
     }
     const name = path.posix.basename(executable);
     if (["bunx", "npx", "pnpx"].includes(name)) return true;
-    if (["node", "bash", "sh", "python", "python3"].includes(name))
+    const nodeRuntime = name === "node" || name === "nodejs";
+    if (nodeRuntime || /^python(?:[23](?:\.\d+)?)?$/u.test(name)) {
+      // Discovery, module, inline, preload, and stdin modes execute without a
+      // filename. Unknown runtime modes therefore retain the trust requirement.
+      const informationFlags = nodeRuntime
+        ? ["--version", "-v", "--help", "-h"]
+        : ["--version", "-V", "--help", "-h"];
+      return !(
+        words.length === 2 && informationFlags.includes(words.at(1) ?? "")
+      );
+    }
+    if (name === "bash" || name === "sh")
       return words.slice(1).some((word) =>
         /^(?!-)(?:\.?\.?\/)?[^$]*\.(?:[cm]?[jt]s|sh|py)$/u.test(word),
       );
