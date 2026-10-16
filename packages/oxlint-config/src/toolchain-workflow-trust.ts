@@ -318,11 +318,7 @@ export const checkWorkflowTrust = (workflow: unknown) => {
     };
     const message = `jobs.${name} repository commands require needs: trust-check and a condition requiring its trusted output on pull requests`;
     const jobUses = job["uses"];
-    if (
-      typeof jobUses === "string" &&
-      !safeAction(jobUses, job["with"]) &&
-      !permitsExecution(undefined)
-    )
+    if (jobUses !== undefined && !permitsExecution(undefined))
       findings.push({ type: "job", property: "uses", job: name, message });
     // Containers and services start before steps, so a step condition cannot
     // authorize them. No image approval catalog is implicit in a digest pin.

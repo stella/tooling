@@ -643,8 +643,9 @@ Job containers and nonempty services require the job-level trust gate because
 they start before steps and supply executable code. A step condition cannot
 authorize their startup. Digest pinning alone does not approve an image for
 pre-trust execution; the guard has no implicit image approval catalog.
-Pinned external actions without inputs may run before trust; local actions,
-reusable workflows with inputs, and unknown action forms require the gate.
+Pinned external step actions without inputs may run before trust; local actions
+and unknown step action forms require the gate. Every job-level reusable workflow
+call requires the job-level trust condition, including pinned calls without inputs.
 
 Interpreters, sourced files, executable paths, package managers (including
 metadata and script-disabled install modes), launchers, custom shells, and

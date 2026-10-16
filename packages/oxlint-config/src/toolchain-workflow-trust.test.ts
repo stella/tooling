@@ -642,12 +642,13 @@ test("local reusable workflows require the same direct trust gate as executable 
     ).toEqual([]);
   }
   expectUnsafeJob(reusableWorkflow({ needs: "trust-check", jobIf: canonical }));
+  const uses = `stella/.github/.github/workflows/build.yml@${"a".repeat(40)}`;
+  expectUnsafeJob(reusableWorkflow({ uses }));
   expect(
-    check(
-      reusableWorkflow({
-        uses: `stella/.github/.github/workflows/build.yml@${"a".repeat(40)}`,
-      }),
-    ),
+    check(reusableWorkflow({ uses, needs: "trust-check", jobIf: trusted })),
+  ).toEqual([]);
+  expect(
+    check(reusableWorkflow({ uses, jobIf: "github.event_name == 'push'" })),
   ).toEqual([]);
 });
 

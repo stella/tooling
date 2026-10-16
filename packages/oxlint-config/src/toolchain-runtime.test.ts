@@ -880,23 +880,28 @@ test("fixture coverage equals the declared runtime rules", () => {
   expect(new Set(cases.map(({ rule }) => rule))).toEqual(new Set(runtimeRules));
 });
 
-test("workflow trust diagnostics locate local reusable workflow jobs", () => {
+test.each([
+  "./.github/workflows/build.yml",
+  `stella/.github/.github/workflows/build.yml@${"a".repeat(40)}`,
+])("workflow trust diagnostics locate reusable workflow jobs: %s", (uses) => {
   const file = ".github/workflows/ci.yml";
   const source = `on: pull_request
 jobs:
   trust-check:
     steps: [{run: echo trust-decision}]
   build:
-    uses: ./.github/workflows/build.yml
+    uses: ${uses}
 `;
-  expect(check(file, source).filter(({ rule }) => rule === "workflow-trust"))
-    .toMatchObject([{ rule: "workflow-trust", path: file, line: 6 }]);
+  expect(
+    check(file, source).filter(({ rule }) => rule === "workflow-trust"),
+  ).toMatchObject([{ rule: "workflow-trust", path: file, line: 6 }]);
   const gated = source.replace(
     "  build:\n",
     "  build:\n    needs: trust-check\n    if: needs.trust-check.outputs.trusted == 'true'\n",
   );
-  expect(check(file, gated).filter(({ rule }) => rule === "workflow-trust"))
-    .toEqual([]);
+  expect(
+    check(file, gated).filter(({ rule }) => rule === "workflow-trust"),
+  ).toEqual([]);
 });
 
 test("workflow trust diagnostics locate non-Bun manager commands", () => {
