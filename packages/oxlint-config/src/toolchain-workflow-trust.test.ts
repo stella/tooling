@@ -994,3 +994,22 @@ for (const interpolation of [
     },
   );
 }
+
+test.each([
+  { expression: "github.event.pull_request.title", name: "PR_TITLE" },
+  { expression: "github.head_ref", name: "HEAD_REF" },
+  { expression: "github.event.issue.body", name: "ISSUE_BODY" },
+  { expression: "github.event.comment.body", name: "COMMENT_BODY" },
+])(
+  "untrusted $expression stays data through $name environment indirection",
+  ({ expression, name }) => {
+    for (const command of [`printf '%s\\n' "$${name}"`, "unknown-command"]) {
+      const document = parseDocument(workflow({ command }));
+      document.setIn(["jobs", "inspect", "steps", 1, "env"], {
+        [name]: `\${{ ${expression} }}`,
+      });
+      if (command === "unknown-command") expectUnsafe(document.toString());
+      else expect(check(document.toString())).toEqual([]);
+    }
+  },
+);
