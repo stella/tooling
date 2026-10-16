@@ -1,5 +1,11 @@
 # @stll/oxlint-config
 
+## 1.3.1
+
+### Patch Changes
+
+- [#145](https://github.com/stella/tooling/pull/145) [`cbdac5c`](https://github.com/stella/tooling/commit/cbdac5c7345f82951d1970e64064962c2f2de3aa) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Cloud setup service commands inherit no descriptors beyond standard input and output.
+
 ## 1.3.0
 
 ### Minor Changes
