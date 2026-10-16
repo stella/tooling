@@ -1,6 +1,6 @@
 /// <reference types="bun-types" />
 import { expect, test } from "bun:test";
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -168,7 +168,7 @@ test("network logs are removed after outer deadlines and capture failures", () =
         `
 mktemp() { command mktemp "$FIXTURE_DIRECTORY/network.XXXXXX"; }
 timeout() { [[ "$FIXTURE_FAILURE" != deadline ]] || return 124; printf 'complete\\n'; }
-tee() { if [[ "$FIXTURE_FAILURE" == capture ]]; then command cat >/dev/null; return 23; fi; command tee "$@"; }
+cat() { [[ "$FIXTURE_FAILURE" != capture ]] || return 23; command cat "$@"; }
 network_run github.com 120 fixture-command
 `,
         { FIXTURE_DIRECTORY: directory, FIXTURE_FAILURE: failure },
@@ -224,4 +224,49 @@ timeout() { printf 'deadline:%s\\n' "$3"; }
   expect(fallback.stdout.toString()).toContain("deadline:180s");
   const extended = run(`${stub}APT_DEADLINE=600 apt_network install x`);
   expect(extended.stdout.toString()).toContain("deadline:600s");
+});
+
+test("a process left behind with the command's output open does not hold the network step", () => {
+  const started = performance.now();
+  // The command exits at once but leaves a child holding its stdout and stderr,
+  // like a service started by a package maintainer script.
+  const result = run(
+    `timeout() { shift 3; "$@"; }
+network_run example.test 20 sh -c 'sleep 30 & echo configured'`,
+  );
+  const elapsedSeconds = (performance.now() - started) / 1000;
+  expect(result.exitCode).toBe(0);
+  expect(result.stdout.toString()).toBe("configured\n");
+  expect(elapsedSeconds).toBeLessThan(10);
+});
+
+test("processes still holding a step log are ended once the command exits", () => {
+  const directory = mkdtempSync(join(tmpdir(), "cloud-network-test-"));
+  try {
+    const result = run(
+      `
+mktemp() { : > "$FIXTURE_DIRECTORY/network.log"; printf '%s\\n' "$FIXTURE_DIRECTORY/network.log"; }
+timeout() {
+  # Simulate one leftover holding the log and one unrelated process.
+  mkdir -p "$CLOUD_PROC_ROOT/4242/fd" "$CLOUD_PROC_ROOT/5353/fd"
+  ln -s "$FIXTURE_DIRECTORY/network.log" "$CLOUD_PROC_ROOT/4242/fd/1"
+  ln -s /dev/null "$CLOUD_PROC_ROOT/5353/fd/1"
+  printf 'installed\\n'
+}
+kill() { printf 'killed:%s\\n' "$*" >> "$FIXTURE_DIRECTORY/kills"; }
+network_run example.test 20 fixture-install
+`,
+      {
+        FIXTURE_DIRECTORY: directory,
+        CLOUD_PROC_ROOT: join(directory, "proc"),
+      },
+    );
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).toBe("installed\n");
+    expect(readFileSync(join(directory, "kills"), "utf8")).toBe(
+      "killed:-TERM 4242\n",
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
