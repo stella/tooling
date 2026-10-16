@@ -218,7 +218,9 @@ write_environment() {
 const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 
 // Offline and time-bounded: stdin is closed so a prompt cannot hold the
-// snapshot, and the whole process group is killed at the bound.
+// snapshot. timeout leads its own process group (its pid), but it stops
+// escalating once its direct child exits, so whatever is left in that group
+// afterwards (a descendant that ignored TERM) is killed unconditionally.
 const renderPrepare = (
   prepare: { script: string; seconds: number } | undefined,
   files: Readonly<Record<string, string>>,
@@ -235,14 +237,20 @@ const renderPrepare = (
   if (
     typeof scripts !== "object" ||
     scripts === null ||
-    !(prepare.script in scripts)
+    !Object.hasOwn(scripts, prepare.script) ||
+    typeof Reflect.get(scripts, prepare.script) !== "string"
   )
     throw new Error(
       `cloud.prepare.script ${prepare.script} is not a root package script`,
     );
   return [
     "prepare_sources() {",
-    `  timeout --kill-after=10 ${prepare.seconds} runuser -u "$OUTPUT_USER" -- env HOME="$OUTPUT_HOME" PATH="$PATH" "$BUN_DIR/bun" run ${shellQuote(prepare.script)} </dev/null`,
+    "  local leader status=0",
+    `  timeout --kill-after=10 ${prepare.seconds} runuser -u "$OUTPUT_USER" -- env HOME="$OUTPUT_HOME" PATH="$PATH" "$BUN_DIR/bun" run ${shellQuote(prepare.script)} </dev/null &`,
+    "  leader=$!",
+    '  wait "$leader" || status=$?',
+    '  kill -KILL -- "-$leader" 2>/dev/null || true',
+    '  return "$status"',
     "}",
   ].join("\n");
 };
