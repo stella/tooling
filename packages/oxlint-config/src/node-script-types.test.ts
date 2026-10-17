@@ -20,6 +20,9 @@ const configDirectory = path.resolve(
   "../../typescript-config",
 );
 const oxlintDirectory = path.dirname(require.resolve("oxlint/package.json"));
+const backendDirectory = path.dirname(
+  require.resolve("oxlint-tsgolint/package.json"),
+);
 const bunTypesDirectory = path.dirname(
   require.resolve("bun-types/package.json"),
 );
@@ -34,15 +37,15 @@ const nodeTypesDirectory = realpathSync(
 const imports = {
   js: 'import { existsSync } from "node:fs";\nimport { open } from "node:fs/promises";\n',
   mjs: 'import { existsSync } from "node:fs";\nimport { open } from "node:fs/promises";\n',
-  cjs: 'const { existsSync } = require("node:fs");\nconst { open } = require("node:fs/promises");\n',
+  cjs: 'const fs = require("node:fs");\nconst fsPromises = require("node:fs/promises");\n',
 };
 
 const fixtureSource = (extension: keyof typeof imports) => {
   const source = `${imports[extension]}
-const present = existsSync(".");
+const present = ${extension === "cjs" ? "fs.existsSync" : "existsSync"}(".");
 const description = present ? "present" : "missing";
 const regularFile = async () => {
-  const file = await open("fixture.txt", "r");
+  const file = await ${extension === "cjs" ? "fsPromises.open" : "open"}("fixture.txt", "r");
   try {
     const stats = await file.stat();
     return stats.isFile() ? "regular" : "other";
@@ -86,6 +89,17 @@ test.each(["js", "mjs", "cjs"] as const)(
       mkdirSync(path.join(root, "scripts"));
       mkdirSync(path.join(root, "node_modules/@types"), { recursive: true });
       mkdirSync(path.join(root, "node_modules/@stll"), { recursive: true });
+      mkdirSync(path.join(root, "node_modules/.bin"));
+      symlinkSync(
+        backendDirectory,
+        path.join(root, "node_modules/oxlint-tsgolint"),
+        "dir",
+      );
+      // Oxlint discovers the backend through the consumer's node_modules/.bin.
+      symlinkSync(
+        path.join(backendDirectory, "bin/tsgolint.js"),
+        path.join(root, "node_modules/.bin/tsgolint"),
+      );
       // Model an isolated consumer's direct dependency, not a hoisted root @types tree.
       symlinkSync(
         nodeTypesDirectory,
@@ -127,9 +141,7 @@ test.each(["js", "mjs", "cjs"] as const)(
       const missingAmbient = lintFixture(root, source);
       expect(missingAmbient.status, missingAmbient.output).not.toBe(0);
       expect(missingAmbient.output).toContain("TS2591");
-      expect(missingAmbient.output).toContain(
-        extension === "cjs" ? "require" : "node:fs",
-      );
+      expect(missingAmbient.output).toContain("node:fs");
 
       writeProject("node");
       const typed = lintFixture(root, source);
