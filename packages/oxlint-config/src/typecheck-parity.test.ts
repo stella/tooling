@@ -10,7 +10,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 
 import {
   assertUnshadowedCheck,
@@ -441,6 +441,56 @@ test("diagnostic sets canonicalize TypeScript and Bun locations and ignore summa
       repo,
     ),
   ).toEqual(["src/input.ts:4:2322"]);
+});
+
+test("Bun filtered workspace diagnostics retain the compiler's file attribution", () => {
+  expect(
+    diagnosticSet(
+      "@stll/anonymize-data typecheck: dictionaries/stll-typecheck-probe-55c6a08c-5c47-4251-a111-c2e651af0da6.ts(1,14): error TS2322: Type 'string' is not assignable to type 'number'.",
+      repo,
+    ),
+  ).toEqual([
+    "dictionaries/stll-typecheck-probe-55c6a08c-5c47-4251-a111-c2e651af0da6.ts:1:2322",
+  ]);
+});
+
+test("Bun workspace prefixes preserve diagnostic identity across output formats", () => {
+  for (const prefix of [
+    "",
+    "@stll/library typecheck: ",
+    "library typecheck: ",
+    "@scope/package-name typecheck:test: ",
+    "package.name check_types-2: ",
+  ]) {
+    for (const diagnostic of [
+      "src/input.ts(4,7): error TS2322: wrong type",
+      "src/input.ts:4:7: error TS2322: wrong type",
+      "src/input.ts:4:7: warning 2322: wrong type",
+      "error TS5083: Cannot read configuration file.",
+      "warning TS5083: Cannot read configuration file.",
+    ]) {
+      const expected = diagnosticSet(diagnostic, repo);
+      expect(expected).toHaveLength(1);
+      for (const output of [
+        `${prefix}${diagnostic}`,
+        `\u001b[32m${prefix}\u001b[0m\u001b[31m${diagnostic}\u001b[0m`,
+      ])
+        expect(diagnosticSet(output, repo)).toEqual(expected);
+    }
+  }
+});
+
+test("diagnostic paths containing spaces and colons retain their complete location", () => {
+  for (const file of [
+    "src/package typecheck: input.ts",
+    "./package typecheck: input.ts",
+    "/workspace/package typecheck: input.ts",
+    "src/input file.ts",
+    "src/input:version.ts",
+  ])
+    expect(
+      diagnosticSet(`${file}(4,7): error TS2322: wrong type`, repo),
+    ).toEqual([`${relative(repo, resolve(repo, file))}:4:2322`]);
 });
 
 test("tagged agent diagnostics retain primary location independent of attribute order", () => {

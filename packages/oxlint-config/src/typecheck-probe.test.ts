@@ -55,7 +55,7 @@ const seedIn = async (directory: string) => {
 const command = ["typecheck", "--noEmit"] as const;
 
 test("probe requires its own diagnostic, removes the seed and repeats the exact command cleanly", async () => {
-  for (const diagnostic of ["tsc", "colon", "xml"])
+  for (const diagnostic of ["tsc", "colon", "xml", "bun-filter"])
     for (const origin of ["repository", "project"])
       await withProject(async ({ repo, project, directory }) => {
         let calls = 0;
@@ -94,7 +94,7 @@ test("probe requires its own diagnostic, removes the seed and repeats the exact 
               };
             return {
               status: 2,
-              output: `\u001b[31m${seed}(1,14): error TS2322: Mismatch\u001b[0m`,
+              output: `\u001b[31m${diagnostic === "bun-filter" ? "@stll/library typecheck: " : ""}${seed}(1,14): error TS2322: Mismatch\u001b[0m`,
             };
           },
         });
