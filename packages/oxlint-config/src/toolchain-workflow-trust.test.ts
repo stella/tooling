@@ -1256,14 +1256,7 @@ test.each([
   },
   {
     uses: `oven-sh/setup-bun@${"a".repeat(40)}`,
-    with: { "bun-version-file": "package.json", "no-cache": true },
-  },
-  {
-    uses: `actions/setup-node@${"a".repeat(40)}`,
-    with: {
-      "node-version-file": ".node-version",
-      "package-manager-cache": false,
-    },
+    with: { "bun-version": "1.4.3", "no-cache": true },
   },
 ])("approved bootstrap selectors remain pre-trust data: %j", (action) => {
   expect(check(actionFixture(action).toString())).toEqual([]);
@@ -1302,4 +1295,143 @@ test.each([
       }).toString(),
     ),
   ).toEqual([]);
+});
+
+const literalBootstrapSetups = [
+  {
+    uses: `actions/setup-node@${"a".repeat(40)}`,
+    versionKey: "node-version",
+    version: "26.10.0",
+  },
+  {
+    uses: `oven-sh/setup-bun@${"a".repeat(40)}`,
+    versionKey: "bun-version",
+    version: "1.4.3",
+  },
+];
+
+const expectActionNeedsJobTrust = (action: unknown) => {
+  expectUnsafe(actionFixture(action).toString());
+  expect(
+    check(
+      actionFixture(action, {
+        needs: "trust-check",
+        jobIf: trusted,
+      }).toString(),
+    ),
+  ).toEqual([]);
+};
+
+test.each(literalBootstrapSetups)(
+  "bootstrap file selectors require trust for every caller-controlled path: %j",
+  ({ uses, versionKey, version }) => {
+    for (const key of [
+      "node-version-file",
+      "bun-version-file",
+      "cache-dependency-path",
+      "path",
+    ]) {
+      for (const file of [
+        "/proc/self/environ",
+        ".node-version",
+        "package.json",
+        "./symlink-to-secret",
+        "../outside/version",
+        "https://example.invalid/version",
+        "${{ inputs.version_file }}",
+      ]) {
+        expectActionNeedsJobTrust({
+          uses,
+          with: { [versionKey]: version, [key]: file },
+        });
+      }
+    }
+  },
+);
+
+test.each(literalBootstrapSetups)(
+  "bootstrap runtimes require explicit literal numeric versions: %j",
+  ({ uses, versionKey, version }) => {
+    for (const value of [
+      null,
+      true,
+      26,
+      "",
+      "latest",
+      "lts/*",
+      "canary",
+      "./symlink-version",
+      "/proc/self/environ",
+      "https://example.invalid/runtime",
+      "${{ inputs.version }}",
+    ]) {
+      expectActionNeedsJobTrust({ uses, with: { [versionKey]: value } });
+    }
+    for (const action of [{ uses }, { uses, with: {} }])
+      expectActionNeedsJobTrust(action);
+    const literal = { uses, with: { [versionKey]: version } };
+    if (versionKey === "node-version") expectActionNeedsJobTrust(literal);
+    else expect(check(actionFixture(literal).toString())).toEqual([]);
+  },
+);
+
+test("checkout destinations require trust even for approved immutable checkout actions", () => {
+  for (const destination of [
+    ".",
+    "./checkout",
+    "./symlink-checkout",
+    "../outside",
+    "/proc/self/environ",
+    "${{ inputs.checkout_path }}",
+  ]) {
+    expectActionNeedsJobTrust({
+      uses: `actions/checkout@${"a".repeat(40)}`,
+      with: { path: destination },
+    });
+  }
+});
+
+test("literal bootstrap versions retain supported boolean controls", () => {
+  for (const noCache of [true, false]) {
+    expect(
+      check(
+        actionFixture({
+          uses: `oven-sh/setup-bun@${"a".repeat(40)}`,
+          with: { "bun-version": "1.4.3", "no-cache": noCache },
+        }).toString(),
+      ),
+    ).toEqual([]);
+  }
+  expectActionNeedsJobTrust({
+    uses: `actions/setup-node@${"a".repeat(40)}`,
+    with: { "node-version": "26.10.0", "package-manager-cache": false },
+  });
+});
+
+test("pre-trust checkout cannot fetch submodules and Node installers require trust", () => {
+  const checkout = `actions/checkout@${"a".repeat(40)}`;
+  for (const submodules of [true, "recursive", "${{ inputs.submodules }}"])
+    expectActionNeedsJobTrust({ uses: checkout, with: { submodules } });
+  expect(
+    check(
+      actionFixture({ uses: checkout, with: { submodules: false } }).toString(),
+    ),
+  ).toEqual([]);
+
+  const node = `actions/setup-node@${"a".repeat(40)}`;
+  for (const architecture of ["x64", "arm64", "x86"])
+    expectActionNeedsJobTrust({
+      uses: node,
+      with: { "node-version": "26.10.0", architecture },
+    });
+  for (const architecture of [
+    "./symlink",
+    "${{ inputs.architecture }}",
+    "unknown",
+    64,
+  ])
+    expectActionNeedsJobTrust({
+      uses: node,
+      with: { "node-version": "26.10.0", architecture },
+    });
 });

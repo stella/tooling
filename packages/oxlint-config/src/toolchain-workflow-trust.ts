@@ -289,17 +289,9 @@ const metadataActionInputs = {
     "persist-credentials",
     "ref",
     "repository",
-    "path",
     "submodules",
   ],
-  "oven-sh/setup-bun": ["bun-version", "bun-version-file", "no-cache"],
-  "actions/setup-node": [
-    "node-version",
-    "node-version-file",
-    "check-latest",
-    "architecture",
-    "package-manager-cache",
-  ],
+  "oven-sh/setup-bun": ["bun-version", "no-cache"],
 } as const;
 
 const safeAction = (uses: unknown, inputs: unknown) => {
@@ -313,16 +305,22 @@ const safeAction = (uses: unknown, inputs: unknown) => {
     ([name]) => name === repository,
   );
   if (approved === undefined) return false;
-  if (inputs === undefined) return true;
+  if (inputs === undefined) return repository === "actions/checkout";
   if (!record(inputs)) return false;
+  if (repository !== "actions/checkout") {
+    const version = inputs["bun-version"];
+    if (
+      typeof version !== "string" ||
+      !/^v?[0-9]+(?:\.(?:[0-9]+|x)){0,2}$/u.test(version)
+    )
+      return false;
+  }
   const [, allowedInputs] = approved;
   return Object.entries(inputs).every(
     ([name, value]) =>
       allowedInputs.some((allowed) => allowed === name) &&
       ["string", "boolean", "number"].includes(typeof value) &&
-      (name !== "package-manager-cache" ||
-        value === false ||
-        value === "false"),
+      (name !== "submodules" || value === false || value === "false"),
   );
 };
 

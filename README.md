@@ -645,8 +645,12 @@ they start before steps and supply executable code. A step condition cannot
 authorize their startup. Digest pinning alone does not approve an image for
 pre-trust execution; the guard has no implicit image approval catalog.
 Before trust, step actions must use a full SHA and match the explicit bootstrap
-catalog: `actions/checkout`, `oven-sh/setup-bun` or `actions/setup-node`, with
-bounded selector inputs. Other actions and unsupported inputs require the
+catalog: `actions/checkout` and `oven-sh/setup-bun`, with
+bounded selector inputs. Bun installation requires an explicit literal version;
+version-file and path inputs require the job trust gate, including repository
+paths that may be symlinks. Checkout path and submodule traversal inputs also
+require trust. `actions/setup-node` requires trust because it also invokes
+package-manager commands from the checkout directory. Other actions and unsupported inputs require the
 job-level gate; a step condition cannot authorize them. Every job-level reusable workflow
 call requires the job-level trust condition, including pinned calls without inputs.
 
