@@ -155,11 +155,44 @@ const objectReference = (value: string) =>
   !value.includes("..") &&
   !value.includes("//") &&
   !value.endsWith("/");
+export const workflowTrustBootstrapCatalog = {
+  commands: {
+    test: "comparison",
+    "[": "comparison",
+    "[[": "comparison",
+    true: "status",
+    false: "status",
+    exit: "exit",
+    echo: "output",
+    printf: "format",
+    git: "git",
+    gh: "github",
+  },
+  git: {
+    "rev-parse": { flags: ["--short", "--verify"], references: 1 },
+    "merge-base": { flags: ["--all", "--is-ancestor"], references: 2 },
+  },
+  github: ["api"],
+  actions: {
+    "actions/checkout": [
+      "fetch-depth",
+      "persist-credentials",
+      "ref",
+      "repository",
+      "submodules",
+    ],
+    "oven-sh/setup-bun": ["bun-version", "no-cache"],
+  },
+} as const;
+
 // History and diff commands may dispatch configured helpers. Only bounded
 // revision queries are proved to remain within repository object metadata.
 const safeGit = (words: readonly string[]) => {
-  const subcommand = words.at(1);
-  if (subcommand !== "rev-parse" && subcommand !== "merge-base") return false;
+  const selected = Object.entries(workflowTrustBootstrapCatalog.git).find(
+    ([name]) => name === words.at(1),
+  );
+  if (selected === undefined) return false;
+  const [, policy] = selected;
   const references: string[] = [];
   for (const argument of words.slice(2)) {
     if (!staticData(argument)) return false;
@@ -167,19 +200,18 @@ const safeGit = (words: readonly string[]) => {
       references.push(argument);
       continue;
     }
-    const allowed =
-      subcommand === "rev-parse"
-        ? ["--short", "--verify"]
-        : ["--all", "--is-ancestor"];
-    if (!allowed.includes(argument)) return false;
+    if (!policy.flags.some((flag) => flag === argument)) return false;
   }
-  const count = subcommand === "rev-parse" ? 1 : 2;
-  return references.length === count && references.every(objectReference);
+  return (
+    references.length === policy.references && references.every(objectReference)
+  );
 };
 
 const safeGh = (words: readonly string[]) => {
   if (!words.every(staticData)) return false;
-  if (words.at(1) === "api") {
+  if (
+    workflowTrustBootstrapCatalog.github.some((name) => name === words.at(1))
+  ) {
     const arguments_ = words.slice(2);
     if (
       ["--method", "-X"].includes(arguments_.at(0) ?? "") &&
@@ -216,15 +248,19 @@ const safeCommand = (raw: readonly string[]): boolean => {
   if (name === "if" || name === "elif") return safeComparison(words.slice(1));
   if (["then", "else"].includes(name ?? "")) return safeCommand(raw.slice(1));
   if (name === "fi") return words.length === 1;
-  if (["test", "[", "[["].includes(name ?? "")) return safeComparison(words);
-  if (["true", "false"].includes(name ?? "")) return words.length === 1;
-  if (name === "exit")
+  const selected = Object.entries(workflowTrustBootstrapCatalog.commands).find(
+    ([command]) => command === name,
+  );
+  const kind = selected?.[1];
+  if (kind === "comparison") return safeComparison(words);
+  if (kind === "status") return words.length === 1;
+  if (kind === "exit")
     return (
       words.length === 1 ||
       (words.length === 2 && /^[0-9]+$/u.test(words.at(1) ?? ""))
     );
-  if (name === "echo") return true;
-  if (name === "printf") {
+  if (kind === "output") return true;
+  if (kind === "format") {
     const format = words.at(1);
     // Data variables may be arguments, never a format or assignment target.
     return (
@@ -233,8 +269,8 @@ const safeCommand = (raw: readonly string[]): boolean => {
       /^(?:[^%$`]|%%|%s)*$/u.test(format)
     );
   }
-  if (name === "git") return safeGit(words);
-  if (name === "gh") return safeGh(words);
+  if (kind === "git") return safeGit(words);
+  if (kind === "github") return safeGh(words);
   return false;
 };
 
@@ -283,17 +319,6 @@ const invokesRepositoryCode = (command: string) => {
 
 // These bootstrap actions may run before the repository's trust decision.
 // Input keys are explicit: accepting a repository script input would cross it.
-const metadataActionInputs = {
-  "actions/checkout": [
-    "fetch-depth",
-    "persist-credentials",
-    "ref",
-    "repository",
-    "submodules",
-  ],
-  "oven-sh/setup-bun": ["bun-version", "no-cache"],
-} as const;
-
 const safeAction = (uses: unknown, inputs: unknown) => {
   if (
     typeof uses !== "string" ||
@@ -301,7 +326,7 @@ const safeAction = (uses: unknown, inputs: unknown) => {
   )
     return false;
   const repository = uses.split("@").at(0);
-  const approved = Object.entries(metadataActionInputs).find(
+  const approved = Object.entries(workflowTrustBootstrapCatalog.actions).find(
     ([name]) => name === repository,
   );
   if (approved === undefined) return false;

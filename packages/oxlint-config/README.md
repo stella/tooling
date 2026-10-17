@@ -678,25 +678,75 @@ Run repository-installed tools only after the workflow's existing trust decision
 The mandatory `workflow-trust` rule applies to PR workflows declaring a
 `trust-check` job. Repository execution requires a direct dependency and a
 condition requiring its `trusted == 'true'` output for every PR trigger.
-Before that boundary, commands must match a small metadata allowlist: shell
-output and bounded comparisons, static file reads, simple jq/yq selectors,
-selected read-only Git commands, and GET-only GitHub CLI reads. The trust job's
-`if`/`elif` comparisons and writes to `GITHUB_OUTPUT` use the same checks.
+Before that boundary, only literal output, bounded comparisons, `true`, `false`,
+`exit`, bounded Git `rev-parse`/`merge-base` object queries, and GET-only `gh api`
+reads are accepted. The trust job's structural `if`/`elif` comparisons use the
+same checks; output may go only to `GITHUB_OUTPUT` or `/dev/null`. Variables must
+be quoted, and command names and `printf` formats must be literal.
+
+The following catalog is the production allowlist. Command kinds select the
+corresponding bounded argument validator; a listed command does not authorize
+arbitrary arguments. Git requires the stated number of explicit object refs.
+Bootstrap action inputs are restricted to the listed keys; Bun requires a literal
+version rather than a repository version file.
+
+<!-- workflow-trust-bootstrap-catalog:start -->
+
+```json
+{
+  "commands": {
+    "test": "comparison",
+    "[": "comparison",
+    "[[": "comparison",
+    "true": "status",
+    "false": "status",
+    "exit": "exit",
+    "echo": "output",
+    "printf": "format",
+    "git": "git",
+    "gh": "github"
+  },
+  "git": {
+    "rev-parse": {
+      "flags": ["--short", "--verify"],
+      "references": 1
+    },
+    "merge-base": {
+      "flags": ["--all", "--is-ancestor"],
+      "references": 2
+    }
+  },
+  "github": ["api"],
+  "actions": {
+    "actions/checkout": [
+      "fetch-depth",
+      "persist-credentials",
+      "ref",
+      "repository",
+      "submodules"
+    ],
+    "oven-sh/setup-bun": ["bun-version", "no-cache"]
+  }
+}
+```
+
+<!-- workflow-trust-bootstrap-catalog:end -->
+
 Job containers and nonempty services require the job-level trust gate because
 they start before steps and supply executable code. A step condition cannot
 authorize their startup. Digest pinning alone does not approve an image for
 pre-trust execution; the guard has no implicit image approval catalog.
 Before trust, step actions must use a full SHA and match the explicit bootstrap
-catalog: `actions/checkout`, `oven-sh/setup-bun` or `actions/setup-node`, with
+catalog: `actions/checkout` or `oven-sh/setup-bun`, with
 bounded selector inputs. Other actions and unsupported inputs require the
 job-level gate; a step condition cannot authorize them. Every job-level reusable workflow
 call requires the job-level trust condition, including pinned calls without inputs.
 
 Interpreters, sourced files, executable paths, package managers (including
 metadata and script-disabled install modes), launchers, custom shells, and
-unknown commands or syntax require trust. File operands are data only for the
-explicit read commands; they never authorize a repository executable. Unsupported
-options and query programs also require the gate. For example, gate the entire
+unknown commands or syntax require trust. File readers, file-presence tests,
+`jq`/`yq`, Git working-tree/history commands, and `actions/setup-node` require the
+job-level gate. Unsupported options and query programs also require the gate. For example, gate the entire
 detector job, including dependency installation:
 
 ```yaml
