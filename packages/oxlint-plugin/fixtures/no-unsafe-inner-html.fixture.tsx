@@ -96,7 +96,7 @@ export const UnsafeShadowedSanitizer = () => (
 
 export const UnsafeComputedInnerHtml = () => {
   const element = document.createElement("div");
-  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html, typescript/dot-notation -- computed member
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- fixture: computed HTML sink
   element["innerHTML"] = rawHtml;
   return element;
 };
@@ -233,9 +233,9 @@ export const UnsafeObjectAssignHoistedSource = () => {
 };
 
 export const UnsafeObjectAssignApplyHoistedSource = () => {
-  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html
   Object.assign.apply(Object, [
     document.createElement("div"),
+    // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- fixture: opaque DOM source is reported at its argument
     unsafeDomProperties,
   ]);
 };
