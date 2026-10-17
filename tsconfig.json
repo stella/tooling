@@ -8,7 +8,10 @@
     "scripts/**/*.mjs",
     "scripts/**/*.cjs",
     "packages/*/tsdown.config.ts",
-    "packages/*/fixtures/**/*.ts"
+    "packages/*/fixtures/**/*"
   ],
-  "exclude": ["node_modules", "packages/oxlint-config/dist"]
+  "exclude": [
+    "node_modules",
+    "packages/oxlint-config/dist"
+  ]
 }
