@@ -1,4 +1,4 @@
-# Optional .cargo/config.toml snippet for Rust repositories.
+# Source template for stll-rust-policy Cargo aliases.
 
 [alias]
 ci-fmt = "fmt --all -- --check"

@@ -13,6 +13,7 @@
     "stll-consumer-compat": "./dist/consumer-compat-cli.mjs",
     "stll-dependabot": "./dist/dependabot-cli.mjs",
     "stll-publish-contract": "./dist/publish-contract-cli.mjs",
+    "stll-rust-policy": "./dist/rust-policy-cli.mjs",
     "stll-toolchain-changed": "./dist/toolchain-changed-cli.mjs",
     "stll-toolchain-check": "./dist/toolchain-check-cli.mjs",
     "stll-typecheck-parity": "./dist/typecheck-parity-cli.mjs",

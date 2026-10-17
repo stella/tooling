@@ -963,3 +963,13 @@ fail closed. This is an ownership check for ordinary authored package scripts,
 not a security boundary against deliberately obfuscated code or lint invocations
 hidden inside arbitrary program bodies. Unsupported forms require an explicit
 supported script invocation or a separately tested extension to the model.
+
+## Rust policy generation
+
+Run `bunx --no-install stll-rust-policy` at the repository root with
+`stll-rust-policy.json` containing `{ "kind": "single-crate" }`. Use
+`--check` in CI to report drift without writes and `--config <path>` to select
+another input. The published CLI embeds the canonical `rust/` templates and
+merges policy into Cargo, Cargo aliases, rustfmt, and Clippy configuration.
+Unrelated TOML values survive; comments and layout are canonicalized.
+See [Rust adoption](../../rust/README.md) for workspace members and exceptions.
