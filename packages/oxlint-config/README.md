@@ -478,6 +478,14 @@ require/resolve calls and named, destructured or namespace `createRequire` bindi
 `import.meta.url` or `__filename`. Asset references must be regular packed files;
 non-JavaScript ESM assets are not parsed as scripts. Recursive import mappings
 are rejected, including expanding wildcard aliases.
+Node resolves collected specifiers against a temporary archive filesystem:
+`createRequire(importer).resolve` for CommonJS and `import.meta.resolve` with the
+importer's URL for ESM, using their respective default conditions. The worker
+reads manifests and file existence without loading package code. Only manifests
+need contents; other members use inert placeholders, and selected targets must
+still be regular packed members. External import-map dependencies use inert
+metadata outside the packed package boundary. Unknown external mapping forms
+fail explicitly. Temporary files and the worker are removed after validation.
 Regular-file validation and script traversal are tracked separately: an asset
 later reached through CommonJS is parsed regardless of archive member order.
 Exported declarations use the same scope collection as ordinary declarations.

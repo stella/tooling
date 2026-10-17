@@ -1,7 +1,10 @@
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { packageMode, parseArtifactSource } from "./publish-artifact-parser";
+import { createPackedNodeResolver } from "./publish-node-resolver";
 
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -615,297 +618,264 @@ export const assertPackedRuntimeImports = async ({
     if (!record(value)) throw new Error(`Invalid packed manifest: ${file}`);
     return value;
   };
-  for (const file of members)
-    if (path.posix.basename(file) === "package.json") await manifest(file);
-  const root = await manifest("package/package.json");
-  const pending = [...members].filter((file) => javascript.test(file));
-  const scripts = new Set(pending);
-  const bin = root["bin"];
-  const bins =
-    bin === undefined
-      ? []
-      : typeof bin === "string"
-        ? [bin]
-        : record(bin)
-          ? Object.values(bin)
-          : undefined;
-  if (bins === undefined) throw new Error("Invalid packed bin declaration");
-  for (const entry of bins) {
-    if (
-      typeof entry !== "string" ||
-      entry === "" ||
-      path.posix.isAbsolute(entry) ||
-      entry.includes("\\")
-    )
-      throw new Error("Invalid packed bin entry");
-    const file = packagePath(path.posix.join("package", entry));
-    scripts.add(file);
-    pending.push(file);
-  }
-  const addEntry = (entry: string, mode: "file" | "url") => {
-    if (declaration.test(entry)) return;
-    if (path.posix.isAbsolute(entry) || entry.includes("\\"))
-      throw new Error(`Runtime entry escapes the packed package: ${entry}`);
-    if (mode === "url" && /%2f|%5c/iu.test(entry))
-      throw new Error(`Invalid packed entry URL: ${entry}`);
-    const file = packagePath(
-      mode === "url"
-        ? fileURLToPath(new URL(entry, "file:///package/package.json")).slice(1)
-        : path.posix.join("package", entry),
-    );
-    if (!file.includes("*")) {
-      if (javascript.test(file) || path.posix.extname(file) === "")
-        scripts.add(file);
-      pending.push(file);
-      return;
-    }
-    const [prefix, suffix] = file.split("*");
-    if (
-      prefix === undefined ||
-      suffix === undefined ||
-      file.split("*").length !== 2
-    )
-      throw new Error(`Unsupported packed entry pattern: ${entry}`);
-    const matches = [...members].filter(
-      (candidate) => candidate.startsWith(prefix) && candidate.endsWith(suffix),
-    );
-    if (matches.length === 0)
-      throw new Error(`Missing packed runtime entry pattern: ${entry}`);
-    for (const match of matches)
-      if (javascript.test(match) || path.posix.extname(match) === "")
-        scripts.add(match);
-    pending.push(...matches);
-  };
-  for (const target of targets(root["module"])) addEntry(target, "file");
-  for (const target of targets(root["exports"])) addEntry(target, "url");
-  const resolveCommonJS = async (
-    file: string,
-    seen = new Set<string>(),
-  ): Promise<string | undefined> => {
-    if (seen.has(file)) return undefined;
-    seen.add(file);
-    for (const candidate of [
-      file,
-      `${file}.js`,
-      `${file}.json`,
-      `${file}.node`,
-    ])
-      if (members.has(candidate)) return candidate;
-    const packageJson = `${file}/package.json`;
-    if (members.has(packageJson)) {
-      const entry = (await manifest(packageJson))["main"];
-      if (entry !== undefined && typeof entry !== "string")
-        throw new Error(`Invalid packed main: ${packageJson}`);
-      if (typeof entry === "string" && entry !== "") {
-        if (path.posix.isAbsolute(entry) || entry.includes("\\"))
-          throw new Error(`Invalid packed main: ${packageJson}`);
-        const found = await resolveCommonJS(
-          packagePath(path.posix.join(file, entry)),
-          seen,
-        );
-        if (found !== undefined) return found;
+  const scratch = await realpath(
+    await mkdtemp(path.join(tmpdir(), "packed-node-resolution-")),
+  );
+  const resolver = createPackedNodeResolver();
+  try {
+    // Recreate the archive's existence index without extracting paths or links.
+    // Node reads manifest contents; other members are byte-free placeholders.
+    // Every selected target is still validated as a regular archive member.
+    for (const file of members) {
+      const directory = file.endsWith("/");
+      const member = directory ? file.slice(0, -1) : file;
+      if (packagePath(member) !== member)
+        throw new Error(`Invalid packed member path: ${file}`);
+      const destination = path.join(scratch, member);
+      if (directory) {
+        await mkdir(destination, { recursive: true });
+        continue;
       }
-    }
-    return ["js", "json", "node"]
-      .map((extension) => `${file}/index.${extension}`)
-      .find((candidate) => members.has(candidate));
-  };
-  if (root["main"] !== undefined) {
-    const entry = root["main"];
-    if (
-      typeof entry !== "string" ||
-      path.posix.isAbsolute(entry) ||
-      entry.includes("\\")
-    )
-      throw new Error("Invalid packed main entry");
-    if (!declaration.test(entry)) {
-      const resolved = await resolveCommonJS(
-        packagePath(path.posix.join("package", entry)),
-      );
-      if (resolved === undefined)
-        throw new Error(`Missing packed runtime main: ${entry}`);
-      if (!opaque.test(resolved)) scripts.add(resolved);
-      pending.push(resolved);
-    }
-  }
-  const mapping = (value: unknown, key: string) => {
-    if (!record(value)) return undefined;
-    const exact = value[key];
-    if (exact !== undefined) return { key, targets: targets(exact) };
-    const match = Object.keys(value)
-      .filter((entry) => entry.includes("*"))
-      .sort((a, b) => b.indexOf("*") - a.indexOf("*") || b.length - a.length)
-      .find((entry) => {
-        const [prefix, suffix] = entry.split("*");
-        return (
-          prefix !== undefined &&
-          suffix !== undefined &&
-          key.startsWith(prefix) &&
-          key.endsWith(suffix)
-        );
-      });
-    if (match === undefined) return undefined;
-    const [prefix, suffix] = match.split("*");
-    if (prefix === undefined || suffix === undefined)
-      throw new Error("Invalid packed import mapping");
-    return {
-      key: match,
-      targets: targets(value[match]).map((entry) =>
-        entry.replaceAll(
-          "*",
-          key.slice(prefix.length, key.length - suffix.length),
-        ),
-      ),
-    };
-  };
-  type StaticResolution = StaticImport & {
-    importer: string;
-    mappings: ReadonlySet<string>;
-  };
-  const resolveImport = async ({
-    specifier,
-    mode,
-    importer,
-    mappings,
-  }: StaticResolution): Promise<string[]> => {
-    if (specifier.startsWith("#")) {
-      let directory = path.posix.dirname(importer);
-      while (
-        directory !== "package" &&
-        !members.has(`${directory}/package.json`)
-      )
-        directory = path.posix.dirname(directory);
-      const owner = `${directory}/package.json`;
-      const selected = mapping((await manifest(owner))["imports"], specifier);
-      if (selected === undefined || selected.targets.length === 0)
-        throw new Error(
-          `Unresolved packed import mapping: ${importer} -> ${specifier}`,
-        );
-      const key = `${owner}:${selected.key}`;
-      if (mappings.has(key))
-        throw new Error(
-          `Cyclic packed import mapping: ${importer} -> ${specifier}`,
-        );
-      const nextMappings = new Set(mappings);
-      nextMappings.add(key);
-      return (
-        await Promise.all(
-          selected.targets.map((target) =>
-            resolveImport({
-              specifier: target,
-              // Package mappings use exact URL resolution, including require().
-              mode: "import",
-              importer: owner,
-              mappings: nextMappings,
-            }),
-          ),
-        )
-      ).flat();
-    }
-    if (
-      !specifier.startsWith(".") &&
-      !specifier.startsWith("/") &&
-      !specifier.startsWith("file:")
-    )
-      return [];
-    let file: string;
-    if (mode === "import") {
-      if (!specifier.startsWith(".") || /%2f|%5c/iu.test(specifier))
-        throw new Error(
-          `Runtime import escapes the packed package: ${specifier}`,
-        );
-      file = packagePath(
-        fileURLToPath(new URL(specifier, `file:///${importer}`)).slice(1),
-      );
-    } else {
-      if (!specifier.startsWith("."))
-        throw new Error(
-          `Runtime import escapes the packed package: ${specifier}`,
-        );
-      file = packagePath(
-        path.posix.join(path.posix.dirname(importer), specifier),
+      await mkdir(path.dirname(destination), { recursive: true });
+      await writeFile(
+        destination,
+        path.posix.basename(file) === "package.json" ? await read(file) : "",
       );
     }
-    const resolved =
-      mode === "require"
-        ? await resolveCommonJS(file)
-        : members.has(file)
-          ? file
-          : undefined;
-    if (resolved === undefined)
-      throw new Error(
-        `Missing packed runtime import: ${importer} -> ${specifier}`,
-      );
-    return [resolved];
-  };
-  const validated = new Set<string>();
-  const traversed = new Set<string>();
-  while (pending.length > 0) {
-    const file = pending.pop();
-    if (file === undefined) continue;
-    if (!validated.has(file)) {
-      if (!members.has(file))
-        throw new Error(`Missing packed runtime file: ${file}`);
-      await assertRegular(file);
-      validated.add(file);
-    }
-    if (!scripts.has(file) || traversed.has(file)) continue;
-    traversed.add(file);
-    const source = await read(file);
-    const mode = /\.mjs$/iu.test(file)
-      ? "module"
-      : /\.cjs$/iu.test(file)
-        ? "script"
-        : packageMode(files, file);
-    const parse = (sourceType: "script" | "module") => {
-      const tree = parseArtifactSource(source, {
-        ecmaVersion: "latest",
-        sourceType,
-        allowHashBang: true,
-        allowReturnOutsideFunction: sourceType === "script",
-      });
-      // The shared parser wraps CommonJS. Its require parameter is the runtime loader.
-      if (sourceType === "script") {
-        const statement = tree.body.at(0);
+    // External dependencies are outside the archive closure. Give Node inert
+    // metadata for bare #imports targets so it can select the exact runtime
+    // condition without requiring a dependency install or executing packages.
+    const externalFiles = new Set<string>();
+    for (const file of members) {
+      if (path.posix.basename(file) !== "package.json") continue;
+      const owner = await manifest(file);
+      for (const target of targets(owner["imports"])) {
         if (
-          statement?.type === "ExpressionStatement" &&
-          statement.expression.type === "FunctionExpression"
+          target.startsWith(".") ||
+          target.startsWith("#") ||
+          target.includes(":")
         )
-          return { tree: statement.expression.body, mode: sourceType };
+          continue;
+        const parts = target.split("/");
+        const name = target.startsWith("@")
+          ? parts.slice(0, 2).join("/")
+          : parts.at(0);
+        if (
+          name === undefined ||
+          !/^(?:@[a-z0-9._~-]+\/)?[a-z0-9._~-]+$/iu.test(name) ||
+          name.split("/").some((part) => part === "." || part === "..")
+        )
+          throw new Error(`Unsupported external import mapping: ${target}`);
+        if (name === owner["name"]) continue;
+        const directory = path.join(scratch, "node_modules", name);
+        await mkdir(directory, { recursive: true });
+        await writeFile(
+          path.join(directory, "package.json"),
+          JSON.stringify({
+            name,
+            exports: { ".": "./external.cjs", "./*": "./external.cjs" },
+          }),
+        );
+        const entry = path.join(directory, "external.cjs");
+        await writeFile(entry, "");
+        externalFiles.add(entry);
       }
-      return { tree, mode: sourceType };
-    };
-    let parsed: ReturnType<typeof parse>;
-    if (mode === "detect") {
+    }
+    const resolveImport = async ({
+      specifier,
+      mode,
+      importer,
+    }: StaticImport & { importer: string }): Promise<string[]> => {
+      let resolved: string | null;
       try {
-        parsed = parse("script");
-      } catch {
-        parsed = parse("module");
+        resolved = await resolver.resolve({
+          specifier,
+          mode,
+          file: path.join(scratch, importer),
+        });
+      } catch (error) {
+        throw new Error(
+          `Missing packed runtime import: ${importer} -> ${specifier}: ${String(error)}`,
+          { cause: error },
+        );
       }
-    } else parsed = parse(mode);
-    let dependencies: StaticImport[];
-    try {
-      dependencies = staticImports(parsed.tree, parsed.mode);
-    } catch (error) {
-      throw new Error(`Packed runtime imports ${file}: ${String(error)}`, {
-        cause: error,
-      });
+      if (resolved === null) return [];
+      const url = new URL(resolved);
+      if (url.protocol !== "file:")
+        throw new Error(`Unsupported packed runtime URL: ${resolved}`);
+      const destination = fileURLToPath(url);
+      if (externalFiles.has(destination)) return [];
+      const file = packagePath(
+        path.relative(scratch, destination).split(path.sep).join("/"),
+      );
+      if (!members.has(file))
+        throw new Error(
+          `Missing packed runtime import: ${importer} -> ${specifier} (${file})`,
+        );
+      return [file];
+    };
+    for (const file of members)
+      if (path.posix.basename(file) === "package.json") await manifest(file);
+    const root = await manifest("package/package.json");
+    const pending = [...members].filter((file) => javascript.test(file));
+    const scripts = new Set(pending);
+    const bin = root["bin"];
+    const bins =
+      bin === undefined
+        ? []
+        : typeof bin === "string"
+          ? [bin]
+          : record(bin)
+            ? Object.values(bin)
+            : undefined;
+    if (bins === undefined) throw new Error("Invalid packed bin declaration");
+    for (const entry of bins) {
+      if (
+        typeof entry !== "string" ||
+        entry === "" ||
+        path.posix.isAbsolute(entry) ||
+        entry.includes("\\")
+      )
+        throw new Error("Invalid packed bin entry");
+      const file = packagePath(path.posix.join("package", entry));
+      scripts.add(file);
+      pending.push(file);
     }
-    for (const dependency of dependencies) {
-      const resolved = await resolveImport({
-        ...dependency,
-        importer: file,
-        mappings: new Set(),
-      });
-      for (const target of resolved) {
-        if (
-          javascript.test(target) ||
-          path.posix.extname(target) === "" ||
-          (dependency.mode === "require" && !opaque.test(target))
-        )
-          scripts.add(target);
-        pending.push(target);
+    const addEntry = (entry: string, mode: "file" | "url") => {
+      if (declaration.test(entry)) return;
+      if (path.posix.isAbsolute(entry) || entry.includes("\\"))
+        throw new Error(`Runtime entry escapes the packed package: ${entry}`);
+      if (mode === "url" && /%2f|%5c/iu.test(entry))
+        throw new Error(`Invalid packed entry URL: ${entry}`);
+      const file = packagePath(
+        mode === "url"
+          ? fileURLToPath(new URL(entry, "file:///package/package.json")).slice(
+              1,
+            )
+          : path.posix.join("package", entry),
+      );
+      if (!file.includes("*")) {
+        if (javascript.test(file) || path.posix.extname(file) === "")
+          scripts.add(file);
+        pending.push(file);
+        return;
       }
+      const [prefix, suffix] = file.split("*");
+      if (
+        prefix === undefined ||
+        suffix === undefined ||
+        file.split("*").length !== 2
+      )
+        throw new Error(`Unsupported packed entry pattern: ${entry}`);
+      const matches = [...members].filter(
+        (candidate) =>
+          candidate.startsWith(prefix) && candidate.endsWith(suffix),
+      );
+      if (matches.length === 0)
+        throw new Error(`Missing packed runtime entry pattern: ${entry}`);
+      for (const match of matches)
+        if (javascript.test(match) || path.posix.extname(match) === "")
+          scripts.add(match);
+      pending.push(...matches);
+    };
+    for (const target of targets(root["module"])) addEntry(target, "file");
+    for (const target of targets(root["exports"])) addEntry(target, "url");
+    if (root["main"] !== undefined) {
+      const entry = root["main"];
+      if (
+        typeof entry !== "string" ||
+        path.posix.isAbsolute(entry) ||
+        entry.includes("\\")
+      )
+        throw new Error("Invalid packed main entry");
+      if (!declaration.test(entry)) {
+        const resolved = (
+          await resolveImport({
+            specifier: "./package",
+            mode: "require",
+            importer: "entry.cjs",
+          })
+        ).at(0);
+        if (resolved === undefined)
+          throw new Error(`Missing packed runtime main: ${entry}`);
+        if (!opaque.test(resolved)) scripts.add(resolved);
+        pending.push(resolved);
+      }
+    }
+    const validated = new Set<string>();
+    const traversed = new Set<string>();
+    while (pending.length > 0) {
+      const file = pending.pop();
+      if (file === undefined) continue;
+      if (!validated.has(file)) {
+        if (!members.has(file))
+          throw new Error(`Missing packed runtime file: ${file}`);
+        await assertRegular(file);
+        validated.add(file);
+      }
+      if (!scripts.has(file) || traversed.has(file)) continue;
+      traversed.add(file);
+      const source = await read(file);
+      const mode = /\.mjs$/iu.test(file)
+        ? "module"
+        : /\.cjs$/iu.test(file)
+          ? "script"
+          : packageMode(files, file);
+      const parse = (sourceType: "script" | "module") => {
+        const tree = parseArtifactSource(source, {
+          ecmaVersion: "latest",
+          sourceType,
+          allowHashBang: true,
+          allowReturnOutsideFunction: sourceType === "script",
+        });
+        // The shared parser wraps CommonJS. Its require parameter is the runtime loader.
+        if (sourceType === "script") {
+          const statement = tree.body.at(0);
+          if (
+            statement?.type === "ExpressionStatement" &&
+            statement.expression.type === "FunctionExpression"
+          )
+            return { tree: statement.expression.body, mode: sourceType };
+        }
+        return { tree, mode: sourceType };
+      };
+      let parsed: ReturnType<typeof parse>;
+      if (mode === "detect") {
+        try {
+          parsed = parse("script");
+        } catch {
+          parsed = parse("module");
+        }
+      } else parsed = parse(mode);
+      let dependencies: StaticImport[];
+      try {
+        dependencies = staticImports(parsed.tree, parsed.mode);
+      } catch (error) {
+        throw new Error(`Packed runtime imports ${file}: ${String(error)}`, {
+          cause: error,
+        });
+      }
+      for (const dependency of dependencies) {
+        const resolved = await resolveImport({
+          ...dependency,
+          importer: file,
+        });
+        for (const target of resolved) {
+          if (
+            javascript.test(target) ||
+            path.posix.extname(target) === "" ||
+            (dependency.mode === "require" && !opaque.test(target))
+          )
+            scripts.add(target);
+          pending.push(target);
+        }
+      }
+    }
+  } finally {
+    try {
+      await resolver.close();
+    } finally {
+      await rm(scratch, { recursive: true, force: true });
     }
   }
 };

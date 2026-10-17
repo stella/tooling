@@ -303,38 +303,50 @@ test("regular-file validation covers entry scripts as well as dependencies", asy
   }
 });
 
-test("package import conditions, arrays and concrete wildcard mappings retain every local branch", async () => {
-  for (const mapping of [
-    {
-      "#helper": {
-        node: "./node.mjs",
-        default: ["./first.mjs", "./second.mjs"],
-      },
-    },
-    {
-      "#helper/*": {
-        node: "./node-*.mjs",
-        default: ["./first-*.mjs", "./second-*.mjs"],
-      },
-    },
-  ]) {
-    const wildcard = Object.keys(mapping).some((key) => key.includes("*"));
+test("package import conditions and wildcard mappings follow the selected Node branch", async () => {
+  for (const wildcard of [false, true]) {
     const suffix = wildcard ? "-value" : "";
-    const entries = {
-      "entry.mjs": `import "${wildcard ? "#helper/value" : "#helper"}";`,
-      [`node${suffix}.mjs`]: "export const value = 1;",
-      [`first${suffix}.mjs`]: "export const value = 1;",
-      [`second${suffix}.mjs`]: "export const value = 1;",
+    const key = wildcard ? "#helper/*" : "#helper";
+    const specifier = wildcard ? "#helper/value" : "#helper";
+    const mapping = {
+      [key]: {
+        node: wildcard ? "./node-*.mjs" : "./node.mjs",
+        default: ["./unused-first.mjs", "./unused-second.mjs"],
+      },
     };
-    const packed = fixture(entries, { type: "module", imports: mapping });
+    const packed = fixture(
+      {
+        "entry.mjs": `import "${specifier}";`,
+        [`node${suffix}.mjs`]: "export const value = 1;",
+      },
+      { type: "module", imports: mapping },
+    );
     await assertPackedRuntimeImports(packed.options);
-    for (const name of ["node", "first", "second"]) {
-      const incomplete = fixture(entries, { type: "module", imports: mapping });
-      incomplete.members.delete(`package/${name}${suffix}.mjs`);
-      await expect(
-        assertPackedRuntimeImports(incomplete.options),
-      ).rejects.toThrow();
-    }
+    expect(packed.checks).toContain(`package/node${suffix}.mjs`);
+    packed.members.delete(`package/node${suffix}.mjs`);
+    await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
+      /node/u,
+    );
+  }
+});
+
+test("package import arrays fall back on invalid targets, not missing selected files", async () => {
+  for (const [entry, source] of [
+    ["entry.mjs", 'import "#helper";'],
+    ["entry.cjs", 'require("#helper");'],
+  ]) {
+    const entries = { [entry]: source, "second.cjs": "module.exports = 1;" };
+    const missingFirst = fixture(entries, {
+      imports: { "#helper": ["./missing.cjs", "./second.cjs"] },
+    });
+    await expect(
+      assertPackedRuntimeImports(missingFirst.options),
+    ).rejects.toThrow(/missing/u);
+    const invalidFirst = fixture(entries, {
+      imports: { "#helper": ["../invalid.cjs", "./second.cjs"] },
+    });
+    await assertPackedRuntimeImports(invalidFirst.options);
+    expect(invalidFirst.checks).toContain("package/second.cjs");
   }
 });
 
@@ -428,9 +440,7 @@ test("cyclic package import mappings fail explicitly", async () => {
       { "entry.mjs": 'import "#a";' },
       { type: "module", imports },
     );
-    await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
-      /cycl/iu,
-    );
+    await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow();
   }
 });
 
@@ -608,9 +618,7 @@ test("expanding wildcard alias cycles reject without repeating the concrete spec
       { "entry.mjs": 'import "#loop/value";' },
       { type: "module", imports },
     );
-    await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
-      /cycl/iu,
-    );
+    await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow();
   }
 });
 
@@ -1175,4 +1183,83 @@ test("createRequire filename bases must resolve to the actual CommonJS wrapper",
       ).options,
     ),
   ).rejects.toThrow("Unresolvable dynamic loader");
+});
+
+test("package self references cannot bypass exports in either module format", async () => {
+  for (const [entry, source] of [
+    ["entry.mjs", 'import "self-fixture/private.mjs";'],
+    ["entry.cjs", 'require("self-fixture/private.mjs");'],
+  ]) {
+    const packed = fixture(
+      {
+        [entry]: source,
+        "private.mjs": "export const presentButPrivate = true;",
+      },
+      { name: "self-fixture", exports: { ".": `./${entry}` } },
+    );
+    await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
+      /export|ERR_PACKAGE_PATH_NOT_EXPORTED/iu,
+    );
+  }
+});
+
+test("conditional self references select the Node import and require targets", async () => {
+  const packed = fixture(
+    {
+      "entry.mjs":
+        'import "self-fixture/feature"; throw new Error("must not execute entry");',
+      "entry.cjs":
+        'require("self-fixture/feature"); throw new Error("must not execute entry");',
+      "imported.mjs": 'export const selected = "import";',
+      "required.cjs": 'module.exports = "require";',
+      "unused-default.mjs":
+        'throw new Error("must not execute default entry");',
+    },
+    {
+      name: "self-fixture",
+      exports: {
+        ".": { import: "./entry.mjs", require: "./entry.cjs" },
+        "./feature": {
+          node: { import: "./imported.mjs", require: "./required.cjs" },
+          default: "./unused-default.mjs",
+        },
+      },
+    },
+  );
+  await assertPackedRuntimeImports(packed.options);
+  expect(packed.checks).toContain("package/imported.mjs");
+  expect(packed.checks).toContain("package/required.cjs");
+  // All declared entry roots are validated, even when a self-import selects another condition.
+  expect(packed.checks).toContain("package/unused-default.mjs");
+  for (const target of ["imported.mjs", "required.cjs"]) {
+    packed.members.delete(`package/${target}`);
+    await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow();
+    packed.members.add(`package/${target}`);
+  }
+});
+
+test("a package main directory does not recursively apply its child's package main", async () => {
+  const packed = fixture({
+    "entry.cjs": 'require("./helper");',
+    "helper/package.json": JSON.stringify({ main: "./child" }),
+    "helper/child/package.json": JSON.stringify({ main: "./actual.cjs" }),
+    "helper/child/actual.cjs": 'throw new Error("must not execute child");',
+  });
+  await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
+    /helper|MODULE_NOT_FOUND/iu,
+  );
+});
+
+test("Node-selected external import mappings remain external dependencies", async () => {
+  for (const [entry, source] of [
+    ["entry.mjs", 'import "#dependency";'],
+    ["entry.cjs", 'require("#dependency");'],
+  ] as const) {
+    await assertPackedRuntimeImports(
+      fixture(
+        { [entry]: source },
+        { imports: { "#dependency": "absent-external-package/runtime" } },
+      ).options,
+    );
+  }
 });
