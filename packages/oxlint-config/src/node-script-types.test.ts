@@ -245,4 +245,5 @@ test("imported program files still need root membership, including combined inve
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
+  // Six sequential compiler and linter launches, each bounded at 30 s.
+}, 180_000);

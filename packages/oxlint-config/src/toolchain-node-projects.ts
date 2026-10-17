@@ -2,7 +2,6 @@ import { spawnSync } from "node:child_process";
 import { lstatSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import picomatch from "picomatch";
 
 import { discoverConsumerManifests } from "./consumer-compat-config";
 import { lintInventoryCommands } from "./toolchain-lint-command";
@@ -117,7 +116,27 @@ export const checkNodeProjects = ({
   manifest,
   trackedFiles,
 }: CheckNodeProjectsOptions) => {
-  let buildPackages: ReturnType<typeof discoverConsumerManifests> | undefined;
+  let members: ReturnType<typeof discoverConsumerManifests> | undefined;
+  // One membership source for filtered builds and workspace lint tasks: package
+  // workspaces and pnpm-workspace.yaml, including exclusion patterns.
+  const workspaceMembers = () => {
+    if (members === undefined) {
+      const files: Record<string, string> = {
+        "package.json": JSON.stringify(manifest),
+      };
+      for (const file of trackedFiles) {
+        const name = path.posix.basename(file);
+        if (
+          file !== "package.json" &&
+          (name === "package.json" || name === "pnpm-workspace.yaml") &&
+          !file.split("/").includes("node_modules")
+        )
+          files[file] = readFileSync(path.join(root, file), "utf8");
+      }
+      members = discoverConsumerManifests(files);
+    }
+    return members;
+  };
   const filteredCommands: (ReturnType<
     typeof lintInventoryCommands
   >["commands"][number] & { cwd: string })[] = [];
@@ -149,19 +168,7 @@ export const checkNodeProjects = ({
     pnpmWorkspace: lifecycleFile(root, "pnpm-workspace.yaml", trackedFiles),
     yarnrc: lifecycleFile(root, ".yarnrc.yml", trackedFiles),
     assertFilteredBunBuild: (selector) => {
-      if (buildPackages === undefined) {
-        const files: Record<string, string> = {
-          "package.json": JSON.stringify(manifest),
-        };
-        for (const file of trackedFiles)
-          if (
-            file.endsWith("/package.json") &&
-            !file.split("/").includes("node_modules")
-          )
-            files[file] = readFileSync(path.join(root, file), "utf8");
-        buildPackages = discoverConsumerManifests(files);
-      }
-      const selected = [...buildPackages.entries()].filter(
+      const selected = [...workspaceMembers().entries()].filter(
         ([, pkg]) => pkg["name"] === selector,
       );
       if (selected.length !== 1)
@@ -230,25 +237,10 @@ export const checkNodeProjects = ({
       ...command,
     }));
     if (inventory.workspaceTask) {
-      const workspaces = record(manifest) ? manifest["workspaces"] : undefined;
-      const patterns = record(workspaces) ? workspaces["packages"] : workspaces;
-      if (
-        !stringList(patterns) ||
-        patterns.some((pattern) => pattern.startsWith("!"))
-      )
-        throw new Error(
-          "workspace lint inventory requires declared positive workspace globs",
-        );
-      const workspaceMatches = picomatch(patterns, { dot: true });
-      for (const file of trackedFiles) {
-        if (!file.endsWith("/package.json")) continue;
-        const directory = path.posix.dirname(file);
-        if (!workspaceMatches(directory)) continue;
-        const workspace: unknown = JSON.parse(
-          readFileSync(path.join(root, file), "utf8"),
-        );
+      for (const [directory, workspace] of workspaceMembers()) {
+        if (directory === ".") continue;
+        const file = `${directory}/package.json`;
         if (
-          !record(workspace) ||
           !record(workspace["scripts"]) ||
           workspace["scripts"]["lint"] === undefined
         )
@@ -337,8 +329,8 @@ export const checkNodeProjects = ({
             );
           result.references.push(referencedConfig);
         }
-        const sources =
-          project["files"] ?? (references.length > 0 ? [] : undefined);
+        // --showConfig omits `files` when the project owns no roots.
+        const sources = project["files"] ?? [];
         if (!stringList(sources))
           throw new Error(
             "compiler configuration did not return a files array",
