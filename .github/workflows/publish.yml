@@ -139,6 +139,7 @@ jobs:
       package-files: |
         packages/oxlint-config/package.json
         packages/oxlint-plugin/package.json
+        packages/test-kit/package.json
         packages/time/package.json
         packages/typescript-config/package.json
       source-ref: ${{ inputs.source_ref || '' }}
