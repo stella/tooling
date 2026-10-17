@@ -339,15 +339,15 @@ const isEdit = (value: unknown): value is Edit => {
   );
 };
 
-const collectorPlugin = String.raw`
-const htmlMethods = new Set([
+const htmlMethodNames = [
   "createContextualFragment",
   "insertAdjacentHTML",
-  "setAttribute",
   "setHTMLUnsafe",
-  "write",
-  "writeln",
-]);
+  ...HTML_ATTRIBUTE_SINKS.map(({ name }) => name),
+  ...DOCUMENT_WRITE_METHODS,
+];
+const collectorPlugin = String.raw`
+const htmlMethods = new Set(${JSON.stringify(htmlMethodNames)});
 const elementFactories = new Set([
   "createElement",
   "jsx",
@@ -635,13 +635,7 @@ const domTargetCollectorPlugin = `import {
   resolveLiteralArraySpreads,
   unwrapExpression,
 } from ${JSON.stringify(pathToFileURL(join(repositoryRoot, "packages/oxlint-plugin/src/utils.ts")).href)};
-const htmlMethods = new Set(${JSON.stringify([
-  "createContextualFragment",
-  "insertAdjacentHTML",
-  "setHTMLUnsafe",
-  ...HTML_ATTRIBUTE_SINKS.map(({ name }) => name),
-  ...DOCUMENT_WRITE_METHODS,
-])});
+const htmlMethods = new Set(${JSON.stringify(htmlMethodNames)});
 ` + String.raw`
 const htmlProperties = new Set(["innerHTML", "outerHTML", "srcdoc"]);
 const staticMemberName = (node) => memberPropertyName(node);
