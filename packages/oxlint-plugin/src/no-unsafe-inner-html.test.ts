@@ -1,3 +1,4 @@
+import type { ESTree, Span } from "@oxlint/plugins";
 import { expect, test } from "bun:test";
 
 import noUnsafeInnerHtml from "./no-unsafe-inner-html";
@@ -29,6 +30,87 @@ const call = (callee: unknown, args: unknown[]) =>
     arguments: args,
     loc: { start: { line: 1 } },
   });
+
+const nodeSpan = (start: number, end: number): Span => ({
+  start,
+  end,
+  range: [start, end],
+  loc: { start: { line: 1, column: start }, end: { line: 1, column: end } },
+});
+
+// el.innerHTML = sanitizeHtml(); with the same parent links Oxlint supplies.
+const sanitizerAssignment = (): ESTree.AssignmentExpression => {
+  const left: ESTree.StaticMemberExpression = {
+    ...nodeSpan(0, 12),
+    type: "MemberExpression",
+    computed: false,
+    optional: false,
+    object: {
+      ...nodeSpan(0, 2),
+      type: "Identifier",
+      name: "el",
+      get parent() {
+        return left;
+      },
+    },
+    property: {
+      ...nodeSpan(3, 12),
+      type: "Identifier",
+      name: "innerHTML",
+      get parent() {
+        return left;
+      },
+    },
+    get parent() {
+      return assignment;
+    },
+  };
+  const right: ESTree.CallExpression = {
+    ...nodeSpan(15, 29),
+    type: "CallExpression",
+    optional: false,
+    arguments: [],
+    callee: {
+      ...nodeSpan(15, 27),
+      type: "Identifier",
+      name: "sanitizeHtml",
+      get parent() {
+        return right;
+      },
+    },
+    get parent() {
+      return assignment;
+    },
+  };
+  const assignment: ESTree.AssignmentExpression = {
+    ...nodeSpan(0, 29),
+    type: "AssignmentExpression",
+    operator: "=",
+    left,
+    right,
+    get parent() {
+      return statement;
+    },
+  };
+  const statement: ESTree.ExpressionStatement = {
+    ...nodeSpan(0, 30),
+    type: "ExpressionStatement",
+    expression: assignment,
+    get parent() {
+      return program;
+    },
+  };
+  const program: ESTree.Program = {
+    ...nodeSpan(0, 30),
+    type: "Program",
+    sourceType: "module",
+    body: [statement],
+    comments: [],
+    tokens: [],
+    parent: null,
+  };
+  return assignment;
+};
 
 const runCallVisitor = (node: unknown): unknown[] => {
   const rule = getRule();
@@ -90,24 +172,7 @@ test("sanitizer policy follows options set before each file", () => {
   // createOnce runs once with options still null; the compat wrapper supplies
   // the current file's options immediately before calling `before`.
   const visitor = rule.createOnce(context);
-  const assignment = {
-    type: "AssignmentExpression",
-    range: [0, 10],
-    left: {
-      type: "MemberExpression",
-      range: [0, 8],
-      computed: false,
-      object: { type: "Identifier", range: [0, 1], name: "el" },
-      property: { type: "Identifier", range: [3, 8], name: "innerHTML" },
-    },
-    right: {
-      type: "CallExpression",
-      range: [9, 20],
-      loc: { start: { line: 1 } },
-      callee: { type: "Identifier", range: [9, 20], name: "sanitizeHtml" },
-      arguments: [],
-    },
-  };
+  const assignment = sanitizerAssignment();
   const onAssignment = Reflect.get(visitor, "AssignmentExpression");
   if (typeof onAssignment !== "function") {
     throw new Error("expected an AssignmentExpression visitor");
