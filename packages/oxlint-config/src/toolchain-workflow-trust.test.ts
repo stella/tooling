@@ -328,6 +328,8 @@ test("literal quoted documentation does not execute commands", () => {
     'echo "node scripts/check.mjs"',
     'echo "corepack pnpm test; corepack npm ci --ignore-scripts"',
     "printf '%s\\n' 'node --test; python3 -m pytest'",
+    'echo "cat /proc/self/environ; ls /tmp/outside"',
+    "printf '%s\\n' 'test -f workspace/link-to-outside'",
   ]) {
     expect(check(workflow({ command }))).toEqual([]);
   }
@@ -763,43 +765,21 @@ test("metadata printf keeps data out of formats and assignment targets", () => {
 const readOnlyCommands = [
   "test -n value",
   "test -z ''",
-  "test -e package.json",
-  "test -d .github",
   "test ready = ready",
   "[ ready != absent ]",
   "[[ ready == ready ]]",
-  "if [ -f package.json ]; then echo present; else echo absent; fi",
   "if test -n value; then echo present; elif test -z ''; then echo empty; fi",
-  "if test -n value; then if test -f package.json; then echo ready; fi; else echo absent; fi",
   "echo ready",
   "printf '%s\\n' ready",
-  "test -f package.json",
-  "[ -f package.json ]",
-  "[[ -f package.json ]]",
   "true",
   "false",
   "exit 0",
-  "cat package.json",
-  "ls .github/workflows",
-  "head -n 5 README.md",
-  "tail -n 5 README.md",
-  "wc -l README.md",
-  "jq -r '.changed' changes.json",
-  "yq eval '.jobs' .github/workflows/ci.yml",
-  "git diff --name-only",
-  "git log -n5 --format=%H",
-  "git log -n 5 --oneline",
-  "git ls-files -z",
-  "git show --stat HEAD",
   "git rev-parse HEAD",
   "git merge-base HEAD origin/main",
-  "git ls-files --cached",
-  "git fetch --no-tags origin main",
   "gh api --method GET repos/stella/tooling/pulls/150",
   "gh api repos/stella/tooling/pulls/150",
   "gh api repos/stella/tooling/pulls/150 --method GET",
   "gh api repos/stella/tooling/pulls/150 -X GET",
-  "gh pr view 150 --repo stella/tooling --json number,headRefOid",
 ];
 
 test.each(readOnlyCommands)(
@@ -808,6 +788,119 @@ test.each(readOnlyCommands)(
     expect(check(workflow({ command }))).toEqual([]);
   },
 );
+
+const filesystemTargets = [
+  "package.json",
+  "/proc/self/environ",
+  "../outside",
+  "/tmp/outside",
+  "workspace/link-to-outside",
+];
+const filesystemReaders = [
+  (target: string) => `cat ${target}`,
+  (target: string) => `head -n 5 ${target}`,
+  (target: string) => `tail -n 5 ${target}`,
+  (target: string) => `wc -l ${target}`,
+  (target: string) => `jq -r '.changed' ${target}`,
+  (target: string) => `yq eval '.jobs' ${target}`,
+  (target: string) => `ls ${target}`,
+  ...["-e", "-f", "-d"].flatMap((operator) => [
+    (target: string) => `test ${operator} ${target}`,
+    (target: string) => `[ ${operator} ${target} ]`,
+    (target: string) => `[[ ${operator} ${target} ]]`,
+  ]),
+];
+
+test.each(
+  filesystemReaders.flatMap((reader) =>
+    filesystemTargets.map((target) => reader(JSON.stringify(target))),
+  ),
+)("filesystem reader %s requires trust regardless of the path", (command) => {
+  expectUnsafe(workflow({ command }));
+  expect(
+    check(workflow({ command, needs: "trust-check", jobIf: canonical })),
+  ).toEqual([]);
+});
+
+test.each([
+  "tail -c 80 /proc/self/environ | head -c 1",
+  "if [ -f package.json ]; then echo present; else echo absent; fi",
+  "if test -n value; then if test -f package.json; then echo ready; fi; else echo absent; fi",
+  "git diff --name-only",
+  "git ls-files -z",
+  "git ls-files --cached",
+  "git fetch --no-tags origin main",
+  "gh pr view 150 --repo stella/tooling --json number,headRefOid",
+])("working-tree and filesystem command %s requires trust", (command) => {
+  expectUnsafe(workflow({ command }));
+  expect(
+    check(workflow({ command, needs: "trust-check", jobIf: canonical })),
+  ).toEqual([]);
+});
+
+test.each([
+  "git diff --no-ext-diff --no-textconv --name-only HEAD origin/main",
+  "git diff --no-ext-diff --no-textconv HEAD..origin/main",
+  "git diff --no-ext-diff --no-textconv HEAD...origin/main",
+  "git log -n5 --format=%H HEAD",
+  "git log -n 5 --oneline HEAD",
+  "git show --no-ext-diff --no-textconv --stat HEAD",
+  "git log --format=%GG HEAD",
+  "git log --show-signature HEAD",
+  "git show --no-ext-diff --no-textconv --format=%GG HEAD",
+  "git show --show-signature HEAD",
+  "git log -n5 --format=%H",
+  "git rev-parse",
+  "git rev-parse HEAD origin/main",
+  "git merge-base HEAD",
+  "git diff --no-ext-diff --no-textconv HEAD",
+  "git diff --no-ext-diff --name-only HEAD origin/main",
+  "git diff --no-textconv --name-only HEAD origin/main",
+  "git diff --name-only HEAD origin/main",
+  "git show --stat HEAD",
+  "git show --no-ext-diff --stat HEAD",
+  "git show --no-textconv --stat HEAD",
+  "git show --no-ext-diff --no-textconv HEAD:README.md",
+  "git show --no-ext-diff --no-textconv HEAD -- README.md",
+  "git diff --no-ext-diff --no-textconv HEAD origin/main -- README.md",
+  "git diff --no-ext-diff --no-textconv HEAD:README.md origin/main:README.md",
+  "git diff --no-ext-diff --no-textconv HEAD origin/main README.md",
+  "git log -n5 HEAD -- README.md",
+  "git log -n5 HEAD:README.md",
+])("Git helper-dispatch or non-object command %s requires trust", (command) => {
+  expectUnsafe(workflow({ command }));
+  expect(
+    check(workflow({ command, needs: "trust-check", jobIf: canonical })),
+  ).toEqual([]);
+});
+
+test.each([
+  "echo *",
+  "printf '%s' *",
+  "test -n *",
+  "echo ~",
+  "echo $PR_TITLE",
+  "echo ?",
+  "echo [abc]",
+  "echo {value,other}",
+])("unquoted shell expansion %s requires trust", (command) => {
+  expectUnsafe(workflow({ command }));
+  expect(
+    check(workflow({ command, needs: "trust-check", jobIf: canonical })),
+  ).toEqual([]);
+});
+
+test.each([
+  "echo '*'",
+  'echo "*"',
+  "printf '%s' '*'",
+  "test -n '*'",
+  'echo "$PR_TITLE"',
+  "printf '%s' \"$PR_TITLE\"",
+  'test -n "$PR_TITLE"',
+])("quoted metadata %s remains data before trust", (command) => {
+  expect(check(workflow({ command }))).toEqual([]);
+});
 
 test("repository-provided step shells require trust even for literal data commands", () => {
   const options = {

@@ -636,8 +636,9 @@ The mandatory `workflow-trust` rule applies to PR workflows declaring a
 `trust-check` job. Repository execution requires a direct dependency and a
 condition requiring its `trusted == 'true'` output for every PR trigger.
 Before that boundary, commands must match a small metadata allowlist: shell
-output and bounded comparisons, static file reads, simple jq/yq selectors,
-selected read-only Git commands, and GET-only GitHub CLI reads. The trust job's
+output and string comparisons, bounded Git `rev-parse`/`merge-base` queries,
+and GET-only GitHub API reads. File readers, directory listings and
+file predicates require the job trust gate, including workspace and symlink paths. The trust job's
 `if`/`elif` comparisons and writes to `GITHUB_OUTPUT` use the same checks.
 Job containers and nonempty services require the job-level trust gate because
 they start before steps and supply executable code. A step condition cannot
@@ -651,9 +652,10 @@ call requires the job-level trust condition, including pinned calls without inpu
 
 Interpreters, sourced files, executable paths, package managers (including
 metadata and script-disabled install modes), launchers, custom shells, and
-unknown commands or syntax require trust. File operands are data only for the
-explicit read commands; they never authorize a repository executable. Unsupported
-options and query programs also require the gate. For example, gate the entire
+unknown commands or syntax require trust. Git history/diff commands and
+working-tree, index and fetch operations require trust; they are outside the
+revision-query allowlist. Unquoted pathname expansion also requires trust. Unsupported options and query programs
+also require the gate. For example, gate the entire
 detector job, including dependency installation:
 
 ```yaml

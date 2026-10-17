@@ -118,8 +118,10 @@ const metadataScript = (command: string) => {
 };
 const metadataWord = (raw: string) => {
   if (/^'[^']*'$/u.test(raw)) return true;
+  if (["[", "]", "[[", "]]"].includes(raw)) return true;
   let quote: "'" | '"' | undefined;
   for (const character of raw) {
+    if (quote === undefined && "*?~[{$".includes(character)) return false;
     if (character === quote) quote = undefined;
     else if (quote === undefined && (character === "'" || character === '"'))
       quote = character;
@@ -131,11 +133,6 @@ const metadataWord = (raw: string) => {
   );
   return !/[`$\\]/u.test(withoutKnownExpressions);
 };
-const fileArguments = (words: readonly string[], flags: RegExp) =>
-  words.every(
-    (word) => staticData(word) && (!word.startsWith("-") || flags.test(word)),
-  );
-
 const safeComparison = (words: readonly string[]) => {
   const first = words.at(0);
   if (!["test", "[", "[["].includes(first ?? "")) return false;
@@ -145,46 +142,39 @@ const safeComparison = (words: readonly string[]) => {
   if (end !== undefined && words.at(-1) !== end) return false;
   const operands = words.slice(1, end === undefined ? undefined : -1);
   if (operands.length === 1) return true;
-  if (operands.length === 2)
-    return ["-n", "-z", "-e", "-f", "-d"].includes(operands.at(0) ?? "");
+  if (operands.length === 2) return ["-n", "-z"].includes(operands.at(0) ?? "");
   return (
     operands.length === 3 && ["=", "==", "!="].includes(operands.at(1) ?? "")
   );
 };
 
+const objectReference = (value: string) =>
+  /^(?:HEAD|[a-f0-9]{7,64}|(?:refs\/(?:heads|tags|remotes)\/|origin\/)[A-Za-z0-9][A-Za-z0-9._/-]*)(?:[~^][0-9]*)*$/u.test(
+    value,
+  ) &&
+  !value.includes("..") &&
+  !value.includes("//") &&
+  !value.endsWith("/");
+// History and diff commands may dispatch configured helpers. Only bounded
+// revision queries are proved to remain within repository object metadata.
 const safeGit = (words: readonly string[]) => {
   const subcommand = words.at(1);
-  const arguments_ = words.slice(2);
-  if (!arguments_.every(staticData)) return false;
-  if (subcommand === "log") {
-    const count = arguments_.indexOf("-n");
-    if (count >= 0) {
-      if (!/^[0-9]+$/u.test(arguments_.at(count + 1) ?? "")) return false;
-      arguments_.splice(count, 2);
+  if (subcommand !== "rev-parse" && subcommand !== "merge-base") return false;
+  const references: string[] = [];
+  for (const argument of words.slice(2)) {
+    if (!staticData(argument)) return false;
+    if (!argument.startsWith("-")) {
+      references.push(argument);
+      continue;
     }
+    const allowed =
+      subcommand === "rev-parse"
+        ? ["--short", "--verify"]
+        : ["--all", "--is-ancestor"];
+    if (!allowed.includes(argument)) return false;
   }
-  const flags =
-    /^(?:--|--name-only|--name-status|--quiet|--exit-code|--stat|--short|--verify|--is-ancestor|--all|--cached|--others|--exclude-standard|--no-pager|--oneline|-z|--no-ext-diff|--no-textconv|--format=[A-Za-z0-9%:._ -]+|-n[0-9]+)$/u;
-  if (
-    ["diff", "log", "show", "rev-parse", "merge-base", "ls-files"].includes(
-      subcommand ?? "",
-    )
-  )
-    return arguments_.every(
-      (argument) => !argument.startsWith("-") || flags.test(argument),
-    );
-  // Fetch uses only a named remote, never an alternate transport/helper program.
-  if (subcommand !== "fetch") return false;
-  return (
-    arguments_.every(
-      (argument) =>
-        /^(?:--no-tags|--prune|--depth=[0-9]+)$/u.test(argument) ||
-        (!argument.startsWith("-") && /^[A-Za-z0-9_.:/-]+$/u.test(argument)),
-    ) &&
-    !arguments_.some(
-      (argument) => argument.includes(":") || argument.startsWith("/"),
-    )
-  );
+  const count = subcommand === "rev-parse" ? 1 : 2;
+  return references.length === count && references.every(objectReference);
 };
 
 const safeGh = (words: readonly string[]) => {
@@ -213,16 +203,7 @@ const safeGh = (words: readonly string[]) => {
     }
     return /^\/?repos\/[A-Za-z0-9_./-]+$/u.test(arguments_.at(0) ?? "");
   }
-  if (words.at(1) !== "pr" || words.at(2) !== "view") return false;
-  const arguments_ = words.slice(3);
-  for (let index = 0; index < arguments_.length; index++) {
-    const argument = arguments_.at(index) ?? "";
-    if (["--json", "--repo", "-R", "--jq", "-q"].includes(argument)) {
-      if (!arguments_.at(++index) || arguments_.at(index)?.startsWith("-"))
-        return false;
-    } else if (!/^[0-9]+$/u.test(argument)) return false;
-  }
-  return true;
+  return false;
 };
 
 const safeCommand = (raw: readonly string[]): boolean => {
@@ -250,38 +231,6 @@ const safeCommand = (raw: readonly string[]): boolean => {
       format !== undefined &&
       !format.startsWith("-") &&
       /^(?:[^%$`]|%%|%s)*$/u.test(format)
-    );
-  }
-  if (name === "cat")
-    return fileArguments(words.slice(1), /^(?:--|-n|-b|-s|-E|-T|-v)$/u);
-  if (name === "ls")
-    return fileArguments(words.slice(1), /^(?:--|-[ladAh1]+)$/u);
-  if (name === "wc")
-    return fileArguments(words.slice(1), /^(?:--|-[lcwmL]+)$/u);
-  if (name === "head" || name === "tail") {
-    const arguments_ = words.slice(1);
-    for (let index = 0; index < arguments_.length; index++) {
-      const argument = arguments_.at(index) ?? "";
-      if (["-n", "-c"].includes(argument)) {
-        if (!/^[0-9]+$/u.test(arguments_.at(++index) ?? "")) return false;
-      } else if (
-        !staticData(argument) ||
-        (argument.startsWith("-") && !/^-[nc][0-9]+$/u.test(argument))
-      )
-        return false;
-    }
-    return true;
-  }
-  if (name === "jq" || name === "yq") {
-    const arguments_ = words.slice(1);
-    while (["-r", "-c", "-e"].includes(arguments_.at(0) ?? ""))
-      arguments_.shift();
-    if (name === "yq" && arguments_.at(0) === "eval") arguments_.shift();
-    const query = arguments_.shift();
-    return (
-      query !== undefined &&
-      /^\.[A-Za-z0-9_.[\]" -]*$/u.test(query) &&
-      fileArguments(arguments_, /^--$/u)
     );
   }
   if (name === "git") return safeGit(words);
