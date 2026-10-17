@@ -141,7 +141,6 @@ export const rustWorkspaceMembers = async (
       for (const entry of await readdir(join(root, directory), {
         withFileTypes: true,
       })) {
-        if ([".git", "node_modules", "target"].includes(entry.name)) continue;
         const child = posix.join(directory, entry.name);
         if (!canContainMember(child)) continue;
         if (excludedSubtree(child)) {

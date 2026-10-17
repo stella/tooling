@@ -819,6 +819,30 @@ test("former explicit, excluded and path-dependency members retire inheritance a
     });
 });
 
+test("declared members include ordinary, build and dependency directory names", async () => {
+  await fixture(async (root) => {
+    const directories = ["ordinary", "target", "node_modules", ".git"];
+    for (const directory of directories) {
+      await mkdir(join(root, "crates", directory), { recursive: true });
+      await writeFile(
+        join(root, "crates", directory, "Cargo.toml"),
+        `[package]\nname = "${directory.replaceAll(".", "")}"\nversion = "0.1.0"\n`,
+      );
+    }
+    await writeFile(
+      join(root, "Cargo.toml"),
+      '[workspace]\nmembers = ["crates/*"]\n',
+    );
+    const input = { kind: "workspace" };
+    await generateRustPolicy({ root, input, mode: "write" });
+    for (const directory of directories)
+      expect(await read(root, `crates/${directory}/Cargo.toml`)).toMatchObject({
+        lints: { workspace: true },
+      });
+    expect(await generateRustPolicy({ root, input, mode: "check" })).toEqual([]);
+  });
+});
+
 test("hidden member globs and literal exclude paths follow Cargo matching", async () => {
   await fixture(async (root) => {
     await mkdir(join(root, "crates/.included"), { recursive: true });
