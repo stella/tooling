@@ -139,3 +139,23 @@ test("wildcard exported archive patterns leave licenses and directories opaque b
     },
   );
 });
+
+test("malformed packed JavaScript retains its import parser cause and member path", async () => {
+  await withPackedFixture(
+    {
+      "package.json": JSON.stringify({ type: "module" }),
+      "dist/chunks/hidden.mjs": "export const syntax = ;\n",
+    },
+    async ({ archive }) => {
+      await assert.rejects(
+        readPackedSyntaxFiles(archive),
+        (error: unknown) =>
+          error instanceof SyntaxError &&
+          /Packed runtime import syntax package\/dist\/chunks\/hidden\.mjs:/.test(
+            error.message,
+          ) &&
+          error.cause instanceof SyntaxError,
+      );
+    },
+  );
+});

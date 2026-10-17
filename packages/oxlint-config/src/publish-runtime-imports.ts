@@ -907,22 +907,30 @@ export const assertPackedRuntimeImports = async ({
       else if (/\.cjs$/iu.test(file)) mode = "script";
       else mode = packageMode(files, file);
       const parse = (sourceType: "script" | "module") => {
-        const tree = parseArtifactSource(source, {
-          ecmaVersion: "latest",
-          sourceType,
-          allowHashBang: true,
-          allowReturnOutsideFunction: sourceType === "script",
-        });
-        // The shared parser wraps CommonJS. Its require parameter is the runtime loader.
-        if (sourceType === "script") {
-          const statement = tree.body.at(0);
-          if (
-            statement?.type === "ExpressionStatement" &&
-            statement.expression.type === "FunctionExpression"
-          )
-            return { tree: statement.expression.body, mode: sourceType };
+        try {
+          const tree = parseArtifactSource(source, {
+            ecmaVersion: "latest",
+            sourceType,
+            allowHashBang: true,
+            allowReturnOutsideFunction: sourceType === "script",
+          });
+          // The shared parser wraps CommonJS. Its require parameter is the runtime loader.
+          if (sourceType === "script") {
+            const statement = tree.body.at(0);
+            if (
+              statement?.type === "ExpressionStatement" &&
+              statement.expression.type === "FunctionExpression"
+            )
+              return { tree: statement.expression.body, mode: sourceType };
+          }
+          return { tree, mode: sourceType };
+        } catch (error) {
+          if (!(error instanceof SyntaxError)) throw error;
+          throw new SyntaxError(
+            `Packed runtime import syntax ${file}: ${error.message}`,
+            { cause: error },
+          );
         }
-        return { tree, mode: sourceType };
       };
       let parsed: ReturnType<typeof parse>;
       if (mode === "detect") {

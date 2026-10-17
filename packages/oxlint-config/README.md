@@ -603,6 +603,9 @@ static contract; no older Node-to-ECMAScript mapping is inferred. Browser target
 are unsupported here: declare an explicit ECMAScript year. Types-only contracts reject any packed JavaScript. Nested
 package manifests and explicit module extensions determine parsing mode.
 Linked syntax inputs and unsafe archive paths fail before staging.
+Invalid JavaScript encountered during import-closure analysis throws a `SyntaxError`
+that names the packed member and retains the original parser error as its cause.
+This can precede the declared-target and native Node checks.
 
 The reusable consumer job declares its exact scope in `stll-toolchain.json`:
 
