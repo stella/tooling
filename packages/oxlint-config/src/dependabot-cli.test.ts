@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
   link,
@@ -167,9 +168,7 @@ test("recreates a deleted tracked output at its indexed spelling", async () => {
           root,
           `.github/dependabot.${extension === "yml" ? "yaml" : "yml"}`,
         );
-        await expect(stat(alternative)).rejects.toMatchObject({
-          code: "ENOENT",
-        });
+        await assert.rejects(stat(alternative), { code: "ENOENT" });
       });
     }
   }
@@ -204,9 +203,9 @@ test("missing unrelated inputs and conflicting indexed output spellings never wr
     expect(await readFile(join(root, ".github/dependabot.yml"), "utf8")).toBe(
       "sentinel\n",
     );
-    await expect(
-      stat(join(root, ".github/dependabot.yaml")),
-    ).rejects.toMatchObject({ code: "ENOENT" });
+    await assert.rejects(stat(join(root, ".github/dependabot.yaml")), {
+      code: "ENOENT",
+    });
   });
 });
 

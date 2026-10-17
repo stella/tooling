@@ -402,12 +402,8 @@ const javascriptEcosystem = (
     } catch {
       // Package rules diagnose malformed JSON; retain its update coverage.
     }
-    if (
-      javascriptDependencyLockfiles.some(
-        (name) => files[path.posix.join(root, name)] !== undefined,
-      )
-    )
-      return "npm";
+    for (const name of javascriptDependencyLockfiles)
+      if (files[path.posix.join(root, name)] !== undefined) return "npm";
     if (root === ".") return "npm";
     root = path.posix.dirname(root);
   }
