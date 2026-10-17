@@ -284,3 +284,50 @@ test("aliases visited repeatedly do not duplicate inventory commands", () => {
     ).commands,
   ).toEqual([["--ignore-pattern=**/dist/**", "--threads", "1", "."]]);
 });
+
+test("every package manager resolves literal run aliases alongside direct oxlint", () => {
+  for (const manager of ["bun", "npm", "pnpm", "yarn"]) {
+    const result = lintInventoryCommands(
+      manifest({
+        lint: `oxlint root.ts && ${manager} run lint:scripts`,
+        "lint:scripts": `${manager} run lint:leaf`,
+        "lint:leaf": "oxlint scripts",
+      }),
+    );
+    expect(result, manager).toEqual({
+      enabled: true,
+      workspaceTask: false,
+      errors: [],
+      commands: [["root.ts"], ["scripts"]],
+    });
+  }
+});
+
+test("manager alias cycles and ambiguous invocations cannot silently omit a lint scope", () => {
+  for (const manager of ["bun", "npm", "pnpm", "yarn"]) {
+    const cycle = lintInventoryCommands(
+      manifest({
+        lint: `oxlint root.ts && ${manager} run lint:scripts`,
+        "lint:scripts": `${manager} run lint`,
+      }),
+    );
+    expect(cycle.errors, manager).toContain("cyclic lint script alias: lint");
+    expect(cycle.commands, manager).toEqual([]);
+    for (const alias of [
+      `${manager} run $SCRIPT`,
+      `${manager} run lint:scripts -- --fix`,
+      `${manager} --cwd elsewhere run lint:scripts`,
+      `env -C elsewhere ${manager} run lint:scripts`,
+      `${manager} lint:scripts`,
+    ]) {
+      const invalid = lintInventoryCommands(
+        manifest({
+          lint: `oxlint root.ts && ${alias}`,
+          "lint:scripts": "oxlint scripts",
+        }),
+      );
+      expect(invalid.errors.length, alias).toBeGreaterThan(0);
+      expect(invalid.commands, alias).toEqual([]);
+    }
+  }
+});

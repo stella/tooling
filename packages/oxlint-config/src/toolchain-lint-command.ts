@@ -4,6 +4,8 @@ import { scriptSourceKind } from "./toolchain-script-extensions";
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+const scriptManagers = new Set(["bun", "npm", "pnpm", "yarn"]);
+
 const valueFlags = new Set([
   "-c",
   "--config",
@@ -191,10 +193,15 @@ export const lintInventoryCommands = (
           );
         continue;
       }
-      if (first === "bun" && words.at(1) === "run") {
+      if (
+        first !== undefined &&
+        scriptManagers.has(first) &&
+        words.at(1) === "run"
+      ) {
         const target = words.at(2);
         if (
           target !== undefined &&
+          first === "bun" &&
           scriptSourceKind(target) !== undefined &&
           typeof scripts[target] !== "string"
         ) {
@@ -238,15 +245,21 @@ export const lintInventoryCommands = (
         if (
           words.some((word) => /(?:^|\/)oxlint(?:@[^/]+)?$/.test(word)) ||
           words.some(
-            (word, index) => word === "bun" && words.at(index + 1) === "run",
+            (word, index) =>
+              scriptManagers.has(word) &&
+              words.slice(index + 1).includes("run"),
           ) ||
           (words.includes("turbo") && words.includes("lint")) ||
-          (first === "bun" &&
-            words.length === 2 &&
-            !["test", "build", "check", "install", "x"].includes(
-              words.at(1) ?? "",
+          (first !== undefined &&
+            scriptManagers.has(first) &&
+            !(
+              first === "bun" &&
+              ["test", "build", "check", "install", "x"].includes(
+                words.at(1) ?? "",
+              )
             ) &&
-            typeof scripts[words.at(1) ?? ""] === "string") ||
+            (words.slice(1).some((word) => typeof scripts[word] === "string") ||
+              !raw.every(literalWord))) ||
           (raw.at(0) !== undefined && !literalWord(raw.at(0) ?? ""))
         )
           errors.push(`${name}: unsupported or dynamic oxlint launcher`);
