@@ -305,6 +305,7 @@ Add an explicit declaration to tracked root `stll-toolchain.json`:
     },
     "tools": {
       "cargo-nextest": "0.9.148",
+      "gitleaks": "8.30.1",
       "wasm-bindgen-cli": "0.2.126",
       "uv": "0.13.1",
       "time": "1.9"
@@ -337,9 +338,9 @@ setup also provisions Ubuntu's `build-essential` package for native compilation
 and linking.
 
 `cloud.tools` is a closed object: the supported keys are `cargo-nextest`,
-`wasm-bindgen-cli`, `uv`, and `time`. Each value must be an exact release supported by
+`wasm-bindgen-cli`, `gitleaks`, `uv`, and `time`. Each value must be an exact release supported by
 the installed tooling package. Unknown tools and unsupported versions fail
-generation. `cargo-nextest`, `wasm-bindgen-cli`, and `uv` use versioned upstream Linux binaries with committed
+generation. `cargo-nextest`, `wasm-bindgen-cli`, `gitleaks`, and `uv` use versioned upstream Linux binaries with committed
 SHA256 pins for amd64 and arm64; setup does not build them with `cargo install`.
 `time` installs GNU time (`/usr/bin/time`, needed for `/usr/bin/time -v`) from
 Ubuntu's `time` package with bounded apt; its value is the upstream release
@@ -432,14 +433,14 @@ or the configured package hosts; a redirected download names its original host.
 
 Allow these direct download hosts for the generated installer:
 
-| Host                   | Downloads                                                                |
-| ---------------------- | ------------------------------------------------------------------------ |
-| `nodejs.org`           | Node archives and SHA256 manifests                                       |
-| `github.com`           | Bun archives and checksums; pinned nextest, wasm-bindgen and uv releases |
-| `static.rust-lang.org` | Pinned rustup-init, Rust manifests, toolchains, components and targets   |
-| `www.postgresql.org`   | PostgreSQL repository signing key                                        |
-| `apt.postgresql.org`   | PostgreSQL packages and repository metadata                              |
-| `download.valkey.io`   | Pinned Valkey binary packages                                            |
+| Host                   | Downloads                                                                          |
+| ---------------------- | ---------------------------------------------------------------------------------- |
+| `nodejs.org`           | Node archives and SHA256 manifests                                                 |
+| `github.com`           | Bun archives and checksums; pinned nextest, wasm-bindgen, gitleaks and uv releases |
+| `static.rust-lang.org` | Pinned rustup-init, Rust manifests, toolchains, components and targets             |
+| `www.postgresql.org`   | PostgreSQL repository signing key                                                  |
+| `apt.postgresql.org`   | PostgreSQL packages and repository metadata                                        |
+| `download.valkey.io`   | Pinned Valkey binary packages                                                      |
 
 GitHub release downloads redirect to `release-assets.githubusercontent.com`;
 allow that host as well. This includes Bun and the optional prebuilt tools.

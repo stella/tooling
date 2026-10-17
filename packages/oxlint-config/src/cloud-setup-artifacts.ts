@@ -62,6 +62,23 @@ export const cloudSetupArtifacts = {
       },
     },
   },
+  gitleaks: {
+    version: "8.30.1",
+    amd64: {
+      url: "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz",
+      sha256:
+        "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb",
+      archive: "tar.gz",
+      binaries: { gitleaks: "gitleaks" },
+    },
+    arm64: {
+      url: "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_arm64.tar.gz",
+      sha256:
+        "e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080",
+      archive: "tar.gz",
+      binaries: { gitleaks: "gitleaks" },
+    },
+  },
   "cargo-nextest": {
     version: "0.9.148",
     amd64: {
@@ -156,6 +173,7 @@ export const cloudSetupArtifactVersions = {
   "cargo-nextest": [cloudSetupArtifacts["cargo-nextest"]],
   "wasm-bindgen-cli": wasmBindgenArtifactReleases,
   uv: [cloudSetupArtifacts.uv],
+  gitleaks: [cloudSetupArtifacts.gitleaks],
 } as const satisfies Record<
   CloudSetupArtifactTool,
   readonly CloudSetupArtifactRelease[]
