@@ -422,6 +422,51 @@ export const UnsafeImportedCreateElementShorthand = () => {
   return createElement("div", { dangerouslySetInnerHTML });
 };
 
+declare const jsxs: (type: string, props: object) => unknown;
+declare const jsxDEV: (
+  type: string,
+  props: object,
+  key: unknown,
+  staticChildren: boolean,
+  source: unknown,
+  self: unknown,
+) => unknown;
+
+export const UnsafeCreateElementSrcDoc = () => {
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- React object props carry the same HTML as JSX attributes
+  React.createElement("iframe", { srcDoc: rawHtml });
+};
+
+export const UnsafeJsxSrcDoc = () => {
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- jsx runtime object props carry HTML
+  jsx("iframe", { srcDoc: rawHtml });
+};
+
+export const UnsafeJsxsSrcdoc = () => {
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- lowercase srcdoc also carries HTML through jsxs
+  jsxs("iframe", { srcdoc: rawHtml });
+};
+
+export const UnsafeJsxDevSrcDoc = () => {
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- development JSX runtime uses the same prop policy
+  jsxDEV("iframe", { srcDoc: rawHtml }, undefined, false, undefined, undefined);
+};
+
+export const UnsafeLowercaseSrcdocJsx = () => (
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- lowercase HTML prop shares the JSX and factory policy
+  <iframe sandbox="" srcdoc={rawHtml} title="preview" />
+);
+
+export const SafeFactorySrcDoc = () => {
+  // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
+  React.createElement("iframe", { srcDoc: "<p>Static</p>" });
+  // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
+  jsx("iframe", { srcdoc: "<p>Static</p>" });
+};
+
+// expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
+export const NonReactSrcDocData = { srcDoc: rawHtml };
+
 export const UnsafeSpreadProps = () => {
   const props = {
     // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- props object spread into JSX

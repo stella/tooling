@@ -84,17 +84,24 @@ export const DOM_ELEMENT_PRODUCERS = [
 // The provenance text after the marker must be non-empty.
 const WAIVER_RE = /^\s*safe-html:\s*\S/u;
 
-const DANGEROUS_PROP = "dangerouslySetInnerHTML";
-const HTML_KEY = "__html";
+export const REACT_HTML_PROPS = [
+  { name: "dangerouslySetInnerHTML", kind: "payload", htmlKey: "__html" },
+  { name: "srcDoc", kind: "value" },
+  { name: "srcdoc", kind: "value" },
+] as const;
+type ReactHtmlProp = (typeof REACT_HTML_PROPS)[number];
+const REACT_ELEMENT_FACTORIES: ReadonlySet<string> = new Set([
+  "createElement",
+  "React.createElement",
+  "jsx",
+  "jsxs",
+  "jsxDEV",
+]);
 const HTML_PROPERTIES: ReadonlySet<string> = new Set([
   "innerHTML",
   "outerHTML",
   "srcdoc",
 ]);
-const DANGEROUS_PROP_ATTRIBUTES: ReadonlySet<string> = new Set([
-  DANGEROUS_PROP,
-]);
-const SRCDOC_ATTRIBUTES: ReadonlySet<string> = new Set(["srcDoc", "srcdoc"]);
 // Methods whose first argument is parsed as HTML.
 const HTML_FIRST_ARGUMENT_METHODS: ReadonlySet<string> = new Set([
   "createContextualFragment",
@@ -216,14 +223,10 @@ const isWaiverComment = (value: unknown): value is WaiverComment =>
   typeof value.loc === "object" &&
   value.loc !== null;
 
-const isJsxIdentifierIn = (
-  node: unknown,
-  names: ReadonlySet<string>,
-): boolean =>
-  isAstNode(node) &&
-  node.type === "JSXIdentifier" &&
-  typeof node.name === "string" &&
-  names.has(node.name);
+const jsxAttributeName = (node: unknown): string | null =>
+  isAstNode(node) && node.type === "JSXIdentifier" && typeof node.name === "string"
+    ? node.name
+    : null;
 
 // A value is proven safe by its own static shape, independent of comments.
 const isProvenSafeValue = (
@@ -507,7 +510,7 @@ export default eslintCompatPlugin({
         // The value of a `dangerouslySetInnerHTML` prop: an inline object has
         // its `__html` checked and its spreads rejected; anything else is a
         // hoisted payload whose HTML this rule cannot see.
-        const checkDangerousPayload = (value: unknown): void => {
+        const checkDangerousPayload = (value: unknown, htmlKey: string): void => {
           const expression = unwrapExpression(value);
           if (expression?.type !== "ObjectExpression") {
             reportIfUnsafe(value);
@@ -520,9 +523,24 @@ export default eslintCompatPlugin({
             }
             if (
               property.type === "Property" &&
-              objectPropertyKey(property) === HTML_KEY
+              objectPropertyKey(property) === htmlKey
             ) {
               reportIfUnsafe(property.value);
+            }
+          }
+        };
+
+        const checkReactHtmlProp = (prop: ReactHtmlProp, value: unknown): void => {
+          switch (prop.kind) {
+            case "payload":
+              checkDangerousPayload(value, prop.htmlKey);
+              return;
+            case "value":
+              reportIfUnsafe(value);
+              return;
+            default: {
+              const exhaustive: never = prop;
+              throw new Error(`Unknown React HTML prop: ${exhaustive}`);
             }
           }
         };
@@ -590,33 +608,26 @@ export default eslintCompatPlugin({
           },
 
           JSXAttribute(node) {
-            const value = node.value;
-            if (!isAstNode(value) || value.type !== "JSXExpressionContainer") {
-              return;
-            }
-            if (isJsxIdentifierIn(node.name, DANGEROUS_PROP_ATTRIBUTES)) {
-              checkDangerousPayload(value.expression);
-              return;
-            }
-            if (isJsxIdentifierIn(node.name, SRCDOC_ATTRIBUTES)) {
-              reportIfUnsafe(value.expression);
-            }
+            const name = jsxAttributeName(node.name);
+            const prop = REACT_HTML_PROPS.find((entry) => entry.name === name);
+            if (prop === undefined) return;
+            const value = unwrapExpression(node.value);
+            checkReactHtmlProp(
+              prop,
+              value?.type === "JSXExpressionContainer" ? value.expression : value,
+            );
           },
 
-          // `{ dangerouslySetInnerHTML: … }` outside a JSX attribute: props
-          // for `createElement` / `jsx()`, or an object spread into JSX.
+          // Payload objects remain checked when hoisted or spread into JSX.
+          // Direct value props require a recognized factory-call context below.
           Property(node) {
-            if (objectPropertyKey(node) !== DANGEROUS_PROP) {
-              return;
-            }
+            const key = objectPropertyKey(node);
+            const prop = REACT_HTML_PROPS.find((entry) => entry.name === key);
+            if (prop?.kind !== "payload") return;
             const container = node.parent;
-            if (
-              !isAstNode(container) ||
-              container.type !== "ObjectExpression"
-            ) {
-              return;
+            if (isAstNode(container) && container.type === "ObjectExpression") {
+              checkReactHtmlProp(prop, node.value);
             }
-            checkDangerousPayload(node.value);
           },
 
           AssignmentExpression(node) {
@@ -633,10 +644,23 @@ export default eslintCompatPlugin({
           CallExpression(node) {
             const call: unknown = node;
             const callee = isAstNode(call) ? invokedCallee(call) : null;
+            const invoked = invokedArguments(node);
+            const factory = staticCalleeName(callee);
+            if (factory !== null && REACT_ELEMENT_FACTORIES.has(factory)) {
+              for (const property of objectProperties(invoked.args.at(1))) {
+                if (property.type !== "Property") continue;
+                const key = objectPropertyKey(property);
+                const prop = REACT_HTML_PROPS.find((entry) => entry.name === key);
+                // Payload props are already checked by the Property visitor.
+                if (prop?.kind === "value") {
+                  checkReactHtmlProp(prop, property.value);
+                }
+              }
+              return;
+            }
             if (callee?.type !== "MemberExpression") {
               return;
             }
-            const invoked = invokedArguments(node);
             const method = memberPropertyName(callee);
             if (method === null) {
               return;

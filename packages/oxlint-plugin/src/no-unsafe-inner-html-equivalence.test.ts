@@ -46,7 +46,23 @@ type SpreadEdit = {
   calleeEnd: number;
 };
 
-type Edit = MemberEdit | AliasEdit | SpreadEdit;
+type JsxEdit = {
+  kind: "jsx";
+  file: string;
+  start: number;
+  end: number;
+  reactText: string;
+  jsxText: string;
+  elementCount: number;
+};
+
+type JsxInventoryEdit = {
+  kind: "jsx-inventory";
+  file: string;
+  elementCount: number;
+};
+
+type Edit = MemberEdit | AliasEdit | SpreadEdit | JsxEdit | JsxInventoryEdit;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -73,6 +89,22 @@ const isEdit = (value: unknown): value is Edit => {
       typeof value.targetEnd === "number"
     );
   }
+  if (value.kind === "jsx") {
+    return (
+      typeof value.file === "string" &&
+      typeof value.start === "number" &&
+      typeof value.end === "number" &&
+      typeof value.reactText === "string" &&
+      typeof value.jsxText === "string" &&
+      typeof value.elementCount === "number"
+    );
+  }
+  if (value.kind === "jsx-inventory") {
+    return (
+      typeof value.file === "string" &&
+      typeof value.elementCount === "number"
+    );
+  }
   return (
     value.kind === "spread" &&
     typeof value.file === "string" &&
@@ -82,7 +114,7 @@ const isEdit = (value: unknown): value is Edit => {
   );
 };
 
-const collectorPlugin = `
+const collectorPlugin = String.raw`
 const htmlMethods = new Set([
   "assign",
   "createContextualFragment",
@@ -91,6 +123,12 @@ const htmlMethods = new Set([
   "setHTMLUnsafe",
   "write",
   "writeln",
+]);
+const elementFactories = new Set([
+  "createElement",
+  "jsx",
+  "jsxs",
+  "jsxDEV",
 ]);
 const staticName = (node) => {
   if (node?.type === "Identifier") return node.name;
@@ -103,6 +141,147 @@ const methodName = (callee) => {
   if (name === "call" || name === "apply") return methodName(callee.object);
   return name;
 };
+const jsxKinds = new Set(["JSXElement", "JSXFragment"]);
+const jsxText = (context, node) => context.sourceCode.getText(node);
+const jsxTagName = (context, node) => {
+  const text = jsxText(context, node);
+  return node.type === "JSXNamespacedName" ||
+    (node.type === "JSXIdentifier" && /^[a-z]/u.test(node.name))
+    ? JSON.stringify(text)
+    : text;
+};
+const jsxAttributeName = (context, node) => {
+  const text = jsxText(context, node);
+  return JSON.stringify(text);
+};
+const applySourceEdits = (source, edits, base) => {
+  let output = source;
+  for (const edit of edits.sort((left, right) => right.start - left.start)) {
+    output =
+      output.slice(0, edit.start - base) +
+      edit.text +
+      output.slice(edit.end - base);
+  }
+  return output;
+};
+const renderExpression = (context, node, mode) => {
+  if (jsxKinds.has(node.type)) return renderJsx(context, node, mode);
+  const source = jsxText(context, node);
+  const replacements = [];
+  let elementCount = 0;
+  const visit = (value) => {
+    if (Array.isArray(value)) {
+      for (const child of value) visit(child);
+      return;
+    }
+    if (!value || typeof value !== "object") return;
+    if (jsxKinds.has(value.type)) {
+      const rendered = renderJsx(context, value, mode);
+      replacements.push({
+        start: value.range[0],
+        end: value.range[1],
+        text: rendered.text,
+      });
+      elementCount += rendered.elementCount;
+      return;
+    }
+    for (const [key, child] of Object.entries(value)) {
+      if (key !== "parent" && key !== "loc" && key !== "range") visit(child);
+    }
+  };
+  for (const [key, value] of Object.entries(node)) {
+    if (key !== "parent" && key !== "loc" && key !== "range") visit(value);
+  }
+  return {
+    text: applySourceEdits(source, replacements, node.range[0]),
+    elementCount,
+  };
+};
+const renderJsx = (context, node, mode) => {
+  const isElement = node.type === "JSXElement";
+  const opening = isElement ? node.openingElement : null;
+  const name = isElement ? jsxTagName(context, opening.name) : "React.Fragment";
+  const properties = [];
+  let elementCount = isElement ? 1 : 0;
+  if (isElement) {
+    for (const attribute of opening.attributes) {
+      if (attribute.type === "JSXSpreadAttribute") {
+        const spreadValue = renderExpression(context, attribute.argument, mode);
+        properties.push("..." + spreadValue.text);
+        elementCount += spreadValue.elementCount;
+        continue;
+      }
+      let value = "true";
+      if (attribute.value?.type === "Literal") {
+        value = JSON.stringify(attribute.value.value);
+      } else if (attribute.value?.type === "JSXExpressionContainer") {
+        const expression = renderExpression(
+          context,
+          attribute.value.expression,
+          mode,
+        );
+        value = "(" + expression.text + ")";
+        elementCount += expression.elementCount;
+      } else if (attribute.value !== null && attribute.value !== undefined) {
+        throw new Error("Unsupported JSX attribute value: " + attribute.value.type);
+      }
+      properties.push(jsxAttributeName(context, attribute.name) + ": " + value);
+    }
+  }
+  const children = [];
+  for (const child of node.children) {
+    if (child.type === "JSXText") {
+      if (child.value !== "") children.push(JSON.stringify(child.value));
+    } else if (child.type === "JSXExpressionContainer") {
+      if (child.expression.type === "JSXEmptyExpression") {
+        const comment = context.sourceCode.text.slice(
+          child.range[0] + 1,
+          child.range[1] - 1,
+        );
+        children.push("null " + comment + "\n");
+      } else {
+        const expression = renderExpression(context, child.expression, mode);
+        children.push(expression.text);
+        elementCount += expression.elementCount;
+      }
+    } else if (child.type === "JSXSpreadChild") {
+      const expression = renderExpression(context, child.expression, mode);
+      children.push("..." + expression.text);
+      elementCount += expression.elementCount;
+    } else if (jsxKinds.has(child.type)) {
+      const rendered = renderJsx(context, child, mode);
+      children.push(rendered.text);
+      elementCount += rendered.elementCount;
+    }
+  }
+  const props = properties.length === 0 ? null : "{" + properties.join(", ") + "}";
+  if (mode === "react") {
+    const args = [name, props ?? "null", ...children];
+    return {
+      text: "React.createElement(" + args.join(", ") + ")",
+      elementCount,
+    };
+  }
+  const jsxProperties = properties.slice();
+  if (children.length > 0) {
+    jsxProperties.push(
+      "children: " +
+        (children.length === 1 ? children[0] : "[" + children.join(", ") + "]"),
+    );
+  }
+  return {
+    text: "jsx(" + name + ", {" + jsxProperties.join(", ") + "})",
+    elementCount,
+  };
+};
+const hasJsxAncestor = (node) => {
+  let parent = node.parent;
+  while (parent) {
+    if (jsxKinds.has(parent.type)) return true;
+    parent = parent.parent;
+  }
+  return false;
+};
 const report = (context, node, edit) =>
   context.report({ node, message: "EQUIVALENCE:" + JSON.stringify(edit) });
 
@@ -111,6 +290,7 @@ export default {
     edits: {
       meta: { type: "problem" },
       create(context) {
+        let visitedJsxElements = 0;
         return {
           MemberExpression(node) {
             if (node.computed || node.property?.type !== "Identifier") return;
@@ -125,9 +305,29 @@ export default {
             });
           },
           CallExpression(node) {
-            if (node.optional === true || node.callee?.type !== "MemberExpression") return;
-            const name = methodName(node.callee);
-            if (!htmlMethods.has(name) || node.arguments.length === 0) return;
+            if (node.optional === true) return;
+            const name =
+              node.callee?.type === "MemberExpression"
+                ? methodName(node.callee)
+                : node.callee?.type === "Identifier"
+                  ? node.callee.name
+                  : null;
+            const isHtmlSink =
+              node.callee?.type === "MemberExpression" &&
+              htmlMethods.has(name);
+            const isElementFactory =
+              (node.callee?.type === "Identifier" &&
+                elementFactories.has(node.callee.name)) ||
+              (node.callee?.type === "MemberExpression" &&
+                name === "createElement" &&
+                node.callee.object?.type === "Identifier" &&
+                node.callee.object.name === "React");
+            if (
+              (!isHtmlSink && !isElementFactory) ||
+              node.arguments.length === 0
+            ) {
+              return;
+            }
             report(context, node, {
               kind: "spread",
               file: context.filename,
@@ -137,6 +337,7 @@ export default {
             });
             if (
               name === "assign" &&
+              node.callee?.type === "MemberExpression" &&
               node.callee.object?.type === "Identifier" &&
               node.callee.object.name === "Object" &&
               node.arguments[0].type !== "SpreadElement"
@@ -152,6 +353,48 @@ export default {
                 targetEnd: target.range[1],
               });
             }
+          },
+          JSXElement(node) {
+            visitedJsxElements += 1;
+            if (hasJsxAncestor(node)) return;
+            const react = renderJsx(context, node, "react");
+            const jsx = renderJsx(context, node, "jsx");
+            if (react.elementCount !== jsx.elementCount) {
+              throw new Error("JSX equivalence renderers missed an element");
+            }
+            report(context, node, {
+              kind: "jsx",
+              file: context.filename,
+              start: node.range[0],
+              end: node.range[1],
+              reactText: react.text,
+              jsxText: jsx.text,
+              elementCount: react.elementCount,
+            });
+          },
+          JSXFragment(node) {
+            if (hasJsxAncestor(node)) return;
+            const react = renderJsx(context, node, "react");
+            const jsx = renderJsx(context, node, "jsx");
+            if (react.elementCount !== jsx.elementCount) {
+              throw new Error("JSX equivalence renderers missed an element");
+            }
+            report(context, node, {
+              kind: "jsx",
+              file: context.filename,
+              start: node.range[0],
+              end: node.range[1],
+              reactText: react.text,
+              jsxText: jsx.text,
+              elementCount: react.elementCount,
+            });
+          },
+          "Program:exit"(node) {
+            report(context, node, {
+              kind: "jsx-inventory",
+              file: context.filename,
+              elementCount: visitedJsxElements,
+            });
           },
         };
       },
@@ -537,9 +780,22 @@ test(
       const spreads = edits.filter(
         (edit): edit is SpreadEdit => edit.kind === "spread",
       );
+      const jsxRoots = edits.filter(
+        (edit): edit is JsxEdit => edit.kind === "jsx",
+      );
+      const jsxInventory = edits.filter(
+        (edit): edit is JsxInventoryEdit => edit.kind === "jsx-inventory",
+      );
       expect(members.length).toBeGreaterThan(0);
       expect(aliases.length).toBeGreaterThan(0);
       expect(spreads.length).toBeGreaterThan(0);
+      expect(jsxRoots.length).toBeGreaterThan(0);
+      expect(jsxInventory).toHaveLength(originalPaths.length);
+      expect(
+        jsxRoots.reduce((count, edit) => count + edit.elementCount, 0),
+      ).toBe(
+        jsxInventory.reduce((count, edit) => count + edit.elementCount, 0),
+      );
 
       const generatedPaths: string[] = [];
       const generatedSources = new Map<string, string>();
@@ -548,6 +804,12 @@ test(
         const fileMembers = members.filter((edit) => edit.file === original.path);
         const fileAliases = aliases.filter((edit) => edit.file === original.path);
         const fileSpreads = spreads.filter((edit) => edit.file === original.path);
+        const fileJsxRoots = jsxRoots.filter((edit) => edit.file === original.path);
+        const inventory = jsxInventory.find((edit) => edit.file === original.path);
+        expect(inventory).toBeDefined();
+        expect(
+          fileJsxRoots.reduce((count, edit) => count + edit.elementCount, 0),
+        ).toBe(inventory?.elementCount);
         const variants = [
           {
             name: "bracket",
@@ -565,6 +827,28 @@ test(
             source: applyEdits(
               original.source,
               spreadEdits(original.source, fileSpreads),
+            ),
+          },
+          {
+            name: "react-create-element",
+            source: applyEdits(
+              original.source,
+              fileJsxRoots.map((edit) => ({
+                start: edit.start,
+                end: edit.end,
+                text: edit.reactText,
+              })),
+            ),
+          },
+          {
+            name: "jsx-call",
+            source: applyEdits(
+              original.source,
+              fileJsxRoots.map((edit) => ({
+                start: edit.start,
+                end: edit.end,
+                text: edit.jsxText,
+              })),
             ),
           },
         ];
@@ -586,7 +870,8 @@ test(
       expect(members.length).toBeGreaterThan(0);
       expect(aliases.length).toBeGreaterThan(0);
       expect(spreads.length).toBeGreaterThan(0);
-      expect(generatedPaths).toHaveLength(originals.length * 3);
+      expect(jsxRoots.length).toBeGreaterThan(0);
+      expect(generatedPaths).toHaveLength(originals.length * 5);
       await Promise.all(
         [...generatedSources].map(([path, source]) => writeFile(path, source)),
       );
