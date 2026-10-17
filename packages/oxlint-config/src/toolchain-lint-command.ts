@@ -1,4 +1,5 @@
 import { decodeShellWord, shellCommandSegments } from "./toolchain-packages";
+import { scriptSourceKind } from "./toolchain-script-extensions";
 
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -194,7 +195,7 @@ export const lintInventoryCommands = (
         const target = words.at(2);
         if (
           target !== undefined &&
-          /\.(?:[cm]?js|ts)$/.test(target) &&
+          scriptSourceKind(target) !== undefined &&
           typeof scripts[target] !== "string"
         ) {
           if (!raw.every(literalWord))

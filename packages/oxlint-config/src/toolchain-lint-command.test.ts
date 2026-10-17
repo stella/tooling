@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 
 import { lintInventoryCommands } from "./toolchain-lint-command";
+import { scriptSourceExtensions } from "./toolchain-script-extensions";
 
 const manifest = (scripts: Record<string, string>) => ({
   devDependencies: { "oxlint-tsgolint": "7.0.2003" },
@@ -86,11 +87,11 @@ test("validation-only workspace leaves do not claim a type-aware lint scope", ()
 });
 
 test("literal validation files remain preparation steps alongside real oxlint commands", () => {
-  for (const extension of ["ts", "js", "mjs", "cjs"]) {
+  for (const extension of Object.keys(scriptSourceExtensions)) {
     expect(
       lintInventoryCommands(
         manifest({
-          lint: `bun run scripts/validate.${extension} --check 'literal argument' && oxlint .`,
+          lint: `bun run scripts/validate${extension} --check 'literal argument' && oxlint .`,
         }),
       ),
     ).toEqual({
