@@ -122,6 +122,27 @@ export const checkNodeProjects = ({
     typeof lintInventoryCommands
   >["commands"][number] & { cwd: string })[] = [];
   const activeBuilds = new Set<string>();
+  const workspaceLifecycle = (directory: string): ScriptLifecycleContext => {
+    const nestedLifecycle = { ...lifecycle };
+    for (const [key, name] of [
+      ["npmrc", ".npmrc"],
+      ["pnpmWorkspace", "pnpm-workspace.yaml"],
+      ["yarnrc", ".yarnrc.yml"],
+    ] as const) {
+      let ancestor = directory;
+      while (ancestor !== ".") {
+        if (
+          lifecycleFile(root, path.posix.join(ancestor, name), trackedFiles)
+            .type !== "absent"
+        ) {
+          nestedLifecycle[key] = { type: "unknown" };
+          break;
+        }
+        ancestor = path.posix.dirname(ancestor);
+      }
+    }
+    return nestedLifecycle;
+  };
   const lifecycle: ScriptLifecycleContext = {
     packageManager: record(manifest) ? manifest["packageManager"] : undefined,
     npmrc: lifecycleFile(root, ".npmrc", trackedFiles),
@@ -166,7 +187,7 @@ export const checkNodeProjects = ({
       activeBuilds.add(directory);
       try {
         const nested = lintInventoryCommands(pkg, true, {
-          ...lifecycle,
+          ...workspaceLifecycle(directory),
           entryScript: "build",
         });
         if (nested.workspaceTask)
@@ -232,24 +253,7 @@ export const checkNodeProjects = ({
           workspace["scripts"]["lint"] === undefined
         )
           continue;
-        const nestedLifecycle = { ...lifecycle };
-        for (const [key, name] of [
-          ["npmrc", ".npmrc"],
-          ["pnpmWorkspace", "pnpm-workspace.yaml"],
-          ["yarnrc", ".yarnrc.yml"],
-        ] as const) {
-          let ancestor = directory;
-          while (ancestor !== ".") {
-            if (
-              lifecycleFile(root, path.posix.join(ancestor, name), trackedFiles)
-                .type !== "absent"
-            ) {
-              nestedLifecycle[key] = { type: "unknown" };
-              break;
-            }
-            ancestor = path.posix.dirname(ancestor);
-          }
-        }
+        const nestedLifecycle = workspaceLifecycle(directory);
         const nested = lintInventoryCommands(workspace, true, nestedLifecycle);
         if (nested.workspaceTask)
           throw new Error(

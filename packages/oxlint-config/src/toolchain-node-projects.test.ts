@@ -777,42 +777,50 @@ test("filtered Bun build preparation cannot hide selected workspace lifecycle ho
 });
 
 test("nested workspace lifecycle settings cannot silently override root hook selection", () => {
-  withInventoryFixture((root, trackedFiles) => {
-    const manifest = {
-      ...fixtureManifest,
-      packageManager: "pnpm@12.9.1",
-      workspaces: ["packages/*"],
-      scripts: { lint: "turbo run lint" },
-    };
-    mkdirSync(path.join(root, "packages/a"), { recursive: true });
-    const files = {
-      "pnpm-workspace.yaml":
-        "packages: ['packages/*']\nenablePrePostScripts: false\n",
-      "packages/a/package.json": JSON.stringify({
-        name: "@fixture/a",
-        scripts: { prelint: "oxlint orphan.mjs", lint: "oxlint owned.mjs" },
-      }),
-      "packages/a/owned.mjs": "export const value = 1;\n",
-      "packages/a/orphan.mjs": "export const value = 1;\n",
-      "packages/a/tsconfig.json": JSON.stringify({
-        compilerOptions: { allowJs: true },
-        files: ["owned.mjs"],
-      }),
-    };
-    for (const [file, source] of Object.entries(files)) {
-      writeFileSync(path.join(root, file), source);
-      trackedFiles.add(file);
-    }
-    expect(checkNodeProjects({ root, manifest, trackedFiles })).toEqual([]);
-    writeFileSync(
-      path.join(root, "packages/a/pnpm-workspace.yaml"),
-      "enablePrePostScripts: true\n",
-    );
-    trackedFiles.add("packages/a/pnpm-workspace.yaml");
-    const findings = checkNodeProjects({ root, manifest, trackedFiles });
-    expect(findings).toHaveLength(1);
-    expect(findings.at(0)?.message).toContain("nested workspace overrides");
-  });
+  for (const lint of [
+    "turbo run lint",
+    "bun --filter @fixture/a build && oxlint packages/a/owned.mjs",
+  ])
+    withInventoryFixture((root, trackedFiles) => {
+      const manifest = {
+        ...fixtureManifest,
+        packageManager: "pnpm@12.9.1",
+        workspaces: ["packages/*"],
+        scripts: { lint },
+      };
+      mkdirSync(path.join(root, "packages/a"), { recursive: true });
+      const files = {
+        "pnpm-workspace.yaml":
+          "packages: ['packages/*']\nenablePrePostScripts: false\n",
+        "packages/a/package.json": JSON.stringify({
+          name: "@fixture/a",
+          scripts: {
+            build: "pnpm run lint",
+            prelint: "oxlint orphan.mjs",
+            lint: "oxlint owned.mjs",
+          },
+        }),
+        "packages/a/owned.mjs": "export const value = 1;\n",
+        "packages/a/orphan.mjs": "export const value = 1;\n",
+        "packages/a/tsconfig.json": JSON.stringify({
+          compilerOptions: { allowJs: true },
+          files: ["owned.mjs"],
+        }),
+      };
+      for (const [file, source] of Object.entries(files)) {
+        writeFileSync(path.join(root, file), source);
+        trackedFiles.add(file);
+      }
+      expect(checkNodeProjects({ root, manifest, trackedFiles })).toEqual([]);
+      writeFileSync(
+        path.join(root, "packages/a/pnpm-workspace.yaml"),
+        "enablePrePostScripts: true\n",
+      );
+      trackedFiles.add("packages/a/pnpm-workspace.yaml");
+      const findings = checkNodeProjects({ root, manifest, trackedFiles });
+      expect(findings).toHaveLength(1);
+      expect(findings.at(0)?.message).toContain("nested workspace overrides");
+    });
 });
 
 test("declared inventory runtimes load real configs independently of the checker parent", async () => {
