@@ -3,6 +3,7 @@
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { basename, join, relative, resolve } from "node:path";
 import { expect, test } from "bun:test";
+import { DOM_ELEMENT_PRODUCERS } from "./no-unsafe-inner-html.ts";
 
 const repositoryRoot = resolve(import.meta.dir, "../../../");
 const fixtureRoot = join(repositoryRoot, "packages/oxlint-plugin/fixtures");
@@ -303,24 +304,165 @@ const aliasEdits = (
 const countMatches = (pattern: RegExp, source: string): number =>
   [...source.matchAll(pattern)].length;
 
+type DomElementProducer = (typeof DOM_ELEMENT_PRODUCERS)[number];
+
+const producerReceivers = (
+  receiver: DomElementProducer["receiver"],
+): readonly string[] => {
+  switch (receiver) {
+    case "document":
+      return ["document"];
+    case "element":
+      return ['document.createElement("div")'];
+    case "either":
+      return [
+        "document",
+        'document.createElement("div")',
+      ];
+    default: {
+      const exhaustive: never = receiver;
+      throw new Error(`Unknown DOM producer receiver: ${exhaustive}`);
+    }
+  }
+};
+
+type CallableDomProducer = Extract<
+  DomElementProducer,
+  { kind: "method" | "collection" }
+>;
+const producerArguments = {
+  createElement: '"div"',
+  createElementNS: '"http://www.w3.org/1999/xhtml", "div"',
+  getElementById: '"fixture"',
+  querySelector: '"div"',
+  closest: '"div"',
+  elementFromPoint: "0, 0",
+  getElementsByClassName: '"fixture"',
+  getElementsByTagName: '"div"',
+  getElementsByTagNameNS: '"http://www.w3.org/1999/xhtml", "div"',
+  getElementsByName: '"fixture"',
+  querySelectorAll: '"div"',
+} as const satisfies Record<CallableDomProducer["name"], string>;
+
+const producerExpressions = (entry: DomElementProducer): string[] => {
+  const expressions: string[] = [];
+  for (const receiver of producerReceivers(entry.receiver)) {
+    switch (entry.kind) {
+      case "property":
+        expressions.push(`${receiver}.${entry.name}`);
+        break;
+      case "method":
+        expressions.push(`${receiver}.${entry.name}(${producerArguments[entry.name]})`);
+        break;
+      case "collection": {
+        const collection = `${receiver}.${entry.name}(${producerArguments[entry.name]})`;
+        expressions.push(`${collection}[0]`, `${collection}.item(0)`);
+        break;
+      }
+      default: {
+        const exhaustive: never = entry;
+        throw new Error(`Unknown DOM producer kind: ${exhaustive}`);
+      }
+    }
+  }
+  return expressions;
+};
+
+const producerCorpus = (): {
+  source: string;
+  invalidCount: number;
+  producerIds: string[];
+} => {
+  const lines = [
+    'declare const payload: object;',
+    'declare const config: Record<string, unknown>;',
+    "",
+  ];
+  let invalidCount = 0;
+  const producerIds: string[] = [];
+  for (const entry of DOM_ELEMENT_PRODUCERS) {
+    const producerId = `${entry.receiver}:${entry.kind}:${entry.name}`;
+    producerIds.push(producerId);
+    const expressions = producerExpressions(entry);
+    expect(expressions.length).toBeGreaterThan(0);
+    for (const [index, target] of expressions.entries()) {
+      lines.push(
+        `// DOM producer case ${entry.receiver}.${entry.name} (${entry.kind}) #${index + 1}`,
+        `// oxlint-disable-next-line ${ruleId} -- recognized DOM target with opaque HTML source`,
+        `Object.assign(${target}, payload);`,
+      );
+      invalidCount += 1;
+    }
+    if (entry.kind === "collection") {
+      for (const receiver of producerReceivers(entry.receiver)) {
+        const collection = `${receiver}.${entry.name}(${producerArguments[entry.name]})`;
+        for (const access of ["elements[0]", "elements.item(0)"]) {
+          lines.push(
+            "{",
+            `const elements = ${collection};`,
+            `// oxlint-disable-next-line ${ruleId} -- stable collection binding retains indexed element provenance`,
+            `Object.assign(${access}, payload);`,
+            "}",
+          );
+          invalidCount += 1;
+        }
+      }
+    }
+  }
+  const cleanTargets = [
+    "config.body",
+    'config.querySelector("div")',
+    'config.getElementsByTagName("div")[0]',
+    'config.getElementsByTagName("div").item(0)',
+  ];
+  for (const target of cleanTargets) {
+    lines.push(
+      `// expect-clean: ${ruleId} -- non-DOM receiver remains outside producer table`,
+      `Object.assign(${target}, payload);`,
+    );
+  }
+  return {
+    source: `${lines.join("\n")}\n`,
+    invalidCount,
+    producerIds,
+  };
+};
+
 test(
   "HTML sink fixtures keep their invalid and clean outcomes across equivalent syntax",
   async () => {
+    const {
+      source: producerSource,
+      invalidCount: producerInvalidCount,
+      producerIds,
+    } = producerCorpus();
+    const expectedProducerIds = DOM_ELEMENT_PRODUCERS.map(
+      ({ receiver, kind, name }) => `${receiver}:${kind}:${name}`,
+    );
+    expect([...new Set(producerIds)].sort()).toEqual(
+      [...new Set(expectedProducerIds)].sort(),
+    );
+    expect(producerIds).toHaveLength(expectedProducerIds.length);
+    expect(new Set(producerIds).size).toBe(DOM_ELEMENT_PRODUCERS.length);
     const tempDirectory = await mkdtemp(join(fixtureRoot, "html-equivalence-"));
     const collectorPath = join(tempDirectory, "collector.mjs");
     const configPrefix = `.html-equivalence-${basename(tempDirectory)}`;
     const collectorConfigPath = join(repositoryRoot, `${configPrefix}-collector.json`);
     const ruleConfigPath = join(repositoryRoot, `${configPrefix}-rule.json`);
-    const originalPaths = (await readdir(fixtureRoot))
-      .filter(
-        (name) =>
-          name.startsWith("no-unsafe-inner-html") && name.endsWith(".fixture.tsx"),
-      )
-      .sort()
-      .map((name) => join(fixtureRoot, name));
-    expect(originalPaths.length).toBeGreaterThan(0);
+    const producerCorpusPath = join(tempDirectory, "dom-producer-corpus.fixture.tsx");
 
     try {
+      await writeFile(producerCorpusPath, producerSource);
+      const originalPaths = (await readdir(fixtureRoot))
+        .filter(
+          (name) =>
+            name.startsWith("no-unsafe-inner-html") &&
+            name.endsWith(".fixture.tsx"),
+        )
+        .sort()
+        .map((name) => join(fixtureRoot, name));
+      expect(originalPaths.length).toBeGreaterThan(0);
+      originalPaths.push(producerCorpusPath);
       const originals = await Promise.all(
         originalPaths.map(async (path) => ({ path, source: await readFile(path, "utf8") })),
       );
@@ -334,6 +476,9 @@ test(
       );
       expect(expectedInvalidCount).toBeGreaterThan(0);
       expect(expectedCleanCount).toBeGreaterThan(0);
+      expect(
+        countMatches(invalidDirective, producerSource),
+      ).toBe(producerInvalidCount);
 
       await writeFile(collectorPath, collectorPlugin);
       const collectorConfig = {

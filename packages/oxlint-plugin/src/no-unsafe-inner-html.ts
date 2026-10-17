@@ -48,6 +48,39 @@ import {
   unwrapExpression,
 } from "./utils.ts";
 
+type DomElementProducer = {
+  name: string;
+  kind: "property" | "method" | "collection";
+  receiver: "document" | "element" | "either";
+};
+
+// DOM element provenance and the generated equivalence corpus share this table.
+export const DOM_ELEMENT_PRODUCERS = [
+  { name: "body", kind: "property", receiver: "document" },
+  { name: "head", kind: "property", receiver: "document" },
+  { name: "documentElement", kind: "property", receiver: "document" },
+  { name: "activeElement", kind: "property", receiver: "document" },
+  { name: "scrollingElement", kind: "property", receiver: "document" },
+  { name: "fullscreenElement", kind: "property", receiver: "document" },
+  { name: "createElement", kind: "method", receiver: "document" },
+  { name: "createElementNS", kind: "method", receiver: "document" },
+  { name: "getElementById", kind: "method", receiver: "document" },
+  { name: "querySelector", kind: "method", receiver: "either" },
+  { name: "closest", kind: "method", receiver: "element" },
+  { name: "elementFromPoint", kind: "method", receiver: "document" },
+  { name: "getElementsByClassName", kind: "collection", receiver: "either" },
+  { name: "getElementsByTagName", kind: "collection", receiver: "either" },
+  { name: "getElementsByTagNameNS", kind: "collection", receiver: "either" },
+  { name: "getElementsByName", kind: "collection", receiver: "document" },
+  { name: "querySelectorAll", kind: "collection", receiver: "either" },
+  { name: "parentElement", kind: "property", receiver: "element" },
+  { name: "firstElementChild", kind: "property", receiver: "element" },
+  { name: "lastElementChild", kind: "property", receiver: "element" },
+  { name: "nextElementSibling", kind: "property", receiver: "element" },
+  { name: "previousElementSibling", kind: "property", receiver: "element" },
+  { name: "offsetParent", kind: "property", receiver: "element" },
+] as const satisfies readonly DomElementProducer[];
+
 // The provenance text after the marker must be non-empty.
 const WAIVER_RE = /^\s*safe-html:\s*\S/u;
 
@@ -336,11 +369,13 @@ export default eslintCompatPlugin({
           node: unknown;
           scope: Scope;
           seen?: Set<Variable>;
+          kind?: "element" | "collection";
         };
         const isKnownDomTarget = ({
           node,
           scope,
           seen = new Set<Variable>(),
+          kind = "element",
         }: DomTargetOptions): boolean => {
           const target = unwrapExpression(node);
           if (isIdentifier(target)) {
@@ -351,7 +386,9 @@ export default eslintCompatPlugin({
                 current = current.upper;
                 continue;
               }
-              if (variable.defs.length === 0) return isDocumentReceiver(target);
+              if (variable.defs.length === 0) {
+                return kind === "element" && isDocumentReceiver(target);
+              }
               if (seen.has(variable)) return false;
               seen.add(variable);
               const definition = variable.defs.at(0);
@@ -371,23 +408,68 @@ export default eslintCompatPlugin({
                 node: definition.node.init,
                 scope: context.sourceCode.getScope(definition.node),
                 seen,
+                kind,
               });
+            }
+          }
+          const hasProducerReceiver = (
+            receiver: unknown,
+            producer: DomElementProducer,
+          ): boolean => {
+            if (
+              producer.receiver !== "element" &&
+              isDocumentReceiver(receiver)
+            ) {
+              return true;
+            }
+            return (
+              producer.receiver !== "document" &&
+              isKnownDomTarget({ node: receiver, scope, seen })
+            );
+          };
+          const isElementCollection = (node: unknown): boolean =>
+            isKnownDomTarget({ node, scope, seen, kind: "collection" });
+          if (kind === "element" && target?.type === "MemberExpression") {
+            const property = memberPropertyName(target);
+            const producer = DOM_ELEMENT_PRODUCERS.find(
+              (entry) => entry.kind === "property" && entry.name === property,
+            );
+            if (producer !== undefined) {
+              return hasProducerReceiver(target.object, producer);
+            }
+            const index = unwrapExpression(target.property);
+            if (
+              target.computed === true &&
+              index?.type === "Literal" &&
+              typeof index.value === "number" &&
+              Number.isInteger(index.value) &&
+              index.value >= 0
+            ) {
+              return isElementCollection(target.object);
             }
           }
           if (target?.type === "CallExpression") {
             const callee = invokedCallee(target);
+            if (callee?.type !== "MemberExpression") return false;
+            const method = memberPropertyName(callee);
+            if (
+              kind === "element" &&
+              method === "item" &&
+              isElementCollection(callee.object)
+            ) {
+              return true;
+            }
+            const producer = DOM_ELEMENT_PRODUCERS.find(
+              (entry) =>
+                entry.kind === (kind === "collection" ? "collection" : "method") &&
+                entry.name === method,
+            );
             return (
-              callee?.type === "MemberExpression" &&
-              isDocumentReceiver(callee.object) &&
-              [
-                "createElement",
-                "createElementNS",
-                "getElementById",
-                "querySelector",
-              ].includes(memberPropertyName(callee) ?? "")
+              producer !== undefined &&
+              hasProducerReceiver(callee.object, producer)
             );
           }
-          return isDocumentReceiver(target);
+          return kind === "element" && isDocumentReceiver(target);
         };
 
         let sanitizerPolicy: SanitizerPolicy = SANITIZER_POLICY.allowlist;
