@@ -10,7 +10,7 @@ import {
   readRegistryFirstPartyPackages,
   REQUIRED_RELEASE_AGE_SECONDS,
   synchronizeFirstPartyExcludes,
-} from "./quarantine-policy-core.ts";
+} from "./quarantine-policy-core";
 
 const now = new Date("2026-10-17T12:00:00.000Z");
 const expires = "2026-10-19T12:00:00.000Z";

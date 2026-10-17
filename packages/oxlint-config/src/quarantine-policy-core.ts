@@ -1,4 +1,4 @@
-import { parseJsonc } from "./jsonc.ts";
+import { parseJsonc } from "./jsonc";
 
 export const REQUIRED_RELEASE_AGE_SECONDS = 5 * 24 * 60 * 60;
 export const NPM_REGISTRY = "https://registry.npmjs.org";
