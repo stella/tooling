@@ -1,5 +1,7 @@
 import { library } from "./packages/oxlint-config/src/index";
 import {
+  bunTestHygienePluginSpecifiers,
+  bunTestHygieneRules,
   portableSafetyPluginSpecifiers,
   portableSafetyRules,
   routeQueryPluginSpecifiers,
@@ -8,7 +10,11 @@ import {
 
 export default library({
   ignorePatterns: ["packages/oxlint-config/dist/"],
-  jsPlugins: [...portableSafetyPluginSpecifiers, ...routeQueryPluginSpecifiers],
+  jsPlugins: [
+    ...bunTestHygienePluginSpecifiers,
+    ...portableSafetyPluginSpecifiers,
+    ...routeQueryPluginSpecifiers,
+  ],
   overrides: [
     {
       // Oxlint presents plugin AST nodes as intentionally untyped values.
@@ -27,7 +33,14 @@ export default library({
     },
     {
       files: ["packages/oxlint-plugin/fixtures/**/*.{ts,tsx}"],
-      rules: { ...portableSafetyRules, ...routeQueryRules },
+      rules: {
+        ...bunTestHygieneRules,
+        ...portableSafetyRules,
+        ...routeQueryRules,
+        // Fixtures intentionally place Bun's void-returning registrations in
+        // expression positions to exercise conditional-branch handling.
+        "typescript/no-confusing-void-expression": "off",
+      },
     },
   ],
 });
