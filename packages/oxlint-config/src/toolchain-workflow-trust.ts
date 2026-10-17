@@ -97,25 +97,24 @@ const excludesUntrusted = ({
 const staticData = (word: string) =>
   !/[`$\\]/u.test(word) && !/[<>]/u.test(word);
 const metadataScript = (command: string) => {
-  let unknown = false;
-  // Actions interpolates before the shell sees quotes or comments. Only these
-  // bounded identity values can be substituted into the metadata proof language.
-  const source = command.replace(
-    /\$\{\{([\s\S]*?)\}\}/gu,
-    (_match, expression: string) => {
-      if (
-        ![
-          "github.sha",
-          "github.run_id",
-          "github.run_attempt",
-          "github.repository",
-        ].includes(expression.trim())
-      )
-        unknown = true;
-      return "stll-metadata";
-    },
-  );
-  return unknown || source.includes("${{") ? undefined : source;
+  const interpolation = /\$\{\{([\s\S]*?)\}\}/gu;
+  // Actions interpolates before the shell sees quotes or comments. Validate
+  // each expression before replacement, without state mutated in a callback.
+  for (const match of command.matchAll(interpolation)) {
+    const expression = match.at(1);
+    if (
+      expression === undefined ||
+      ![
+        "github.sha",
+        "github.run_id",
+        "github.run_attempt",
+        "github.repository",
+      ].includes(expression.trim())
+    )
+      return undefined;
+  }
+  const source = command.replace(interpolation, "stll-metadata");
+  return source.includes("${{") ? undefined : source;
 };
 const metadataWord = (raw: string) => {
   if (/^'[^']*'$/u.test(raw)) return true;
@@ -140,7 +139,9 @@ const fileArguments = (words: readonly string[], flags: RegExp) =>
 const safeComparison = (words: readonly string[]) => {
   const first = words.at(0);
   if (!["test", "[", "[["].includes(first ?? "")) return false;
-  const end = first === "[[" ? "]]" : first === "[" ? "]" : undefined;
+  let end: string | undefined;
+  if (first === "[[") end = "]]";
+  else if (first === "[") end = "]";
   if (end !== undefined && words.at(-1) !== end) return false;
   const operands = words.slice(1, end === undefined ? undefined : -1);
   if (operands.length === 1) return true;
@@ -410,6 +411,13 @@ type WorkflowTrustFinding = {
   | { type: "step"; step: number }
 );
 
+const workflowEvents = (triggers: unknown): unknown[] => {
+  if (typeof triggers === "string") return [triggers];
+  if (Array.isArray(triggers)) return triggers;
+  if (record(triggers)) return Object.keys(triggers);
+  return [];
+};
+
 /** Enforce a workflow's declared trust boundary before repository dependency execution. */
 export const checkWorkflowTrust = (workflow: unknown) => {
   const findings: WorkflowTrustFinding[] = [];
@@ -417,14 +425,7 @@ export const checkWorkflowTrust = (workflow: unknown) => {
   const jobs = workflow["jobs"];
   if (!record(jobs["trust-check"])) return findings;
   const triggers = workflow["on"];
-  const events =
-    typeof triggers === "string"
-      ? [triggers]
-      : Array.isArray(triggers)
-        ? triggers
-        : record(triggers)
-          ? Object.keys(triggers)
-          : [];
+  const events = workflowEvents(triggers);
   const pullRequests = events.filter(
     (event): event is string =>
       event === "pull_request" || event === "pull_request_target",
