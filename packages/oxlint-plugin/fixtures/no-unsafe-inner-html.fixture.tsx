@@ -163,6 +163,56 @@ export const UnsafeObjectAssign = () =>
   // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html
   Object.assign(document.createElement("div"), { innerHTML: rawHtml });
 
+export const UnsafeApplyInsertAdjacentHtml = (element: Element) => {
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html
+  element.insertAdjacentHTML.apply(element, ["beforeend", rawHtml]);
+};
+
+export const UnsafeApplySpreadInsertAdjacentHtml = (element: Element) => {
+  const argumentsList = ["beforeend", rawHtml] as const;
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html
+  element.insertAdjacentHTML.apply(element, [...argumentsList]);
+};
+
+export const UnsafeApplyDocumentWrite = () => {
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html
+  document.write.apply(document, [rawHtml]);
+};
+
+declare const opaqueChunks: string[];
+export const UnsafeOpaqueApplyDocumentWrite = () => {
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html
+  document.write.apply(document, opaqueChunks);
+};
+
+declare const unsafeDomProperties: object;
+export const UnsafeObjectAssignHoistedSource = () => {
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html
+  Object.assign(document.createElement("div"), unsafeDomProperties);
+};
+
+export const UnsafeObjectAssignApplyHoistedSource = () => {
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html
+  Object.assign.apply(Object, [
+    document.createElement("div"),
+    unsafeDomProperties,
+  ]);
+};
+
+export const UnsafeObjectAssignSpreadSource = () =>
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html
+  Object.assign(document.createElement("div"), { ...unsafeDomProperties });
+
+export const UnsafeObjectAssignComputedKey = (key: string) =>
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html
+  Object.assign(document.createElement("div"), { [key]: rawHtml });
+
+declare const config: Record<string, unknown>;
+export const SafeObjectAssignHoistedConfig = () => {
+  // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
+  Object.assign(config, unsafeDomProperties);
+};
+
 declare const React: {
   createElement: (type: string, props: object | null) => unknown;
 };
@@ -269,6 +319,20 @@ export const SafeAnnotatedWrite = () => {
 export const SafeTextContentAssign = () =>
   // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
   Object.assign(document.createElement("div"), { textContent: rawHtml });
+
+export const SafeObjectAssignComputedTemplate = () =>
+  // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
+  Object.assign(document.createElement("div"), {
+    [`innerHTML`]: "<b>Static</b>",
+  });
+
+export const SafeApplyStaticDocumentWrite = () =>
+  // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
+  document.write.apply(document, ["<p>Static</p>"]);
+
+export const SafeApplyStaticInsertAdjacentHtml = (element: Element) =>
+  // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
+  element.insertAdjacentHTML.apply(element, ["beforeend", "<b>Static</b>"]);
 
 declare const stream: { write: (chunk: string) => void };
 // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html

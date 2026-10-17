@@ -214,8 +214,30 @@ const objectPropertyKey = (property: unknown): string | null => {
   if (!isAstNode(property)) {
     return null;
   }
-  if (property.computed === true && !isStringLiteral(property.key)) {
-    return null;
+  if (property.computed === true) {
+    if (isStringLiteral(property.key)) {
+      return property.key.value;
+    }
+    const key = property.key;
+    if (
+      !isAstNode(key) ||
+      key.type !== "TemplateLiteral" ||
+      !Array.isArray(key.expressions) ||
+      key.expressions.length !== 0 ||
+      !Array.isArray(key.quasis)
+    ) {
+      return null;
+    }
+    const quasi = key.quasis.at(0);
+    if (!isAstNode(quasi)) {
+      return null;
+    }
+    const value = quasi.value;
+    const cooked =
+      typeof value === "object" && value !== null
+        ? Reflect.get(value, "cooked")
+        : undefined;
+    return typeof cooked === "string" ? cooked : null;
   }
   return getPropertyName(property.key);
 };
@@ -231,9 +253,28 @@ const objectProperties = (node: unknown): AstNode[] => {
   return expression.properties.filter(isAstNode);
 };
 
+type AppliedArguments =
+  | { status: "known"; args: unknown[] }
+  | { status: "opaque" };
+
+const appliedArgumentsFor = (call: AstNode): AppliedArguments => {
+  const args = Array.isArray(call.arguments) ? call.arguments : [];
+  const applied = unwrapExpression(args.at(1));
+  if (
+    applied === null ||
+    (applied.type === "Literal" && applied.value === null) ||
+    isIdentifier(applied, "undefined")
+  ) {
+    return { status: "known", args: [] };
+  }
+  if (applied.type !== "ArrayExpression" || !Array.isArray(applied.elements)) {
+    return { status: "opaque" };
+  }
+  return { status: "known", args: applied.elements };
+};
+
 // The arguments the invoked function receives: `f.call(thisArg, ...args)`
-// shifts them by one; `f.apply(thisArg, args)` passes an array this rule does
-// not read, so it yields none.
+// shifts them by one; `f.apply(thisArg, [...])` forwards a literal array.
 const invokedArguments = (call: unknown): unknown[] => {
   if (!isAstNode(call)) {
     return [];
@@ -247,7 +288,35 @@ const invokedArguments = (call: unknown): unknown[] => {
   if (method === "call") {
     return args.slice(1);
   }
-  return method === "apply" ? [] : args;
+  if (method !== "apply") {
+    return args;
+  }
+  const applied = appliedArgumentsFor(call);
+  if (applied.status === "opaque") {
+    // Preserve an opaque sentinel so known sinks fail closed.
+    return [call, call];
+  }
+  return applied.args;
+};
+
+const isOpaqueApply = (call: unknown): boolean => {
+  if (!isAstNode(call) || call.type !== "CallExpression") {
+    return false;
+  }
+  const callee = unwrapExpression(call.callee);
+  if (
+    callee?.type !== "MemberExpression" ||
+    memberPropertyName(callee) !== "apply"
+  ) {
+    return false;
+  }
+  const applied = appliedArgumentsFor(call);
+  return (
+    applied.status === "opaque" ||
+    applied.args.some(
+      (argument) => isAstNode(argument) && argument.type === "SpreadElement",
+    )
+  );
 };
 
 // `document.write`, `window.document.write`, `frame.contentDocument.write`,
@@ -262,6 +331,24 @@ const isDocumentReceiver = (node: unknown): boolean => {
   }
   const name = memberPropertyName(receiver);
   return name !== null && DOCUMENT_MEMBERS.has(name);
+};
+
+const isKnownDomTarget = (node: unknown): boolean => {
+  const target = unwrapExpression(node);
+  if (target?.type === "CallExpression") {
+    const callee = invokedCallee(target);
+    return (
+      callee?.type === "MemberExpression" &&
+      isIdentifier(callee.object, "document") &&
+      [
+        "createElement",
+        "createElementNS",
+        "getElementById",
+        "querySelector",
+      ].includes(memberPropertyName(callee) ?? "")
+    );
+  }
+  return isDocumentReceiver(target);
 };
 
 export default eslintCompatPlugin({
@@ -346,15 +433,37 @@ export default eslintCompatPlugin({
           }
         };
 
-        const checkHtmlPropertySources = (sources: unknown[]): void => {
+        const checkHtmlPropertySources = (
+          sources: unknown[],
+          domTarget: boolean,
+        ): void => {
           for (const source of sources) {
+            const expression = unwrapExpression(source);
+            if (expression?.type !== "ObjectExpression") {
+              if (domTarget) {
+                reportIfUnsafe(source);
+              }
+              continue;
+            }
             for (const property of objectProperties(source)) {
+              if (property.type === "SpreadElement") {
+                if (domTarget) {
+                  reportIfUnsafe(property);
+                }
+                continue;
+              }
               const key =
                 property.type === "Property"
                   ? objectPropertyKey(property)
                   : null;
               if (key !== null && HTML_PROPERTIES.has(key)) {
                 reportIfUnsafe(property.value);
+              } else if (
+                domTarget &&
+                key === null &&
+                property.computed === true
+              ) {
+                reportIfUnsafe(property);
               }
             }
           }
@@ -429,14 +538,26 @@ export default eslintCompatPlugin({
               return;
             }
             if (HTML_FIRST_ARGUMENT_METHODS.has(method)) {
+              if (isOpaqueApply(node)) {
+                reportIfUnsafe(node);
+                return;
+              }
               reportIfUnsafe(args.at(0));
               return;
             }
             if (method === "insertAdjacentHTML") {
+              if (isOpaqueApply(node)) {
+                reportIfUnsafe(node);
+                return;
+              }
               reportIfUnsafe(args.at(1));
               return;
             }
             if (method === "setAttribute") {
+              if (isOpaqueApply(node)) {
+                reportIfUnsafe(node);
+                return;
+              }
               const attribute = unwrapExpression(args.at(0));
               if (
                 isStringLiteral(attribute) &&
@@ -461,7 +582,10 @@ export default eslintCompatPlugin({
               return;
             }
             if (isMemberAccess(callee, "Object", "assign")) {
-              checkHtmlPropertySources(args.slice(1));
+              checkHtmlPropertySources(
+                args.slice(1),
+                isKnownDomTarget(args.at(0)),
+              );
             }
           },
         };
