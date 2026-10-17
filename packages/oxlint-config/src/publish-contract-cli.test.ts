@@ -1,7 +1,15 @@
 import { expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -138,5 +146,118 @@ test("CLI read and write reject unsupported published manifests without replacin
     }
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("CLI artifact mode checks real tarball import closure and the matching workspace contract", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "publish-contract-artifact-"));
+  const require = createRequire(import.meta.url);
+  const manifest = {
+    name: "artifact-library",
+    version: "1.0.0",
+    type: "module",
+    exports: "./dist/index.mjs",
+    engines: { node: "^20.19.0 || >=22.12.0" },
+    scripts: { build: "tsdown" },
+  };
+  const archive = path.join(root, "artifact.tgz");
+  const run = (...args: string[]) =>
+    Bun.spawnSync([process.execPath, cli, ...args], { cwd: root });
+  const pack = () =>
+    execFileSync("tar", ["-czf", archive, "package"], { cwd: root });
+  const writePackedManifest = (value: unknown) =>
+    writeFile(path.join(root, "package/package.json"), JSON.stringify(value));
+  try {
+    await mkdir(path.join(root, "node_modules"));
+    await symlink(
+      path.dirname(require.resolve("tsdown/package.json")),
+      path.join(root, "node_modules/tsdown"),
+    );
+    await writeFile(path.join(root, "package.json"), JSON.stringify(manifest));
+    await writeFile(path.join(root, "entry.js"), "export {};\n");
+    await writeFile(
+      path.join(root, "tsdown.config.mjs"),
+      "export default { entry: ['entry.js'], dts: false, target: 'node20.19.0' };\n",
+    );
+    await writeReleaseWorkflow(root);
+    execFileSync("git", ["init", "--quiet"], { cwd: root });
+    execFileSync(
+      "git",
+      ["add", "package.json", "entry.js", "tsdown.config.mjs", ".github"],
+      { cwd: root },
+    );
+    const written = run("--write");
+    expect(written.stderr.toString()).toBe("");
+    expect(written.exitCode).toBe(0);
+    const originalContract = await readFile(
+      path.join(root, "publish-contract.json"),
+      "utf8",
+    );
+    await mkdir(path.join(root, "package/dist"), { recursive: true });
+    await writePackedManifest(manifest);
+    await writeFile(
+      path.join(root, "package/dist/index.mjs"),
+      "import './helper.mjs'; throw new Error('artifact code must never execute');\n",
+    );
+    pack();
+    const missing = run("--artifact", archive);
+    expect(missing.exitCode).toBe(1);
+    expect(missing.stderr.toString()).toContain("helper.mjs");
+    await writeFile(path.join(root, "package/dist/helper.mjs"), "export {};\n");
+    pack();
+    const valid = run("--artifact", archive);
+    expect(valid.stderr.toString()).toBe("");
+    expect(valid.exitCode).toBe(0);
+    await writePackedManifest({ ...manifest, exports: "./dist/helper.mjs" });
+    pack();
+    const drift = run("--artifact", archive);
+    expect(drift.exitCode).toBe(1);
+    expect(drift.stderr.toString()).toContain(
+      "published entryPoints.exports differs",
+    );
+    for (const packedManifest of [
+      { ...manifest, name: "unknown-package" },
+      { ...manifest, private: true },
+    ]) {
+      await writePackedManifest(packedManifest);
+      pack();
+      const unknown = run("--artifact", archive);
+      expect(unknown.exitCode).toBe(1);
+      expect(unknown.stderr.toString()).toContain(
+        "declared public workspace package",
+      );
+    }
+    expect(
+      await readFile(path.join(root, "publish-contract.json"), "utf8"),
+    ).toBe(originalContract);
+    await writeFile(
+      path.join(root, "package.json"),
+      JSON.stringify({ ...manifest, exports: "./dist/changed.mjs" }),
+    );
+    const sourceDrift = run("--artifact", path.join(root, "absent.tgz"));
+    expect(sourceDrift.exitCode).toBe(1);
+    expect(sourceDrift.stderr.toString()).toContain(
+      "published entryPoints.exports differs",
+    );
+    expect(sourceDrift.stderr.toString()).not.toContain("tar:");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("CLI artifact mode accepts exactly one explicit archive and never writes contracts", () => {
+  for (const args of [
+    ["--artifact"],
+    ["--artifact", ""],
+    ["--artifact", "one.tgz", "two.tgz"],
+    ["--write", "--artifact", "one.tgz"],
+    ["--artifact", "one.tgz", "--write"],
+    ["--artifact", "--write"],
+  ]) {
+    const result = Bun.spawnSync([process.execPath, cli, ...args]);
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain(
+      "Expected no arguments, --write, or --artifact",
+    );
   }
 });
