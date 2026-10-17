@@ -5,6 +5,7 @@ import path from "node:path";
 import picomatch from "picomatch";
 
 import { lintInventoryCommands } from "./toolchain-lint-command";
+import { scriptSourceKind } from "./toolchain-script-extensions";
 
 export const nodeProjectRule = "type-aware-projects";
 
@@ -29,7 +30,7 @@ export const checkProjectOwnership = ({
   [...new Set(lintedFiles)]
     .filter(
       (file) =>
-        /\.(?:[cm]?js|ts)$/.test(file) &&
+        scriptSourceKind(file) !== undefined &&
         trackedFiles.has(file) &&
         !projectFiles.has(file),
     )
@@ -139,18 +140,29 @@ export const checkNodeProjects = ({
         .filter((file) => file !== "")
         .map((file) => relativePath(root, path.resolve(cwd, file))),
     );
-    const projectFiles = new Set<string>();
-    const projects = [...trackedFiles].filter((file) => {
-      if (path.posix.basename(file) !== "tsconfig.json") return false;
-      const parent = path.posix.dirname(file);
-      return lintedFiles.some(
-        (source) => parent === "." || source.startsWith(`${parent}/`),
-      );
-    });
-    const visited = new Set<string>();
-    for (const config of projects) {
-      if (visited.has(config)) continue;
-      visited.add(config);
+    const groups = new Map<string, string[]>();
+    for (const file of new Set(lintedFiles)) {
+      if (!trackedFiles.has(file) || scriptSourceKind(file) === undefined)
+        continue;
+      let directory = path.posix.dirname(file);
+      while (true) {
+        const config = path.posix.join(directory, "tsconfig.json");
+        if (trackedFiles.has(config)) {
+          const group = groups.get(config);
+          if (group === undefined) groups.set(config, [file]);
+          else group.push(file);
+          break;
+        }
+        if (directory === ".") break;
+        directory = path.posix.dirname(directory);
+      }
+    }
+    type Project = { files: Set<string>; references: string[] };
+    const projects = new Map<string, Project>();
+    const readProject = (config: string): Project => {
+      const cached = projects.get(config);
+      if (cached !== undefined) return cached;
+      const result: Project = { files: new Set(), references: [] };
       try {
         const project: unknown = JSON.parse(
           readCommand(root, compiler, ["--showConfig", "--project", config]),
@@ -174,7 +186,7 @@ export const checkNodeProjects = ({
             throw new Error(
               `project reference is not tracked: ${referencedConfig}`,
             );
-          projects.push(referencedConfig);
+          result.references.push(referencedConfig);
         }
         const sources =
           project["files"] ?? (references.length > 0 ? [] : undefined);
@@ -185,20 +197,40 @@ export const checkNodeProjects = ({
         const options = project["compilerOptions"];
         for (const file of sources) {
           if (
-            /\.[cm]?js$/.test(file) &&
+            scriptSourceKind(file) === "javascript" &&
             (!record(options) ||
               (options["allowJs"] !== true && options["checkJs"] !== true))
           )
             continue;
-          projectFiles.add(
+          result.files.add(
             relativePath(root, path.resolve(root, path.dirname(config), file)),
           );
         }
       } catch (error) {
+        result.files.clear();
+        result.references.length = 0;
         addConfiguration(
           config,
           error instanceof Error ? error.message : String(error),
         );
+      }
+      projects.set(config, result);
+      return result;
+    };
+    const projectFiles = new Set<string>();
+    for (const [nearest, sources] of groups) {
+      const pending = [nearest];
+      const visited = new Set<string>();
+      let config = pending.pop();
+      while (config !== undefined) {
+        if (!visited.has(config)) {
+          visited.add(config);
+          const project = readProject(config);
+          for (const source of sources)
+            if (project.files.has(source)) projectFiles.add(source);
+          pending.push(...project.references);
+        }
+        config = pending.pop();
       }
     }
     diagnostics.push(
