@@ -306,6 +306,9 @@ export const lintInventoryCommands = (
               words.slice(index + 1).includes("run"),
           ) ||
           (words.includes("turbo") && words.includes("lint")) ||
+          // Only the literal filtered build form above is modelled; any other
+          // filtered Bun invocation could run workspace lint out of inventory.
+          (first === "bun" && words.includes("--filter")) ||
           (first !== undefined &&
             scriptManagers.has(first) &&
             !(

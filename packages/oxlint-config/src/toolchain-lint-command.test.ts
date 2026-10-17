@@ -389,6 +389,16 @@ test("literal filtered Bun builds prepare lint without becoming linter launchers
     expect(result.errors.length, command).toBeGreaterThan(0);
     expect(result.commands, command).toEqual([]);
   }
+  for (const command of [
+    "bun --filter @fixture/a build --deny-warnings",
+    "bun --filter @fixture/a typecheck",
+  ]) {
+    const result = lintInventoryCommands(
+      manifest({ lint: `oxlint root.ts && ${command}` }),
+    );
+    expect(result.errors.length, command).toBeGreaterThan(0);
+    expect(result.commands, command).toEqual([]);
+  }
 });
 
 test("inventory strips validated caller thread options without changing other arguments", () => {
