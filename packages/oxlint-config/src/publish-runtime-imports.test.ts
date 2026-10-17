@@ -331,10 +331,10 @@ test("package import conditions and wildcard mappings follow the selected Node b
 });
 
 test("package import arrays fall back on invalid targets, not missing selected files", async () => {
-  for (const [entry, source] of [
-    ["entry.mjs", 'import "#helper";'],
-    ["entry.cjs", 'require("#helper");'],
-  ]) {
+  for (const [entry, source] of Object.entries({
+    "entry.mjs": 'import "#helper";',
+    "entry.cjs": 'require("#helper");',
+  })) {
     const entries = { [entry]: source, "second.cjs": "module.exports = 1;" };
     const missingFirst = fixture(entries, {
       imports: { "#helper": ["./missing.cjs", "./second.cjs"] },
@@ -351,16 +351,12 @@ test("package import arrays fall back on invalid targets, not missing selected f
 });
 
 test("createRequire aliases resolve static local calls and resolve calls", async () => {
-  for (const [entry, source] of [
-    [
-      "entry.mjs",
+  for (const [entry, source] of Object.entries({
+    "entry.mjs":
       'import { createRequire } from "node:module"; const localRequire = createRequire(import.meta.url); localRequire("./helper"); localRequire.resolve("./resolved");',
-    ],
-    [
-      "entry.cjs",
+    "entry.cjs":
       'const { createRequire } = require("node:module"); const localRequire = createRequire(__filename); localRequire("./helper"); localRequire.resolve("./resolved");',
-    ],
-  ]) {
+  })) {
     const entries = {
       [entry]: source,
       "helper.js": "module.exports = 1;",
@@ -1177,10 +1173,10 @@ test("createRequire filename bases must resolve to the actual CommonJS wrapper",
 });
 
 test("package self references cannot bypass exports in either module format", async () => {
-  for (const [entry, source] of [
-    ["entry.mjs", 'import "self-fixture/private.mjs";'],
-    ["entry.cjs", 'require("self-fixture/private.mjs");'],
-  ]) {
+  for (const [entry, source] of Object.entries({
+    "entry.mjs": 'import "self-fixture/private.mjs";',
+    "entry.cjs": 'require("self-fixture/private.mjs");',
+  })) {
     const packed = fixture(
       {
         [entry]: source,
