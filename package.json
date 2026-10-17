@@ -37,9 +37,9 @@
     "oxfmt": "0.72.0",
     "oxlint": "1.87.0",
     "oxlint-tsgolint": "7.0.2003",
-    "pnpm": "12.9.1",
+    "pnpm": "12.12.1",
     "publint": "0.3.25",
-    "tsdown": "0.22.9",
+    "tsdown": "0.23.1",
     "typescript": "7.0.2"
   },
   "overrides": {
