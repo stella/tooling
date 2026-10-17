@@ -257,8 +257,7 @@ type AppliedArguments =
   | { status: "known"; args: unknown[] }
   | { status: "opaque" };
 
-const appliedArgumentsFor = (call: AstNode): AppliedArguments => {
-  const args = Array.isArray(call.arguments) ? call.arguments : [];
+const appliedArgumentsFor = (args: unknown[]): AppliedArguments => {
   const applied = unwrapExpression(args.at(1));
   if (
     applied === null ||
@@ -291,7 +290,7 @@ const invokedArguments = (call: unknown): unknown[] => {
   if (method !== "apply") {
     return args;
   }
-  const applied = appliedArgumentsFor(call);
+  const applied = appliedArgumentsFor(args);
   if (applied.status === "opaque") {
     // Preserve an opaque sentinel so known sinks fail closed.
     return [call, call];
@@ -299,24 +298,44 @@ const invokedArguments = (call: unknown): unknown[] => {
   return applied.args;
 };
 
-const isOpaqueApply = (call: unknown): boolean => {
-  if (!isAstNode(call) || call.type !== "CallExpression") {
-    return false;
-  }
-  const callee = unwrapExpression(call.callee);
-  if (
-    callee?.type !== "MemberExpression" ||
-    memberPropertyName(callee) !== "apply"
-  ) {
-    return false;
-  }
-  const applied = appliedArgumentsFor(call);
-  return (
-    applied.status === "opaque" ||
-    applied.args.some(
-      (argument) => isAstNode(argument) && argument.type === "SpreadElement",
+const resolvedForwardedArguments = (args: unknown[]): AppliedArguments => {
+  const forwarded: unknown[] = [];
+  const append = (argument: unknown): boolean => {
+    if (!isAstNode(argument) || argument.type !== "SpreadElement") {
+      forwarded.push(argument);
+      return true;
+    }
+    const expression = unwrapExpression(argument.argument);
+    if (
+      expression?.type !== "ArrayExpression" ||
+      !Array.isArray(expression.elements)
     )
-  );
+      return false;
+    for (const element of expression.elements)
+      if (!append(element)) return false;
+    return true;
+  };
+  for (const argument of args)
+    if (!append(argument)) return { status: "opaque" };
+  return { status: "known", args: forwarded };
+};
+
+const sinkArgumentsFor = (call: unknown): AppliedArguments => {
+  if (!isAstNode(call) || call.type !== "CallExpression")
+    return { status: "opaque" };
+  const rawArguments = Array.isArray(call.arguments) ? call.arguments : [];
+  const callArguments = resolvedForwardedArguments(rawArguments);
+  if (callArguments.status === "opaque") return callArguments;
+  const callee = unwrapExpression(call.callee);
+  if (callee?.type !== "MemberExpression") return callArguments;
+  const method = memberPropertyName(callee);
+  if (method === "call")
+    return { status: "known", args: callArguments.args.slice(1) };
+  if (method !== "apply") return callArguments;
+  const applied = appliedArgumentsFor(callArguments.args);
+  return applied.status === "opaque"
+    ? applied
+    : resolvedForwardedArguments(applied.args);
 };
 
 // `document.write`, `window.document.write`, `frame.contentDocument.write`,
@@ -537,33 +556,34 @@ export default eslintCompatPlugin({
             if (method === null) {
               return;
             }
+            const sinkArguments = sinkArgumentsFor(node);
             if (HTML_FIRST_ARGUMENT_METHODS.has(method)) {
-              if (isOpaqueApply(node)) {
+              if (sinkArguments.status === "opaque") {
                 reportIfUnsafe(node);
                 return;
               }
-              reportIfUnsafe(args.at(0));
+              reportIfUnsafe(sinkArguments.args.at(0));
               return;
             }
             if (method === "insertAdjacentHTML") {
-              if (isOpaqueApply(node)) {
+              if (sinkArguments.status === "opaque") {
                 reportIfUnsafe(node);
                 return;
               }
-              reportIfUnsafe(args.at(1));
+              reportIfUnsafe(sinkArguments.args.at(1));
               return;
             }
             if (method === "setAttribute") {
-              if (isOpaqueApply(node)) {
+              if (sinkArguments.status === "opaque") {
                 reportIfUnsafe(node);
                 return;
               }
-              const attribute = unwrapExpression(args.at(0));
+              const attribute = unwrapExpression(sinkArguments.args.at(0));
               if (
                 isStringLiteral(attribute) &&
                 attribute.value.toLowerCase() === "srcdoc"
               ) {
-                reportIfUnsafe(args.at(1));
+                reportIfUnsafe(sinkArguments.args.at(1));
               }
               return;
             }
@@ -571,8 +591,12 @@ export default eslintCompatPlugin({
               DOCUMENT_WRITE_METHODS.has(method) &&
               isDocumentReceiver(callee.object)
             ) {
+              if (sinkArguments.status === "opaque") {
+                reportIfUnsafe(node);
+                return;
+              }
               if (
-                !args.every((argument) =>
+                !sinkArguments.args.every((argument) =>
                   isProvenSafeValue(argument, sanitizerPolicy),
                 ) &&
                 !consumeWaiver(node)

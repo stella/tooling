@@ -6,6 +6,17 @@
 // and `--report-unused-disable-directives-severity=error` fails CI.
 
 const rawHtml = "<img src=x onerror=alert(1)>";
+declare const opaqueInsertArguments: [
+  Element,
+  "beforebegin" | "afterbegin" | "beforeend" | "afterend",
+  string,
+];
+declare const opaqueApplyArguments: [
+  Element,
+  ["beforebegin" | "afterbegin" | "beforeend" | "afterend", string],
+];
+declare const opaqueWriteArguments: [Document, string];
+declare const opaqueAttributeArguments: [string, string];
 
 const escapeHtml = (value: string): string =>
   value.replaceAll("&", "&amp;").replaceAll("<", "&lt;");
@@ -122,6 +133,36 @@ export const UnsafeInsertAdjacentHtml = () => {
   element.insertAdjacentHTML.call(element, "beforeend", rawHtml);
   // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html
   (0, element.insertAdjacentHTML)("beforeend", rawHtml);
+};
+
+export const UnsafeDirectSpreadInsertAdjacentHtml = (element: Element) => {
+  const forwardedArguments = ["beforeend", rawHtml] as const;
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- opaque spread hides the HTML argument position
+  element.insertAdjacentHTML(...forwardedArguments);
+};
+
+export const SafeLiteralSpreadInsertAdjacentHtml = (element: Element) =>
+  // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
+  element.insertAdjacentHTML(...(["beforeend", "<p>static</p>"] as const));
+
+export const UnsafeCallSpreadInsertAdjacentHtml = () => {
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- opaque call spread hides the HTML argument position
+  Element.prototype.insertAdjacentHTML.call(...opaqueInsertArguments);
+};
+
+export const UnsafeApplySpreadInsertAdjacentHtml = () => {
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- opaque apply spread hides the forwarded argument list
+  Element.prototype.insertAdjacentHTML.apply(...opaqueApplyArguments);
+};
+
+export const UnsafeCallSpreadDocumentWrite = () => {
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- opaque call spread hides document.write arguments
+  document.write.call(...opaqueWriteArguments);
+};
+
+export const UnsafeSpreadSetAttribute = () => {
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- opaque spread may name srcdoc
+  document.createElement("iframe").setAttribute(...opaqueAttributeArguments);
 };
 
 export const UnsafeDocumentWrite = () => {
