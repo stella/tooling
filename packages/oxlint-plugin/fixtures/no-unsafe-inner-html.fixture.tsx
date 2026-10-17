@@ -369,6 +369,27 @@ export const SafeObjectAssignUnknownTargetSpread = () => {
   Object.assign(...opaqueObjectAssignArguments);
 };
 
+export const UnsafeBracketObjectAssign = () => {
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- static bracket access identifies the same Object.assign sink
+  Object["assign"](document["createElement"]("div"), unsafeDomProperties);
+};
+
+export const UnsafeOpaqueComputedHtmlPayload = (key: string) => (
+  <div
+    dangerouslySetInnerHTML={{
+      // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- an unresolved payload key may name __html, like an object spread
+      [key]: rawHtml,
+    }}
+  />
+);
+
+export const UnsafeOpaqueComputedPropsPayload = (key: string) => ({
+  dangerouslySetInnerHTML: {
+    // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- opaque computed payload keys are checked outside JSX too
+    [key]: rawHtml,
+  },
+});
+
 export const UnsafeObjectAssignComputedKey = (key: string) =>
   // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html
   Object.assign(document.createElement("div"), { [key]: rawHtml });
@@ -491,6 +512,13 @@ export const SafeObjectAssignComputedTemplate = () =>
   Object.assign(document.createElement("div"), {
     [`innerHTML`]: "<b>Static</b>",
   });
+
+export const SafeBracketSanitizerResult = () => (
+  // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
+  <div
+    dangerouslySetInnerHTML={{ __html: DOMPurify["sanitize"](rawHtml)["value"] }}
+  />
+);
 
 export const SafeApplyStaticDocumentWrite = () =>
   // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html

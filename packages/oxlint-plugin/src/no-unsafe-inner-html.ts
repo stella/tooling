@@ -37,12 +37,10 @@ import { eslintCompatPlugin } from "@oxlint/plugins";
 
 import type { AstNode, LiteralArgumentResolution } from "./utils.ts";
 import {
-  getCalleeName,
   getPropertyName,
   invokedCallee,
   isAstNode,
   isIdentifier,
-  isMemberAccess,
   isStringLiteral,
   memberPropertyName,
   resolveLiteralArraySpreads,
@@ -108,11 +106,23 @@ const sanitizerPolicyFrom = (option: unknown): SanitizerPolicy => {
   }
 };
 
+// Use the same static member-name resolution for sinks and safe-value proofs.
+const staticCalleeName = (node: unknown): string | null => {
+  const expression = unwrapExpression(node);
+  if (isIdentifier(expression)) return expression.name;
+  if (expression?.type !== "MemberExpression") return null;
+  const receiver = staticCalleeName(expression.object);
+  const property = memberPropertyName(expression);
+  return receiver === null || property === null
+    ? null
+    : `${receiver}.${property}`;
+};
+
 const isSanitizerCall = (node: unknown): boolean => {
   if (!isAstNode(node) || node.type !== "CallExpression") {
     return false;
   }
-  const dotted = getCalleeName(node.callee);
+  const dotted = staticCalleeName(node.callee);
   if (dotted === null) {
     return false;
   }
@@ -129,10 +139,7 @@ const isSanitizerCall = (node: unknown): boolean => {
 
 const isSanitizerResult = (node: unknown): boolean => {
   const expression = unwrapExpression(node);
-  if (
-    expression?.type !== "MemberExpression" ||
-    expression.computed !== false
-  ) {
+  if (expression?.type !== "MemberExpression") {
     return false;
   }
   const property = memberPropertyName(expression);
@@ -222,6 +229,12 @@ const objectPropertyKey = (property: unknown): string | null => {
   }
   return getPropertyName(property.key);
 };
+
+const isOpaqueProperty = (property: AstNode): boolean =>
+  property.type === "SpreadElement" ||
+  (property.type === "Property" &&
+    property.computed === true &&
+    objectPropertyKey(property) === null);
 
 const objectProperties = (node: unknown): AstNode[] => {
   const expression = unwrapExpression(node);
@@ -411,7 +424,7 @@ export default eslintCompatPlugin({
             return;
           }
           for (const property of objectProperties(expression)) {
-            if (property.type === "SpreadElement") {
+            if (isOpaqueProperty(property)) {
               context.report({
                 node: property,
                 messageId: "unsafeInnerHtmlSpread",
@@ -440,7 +453,7 @@ export default eslintCompatPlugin({
               continue;
             }
             for (const property of objectProperties(source)) {
-              if (property.type === "SpreadElement") {
+              if (isOpaqueProperty(property)) {
                 if (domTarget) {
                   reportIfUnsafe(property);
                 }
@@ -452,12 +465,6 @@ export default eslintCompatPlugin({
                   : null;
               if (key !== null && HTML_PROPERTIES.has(key)) {
                 reportIfUnsafe(property.value);
-              } else if (
-                domTarget &&
-                key === null &&
-                property.computed === true
-              ) {
-                reportIfUnsafe(property);
               }
             }
           }
@@ -576,7 +583,7 @@ export default eslintCompatPlugin({
               }
               return;
             }
-            if (isMemberAccess(callee, "Object", "assign")) {
+            if (isIdentifier(callee.object, "Object") && method === "assign") {
               const domTarget = isKnownDomTarget({
                 node: invoked.args.at(0),
                 scope: context.sourceCode.getScope(node),
