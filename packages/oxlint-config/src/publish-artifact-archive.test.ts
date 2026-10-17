@@ -108,3 +108,34 @@ test("literal extensionless CommonJS helpers are loaded lazily from the full arc
     },
   );
 });
+
+test("wildcard exported archive patterns leave licenses and directories opaque but follow extensionless imports", async () => {
+  await withPackedFixture(
+    {
+      "package.json": JSON.stringify({
+        type: "module",
+        exports: { "./*": "./*" },
+      }),
+      LICENSE: "Copyright reserved. This license text is not JavaScript.",
+      "docs/NOTICE": "Documentation is not a runtime module.",
+      "entry.mjs": 'import "./helper";',
+      helper: 'export { value } from "./nested/leaf.mjs";',
+      "nested/leaf.mjs": "export const value = 1;",
+    },
+    async ({ root, archive, repack }) => {
+      const listing = execFileSync("tar", ["-tzf", archive], {
+        encoding: "utf8",
+      });
+      expect(listing).toContain("package/docs/");
+      expect(listing).toContain("package/nested/");
+      const packed = await readPackedSyntaxFiles(archive);
+      expect(packed.has("package/LICENSE")).toBe(false);
+      expect(packed.has("package/docs/NOTICE")).toBe(false);
+      expect(packed.has("package/docs/")).toBe(false);
+      expect(packed.get("package/helper")).toContain("./nested/leaf.mjs");
+      await rm(path.join(root, "package/nested/leaf.mjs"));
+      repack();
+      await assert.rejects(readPackedSyntaxFiles(archive), /leaf\.mjs/);
+    },
+  );
+});

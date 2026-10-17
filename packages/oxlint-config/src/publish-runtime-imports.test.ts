@@ -485,29 +485,23 @@ test("declared entry roots cannot escape the package", async () => {
   }
 });
 
-test("unshadowed module require properties preserve static local dependencies", async () => {
+test("CommonJS module require properties reject even literal targets", async () => {
   for (const source of [
     'module.require("./helper");',
     'module["require"]("./helper");',
+    'const wrapper = module; wrapper.require("./helper");',
+    'function use(module) { module.require("./helper"); }',
+    'var module; module.require("./helper");',
   ]) {
-    const packed = fixture({
-      "entry.cjs": source,
-      "helper.js": "module.exports = 1;",
-    });
-    await assertPackedRuntimeImports(packed.options);
-    packed.members.delete("package/helper.js");
-    await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
-      "helper",
-    );
+    await expect(
+      assertPackedRuntimeImports(
+        fixture({
+          "entry.cjs": source,
+          "helper.js": "module.exports = 1;",
+        }).options,
+      ),
+    ).rejects.toThrow("Unresolvable dynamic loader");
   }
-  await expect(
-    assertPackedRuntimeImports(
-      fixture({
-        "entry.cjs":
-          'function use(module) { module.require("./not-local.cjs"); }',
-      }).options,
-    ),
-  ).rejects.toThrow("Unresolvable dynamic loader");
 });
 
 test("legacy main resolution and exported URLs follow their distinct path rules", async () => {
@@ -564,8 +558,7 @@ test("computed literal require.resolve methods retain static local targets", asy
 test("uninitialized CommonJS var redeclarations retain wrapper loader bindings", async () => {
   for (const source of [
     'var require; require("./helper");',
-    'var module; module.require("./helper");',
-    'var require, module; require.resolve("./helper"); module["require"]("./helper");',
+    'var require, module; require.resolve("./helper"); module.exports = 1;',
     'if (true) { var require; require("./helper"); }',
   ]) {
     const packed = fixture({
@@ -850,8 +843,7 @@ test("unsupported loader destructuring and resolution options fail explicitly", 
 test("external literal loader calls and unrelated ESM shadows retain their boundaries", async () => {
   await assertPackedRuntimeImports(
     fixture({
-      "entry.cjs":
-        'require("node:fs"); require.resolve("external-package"); module.require("@scope/dependency");',
+      "entry.cjs": 'require("node:fs"); require.resolve("external-package");',
     }).options,
   );
   for (const source of [
@@ -1342,4 +1334,85 @@ test("a second module cannot invoke an exported loader outside its declaring mod
     await expect(
       assertPackedRuntimeImports(fixture(entries).options),
     ).rejects.toThrow("unsupported loader propagation");
+});
+
+test("CommonJS wrapper arguments and dynamic execution cannot recover untracked loaders", async () => {
+  const escapes = {
+    wrapperArguments: 'arguments[1]("./helper.cjs");',
+    arrowArguments: '(() => arguments[1]("./helper.cjs"))();',
+    argumentsAlias:
+      'const wrapperArgs = arguments; wrapperArgs[1]("./helper.cjs");',
+    directEval: `eval('require("./helper.cjs")');`,
+    indirectEval: `(0, eval)('require("./helper.cjs")');`,
+    evalAlias: `const execute = eval; execute('require("./helper.cjs")');`,
+    globalEval: `globalThis.eval('require("./helper.cjs")');`,
+    newFunction: `new Function('return require("./helper.cjs")')();`,
+    callFunction: `Function('return require("./helper.cjs")')();`,
+    functionAlias: `const compile = Function; compile('return require("./helper.cjs")')();`,
+    moduleConstructor: 'module.constructor._load("./helper.cjs");',
+    computedConstructor: 'module["constructor"]["_load"]("./helper.cjs");',
+    moduleAlias:
+      'const wrapper = module; wrapper.constructor._load("./helper.cjs");',
+    mainModule: 'process.mainModule.require("./helper.cjs");',
+    computedMainModule: 'process["mainModule"]["require"]("./helper.cjs");',
+    globalThisRequire: 'globalThis.require("./helper.cjs");',
+    globalRequire: 'global.require("./helper.cjs");',
+    computedGlobalRequire: 'globalThis["require"]("./helper.cjs");',
+    globalFunction: 'globalThis.Function("return 1")();',
+    computedGlobalEval: 'global["eval"]("1");',
+    requireCache: "require.cache;",
+    requireExtensions: "require.extensions;",
+    requireMain: "require.main;",
+    computedCache: 'require["cache"];',
+    aliasExtensions: "const loader = require; loader.extensions;",
+    namespaceLoad:
+      'const moduleApi = require("node:module"); moduleApi._load("./helper.cjs");',
+    namespaceAliasLoad:
+      'const moduleApi = require("node:module"); const alias = moduleApi; alias.Module._load("./helper.cjs");',
+  };
+  const exercised = new Set<string>();
+  for (const [name, source] of Object.entries(escapes)) {
+    await expect(
+      assertPackedRuntimeImports(
+        fixture({
+          "entry.cjs": source,
+          "helper.cjs": "module.exports = 1;",
+        }).options,
+      ),
+      name,
+    ).rejects.toThrow("Unresolvable dynamic loader");
+    exercised.add(name);
+  }
+  expect(exercised).toEqual(new Set(Object.keys(escapes)));
+});
+
+test("ESM module factory aliases cannot expose loader metadata or constructors", async () => {
+  for (const source of [
+    'import {createRequire} from "node:module"; const loader = createRequire(import.meta.url); loader.cache;',
+    'import {createRequire} from "node:module"; const loader = createRequire(import.meta.url); const alias = loader; alias.extensions;',
+    'import * as moduleApi from "node:module"; moduleApi.Module._load("./helper.cjs");',
+    'import * as moduleApi from "node:module"; const alias = moduleApi; alias.Module._load("./helper.cjs");',
+  ]) {
+    await expect(
+      assertPackedRuntimeImports(
+        fixture(
+          {
+            "entry.mjs": source,
+            "helper.cjs": "module.exports = 1;",
+          },
+          { type: "module" },
+        ).options,
+      ),
+    ).rejects.toThrow("Unresolvable dynamic loader");
+  }
+});
+
+test("normal function arguments and ordinary property names do not acquire wrapper capabilities", async () => {
+  for (const source of [
+    "function first() { return arguments[0]; } module.exports = first;",
+    "function first() { return (() => arguments[0])(); } module.exports = first;",
+    "const data = {arguments: 1, eval: 2, Function: 3, require: 4, constructor: 5, mainModule: 6, cache: 7, extensions: 8, main: 9}; module.exports = data.arguments + data.eval + data.Function + data.require + data.constructor + data.mainModule + data.cache + data.extensions + data.main;",
+  ]) {
+    await assertPackedRuntimeImports(fixture({ "entry.cjs": source }).options);
+  }
 });

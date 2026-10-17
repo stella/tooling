@@ -509,6 +509,21 @@ produce an `unsupported loader propagation` diagnostic; analysis does not infer
 loader behavior across module boundaries. Ordinary exported functions may still
 make recognized static local loader calls.
 
+This check proves the import closure of ordinary authored code in our own
+packages within the supported static forms. It is not a security boundary against
+deliberately obfuscated code. Unrecognized loader forms are rejected rather than
+inferred; the check does not interpret dynamic code or prove arbitrary JavaScript
+data flow. Known escape hatches are rejected: CommonJS wrapper `arguments`,
+`eval`, `Function` construction/calls, `module.constructor`, `module.require`,
+`process.mainModule`, global `require` properties, and `require.cache`,
+`require.extensions` or `require.main` access. The strict metadata-read policy
+also rejects aliases such as `const a = require.main`, which would otherwise
+propagate an unclassified loader-capable object.
+
+Wildcard exports exclude directory entries and treat only JavaScript-like
+matches as scripts. Licenses and other extensionless wildcard matches remain
+opaque; an import that reaches extensionless code still traverses its closure.
+
 The consumer policy pins Node 22.23.3, npm 12.2.0, pnpm 12.9.1, and TypeScript
 6.0.3 independently of the development toolchain. Published engines and TypeScript
 peers must support the consumer versions; ranges may include newer versions.

@@ -139,6 +139,7 @@ const staticImports = (
   mode: "script" | "module",
 ): StaticImport[] => {
   const result: StaticImport[] = [];
+  const functionScopes = new WeakMap<Scope, "wrapper" | "function">();
   const resolvedFactories = new Set<Record<string, unknown>>();
   const resolvedNamespaces = new Set<Record<string, unknown>>();
   const allowedLoaderReferences = new Set<Record<string, unknown>>();
@@ -269,6 +270,8 @@ const staticImports = (
         }
       };
       if (functionNode(node)) {
+        if (kind !== "ArrowFunctionExpression")
+          functionScopes.set(local, "function");
         bind(node["id"]);
         for (const parameter of nodes(node["params"])) bind(parameter);
       }
@@ -618,6 +621,32 @@ const staticImports = (
           parent["value"] !== node));
     const reference = loaderBinding(node, scopes);
     const name = identifier(node);
+    if (!nonReference && !allowedLoaderReferences.has(node)) {
+      const owner = scopes.findLast((scope) => functionScopes.has(scope));
+      if (
+        (name === "arguments" &&
+          owner !== undefined &&
+          functionScopes.get(owner) === "wrapper") ||
+        name === "eval" ||
+        name === "Function"
+      )
+        throw unresolvable(`unsupported dynamic loader escape: ${name}`);
+    }
+    if (kind === "MemberExpression") {
+      const owner = identifier(node["object"]);
+      const property = memberName(node);
+      const ownerBinding = loaderBinding(node["object"], scopes);
+      if (
+        (ownerBinding === "module" &&
+          (property === "constructor" || property === "require")) ||
+        (ownerBinding === "require" &&
+          ["cache", "extensions", "main"].includes(property ?? "")) ||
+        (owner === "process" && property === "mainModule") ||
+        ((owner === "globalThis" || owner === "global") &&
+          ["require", "eval", "Function"].includes(property ?? ""))
+      )
+        throw unresolvable("unsupported dynamic loader escape property");
+    }
     if (
       name !== undefined &&
       loaderName(name, scopes) &&
@@ -642,16 +671,16 @@ const staticImports = (
     for (const child of children(node)) walk(child, scopes, node);
   };
   const root = nodes(tree).at(0);
-  if (root !== undefined)
-    walk(root, [
-      mode === "script"
-        ? new Map<string, Binding>([
-            ["require", "require"],
-            ["module", "module"],
-            ["__filename", "filename"],
-          ])
-        : new Map<string, Binding>(),
-    ]);
+  if (root !== undefined) {
+    const wrapper: Scope = new Map();
+    if (mode === "script") {
+      wrapper.set("require", "require");
+      wrapper.set("module", "module");
+      wrapper.set("__filename", "filename");
+      functionScopes.set(wrapper, "wrapper");
+    }
+    walk(root, [wrapper]);
+  }
   return result;
 };
 
@@ -828,13 +857,15 @@ export const assertPackedRuntimeImports = async ({
         throw new Error(`Unsupported packed entry pattern: ${entry}`);
       const matches = [...members].filter(
         (candidate) =>
-          candidate.startsWith(prefix) && candidate.endsWith(suffix),
+          !candidate.endsWith("/") &&
+          candidate.length >= prefix.length + suffix.length &&
+          candidate.startsWith(prefix) &&
+          candidate.endsWith(suffix),
       );
       if (matches.length === 0)
         throw new Error(`Missing packed runtime entry pattern: ${entry}`);
       for (const match of matches)
-        if (javascript.test(match) || path.posix.extname(match) === "")
-          scripts.add(match);
+        if (javascript.test(match)) scripts.add(match);
       pending.push(...matches);
     };
     for (const target of targets(root["module"])) addEntry(target, "file");
