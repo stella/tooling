@@ -1,15 +1,16 @@
-import { parse, type Options } from "acorn";
+import type { Options } from "acorn";
 import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
-import { wrap } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
+import { packageMode, parseArtifactSource } from "./publish-artifact-parser";
 import {
   publishedNodeTargetSupportsConsumer,
   type PublishTarget,
 } from "./publish-contract";
+import { assertPackedRuntimeImports } from "./publish-runtime-imports";
 
 const command = promisify(execFile);
 const record = (value: unknown): value is Record<string, unknown> =>
@@ -111,61 +112,10 @@ const syntaxFiles = (files: Map<string, string>) => {
   ];
 };
 
-const packageMode = (
-  files: Map<string, string>,
-  file: string,
-): "module" | "script" | "detect" => {
-  let directory = path.posix.dirname(file);
-  while (directory !== ".") {
-    const source = files.get(`${directory}/package.json`);
-    if (source !== undefined) {
-      const manifest: unknown = JSON.parse(source);
-      if (!record(manifest))
-        throw new Error(`Invalid packed manifest: ${directory}`);
-      if (manifest["type"] === "module") return "module";
-      if (manifest["type"] === "commonjs") return "script";
-      if (manifest["type"] !== undefined)
-        throw new Error(`Invalid packed package type: ${directory}`);
-      return "detect";
-    }
-    directory = path.posix.dirname(directory);
-  }
-  return "detect";
-};
-
 type ArtifactSyntaxOptions = {
   files: Map<string, string>;
   target: PublishTarget;
   node: string;
-};
-
-const parseArtifactSource = (source: string, options: Options) => {
-  const script = options.sourceType === "script";
-  const content = script
-    ? source.replace(/^\uFEFF/, "").replace(/^#![^\r\n]*/, "")
-    : source;
-  try {
-    return parse(script ? wrap(content) : content, options);
-  } catch (error) {
-    if (
-      !script ||
-      !(error instanceof SyntaxError) ||
-      !record(error) ||
-      typeof error["pos"] !== "number"
-    )
-      throw error;
-    const prefixLength = wrap("\u0000").indexOf("\u0000");
-    const position = Math.max(
-      0,
-      Math.min(
-        source.length,
-        error["pos"] - prefixLength + source.length - content.length,
-      ),
-    );
-    const lines = source.slice(0, position).split(/\r\n|[\n\r\u2028\u2029]/);
-    const location = `(${lines.length}:${lines.at(-1)?.length ?? 0})`;
-    throw new SyntaxError(error.message.replace(/\(\d+:\d+\)$/, location));
-  }
 };
 
 /** Enumerate all chunks and bins, including JavaScript outside declared exports. */
@@ -279,27 +229,37 @@ export const readPackedSyntaxFiles = async (archive: string) => {
     maxBuffer: 16 * 1024 * 1024,
   });
   const files = new Map<string, string>();
-  const members = archiveMembers(
-    listing.split("\n").filter((entry) => entry !== ""),
+  const members = new Set(
+    archiveMembers(listing.split("\n").filter((entry) => entry !== "")),
   );
-  const read = async (file: string) => {
-    if (!members.includes(file))
+  const regularFiles = new Set<string>();
+  const assertRegular = async (file: string) => {
+    if (!members.has(file))
       throw new Error(`Missing packed syntax input: ${file}`);
+    if (regularFiles.has(file)) return;
     const { stdout: metadata } = await command("tar", ["-tvzf", archive, file]);
     if (
       !metadata.startsWith("-") ||
       metadata.trimEnd().split("\n").length !== 1
     )
       throw new Error(`Packed syntax input must be a regular file: ${file}`);
+    regularFiles.add(file);
+  };
+  const readSource = async (file: string) => {
+    const cached = files.get(file);
+    if (cached !== undefined) return cached;
+    await assertRegular(file);
     const { stdout } = await command("tar", ["-xOf", archive, file], {
       maxBuffer: 16 * 1024 * 1024,
     });
     files.set(file, stdout);
+    return stdout;
   };
   for (const file of members)
     if (javascript.test(file) || path.posix.basename(file) === "package.json")
-      await read(file);
+      await readSource(file);
   for (const file of packedBinFiles(files))
-    if (!files.has(file)) await read(file);
+    if (!files.has(file)) await readSource(file);
+  await assertPackedRuntimeImports({ members, readSource, assertRegular });
   return files;
 };

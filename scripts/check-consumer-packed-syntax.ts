@@ -59,7 +59,8 @@ export const assertConsumerPackedSyntaxIntegration = async ({
         name: "unbounded",
         target: { type: "javascript", targets: ["esnext"] },
         chunk: "export const syntax = ;\n",
-        error: /declared syntax target|consumer Node/,
+        error:
+          /Packed runtime import syntax package\/dist\/chunks\/hidden\.mjs:/,
       },
     ] satisfies {
       name: string;

@@ -514,6 +514,66 @@ resolved JavaScript targets, and entry points. `stll-publish-contract --write`
 records an explicit contract decision as a reviewable diff; it also validates
 consumer support and cannot accept development-only requirements.
 
+Use `stll-publish-contract --artifact path/to/package.tgz` to check an existing
+release archive after the workspace metadata checks. It validates the static
+literal import closure within the packed package and compares the archive's
+manifest with its declared public workspace package's committed contract and
+resolved build target. The command never packs
+or executes the archive, accepts exactly one archive, and cannot combine
+`--artifact` with `--write`. Unknown or private package artifacts fail. Bare external
+package dependencies are outside this local archive check. Dynamic imports require
+literal specifiers; computed values cannot exclude the module loader namespace.
+The reader follows literal ESM imports/re-exports, CommonJS
+require/resolve calls and named, destructured or namespace `createRequire` bindings based on
+`import.meta.url` or `__filename`. Asset references must be regular packed files;
+non-JavaScript ESM assets are not parsed as scripts. Recursive import mappings
+are rejected, including expanding wildcard aliases.
+Node resolves collected specifiers against a temporary archive filesystem:
+`createRequire(importer).resolve` for CommonJS and `import.meta.resolve` with the
+importer's URL for ESM, using their respective default conditions. The worker
+reads manifests and file existence without loading package code. Only manifests
+need contents; other members use inert placeholders, and selected targets must
+still be regular packed members. External import-map dependencies use inert
+metadata outside the packed package boundary. Unknown external mapping forms
+fail explicitly. Temporary files and the worker are removed after validation.
+Regular-file validation and script traversal are tracked separately: an asset
+later reached through CommonJS is parsed regardless of archive member order.
+Exported declarations use the same scope collection as ordinary declarations.
+Loader references are allowed only within recognized static declarations and
+calls; inline module factories and unsupported namespace references fail closed.
+Known loader calls require one literal specifier. Unresolved loader aliases,
+computed bases, unsupported propagation and conflicting bindings report an
+`Unresolvable dynamic loader` diagnostic instead of omitting dependencies.
+In CommonJS scopes, declarations, parameters and assignments that shadow wrapper
+loader names or inherited loader aliases must resolve to a recognized static
+binding. Unknown bindings fail closed; uninitialized wrapper `var` declarations
+retain the existing loader binding.
+Imports from `node:module` or `module` must declare recognized factory or namespace
+bindings, including string-named `createRequire` imports. Unsupported named imports,
+side-effect imports, re-exports and dynamic namespace imports fail closed. Derived
+aliases retain this policy in ESM scopes. A `__filename` factory base must resolve
+to the unshadowed CommonJS wrapper binding; ESM factories use `import.meta.url`.
+Loader bindings, factory results, module namespaces and their aliases cannot be
+exported through ESM declarations/defaults/re-exports or CommonJS exports. They
+produce an `unsupported loader propagation` diagnostic; analysis does not infer
+loader behavior across module boundaries. Ordinary exported functions may still
+make recognized static local loader calls.
+
+This check proves the import closure of ordinary authored code in our own
+packages within the supported static forms. It is not a security boundary against
+deliberately obfuscated code. Unrecognized loader forms are rejected rather than
+inferred; the check does not interpret dynamic code or prove arbitrary JavaScript
+data flow. Known escape hatches are rejected: CommonJS wrapper `arguments`,
+`eval`, `Function` construction/calls, `module.constructor`, `module.require`,
+`process.mainModule`, global `require` properties, and `require.cache`,
+`require.extensions` or `require.main` access. The strict metadata-read policy
+also rejects aliases such as `const a = require.main`, which would otherwise
+propagate an unclassified loader-capable object.
+
+Wildcard exports exclude directory entries and treat only JavaScript-like
+matches as scripts. Licenses and other extensionless wildcard matches remain
+opaque; an import that reaches extensionless code still traverses its closure.
+
 The consumer policy pins Node 22.23.3, npm 12.2.0, pnpm 12.9.1, and TypeScript
 6.0.3 independently of the development toolchain. Published engines and TypeScript
 peers must support the consumer versions; ranges may include newer versions.
@@ -593,6 +653,9 @@ static contract; no older Node-to-ECMAScript mapping is inferred. Browser target
 are unsupported here: declare an explicit ECMAScript year. Types-only contracts reject any packed JavaScript. Nested
 package manifests and explicit module extensions determine parsing mode.
 Linked syntax inputs and unsafe archive paths fail before staging.
+Invalid JavaScript encountered during import-closure analysis throws a `SyntaxError`
+that names the packed member and retains the original parser error as its cause.
+This can precede the declared-target and native Node checks.
 
 The reusable consumer job declares its exact scope in `stll-toolchain.json`:
 
