@@ -6,9 +6,7 @@
     "scripts/**/*.ts",
     "scripts/**/*.js",
     "scripts/**/*.mjs",
-    "scripts/**/*.cjs",
-    "packages/*/tsdown.config.ts",
-    "packages/*/fixtures/**/*"
+    "scripts/**/*.cjs"
   ],
   "exclude": [
     "node_modules",
