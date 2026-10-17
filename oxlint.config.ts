@@ -29,5 +29,16 @@ export default library({
       files: ["packages/oxlint-plugin/fixtures/**/*.{ts,tsx}"],
       rules: { ...portableSafetyRules, ...routeQueryRules },
     },
+    {
+      files: [
+        "packages/oxlint-plugin/fixtures/no-unsafe-inner-html-provenance.fixture.tsx",
+      ],
+      rules: {
+        "no-unsafe-inner-html/no-unsafe-inner-html": [
+          "error",
+          { sanitizerPolicy: "provenance" },
+        ],
+      },
+    },
   ],
 });

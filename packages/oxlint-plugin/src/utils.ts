@@ -54,6 +54,62 @@ export const getPropertyName = (node: unknown): string | null => {
   return null;
 };
 
+export const memberPropertyName = (node: unknown): string | null => {
+  if (!isAstNode(node) || node.type !== "MemberExpression") {
+    return null;
+  }
+  if (node.computed !== true) {
+    return getPropertyName(node.property);
+  }
+  if (isStringLiteral(node.property)) {
+    return node.property.value;
+  }
+  const property = node.property;
+  if (
+    !isAstNode(property) ||
+    property.type !== "TemplateLiteral" ||
+    !Array.isArray(property.expressions) ||
+    property.expressions.length !== 0 ||
+    !Array.isArray(property.quasis)
+  ) {
+    return null;
+  }
+  const quasi = property.quasis.at(0);
+  if (!isAstNode(quasi)) {
+    return null;
+  }
+  const value = quasi.value;
+  const cooked =
+    typeof value === "object" && value !== null
+      ? Reflect.get(value, "cooked")
+      : undefined;
+  return typeof cooked === "string" ? cooked : null;
+};
+
+export const invokedCallee = (node: unknown): AstNode | null => {
+  if (!isAstNode(node) || node.type !== "CallExpression") {
+    return null;
+  }
+  const callee = unwrapExpression(node.callee);
+  if (!isAstNode(callee)) {
+    return null;
+  }
+  if (
+    callee.type === "SequenceExpression" &&
+    Array.isArray(callee.expressions)
+  ) {
+    return unwrapExpression(callee.expressions.at(-1));
+  }
+  if (
+    callee.type === "MemberExpression" &&
+    (memberPropertyName(callee) === "call" ||
+      memberPropertyName(callee) === "apply")
+  ) {
+    return unwrapExpression(callee.object);
+  }
+  return callee;
+};
+
 // Match `<object>.<property>` member access where both halves are
 // Identifiers and the access is not computed.
 export const isMemberAccess = (

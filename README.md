@@ -415,9 +415,11 @@ export default defineConfig({
 `no-raw-route-query-client` requires route freshness helpers instead of raw
 TanStack Query client calls and keeps pending components synchronous.
 
-When using `no-unsafe-inner-html`, disable the blanket `react/no-danger` rule;
-the portable rule permits static and provably sanitized HTML while rejecting
-untrusted values.
+When using `no-unsafe-inner-html`, disable the blanket `react/no-danger` rule.
+Its default `sanitizerPolicy: "allowlist"` permits static HTML and calls whose
+names match the shared HTML sanitizer allowlist. Set
+`sanitizerPolicy: "provenance"` to require a `// safe-html: <provenance>`
+comment for dynamic values, including calls to sanitizer-named functions.
 
 Oxlint 1.80 replaced `react/react-compiler` with category-specific React
 Compiler rules. Enable the actionable categories explicitly with
