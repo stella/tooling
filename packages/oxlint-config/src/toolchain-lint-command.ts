@@ -143,13 +143,18 @@ const inventoryArguments = (raw: readonly string[]) => {
   return { args };
 };
 
-/** Extract argument vectors for the pinned inventory binary; never execute package-script shell text. */
+type LintInventoryCommand = {
+  runtime: "node" | "bun";
+  args: string[];
+};
+
+/** Extract runtime and arguments for the pinned inventory binary; never execute package-script shell text. */
 export const lintInventoryCommands = (
   manifest: unknown,
   forceEnabled = false,
   context: ScriptLifecycleContext = {},
 ) => {
-  const commands: string[][] = [];
+  const commands: LintInventoryCommand[] = [];
   const errors: string[] = [];
   const workspaceTasks = new Set<string>();
   const declaresEngine =
@@ -321,7 +326,11 @@ export const lintInventoryCommands = (
       const inventory = inventoryArguments(raw.slice(offset));
       if (inventory.error !== undefined)
         errors.push(`${name}: ${inventory.error}`);
-      else commands.push(inventory.args);
+      else
+        commands.push({
+          runtime: first === "bun" ? "bun" : "node",
+          args: inventory.args,
+        });
     }
     active.delete(name);
     visited.add(name);

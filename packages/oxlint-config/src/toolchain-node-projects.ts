@@ -54,13 +54,29 @@ const record = (value: unknown): value is Record<string, unknown> =>
 const stringList = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((entry) => typeof entry === "string");
 
-const readCommand = (root: string, executable: string, args: string[]) => {
-  const result = spawnSync(process.execPath, [executable, ...args], {
-    cwd: root,
-    encoding: "utf8",
-    timeout: 30_000,
-    maxBuffer: 32 * 1024 * 1024,
-  });
+type ReadCommandOptions = {
+  root: string;
+  executable: string;
+  args: string[];
+  runtime: "node" | "bun";
+};
+
+const readCommand = ({
+  root,
+  executable,
+  args,
+  runtime,
+}: ReadCommandOptions) => {
+  const result = spawnSync(
+    runtime,
+    [...(runtime === "bun" ? ["--bun"] : []), executable, ...args],
+    {
+      cwd: root,
+      encoding: "utf8",
+      timeout: 30_000,
+      maxBuffer: 32 * 1024 * 1024,
+    },
+  );
   if (result.error !== undefined) throw result.error;
   if (result.status !== 0)
     throw new Error(
@@ -158,7 +174,10 @@ export const checkNodeProjects = ({
       path.dirname(require.resolve("typescript/package.json")),
       "bin/tsc",
     );
-    const commands = inventory.commands.map((args) => ({ cwd: root, args }));
+    const commands = inventory.commands.map((command) => ({
+      cwd: root,
+      ...command,
+    }));
     if (inventory.workspaceTask) {
       const workspaces = record(manifest) ? manifest["workspaces"] : undefined;
       const patterns = record(workspaces) ? workspaces["packages"] : workspaces;
@@ -208,14 +227,19 @@ export const checkNodeProjects = ({
           );
         if (nested.errors.length > 0)
           throw new Error(`${file}: ${nested.errors.join("; ")}`);
-        for (const args of nested.commands)
-          commands.push({ cwd: path.join(root, directory), args });
+        for (const command of nested.commands)
+          commands.push({ cwd: path.join(root, directory), ...command });
       }
       if (commands.length === 0)
         throw new Error("workspace lint task has no declared oxlint commands");
     }
-    const lintedFiles = commands.flatMap(({ cwd, args }) =>
-      readCommand(cwd, oxlint, [...args, "--debug", "files", "--threads", "1"])
+    const lintedFiles = commands.flatMap(({ cwd, args, runtime }) =>
+      readCommand({
+        root: cwd,
+        executable: oxlint,
+        args: [...args, "--debug", "files", "--threads", "1"],
+        runtime,
+      })
         .split(/\r?\n/)
         .filter((file) => file !== "")
         .map((file) => relativePath(root, path.resolve(cwd, file))),
@@ -247,7 +271,12 @@ export const checkNodeProjects = ({
       const result: Project = { files: new Set(), references: [] };
       try {
         const project: unknown = JSON.parse(
-          readCommand(root, compiler, ["--showConfig", "--project", config]),
+          readCommand({
+            root,
+            executable: compiler,
+            args: ["--showConfig", "--project", config],
+            runtime: "node",
+          }),
         );
         if (!record(project))
           throw new Error("compiler configuration must be an object");

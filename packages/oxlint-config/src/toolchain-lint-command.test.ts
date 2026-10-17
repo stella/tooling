@@ -37,13 +37,16 @@ test("native package lint scripts retain scope and diagnostic flags without requ
     workspaceTask: false,
     errors: [],
     commands: [
-      [
-        "-c",
-        "oxlint.config.ts",
-        "--report-unused-disable-directives-severity=error",
-        "--deny-warnings",
-        ".",
-      ],
+      {
+        runtime: "bun",
+        args: [
+          "-c",
+          "oxlint.config.ts",
+          "--report-unused-disable-directives-severity=error",
+          "--deny-warnings",
+          ".",
+        ],
+      },
     ],
   });
 });
@@ -64,7 +67,9 @@ test("literal Turbo lint delegates workspace discovery without executing Turbo",
     enabled: true,
     workspaceTask: false,
     errors: [],
-    commands: [["-c", "../../oxlint.config.ts", "."]],
+    commands: [
+      { runtime: "node", args: ["-c", "../../oxlint.config.ts", "."] },
+    ],
   });
 });
 
@@ -98,7 +103,7 @@ test("literal validation files remain preparation steps alongside real oxlint co
       enabled: true,
       workspaceTask: false,
       errors: [],
-      commands: [["."]],
+      commands: [{ runtime: "node", args: ["."] }],
     });
   }
   expect(
@@ -108,7 +113,7 @@ test("literal validation files remain preparation steps alongside real oxlint co
         "lint.ts": "oxlint .",
       }),
     ).commands,
-  ).toEqual([["."]]);
+  ).toEqual([{ runtime: "node", args: ["."] }]);
   expect(
     lintInventoryCommands(
       { scripts: { lint: "bun run scripts/validate.ts $ARGS" } },
@@ -152,7 +157,12 @@ test("workspace lint aliases recurse without executing preparation commands", ()
     enabled: true,
     workspaceTask: true,
     errors: [],
-    commands: [["-c", "oxlint.config.ts", "--deny-warnings", "."]],
+    commands: [
+      {
+        runtime: "bun",
+        args: ["-c", "oxlint.config.ts", "--deny-warnings", "."],
+      },
+    ],
   });
 });
 
@@ -176,15 +186,18 @@ test("supported literal launchers preserve ordered file-selection arguments", ()
       workspaceTask: false,
       errors: [],
       commands: [
-        [
-          "--ignore-path",
-          ".lint ignore",
-          "--ignore-pattern",
-          "**/generated/**",
-          "--no-ignore",
-          "--disable-nested-config",
-          "scripts/**/*.mjs",
-        ],
+        {
+          runtime: launcher === "bun --bun oxlint" ? "bun" : "node",
+          args: [
+            "--ignore-path",
+            ".lint ignore",
+            "--ignore-pattern",
+            "**/generated/**",
+            "--no-ignore",
+            "--disable-nested-config",
+            "scripts/**/*.mjs",
+          ],
+        },
       ],
     });
   }
@@ -201,7 +214,7 @@ test("shared shell parsing distinguishes executable nested programs from quoted 
     enabled: true,
     workspaceTask: false,
     errors: [],
-    commands: [["-c", "oxlint.config.ts", "."]],
+    commands: [{ runtime: "node", args: ["-c", "oxlint.config.ts", "."] }],
   });
 });
 
@@ -282,7 +295,7 @@ test("aliases visited repeatedly do not duplicate inventory commands", () => {
         "lint:core": "oxlint --ignore-pattern='**/dist/**' --threads 1 .",
       }),
     ).commands,
-  ).toEqual([["--ignore-pattern=**/dist/**", "."]]);
+  ).toEqual([{ runtime: "node", args: ["--ignore-pattern=**/dist/**", "."] }]);
 });
 
 test("every package manager resolves literal run aliases alongside direct oxlint", () => {
@@ -298,7 +311,10 @@ test("every package manager resolves literal run aliases alongside direct oxlint
       enabled: true,
       workspaceTask: false,
       errors: [],
-      commands: [["root.ts"], ["scripts"]],
+      commands: [
+        { runtime: "node", args: ["root.ts"] },
+        { runtime: "node", args: ["scripts"] },
+      ],
     });
   }
 });
@@ -355,7 +371,7 @@ test("literal filtered Bun builds prepare lint without becoming linter launchers
     enabled: true,
     workspaceTask: false,
     errors: [],
-    commands: [["."]],
+    commands: [{ runtime: "bun", args: ["."] }],
   });
   expect(selected).toEqual(packages.map((name) => `@stll/${name}`));
   for (const command of [
@@ -390,7 +406,10 @@ test("inventory strips validated caller thread options without changing other ar
     );
     expect(result.errors).toEqual([]);
     expect(result.commands).toEqual([
-      ["-c", "config.json", "--deny-warnings", "scripts"],
+      {
+        runtime: "node",
+        args: ["-c", "config.json", "--deny-warnings", "scripts"],
+      },
     ]);
   }
 });
@@ -434,7 +453,13 @@ test("script aliases discover the stages actually run by each declared manager",
     });
     expect(result.errors, manager).toEqual([]);
     expect(result.commands, manager).toEqual(
-      hooks ? [["before.mjs"], ["main.mjs"], ["after.mjs"]] : [["main.mjs"]],
+      hooks
+        ? [
+            { runtime: "node", args: ["before.mjs"] },
+            { runtime: "node", args: ["main.mjs"] },
+            { runtime: "node", args: ["after.mjs"] },
+          ]
+        : [{ runtime: "node", args: ["main.mjs"] }],
     );
   }
 });
@@ -451,9 +476,9 @@ test("root script hooks inherit the declared manager and hook aliases retain dis
   });
   expect(result.errors).toEqual([]);
   expect(result.commands).toEqual([
-    ["before.mjs"],
-    ["main.mjs"],
-    ["after.mjs"],
+    { runtime: "node", args: ["before.mjs"] },
+    { runtime: "node", args: ["main.mjs"] },
+    { runtime: "node", args: ["after.mjs"] },
   ]);
 });
 
@@ -466,8 +491,8 @@ test("pnpm lifecycle configuration and substring suppression follow the pinned i
   });
   const input = { ...scripts, packageManager: "pnpm@12.9.1" };
   expect(lintInventoryCommands(input).commands).toEqual([
-    ["main.mjs"],
-    ["after.mjs"],
+    { runtime: "node", args: ["main.mjs"] },
+    { runtime: "node", args: ["after.mjs"] },
   ]);
   expect(
     lintInventoryCommands(input, false, {
@@ -476,7 +501,7 @@ test("pnpm lifecycle configuration and substring suppression follow the pinned i
         source: "enablePrePostScripts: false\n",
       },
     }).commands,
-  ).toEqual([["main.mjs"]]);
+  ).toEqual([{ runtime: "node", args: ["main.mjs"] }]);
   expect(
     lintInventoryCommands(input, false, {
       pnpmWorkspace: {
@@ -485,7 +510,10 @@ test("pnpm lifecycle configuration and substring suppression follow the pinned i
       },
       npmrc: { type: "tracked", source: "enable-pre-post-scripts=false\n" },
     }).commands,
-  ).toEqual([["main.mjs"], ["after.mjs"]]);
+  ).toEqual([
+    { runtime: "node", args: ["main.mjs"] },
+    { runtime: "node", args: ["after.mjs"] },
+  ]);
 });
 
 test("undetermined lifecycle configuration or manager flavors fail closed", () => {
@@ -539,7 +567,13 @@ test("npm ignore-scripts controls hooks and lifecycle cycles cannot hide scopes"
     });
     expect(result.errors).toEqual([]);
     expect(result.commands).toEqual(
-      enabled ? [["before.mjs"], ["main.mjs"], ["after.mjs"]] : [["main.mjs"]],
+      enabled
+        ? [
+            { runtime: "node", args: ["before.mjs"] },
+            { runtime: "node", args: ["main.mjs"] },
+            { runtime: "node", args: ["after.mjs"] },
+          ]
+        : [{ runtime: "node", args: ["main.mjs"] }],
     );
   }
   for (const key of ["IGNORE-SCRIPTS", "Ignore-Scripts"]) {

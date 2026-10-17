@@ -1,6 +1,7 @@
 /// <reference types="bun-types" />
 
 import { expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
@@ -763,4 +764,96 @@ test("nested workspace lifecycle settings cannot silently override root hook sel
     expect(findings).toHaveLength(1);
     expect(findings.at(0)?.message).toContain("nested workspace overrides");
   });
+});
+
+test("declared inventory runtimes load real configs independently of the checker parent", async () => {
+  const bundleRoot = mkdtempSync(path.join(tmpdir(), "stll-inventory-parent-"));
+  try {
+    const entry = path.join(bundleRoot, "entry.ts");
+    writeFileSync(
+      entry,
+      `
+      import { checkNodeProjects } from ${JSON.stringify(path.join(import.meta.dir, "toolchain-node-projects.ts"))};
+      import { readFileSync } from "node:fs";
+      const input = JSON.parse(readFileSync(process.argv[2], "utf8"));
+      console.log(JSON.stringify(checkNodeProjects({ ...input, trackedFiles: new Set(input.trackedFiles) })));
+    `,
+    );
+    const build = await Bun.build({
+      entrypoints: [entry],
+      outdir: bundleRoot,
+      naming: "checker.mjs",
+      target: "node",
+    });
+    expect(build.success).toBe(true);
+    withInventoryFixture((root, trackedFiles) => {
+      writeFileSync(
+        path.join(root, "scripts/owned.mjs"),
+        "export const owned = true;\n",
+      );
+      writeFileSync(
+        path.join(root, "scripts/orphan.mjs"),
+        "export const orphan = true;\n",
+      );
+      writeFileSync(
+        path.join(root, "scripts/tsconfig.json"),
+        JSON.stringify({
+          compilerOptions: { allowJs: true },
+          files: ["owned.mjs"],
+        }),
+      );
+      writeFileSync(
+        path.join(root, "oxlint.shared.ts"),
+        "export default {};\n",
+      );
+      writeFileSync(
+        path.join(root, "oxlint.config.ts"),
+        'import config from "./oxlint.shared"; export default config;\n',
+      );
+      for (const file of [
+        "scripts/owned.mjs",
+        "scripts/orphan.mjs",
+        "scripts/tsconfig.json",
+        "oxlint.shared.ts",
+        "oxlint.config.ts",
+      ])
+        trackedFiles.add(file);
+      for (const lint of [
+        "bun --bun oxlint -c oxlint.config.ts --type-aware scripts",
+        "oxlint -c .oxlintrc.json --type-aware scripts",
+      ]) {
+        const input = path.join(bundleRoot, "input.json");
+        writeFileSync(
+          input,
+          JSON.stringify({
+            root,
+            manifest: { ...fixtureManifest, scripts: { lint } },
+            trackedFiles: [...trackedFiles],
+          }),
+        );
+        for (const parent of ["node", "bun"]) {
+          const result = spawnSync(
+            parent,
+            [
+              ...(parent === "bun" ? ["--bun"] : []),
+              path.join(bundleRoot, "checker.mjs"),
+              input,
+            ],
+            { encoding: "utf8" },
+          );
+          expect(result.status, result.stderr).toBe(0);
+          expect(JSON.parse(result.stdout)).toEqual([
+            {
+              rule: nodeProjectRule,
+              path: "scripts/orphan.mjs",
+              line: 1,
+              message: expect.stringContaining("inferred project"),
+            },
+          ]);
+        }
+      }
+    });
+  } finally {
+    rmSync(bundleRoot, { recursive: true, force: true });
+  }
 });
