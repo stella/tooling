@@ -652,12 +652,140 @@ test("workspace hooks use the root manager and unresolved pnpm configuration fai
     trackedFiles.delete("pnpm-workspace.yaml");
     writeFileSync(
       path.join(root, "pnpm-workspace.yaml"),
-      "enablePrePostScripts: false\n",
+      "packages: ['packages/*']\nenablePrePostScripts: false\n",
     );
     const untracked = checkNodeProjects({ root, manifest, trackedFiles });
     expect(untracked).toHaveLength(1);
     expect(untracked.at(0)?.message).toContain("tracked regular");
     trackedFiles.add("pnpm-workspace.yaml");
+    expect(checkNodeProjects({ root, manifest, trackedFiles })).toEqual([]);
+  });
+});
+
+test("workspace lint tasks read pnpm-workspace.yaml membership and exclusions", () => {
+  withInventoryFixture((root, trackedFiles) => {
+    const manifest = {
+      ...fixtureManifest,
+      packageManager: "pnpm@12.9.1",
+      scripts: { lint: "turbo run lint" },
+    };
+    const member = (name: string) => ({
+      [`packages/${name}/package.json`]: JSON.stringify({
+        name: `@fixture/${name}`,
+        scripts: { lint: "oxlint ." },
+      }),
+      [`packages/${name}/owned.mjs`]: "export const value = 1;\n",
+      [`packages/${name}/orphan.mjs`]: "export const value = 1;\n",
+      [`packages/${name}/tsconfig.json`]: JSON.stringify({
+        compilerOptions: { allowJs: true },
+        files: ["owned.mjs"],
+      }),
+    });
+    const files = {
+      "pnpm-workspace.yaml": "packages:\n  - 'packages/*'\n  - '!packages/skipped'\n",
+      ...member("a"),
+      ...member("skipped"),
+    };
+    for (const [file, source] of Object.entries(files)) {
+      mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+      writeFileSync(path.join(root, file), source);
+      trackedFiles.add(file);
+    }
+    expect(
+      checkNodeProjects({ root, manifest, trackedFiles }).map(
+        ({ path: file }) => file,
+      ),
+    ).toEqual(["packages/a/orphan.mjs"]);
+    // Under Bun, package.json workspaces stay authoritative even when a
+    // settings-only pnpm-workspace.yaml is tracked.
+    writeFileSync(path.join(root, "pnpm-workspace.yaml"), "packages: []\n");
+    expect(
+      checkNodeProjects({
+        root,
+        manifest: {
+          ...manifest,
+          packageManager: "bun@1.4.3",
+          workspaces: ["packages/*", "!packages/skipped"],
+        },
+        trackedFiles,
+      }).map(({ path: file }) => file),
+    ).toEqual(["packages/a/orphan.mjs"]);
+  });
+});
+
+test("filtered Bun builds select package.json workspaces even under pnpm", () => {
+  withInventoryFixture((root, trackedFiles) => {
+    const manifest = {
+      ...fixtureManifest,
+      packageManager: "pnpm@12.9.1",
+      workspaces: ["packages/bun-member"],
+      scripts: { lint: "bun --filter @fixture/bun-member build" },
+    };
+    const member = (name: string) => ({
+      [`packages/${name}/package.json`]: JSON.stringify({
+        name: `@fixture/${name}`,
+        private: true,
+        scripts: { build: "oxlint orphan.mjs" },
+      }),
+      [`packages/${name}/orphan.mjs`]: "export const value = 1;\n",
+      [`packages/${name}/tsconfig.json`]: JSON.stringify({
+        compilerOptions: { allowJs: true },
+        files: [],
+      }),
+    });
+    const files = {
+      "pnpm-workspace.yaml": "packages: ['packages/pnpm-member']\n",
+      ...member("bun-member"),
+      ...member("pnpm-member"),
+    };
+    for (const [file, source] of Object.entries(files)) {
+      mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+      writeFileSync(path.join(root, file), source);
+      trackedFiles.add(file);
+    }
+    expect(
+      checkNodeProjects({ root, manifest, trackedFiles }).map(
+        ({ path: file }) => file,
+      ),
+    ).toEqual(["packages/bun-member/orphan.mjs"]);
+    const pnpmOnly = checkNodeProjects({
+      root,
+      manifest: {
+        ...manifest,
+        scripts: { lint: "bun --filter @fixture/pnpm-member build" },
+      },
+      trackedFiles,
+    });
+    expect(new Set(pnpmOnly.map(({ path: file }) => file))).toEqual(
+      new Set(["package.json"]),
+    );
+    expect(
+      pnpmOnly.some(({ message }) =>
+        message.includes("one declared workspace package"),
+      ),
+    ).toBe(true);
+  });
+});
+
+test("a nearest project that owns no roots defers to its ancestor", () => {
+  withInventoryFixture((root, trackedFiles) => {
+    const manifest = {
+      ...fixtureManifest,
+      scripts: { lint: "oxlint scripts" },
+    };
+    const files = {
+      "scripts/tsconfig.json": JSON.stringify({
+        compilerOptions: { allowJs: true },
+        include: ["**/*.mjs"],
+      }),
+      "scripts/nested/tsconfig.json": JSON.stringify({ files: [] }),
+      "scripts/nested/owned.mjs": "export const value = 1;\n",
+    };
+    for (const [file, source] of Object.entries(files)) {
+      mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+      writeFileSync(path.join(root, file), source);
+      trackedFiles.add(file);
+    }
     expect(checkNodeProjects({ root, manifest, trackedFiles })).toEqual([]);
   });
 });
