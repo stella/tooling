@@ -657,3 +657,258 @@ test("ESM asset targets are required packed members without being parsed as Java
     );
   }
 });
+
+test("exported createRequire loader declarations retain their static local closure", async () => {
+  for (const source of [
+    'import { createRequire } from "node:module"; export const loader = createRequire(import.meta.url); loader("./helper.cjs");',
+    'import { createRequire as factory } from "node:module"; export const loader = factory(import.meta.url); export const alias = loader; alias.resolve("./helper.cjs");',
+    'export { loader }; export function run() { return loader("./helper.cjs"); } const loader = factory(import.meta.url); import { createRequire as factory } from "node:module";',
+    'import { createRequire } from "node:module"; export const alias = loader; export const loader = createRequire(import.meta.url); alias("./helper.cjs");',
+  ]) {
+    const packed = fixture(
+      { "entry.mjs": source, "helper.cjs": "module.exports = 1;" },
+      { type: "module" },
+    );
+    await assertPackedRuntimeImports(packed.options);
+    packed.members.delete("package/helper.cjs");
+    await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
+      "helper.cjs",
+    );
+  }
+});
+
+test("exported named function and class declarations establish their normal scopes", async () => {
+  for (const source of [
+    'export default function require() { return 1; } require("./not-local.cjs");',
+    'export default class require { static resolve() { return 1; } } require.resolve("./not-local.cjs");',
+    'export function require(target) { return target; } require("./not-local.cjs");',
+    'export class module { static require(target) { return target; } } module.require("./not-local.cjs");',
+  ])
+    await assertPackedRuntimeImports(
+      fixture({ "entry.mjs": source }, { type: "module" }).options,
+    );
+  for (const declaration of [
+    'export default function run() { return loader("./helper.cjs"); }',
+    'export default class Run { static run() { return loader("./helper.cjs"); } }',
+  ]) {
+    const packed = fixture(
+      {
+        "entry.mjs": `import { createRequire } from "node:module"; const loader = createRequire(import.meta.url); ${declaration}`,
+        "helper.cjs": "module.exports = 1;",
+      },
+      { type: "module" },
+    );
+    await assertPackedRuntimeImports(packed.options);
+    packed.members.delete("package/helper.cjs");
+    await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
+      "helper.cjs",
+    );
+  }
+});
+
+test("known CommonJS loader calls with computed arguments fail closed", async () => {
+  for (const source of [
+    'const target = "./helper.cjs"; require(target);',
+    'const target = "./helper.cjs"; require.resolve(target);',
+    'const target = "./helper.cjs"; require["resolve"](target);',
+    'const target = "./helper.cjs"; module.require(target);',
+    'const target = "./helper.cjs"; module["require"](target);',
+    'const loader = require; const target = "./helper.cjs"; loader(target);',
+  ])
+    await expect(
+      assertPackedRuntimeImports(
+        fixture({ "entry.cjs": source, "helper.cjs": "module.exports = 1;" })
+          .options,
+      ),
+    ).rejects.toThrow("Unresolvable dynamic loader");
+});
+
+test("computed createRequire bases and unsupported result propagation fail closed", async () => {
+  for (const body of [
+    'const base = import.meta.url; const loader = createRequire(base); loader("./helper.cjs");',
+    'createRequire(import.meta.url)("./helper.cjs");',
+    'let loader; loader = createRequire(import.meta.url); loader("./helper.cjs");',
+  ]) {
+    const packed = fixture(
+      {
+        "entry.mjs": `import { createRequire } from "node:module"; ${body}`,
+        "helper.cjs": "module.exports = 1;",
+      },
+      { type: "module" },
+    );
+    await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
+      "Unresolvable dynamic loader",
+    );
+  }
+});
+
+test("conditional aliases containing known loaders cannot silently erase dependencies", async () => {
+  for (const source of [
+    'const custom = () => 1; const loader = condition ? require : custom; loader("./helper.cjs");',
+    'const custom = () => 1; const loader = condition ? custom : require; loader("./helper.cjs");',
+    'const custom = () => 1; const loader = condition && require; loader("./helper.cjs");',
+  ])
+    await expect(
+      assertPackedRuntimeImports(
+        fixture({ "entry.cjs": source, "helper.cjs": "module.exports = 1;" })
+          .options,
+      ),
+    ).rejects.toThrow("Unresolvable dynamic loader");
+});
+
+test("namespace createRequire factories and plain namespace aliases retain local dependencies", async () => {
+  for (const [entry, source] of [
+    [
+      "entry.mjs",
+      'import * as moduleApi from "node:module"; export const loader = moduleApi.createRequire(import.meta.url); loader("./helper.cjs");',
+    ],
+    [
+      "entry.mjs",
+      'import * as moduleApi from "node:module"; const alias = moduleApi; const loader = alias["createRequire"](import.meta.url); loader.resolve("./helper.cjs");',
+    ],
+    [
+      "entry.cjs",
+      'const moduleApi = require("node:module"); const loader = moduleApi.createRequire(__filename); loader("./helper.cjs");',
+    ],
+    [
+      "entry.mjs",
+      'import * as moduleApi from "node:module"; const {createRequire: factory} = moduleApi; const loader = factory(import.meta.url); loader("./helper.cjs");',
+    ],
+    [
+      "entry.mjs",
+      'import * as moduleApi from "node:module"; export const {["createRequire"]: factory} = moduleApi; const loader = factory(import.meta.url); loader("./helper.cjs");',
+    ],
+    [
+      "entry.mjs",
+      'import moduleApi from "node:module"; const {createRequire: factory} = moduleApi; const loader = factory(import.meta.url); loader("./helper.cjs");',
+    ],
+    [
+      "entry.mjs",
+      'import {Module as moduleApi} from "node:module"; const loader = moduleApi.createRequire(import.meta.url); loader("./helper.cjs");',
+    ],
+    [
+      "entry.cjs",
+      'const moduleApi = require("node:module"); const {createRequire: factory} = moduleApi; const loader = factory(__filename); loader("./helper.cjs");',
+    ],
+  ] as const) {
+    const packed = fixture({
+      [entry]: source,
+      "helper.cjs": "module.exports = 1;",
+    });
+    await assertPackedRuntimeImports(packed.options);
+    packed.members.delete("package/helper.cjs");
+    await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
+      "helper.cjs",
+    );
+  }
+});
+
+test("unsupported loader destructuring and resolution options fail explicitly", async () => {
+  for (const [entry, source] of [
+    [
+      "entry.mjs",
+      'import * as moduleApi from "node:module"; const {[field]: factory} = moduleApi; const loader = factory(import.meta.url); loader("./helper.cjs");',
+    ],
+    [
+      "entry.mjs",
+      'import * as moduleApi from "node:module"; const {...copy} = moduleApi; const loader = copy.createRequire(import.meta.url); loader("./helper.cjs");',
+    ],
+    [
+      "entry.mjs",
+      'import * as moduleApi from "node:module"; const {createRequire: factory = fallback} = moduleApi; const loader = factory(import.meta.url); loader("./helper.cjs");',
+    ],
+    ["entry.cjs", 'const {resolve} = require; resolve("./helper.cjs");'],
+    ["entry.cjs", 'const {require: loader} = module; loader("./helper.cjs");'],
+    ["entry.cjs", 'require.resolve("./helper.cjs", {paths: ["./other"]});'],
+  ] as const)
+    await expect(
+      assertPackedRuntimeImports(
+        fixture({ [entry]: source, "helper.cjs": "module.exports = 1;" })
+          .options,
+      ),
+    ).rejects.toThrow("Unresolvable dynamic loader");
+});
+
+test("external literal loader calls, custom shadows and computed import expressions retain their boundaries", async () => {
+  for (const source of [
+    'require("node:fs"); require.resolve("external-package"); module.require("@scope/dependency");',
+    "function use(require, target) { require(target); require.resolve(target); }",
+    "function use(module, target) { module.require(target); }",
+    'function createRequire(base) { return target => target; } const loader = createRequire("custom"); loader(target);',
+  ])
+    await assertPackedRuntimeImports(fixture({ "entry.cjs": source }).options);
+  await assertPackedRuntimeImports(
+    fixture(
+      {
+        "entry.mjs":
+          'const target = "./consumer-owned-config.mjs"; void import(target);',
+      },
+      { type: "module" },
+    ).options,
+  );
+});
+
+test("function-owned var loader aliases remain visible throughout their function", async () => {
+  for (const source of [
+    'function run() { var loader = require; loader("./helper.cjs"); }',
+    'function run() { if (condition) { var loader = require; } loader("./helper.cjs"); }',
+  ]) {
+    const packed = fixture({
+      "entry.cjs": source,
+      "helper.cjs": "module.exports = 1;",
+    });
+    await assertPackedRuntimeImports(packed.options);
+    packed.members.delete("package/helper.cjs");
+    await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
+      "helper.cjs",
+    );
+  }
+});
+
+test("conflicting var loader kinds fail explicitly instead of oscillating inference", async () => {
+  for (const source of [
+    'const { createRequire } = require("node:module"); var loader = require; var loader = createRequire; loader("./helper.cjs");',
+    'var loader = require; var loader = module; loader.require("./helper.cjs");',
+  ])
+    await expect(
+      assertPackedRuntimeImports(
+        fixture({ "entry.cjs": source, "helper.cjs": "module.exports = 1;" })
+          .options,
+      ),
+    ).rejects.toThrow("Unresolvable dynamic loader");
+});
+
+test("known loaders cannot escape through bind, call, apply, consumers or reassignment", async () => {
+  for (const source of [
+    'const loader = require.bind(null); loader("./helper.cjs");',
+    'require.call(null, "./helper.cjs");',
+    'require.apply(null, ["./helper.cjs"]);',
+    "choose(require);",
+    'function choose(value) { return value; } const loader = choose(require); loader("./helper.cjs");',
+    'let loader; loader = require; loader("./helper.cjs");',
+    'const holder = {}; holder.loader = require; holder.loader("./helper.cjs");',
+    'const select = () => require; const loader = select(); loader("./helper.cjs");',
+    'function select() { return require; } const loader = select(); loader("./helper.cjs");',
+    'let loader = require; loader = custom; loader("./helper.cjs");',
+    'require = custom; require("./helper.cjs");',
+  ])
+    await expect(
+      assertPackedRuntimeImports(
+        fixture({ "entry.cjs": source, "helper.cjs": "module.exports = 1;" })
+          .options,
+      ),
+    ).rejects.toThrow("Unresolvable dynamic loader");
+});
+
+test("default-exported unbound createRequire results fail explicitly", async () => {
+  const packed = fixture(
+    {
+      "entry.mjs":
+        'import { createRequire } from "node:module"; export default createRequire(import.meta.url);',
+    },
+    { type: "module" },
+  );
+  await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
+    "Unresolvable dynamic loader",
+  );
+});

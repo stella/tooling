@@ -471,12 +471,16 @@ manifest with its declared public workspace package's committed contract and
 resolved build target. The command never packs
 or executes the archive, accepts exactly one archive, and cannot combine
 `--artifact` with `--write`. Unknown or private package artifacts fail. Computed
-dynamic specifiers and bare external package dependencies are outside this local
+`import()` specifiers and bare external package dependencies are outside this local
 archive check. The reader follows literal ESM imports/re-exports, CommonJS
-require/resolve calls and named or destructured `createRequire` bindings based on
+require/resolve calls and named, destructured or namespace `createRequire` bindings based on
 `import.meta.url` or `__filename`. Asset references must be regular packed files;
 non-JavaScript ESM assets are not parsed as scripts. Recursive import mappings
 are rejected, including expanding wildcard aliases.
+Exported declarations use the same scope collection as ordinary declarations.
+Known loader calls require one literal specifier. Unresolved loader aliases,
+computed bases, unsupported propagation and conflicting bindings report an
+`Unresolvable dynamic loader` diagnostic instead of omitting dependencies.
 
 The consumer policy pins Node 22.23.3, npm 12.2.0, pnpm 12.9.1, and TypeScript
 6.0.3 independently of the development toolchain. Published engines and TypeScript

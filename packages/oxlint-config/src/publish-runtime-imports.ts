@@ -76,14 +76,42 @@ const patternNames = (value: unknown): string[] => {
       return [];
   }
 };
-type Binding = "other" | "require" | "factory" | "module";
+type Binding = "other" | "require" | "factory" | "module" | "module-api";
 type Scope = Map<string, Binding>;
-const binding = (scopes: readonly Scope[], name: string) => {
-  for (const scope of scopes.toReversed()) {
-    const found = scope.get(name);
-    if (found !== undefined) return found;
-  }
+const bindingScope = (scopes: readonly Scope[], name: string) =>
+  scopes.findLast((scope) => scope.has(name));
+const binding = (scopes: readonly Scope[], name: string) =>
+  bindingScope(scopes, name)?.get(name);
+const memberName = (value: Record<string, unknown>) =>
+  value["computed"] === true
+    ? literal(value["property"])
+    : identifier(value["property"]);
+const loaderBinding = (
+  value: unknown,
+  scopes: readonly Scope[],
+): Binding | undefined => {
+  const name = identifier(value);
+  if (name !== undefined) return binding(scopes, name);
+  if (!record(value) || value["type"] !== "MemberExpression") return undefined;
+  const owner = identifier(value["object"]);
+  if (owner === undefined) return undefined;
+  const kind = binding(scopes, owner);
+  const property = memberName(value);
+  if (kind === "module-api" && property === "createRequire") return "factory";
+  if (kind === "module" && property === "require") return "require";
+  if (kind === "require" && property === "resolve") return "require";
   return undefined;
+};
+const scopeDeclarations = (
+  node: Record<string, unknown>,
+): Record<string, unknown>[] => {
+  if (
+    (node["type"] === "ExportNamedDeclaration" ||
+      node["type"] === "ExportDefaultDeclaration") &&
+    record(node["declaration"])
+  )
+    return scopeDeclarations(node["declaration"]);
+  return [node];
 };
 const functionNode = (node: Record<string, unknown>) =>
   [
@@ -93,12 +121,34 @@ const functionNode = (node: Record<string, unknown>) =>
   ].includes(String(node["type"]));
 
 type StaticImport = { specifier: string; mode: "import" | "require" };
-/** Read syntax only: never evaluate package code or computed loader arguments. */
+/** Read syntax only; known loaders must have statically resolvable bindings. */
 const staticImports = (
   tree: unknown,
   mode: "script" | "module",
 ): StaticImport[] => {
   const result: StaticImport[] = [];
+  const resolvedFactories = new Set<Record<string, unknown>>();
+  const unresolvable = (description: string) =>
+    new Error(`Unresolvable dynamic loader: ${description}`);
+  const loaderValue = (value: unknown, scopes: readonly Scope[]): boolean => {
+    if (!record(value)) return false;
+    const kind = loaderBinding(value, scopes);
+    if (kind !== undefined && kind !== "other") return true;
+    if (
+      functionNode(value) ||
+      [
+        "CallExpression",
+        "MemberExpression",
+        "UnaryExpression",
+        "BinaryExpression",
+        "TemplateLiteral",
+      ].includes(String(value["type"]))
+    )
+      return false;
+    if (value["type"] === "Property")
+      return loaderValue(value["value"], scopes);
+    return children(value).some((child) => loaderValue(child, scopes));
+  };
   const walk = (node: Record<string, unknown>, scopes: readonly Scope[]) => {
     const kind = node["type"];
     if (
@@ -142,10 +192,17 @@ const staticImports = (
         for (const parameter of nodes(node["params"])) bind(parameter);
       }
       if (kind === "CatchClause") bind(node["param"]);
+      if (
+        kind === "ArrowFunctionExpression" &&
+        record(node["body"]) &&
+        node["body"]["type"] !== "BlockStatement" &&
+        loaderValue(node["body"], [...scopes, local])
+      )
+        throw unresolvable("loader returned through an unsupported function");
       const statements =
         kind === "Program" || kind === "BlockStatement"
-          ? nodes(node["body"])
-          : children(node);
+          ? nodes(node["body"]).flatMap(scopeDeclarations)
+          : children(node).flatMap(scopeDeclarations);
       const declarations: Record<string, unknown>[] = [];
       for (const statement of statements) {
         if (statement["type"] === "VariableDeclaration") {
@@ -166,8 +223,16 @@ const staticImports = (
               name,
               ["node:module", "module"].includes(
                 literal(statement["source"]) ?? "",
-              ) && identifier(specifier["imported"]) === "createRequire"
-                ? "factory"
+              )
+                ? identifier(specifier["imported"]) === "createRequire"
+                  ? "factory"
+                  : [
+                        "ImportDefaultSpecifier",
+                        "ImportNamespaceSpecifier",
+                      ].includes(String(specifier["type"])) ||
+                      identifier(specifier["imported"]) === "Module"
+                    ? "module-api"
+                    : "other"
                 : "other",
             );
           }
@@ -191,61 +256,110 @@ const staticImports = (
         for (const statement of statements) hoisted(statement);
       }
       const nested = [...scopes, local];
-      for (const entry of declarations) {
-        const name = identifier(entry["id"]);
-        const initial = entry["init"];
-        if (!record(initial)) continue;
-        if (
-          initial["type"] === "CallExpression" &&
-          identifier(initial["callee"]) === "require" &&
-          binding(nested, "require") === "require" &&
-          ["node:module", "module"].includes(
-            literal(nodes(initial["arguments"]).at(0)) ?? "",
-          ) &&
-          record(entry["id"]) &&
-          entry["id"]["type"] === "ObjectPattern"
-        ) {
-          for (const property of nodes(entry["id"]["properties"])) {
-            const factoryName = identifier(property["value"]);
+      let changed = true;
+      while (changed) {
+        changed = false;
+        const assign = (name: string, value: Binding) => {
+          const owner = bindingScope(nested, name);
+          if (owner === undefined)
+            throw unresolvable("loader declaration has no owning scope");
+          if (owner.get(name) === value) return;
+          if (owner.get(name) !== "other")
+            throw unresolvable("conflicting loader binding declarations");
+          owner.set(name, value);
+          changed = true;
+        };
+        for (const entry of declarations) {
+          const name = identifier(entry["id"]);
+          const initial = entry["init"];
+          if (!record(initial)) continue;
+          const alias = loaderBinding(initial, nested);
+          const nodeModule =
+            initial["type"] === "CallExpression" &&
+            loaderBinding(initial["callee"], nested) === "require" &&
+            ["node:module", "module"].includes(
+              literal(nodes(initial["arguments"]).at(0)) ?? "",
+            );
+          if (
+            (nodeModule || alias === "module-api") &&
+            record(entry["id"]) &&
+            entry["id"]["type"] === "ObjectPattern"
+          ) {
+            for (const property of nodes(entry["id"]["properties"])) {
+              const key =
+                property["computed"] === true
+                  ? literal(property["key"])
+                  : (identifier(property["key"]) ?? literal(property["key"]));
+              if (property["type"] === "RestElement" || key === undefined)
+                throw unresolvable(
+                  "module loader destructuring cannot be resolved statically",
+                );
+              const factoryName = identifier(property["value"]);
+              if (
+                key === "createRequire" ||
+                key === "Module" ||
+                key === "default"
+              ) {
+                if (factoryName === undefined)
+                  throw unresolvable(
+                    "module loader binding pattern cannot be resolved statically",
+                  );
+                assign(
+                  factoryName,
+                  key === "createRequire" ? "factory" : "module-api",
+                );
+              }
+            }
+          } else if (
+            name === undefined &&
+            alias !== undefined &&
+            alias !== "other"
+          ) {
+            throw unresolvable(
+              "loader destructuring cannot be resolved statically",
+            );
+          }
+          if (name === undefined) continue;
+          if (alias !== undefined && alias !== "other") assign(name, alias);
+          if (nodeModule) assign(name, "module-api");
+          if (
+            initial["type"] === "CallExpression" &&
+            loaderBinding(initial["callee"], nested) === "factory"
+          ) {
+            const argument = nodes(initial["arguments"]).at(0);
+            const object = argument?.["object"];
+            const importMeta =
+              record(object) &&
+              object["type"] === "MetaProperty" &&
+              identifier(object["meta"]) === "import" &&
+              identifier(object["property"]) === "meta";
             if (
-              identifier(property["key"]) === "createRequire" &&
-              factoryName !== undefined
+              nodes(initial["arguments"]).length !== 1 ||
+              !(
+                identifier(argument) === "__filename" ||
+                (argument?.["type"] === "MemberExpression" &&
+                  argument["computed"] === false &&
+                  importMeta &&
+                  identifier(argument["property"]) === "url")
+              )
             )
-              local.set(factoryName, "factory");
+              throw unresolvable(
+                "createRequire needs import.meta.url or __filename",
+              );
+            assign(name, "require");
+            resolvedFactories.add(initial);
           }
         }
-        if (name === undefined) continue;
-        const alias = identifier(initial);
-        if (alias !== undefined && binding(nested, alias) === "require")
-          local.set(name, "require");
-        const callee = identifier(initial["callee"]);
+      }
+      for (const entry of declarations) {
+        const initial = entry["init"];
         if (
-          initial["type"] === "CallExpression" &&
-          callee !== undefined &&
-          binding(nested, callee) === "factory"
-        ) {
-          const argument = nodes(initial["arguments"]).at(0);
-          const object = argument?.["object"];
-          const importMeta =
-            record(object) &&
-            object["type"] === "MetaProperty" &&
-            identifier(object["meta"]) === "import" &&
-            identifier(object["property"]) === "meta";
-          if (
-            nodes(initial["arguments"]).length !== 1 ||
-            !(
-              identifier(argument) === "__filename" ||
-              (argument?.["type"] === "MemberExpression" &&
-                argument["computed"] === false &&
-                importMeta &&
-                identifier(argument["property"]) === "url")
-            )
-          )
-            throw new Error(
-              "Packed createRequire needs import.meta.url or __filename for static resolution",
-            );
-          local.set(name, "require");
-        }
+          loaderBinding(initial, nested) === undefined &&
+          loaderValue(initial, nested)
+        )
+          throw unresolvable(
+            "binding initializer cannot be resolved statically",
+          );
       }
       for (const child of children(node)) walk(child, nested);
       return;
@@ -264,38 +378,61 @@ const staticImports = (
     }
     if (kind === "CallExpression") {
       const callee = node["callee"];
-      const name = identifier(callee);
-      const resolved =
-        record(callee) &&
-        callee["type"] === "MemberExpression" &&
-        (callee["computed"] === true
-          ? literal(callee["property"])
-          : identifier(callee["property"])) === "resolve"
-          ? identifier(callee["object"])
-          : name;
+      const resolved = loaderBinding(callee, scopes);
       const specifier = literal(nodes(node["arguments"]).at(0));
-      if (
-        resolved !== undefined &&
-        binding(scopes, resolved) === "require" &&
-        specifier !== undefined
-      )
+      if (resolved === "require") {
+        if (specifier === undefined || nodes(node["arguments"]).length !== 1)
+          throw unresolvable(
+            "require/resolve needs one literal module specifier",
+          );
         result.push({ specifier, mode: "require" });
+      }
+      if (resolved === "factory" && !resolvedFactories.has(node))
+        throw unresolvable(
+          "createRequire result needs a resolvable local binding",
+        );
       if (
         record(callee) &&
         callee["type"] === "MemberExpression" &&
-        (callee["computed"] === true
-          ? literal(callee["property"])
-          : identifier(callee["property"])) === "require"
-      ) {
-        const object = identifier(callee["object"]);
-        if (
-          object !== undefined &&
-          binding(scopes, object) === "module" &&
-          specifier !== undefined
+        ["require", "factory"].includes(
+          loaderBinding(callee["object"], scopes) ?? "",
+        ) &&
+        resolved === undefined
+      )
+        throw unresolvable("loader method cannot be resolved statically");
+      if (
+        resolved !== "require" &&
+        resolved !== "factory" &&
+        nodes(node["arguments"]).some((argument) =>
+          loaderValue(argument, scopes),
         )
-          result.push({ specifier, mode: "require" });
+      )
+        throw unresolvable("loader passed through an unsupported call");
+    }
+    if (kind === "AssignmentExpression") {
+      const assigned = loaderBinding(node["right"], scopes);
+      if (
+        loaderValue(node["right"], scopes) &&
+        (node["operator"] !== "=" ||
+          loaderBinding(node["left"], scopes) !== assigned ||
+          assigned === undefined)
+      )
+        throw unresolvable("loader assignment cannot be resolved statically");
+      for (const name of patternNames(node["left"])) {
+        const previous = binding(scopes, name);
+        if (
+          previous !== undefined &&
+          previous !== "other" &&
+          (node["operator"] !== "=" ||
+            loaderBinding(node["right"], scopes) !== previous)
+        )
+          throw unresolvable(
+            "loader reassignment cannot be resolved statically",
+          );
       }
     }
+    if (kind === "ReturnStatement" && loaderValue(node["argument"], scopes))
+      throw unresolvable("loader returned through an unsupported function");
     for (const child of children(node)) walk(child, scopes);
   };
   const root = nodes(tree).at(0);
@@ -595,7 +732,15 @@ export const assertPackedRuntimeImports = async ({
         parsed = parse("module");
       }
     } else parsed = parse(mode);
-    for (const dependency of staticImports(parsed.tree, parsed.mode)) {
+    let dependencies: StaticImport[];
+    try {
+      dependencies = staticImports(parsed.tree, parsed.mode);
+    } catch (error) {
+      throw new Error(`Packed runtime imports ${file}: ${String(error)}`, {
+        cause: error,
+      });
+    }
+    for (const dependency of dependencies) {
       const resolved = await resolveImport({
         ...dependency,
         importer: file,
