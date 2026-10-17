@@ -696,6 +696,20 @@ test("workspace lint tasks read pnpm-workspace.yaml membership and exclusions", 
         ({ path: file }) => file,
       ),
     ).toEqual(["packages/a/orphan.mjs"]);
+    // Under Bun, package.json workspaces stay authoritative even when a
+    // settings-only pnpm-workspace.yaml is tracked.
+    writeFileSync(path.join(root, "pnpm-workspace.yaml"), "packages: []\n");
+    expect(
+      checkNodeProjects({
+        root,
+        manifest: {
+          ...manifest,
+          packageManager: "bun@1.4.3",
+          workspaces: ["packages/*", "!packages/skipped"],
+        },
+        trackedFiles,
+      }).map(({ path: file }) => file),
+    ).toEqual(["packages/a/orphan.mjs"]);
   });
 });
 

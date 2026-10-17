@@ -124,11 +124,21 @@ export const checkNodeProjects = ({
       const files: Record<string, string> = {
         "package.json": JSON.stringify(manifest),
       };
+      // pnpm-workspace.yaml declares membership only when pnpm is the manager;
+      // other managers may track it for settings alone.
+      const packageManager = record(manifest)
+        ? manifest["packageManager"]
+        : undefined;
+      const pnpmMembership =
+        packageManager === undefined ||
+        (typeof packageManager === "string" &&
+          packageManager.startsWith("pnpm@"));
       for (const file of trackedFiles) {
         const name = path.posix.basename(file);
         if (
           file !== "package.json" &&
-          (name === "package.json" || name === "pnpm-workspace.yaml") &&
+          (name === "package.json" ||
+            (pnpmMembership && name === "pnpm-workspace.yaml")) &&
           !file.split("/").includes("node_modules")
         )
           files[file] = readFileSync(path.join(root, file), "utf8");
