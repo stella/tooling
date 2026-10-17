@@ -444,7 +444,11 @@ export const diagnosticSet = (output: string, repo: string) => {
       diagnostics.add(globalDiagnosticKey(code.slice(2), message));
     }
   }
-  for (const line of clean.split("\n")) {
+  for (const rawLine of clean.split("\n")) {
+    const line = rawLine.replace(
+      /^(?!(?:error|warning) TS\d+:)(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]* [a-zA-Z0-9_.:-]+: /,
+      "",
+    );
     if (line.startsWith("<error ")) continue;
     const match =
       /^(.*?)\((\d+),\d+\):\s*(?:error|warning) TS(\d+)/.exec(line) ??
