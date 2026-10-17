@@ -148,7 +148,7 @@ test("invalid policies and exceptions fail before outputs change", async () => {
       ["profile"],
       ["profile", "missing", "value"],
     ]) {
-      await expect(
+      expect(
         generateRustPolicy({
           root,
           mode: "write",
@@ -176,7 +176,7 @@ test("unsafe output links and ancestors are rejected without partial writes", as
       if (kind === "hardlink") await link(outside, join(root, "rustfmt.toml"));
       if (kind === "directory") await mkdir(join(root, "rustfmt.toml"));
       if (kind === "ancestor") await symlink(root, join(root, ".cargo"));
-      await expect(
+      expect(
         generateRustPolicy({ root, input: single, mode: "write" }),
       ).rejects.toThrow();
       expect(await readFile(join(root, "Cargo.toml"), "utf8")).toBe(original);
@@ -287,7 +287,7 @@ test("workspace discovery rejects escaping paths and existing local member lint 
     for (const members of ['["../outside"]', '["missing"]', '["member"]']) {
       const current = `[workspace]\nmembers = ${members}\n`;
       await writeFile(join(root, "Cargo.toml"), current);
-      await expect(
+      expect(
         generateRustPolicy({
           root,
           input: { kind: "workspace" },
@@ -376,7 +376,7 @@ test("malformed and out-of-scope ownership markers never discard unrelated Cargo
     for (const metadata of bad) {
       const text = `# stll-rust-policy-owned-v1: ${metadata}\n${current}`;
       await writeFile(join(root, "Cargo.toml"), text);
-      await expect(
+      expect(
         generateRustPolicy({ root, input: single, mode: "write" }),
       ).rejects.toThrow();
       expect(await readFile(join(root, "Cargo.toml"), "utf8")).toBe(text);
@@ -423,7 +423,7 @@ test("workspace inheritance cannot be overridden by exceptions on members or roo
             { file, path: ["lints", "workspace"], value, reason: "fixture" },
           ],
         };
-        await expect(
+        expect(
           generateRustPolicy({ root, input, mode: "write" }),
         ).rejects.toThrow("inheritance is structural");
         expect(await readFile(join(root, "Cargo.toml"), "utf8")).toBe(rootText);
@@ -617,7 +617,7 @@ test("matching and ancestor directory links and unresolved relevant links fail b
             : join(outside, "target");
         if (scenario.target === "directory") await mkdir(target);
         await symlink(target, join(root, scenario.link));
-        await expect(
+        expect(
           generateRustPolicy({
             root,
             input: { kind: "workspace" },
@@ -658,7 +658,7 @@ test("a symlinked intermediate glob directory fails before writes even alongside
       );
       await writeFile(join(outside, "member/Cargo.toml"), memberText);
       await symlink(outside, join(root, "crates/link"));
-      await expect(
+      expect(
         generateRustPolicy({
           root,
           input: { kind: "workspace" },
@@ -792,7 +792,7 @@ test("every glob-matched directory requires Cargo.toml even alongside valid memb
     const member = '[package]\nname = "valid"\nversion = "0.1.0"\n';
     await writeFile(join(root, "Cargo.toml"), source);
     await writeFile(join(root, "crates/valid/Cargo.toml"), member);
-    await expect(
+    expect(
       generateRustPolicy({ root, input: { kind: "workspace" }, mode: "write" }),
     ).rejects.toThrow("missing workspace member manifest");
     expect(await readFile(join(root, "Cargo.toml"), "utf8")).toBe(source);
@@ -826,7 +826,7 @@ test("retired member paths retain source provenance and reject symlink substitut
     const keep = await readFile(join(root, "keep/Cargo.toml"), "utf8");
     await rm(join(root, "retire"), { recursive: true });
     await symlink(join(root, "keep"), join(root, "retire"));
-    await expect(
+    expect(
       generateRustPolicy({ root, input, mode: "write" }),
     ).rejects.toThrow("real repository directory");
     expect(await readFile(join(root, "Cargo.toml"), "utf8")).toBe(source);
@@ -883,7 +883,7 @@ test("member ownership indexes reject noncanonical paths and cannot erase unowne
     ]) {
       const source = `# stll-rust-policy-members-v1: ${JSON.stringify(paths)}\n${original}`;
       await writeFile(join(root, "Cargo.toml"), source);
-      await expect(
+      expect(
         generateRustPolicy({ root, input: single, mode: "write" }),
       ).rejects.toThrow();
       expect(await readFile(join(root, "Cargo.toml"), "utf8")).toBe(source);
@@ -894,7 +894,7 @@ test("member ownership indexes reject noncanonical paths and cannot erase unowne
     await writeFile(join(root, "unowned/Cargo.toml"), unowned);
     const source = `# stll-rust-policy-members-v1: ["unowned/Cargo.toml"]\n${original}`;
     await writeFile(join(root, "Cargo.toml"), source);
-    await expect(
+    expect(
       generateRustPolicy({ root, input: single, mode: "write" }),
     ).rejects.toThrow("retain its generated inheritance ownership");
     expect(await readFile(join(root, "unowned/Cargo.toml"), "utf8")).toBe(
