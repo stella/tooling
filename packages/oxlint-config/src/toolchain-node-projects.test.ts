@@ -698,6 +698,18 @@ test("filtered Bun build preparation cannot hide selected workspace lifecycle ho
     };
     writeFileSync(packageFile, JSON.stringify(member));
     expect(checkNodeProjects({ root, manifest, trackedFiles })).toEqual([]);
+    expect(
+      checkNodeProjects({
+        root,
+        manifest: {
+          ...manifest,
+          scripts: { lint: "bun --filter @fixture/a build" },
+        },
+        trackedFiles,
+      }).map(({ path: file, message }) => [file, message]),
+    ).toEqual([
+      ["package.json", "root lint scripts contain no supported oxlint invocation"],
+    ]);
     writeFileSync(
       path.join(root, "packages/a/orphan.mjs"),
       "export const orphan = 1;\n",
