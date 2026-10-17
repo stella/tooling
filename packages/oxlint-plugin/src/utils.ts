@@ -173,6 +173,46 @@ export const unwrapExpression = (node: unknown): AstNode | null => {
   return node;
 };
 
+export type LiteralArgumentResolution =
+  | { status: "known"; args: unknown[] }
+  | { status: "opaque"; args: unknown[]; spread: unknown; tail: unknown[] };
+
+// Expand literal array spreads and retain unresolved spread nodes in sequence.
+// Positional readers use only `args`, the prefix before the first barrier;
+// source inspectors can still inspect later entries in `tail`.
+export const resolveLiteralArraySpreads = (
+  args: unknown[],
+): LiteralArgumentResolution => {
+  const expanded: unknown[] = [];
+  const append = (argument: unknown): void => {
+    if (!isAstNode(argument) || argument.type !== "SpreadElement") {
+      expanded.push(argument);
+      return;
+    }
+    const expression = unwrapExpression(argument.argument);
+    if (
+      expression?.type !== "ArrayExpression" ||
+      !Array.isArray(expression.elements)
+    ) {
+      expanded.push(argument);
+      return;
+    }
+    for (const element of expression.elements) append(element);
+  };
+  for (const argument of args) append(argument);
+  const barrierIndex = expanded.findIndex(
+    (argument) => isAstNode(argument) && argument.type === "SpreadElement",
+  );
+  if (barrierIndex === -1) return { status: "known", args: expanded };
+  const spread = expanded.at(barrierIndex);
+  return {
+    status: "opaque",
+    args: expanded.slice(0, barrierIndex),
+    spread,
+    tail: expanded.slice(barrierIndex + 1),
+  };
+};
+
 // Resolve an ImportSpecifier's imported binding name (Identifier.name or
 // string-Literal.value). Returns null when the specifier shape is unexpected.
 export const getImportedName = (specifier: unknown): string | null => {

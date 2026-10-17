@@ -56,8 +56,10 @@ import path from "node:path";
 import {
   filenameForContext,
   getPropertyName,
+  isAstNode,
   isIdentifier,
   isStringLiteral,
+  resolveLiteralArraySpreads,
   unwrapExpression,
 } from "./utils.ts";
 
@@ -93,7 +95,8 @@ const suspenseFactoryName = (node) => {
   if (!isSuspenseCallee(node.callee)) {
     return null;
   }
-  const arg = unwrapExpression(node.arguments?.[0]);
+  const { args } = resolveLiteralArraySpreads(node.arguments ?? []);
+  const arg = unwrapExpression(args.at(0));
   if (arg?.type === "CallExpression" && isIdentifier(arg.callee)) {
     return arg.callee.name;
   }
@@ -245,12 +248,14 @@ export default eslintCompatPlugin({
 
             if (isCreateFileRouteOptionsCall(callee)) {
               isRouteFile = true;
-              const optionsArg = node.arguments.at(0);
+              const { args } = resolveLiteralArraySpreads(node.arguments);
+              const optionsArg = args.at(0);
               if (
                 routeOptions === null &&
-                optionsArg?.type === "ObjectExpression"
+                isAstNode(optionsArg) &&
+                optionsArg.type === "ObjectExpression"
               ) {
-                routeOptions = optionsArg;
+                routeOptions = { properties: optionsArg.properties };
               }
             }
 

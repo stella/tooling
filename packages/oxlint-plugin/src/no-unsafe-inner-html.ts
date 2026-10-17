@@ -34,7 +34,7 @@
 
 import { eslintCompatPlugin } from "@oxlint/plugins";
 
-import type { AstNode } from "./utils.ts";
+import type { AstNode, LiteralArgumentResolution } from "./utils.ts";
 import {
   getCalleeName,
   getPropertyName,
@@ -44,6 +44,7 @@ import {
   isMemberAccess,
   isStringLiteral,
   memberPropertyName,
+  resolveLiteralArraySpreads,
   staticStringValue,
   unwrapExpression,
 } from "./utils.ts";
@@ -232,9 +233,7 @@ const objectProperties = (node: unknown): AstNode[] => {
   return expression.properties.filter(isAstNode);
 };
 
-type AppliedArguments =
-  | { status: "known"; args: unknown[] }
-  | { status: "opaque" };
+type AppliedArguments = LiteralArgumentResolution;
 
 const appliedArgumentsFor = (args: unknown[]): AppliedArguments => {
   const applied = unwrapExpression(args.at(1));
@@ -246,75 +245,31 @@ const appliedArgumentsFor = (args: unknown[]): AppliedArguments => {
     return { status: "known", args: [] };
   }
   if (applied.type !== "ArrayExpression" || !Array.isArray(applied.elements)) {
-    return { status: "opaque" };
+    return { status: "opaque", args: [], spread: args.at(1), tail: [] };
   }
-  return { status: "known", args: applied.elements };
+  return resolveLiteralArraySpreads(applied.elements);
 };
 
 // The arguments the invoked function receives: `f.call(thisArg, ...args)`
 // shifts them by one; `f.apply(thisArg, [...])` forwards a literal array.
-const invokedArguments = (call: unknown): unknown[] => {
+const invokedArguments = (call: unknown): AppliedArguments => {
   if (!isAstNode(call)) {
-    return [];
+    return { status: "known", args: [] };
   }
-  const args = Array.isArray(call.arguments) ? call.arguments : [];
+  const rawArguments = Array.isArray(call.arguments) ? call.arguments : [];
+  const resolved = resolveLiteralArraySpreads(rawArguments);
   const callee = unwrapExpression(call.callee);
-  if (callee?.type !== "MemberExpression") {
-    return args;
-  }
+  if (callee?.type !== "MemberExpression") return resolved;
   const method = memberPropertyName(callee);
   if (method === "call") {
-    return args.slice(1);
+    return { ...resolved, args: resolved.args.slice(1) };
   }
-  if (method !== "apply") {
-    return args;
+  if (method !== "apply") return resolved;
+  if (resolved.status === "opaque") {
+    if (resolved.args.length >= 2) return appliedArgumentsFor(resolved.args);
+    return { ...resolved, args: [], tail: [] };
   }
-  const applied = appliedArgumentsFor(args);
-  if (applied.status === "opaque") {
-    // Preserve an opaque sentinel so known sinks fail closed.
-    return [call, call];
-  }
-  return applied.args;
-};
-
-const resolvedForwardedArguments = (args: unknown[]): AppliedArguments => {
-  const forwarded: unknown[] = [];
-  const append = (argument: unknown): boolean => {
-    if (!isAstNode(argument) || argument.type !== "SpreadElement") {
-      forwarded.push(argument);
-      return true;
-    }
-    const expression = unwrapExpression(argument.argument);
-    if (
-      expression?.type !== "ArrayExpression" ||
-      !Array.isArray(expression.elements)
-    )
-      return false;
-    for (const element of expression.elements)
-      if (!append(element)) return false;
-    return true;
-  };
-  for (const argument of args)
-    if (!append(argument)) return { status: "opaque" };
-  return { status: "known", args: forwarded };
-};
-
-const sinkArgumentsFor = (call: unknown): AppliedArguments => {
-  if (!isAstNode(call) || call.type !== "CallExpression")
-    return { status: "opaque" };
-  const rawArguments = Array.isArray(call.arguments) ? call.arguments : [];
-  const callArguments = resolvedForwardedArguments(rawArguments);
-  if (callArguments.status === "opaque") return callArguments;
-  const callee = unwrapExpression(call.callee);
-  if (callee?.type !== "MemberExpression") return callArguments;
-  const method = memberPropertyName(callee);
-  if (method === "call")
-    return { status: "known", args: callArguments.args.slice(1) };
-  if (method !== "apply") return callArguments;
-  const applied = appliedArgumentsFor(callArguments.args);
-  return applied.status === "opaque"
-    ? applied
-    : resolvedForwardedArguments(applied.args);
+  return appliedArgumentsFor(resolved.args);
 };
 
 // `document.write`, `window.document.write`, `frame.contentDocument.write`,
@@ -530,38 +485,35 @@ export default eslintCompatPlugin({
             if (callee?.type !== "MemberExpression") {
               return;
             }
-            const args = invokedArguments(node);
+            const invoked = invokedArguments(node);
             const method = memberPropertyName(callee);
             if (method === null) {
               return;
             }
-            const sinkArguments = sinkArgumentsFor(node);
             if (HTML_FIRST_ARGUMENT_METHODS.has(method)) {
-              if (sinkArguments.status === "opaque") {
+              if (invoked.status === "opaque") {
                 reportIfUnsafe(node);
                 return;
               }
-              reportIfUnsafe(sinkArguments.args.at(0));
+              reportIfUnsafe(invoked.args.at(0));
               return;
             }
             if (method === "insertAdjacentHTML") {
-              if (sinkArguments.status === "opaque") {
+              if (invoked.status === "opaque") {
                 reportIfUnsafe(node);
                 return;
               }
-              reportIfUnsafe(sinkArguments.args.at(1));
+              reportIfUnsafe(invoked.args.at(1));
               return;
             }
             if (method === "setAttribute") {
-              if (sinkArguments.status === "opaque") {
+              if (invoked.status === "opaque") {
                 reportIfUnsafe(node);
                 return;
               }
-              const attribute = staticStringValue(
-                sinkArguments.args.at(0),
-              );
+              const attribute = staticStringValue(invoked.args.at(0));
               if (attribute?.toLowerCase() === "srcdoc") {
-                reportIfUnsafe(sinkArguments.args.at(1));
+                reportIfUnsafe(invoked.args.at(1));
               }
               return;
             }
@@ -569,12 +521,12 @@ export default eslintCompatPlugin({
               DOCUMENT_WRITE_METHODS.has(method) &&
               isDocumentReceiver(callee.object)
             ) {
-              if (sinkArguments.status === "opaque") {
+              if (invoked.status === "opaque") {
                 reportIfUnsafe(node);
                 return;
               }
               if (
-                !sinkArguments.args.every((argument) =>
+                !invoked.args.every((argument) =>
                   isProvenSafeValue(argument, sanitizerPolicy),
                 ) &&
                 !consumeWaiver(node)
@@ -584,10 +536,17 @@ export default eslintCompatPlugin({
               return;
             }
             if (isMemberAccess(callee, "Object", "assign")) {
+              const domTarget = isKnownDomTarget(invoked.args.at(0));
               checkHtmlPropertySources(
-                args.slice(1),
-                isKnownDomTarget(args.at(0)),
+                [
+                  ...invoked.args.slice(1),
+                  ...(invoked.status === "opaque" ? invoked.tail : []),
+                ],
+                domTarget,
               );
+              if (invoked.status === "opaque" && domTarget) {
+                reportIfUnsafe(invoked.spread);
+              }
             }
           },
         };

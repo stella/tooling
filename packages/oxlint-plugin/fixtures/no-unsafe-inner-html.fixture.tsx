@@ -253,6 +253,7 @@ export const UnsafeOpaqueApplyDocumentWrite = () => {
 };
 
 declare const unsafeDomProperties: object;
+declare const opaqueObjectAssignSources: object[];
 export const UnsafeObjectAssignHoistedSource = () => {
   // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html
   Object.assign(document.createElement("div"), unsafeDomProperties);
@@ -266,9 +267,73 @@ export const UnsafeObjectAssignApplyHoistedSource = () => {
   ]);
 };
 
+export const UnsafeObjectAssignApplyKnownArgumentsWithOpaqueRawTail = () => {
+  Object.assign.apply(
+    Object,
+    [
+      document.createElement("div"),
+      // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- known apply array retains the unsafe source position
+      { innerHTML: rawHtml },
+    ],
+    ...opaqueObjectAssignSources,
+  );
+};
+
 export const UnsafeObjectAssignSpreadSource = () =>
   // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html
   Object.assign(document.createElement("div"), { ...unsafeDomProperties });
+
+export const UnsafeObjectAssignLiteralArgumentSpreads = () =>
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- literal argument spread forwards an unsafe DOM source
+  Object.assign(...[document.createElement("div"), { innerHTML: rawHtml }]);
+
+export const UnsafeObjectAssignLiteralTargetSpread = () =>
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- literal target spread keeps the source position known
+  Object.assign(...[document.createElement("div")], { innerHTML: rawHtml });
+
+export const UnsafeObjectAssignLiteralSourceSpread = () =>
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- literal source spread keeps the DOM target known
+  Object.assign(document.createElement("div"), ...[{ innerHTML: rawHtml }]);
+
+export const UnsafeObjectAssignNestedArgumentSpreads = () =>
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- nested literal spreads preserve target and source positions
+  Object.assign(...[document.createElement("div"), ...[{ srcdoc: rawHtml }]]);
+
+export const UnsafeObjectAssignOpaqueSourceSpread = () => {
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- known DOM target with opaque source spread must fail closed
+  Object.assign(document.createElement("div"), ...opaqueObjectAssignSources);
+};
+
+export const UnsafeObjectAssignDomTargetWithLiteralSpreadTail = () => {
+  Object.assign(
+    document.createElement("div"),
+    // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- opaque source spread after known DOM target must fail closed
+    ...opaqueObjectAssignSources,
+    // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- literal HTML source after opaque spread is still detected
+    ...[{ srcdoc: rawHtml }],
+  );
+};
+
+export const UnsafeObjectAssignKnownTailAfterOpaqueSource = () => {
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- explicit HTML source after an opaque source remains detectable
+  Object.assign(config, ...opaqueObjectAssignSources, { innerHTML: rawHtml });
+};
+
+export const UnsafeObjectAssignLiteralSpreadTailAfterOpaqueSource = () => {
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- literal source spread after an opaque source remains detectable
+  Object.assign(config, ...opaqueObjectAssignSources, ...[{ innerHTML: rawHtml }]);
+};
+
+export const SafeObjectAssignStaticHtmlSpread = () => {
+  // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
+  Object.assign(...[document.createElement("div"), { innerHTML: "<p>safe</p>" }]);
+};
+
+declare const opaqueObjectAssignArguments: [object, ...object[]];
+export const SafeObjectAssignUnknownTargetSpread = () => {
+  // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
+  Object.assign(...opaqueObjectAssignArguments);
+};
 
 export const UnsafeObjectAssignComputedKey = (key: string) =>
   // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html
