@@ -276,11 +276,12 @@ install_runtimes
           expect(result.stdout.toString()).toBe("");
           const packages =
             "ca-certificates curl unzip xz-utils openssl gnupg util-linux libatomic1";
-          const expectedCalls = ready
-            ? `${initial === "populated" ? "" : "update\n"}refresh ${packages}\ninstall ${packages}\n`
-            : outcome === "unavailable"
-              ? ""
-              : "update\n";
+          let expectedCalls = "update\n";
+          if (outcome === "unavailable") expectedCalls = "";
+          if (ready) {
+            const repair = initial === "populated" ? "" : "update\n";
+            expectedCalls = `${repair}refresh ${packages}\ninstall ${packages}\n`;
+          }
           expect(existsSync(marker) ? readFileSync(marker, "utf8") : "").toBe(
             expectedCalls,
           );
