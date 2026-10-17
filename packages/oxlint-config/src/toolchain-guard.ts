@@ -109,6 +109,10 @@ export const parseToolchainConfiguration = (input: unknown) => {
       throw new Error(
         "node-engine cannot be opted out; engines.node must support the shared Node series",
       );
+    if (entry["rule"] === "workflow-trust")
+      throw new Error(
+        "workflow-trust cannot be opted out; repository commands must follow the declared trust decision",
+      );
     if (entry["rule"] === "cloud-setup-drift")
       throw new Error(
         "cloud-setup-drift cannot be opted out; generated setup must match shared policy",
@@ -150,12 +154,14 @@ export const readToolchainInputs = (root: string) => {
         .split("/")
         .some((part) => part === "vendor" || part === "node_modules");
     if (kind === undefined && !shebangCandidate) continue;
-    if (kind === "presence") {
-      files[file] = "";
-      continue;
-    }
     try {
       const inputPath = path.join(resolvedRoot, file);
+      if (kind === "presence") {
+        // The index can retain deleted declarations; presence follows the worktree.
+        lstatSync(inputPath);
+        files[file] = "";
+        continue;
+      }
       if (shebangCandidate) {
         const input = lstatSync(inputPath);
         if (!input.isFile() && !input.isSymbolicLink()) continue;
@@ -186,7 +192,14 @@ export const readToolchainInputs = (root: string) => {
           continue;
       }
       files[file] = readFileSync(resolvedFile, "utf8");
-    } catch {
+    } catch (error) {
+      if (
+        kind === "presence" &&
+        error instanceof Error &&
+        "code" in error &&
+        error.code === "ENOENT"
+      )
+        continue;
       if (shebangCandidate) continue;
       diagnostics.push({
         rule: "configuration",

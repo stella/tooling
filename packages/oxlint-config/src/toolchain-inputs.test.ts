@@ -1,12 +1,22 @@
 /// <reference types="bun-types" />
 
 import { expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { parseDocument } from "yaml";
 
 import toolchain from "../toolchain.json";
 import { containerDocumentImages } from "./toolchain-container-inputs";
-import { generateDependabotConfig } from "./toolchain-dependabot";
 import {
+  checkDependabot,
+  generateDependabotConfig,
+} from "./toolchain-dependabot";
+import { readToolchainInputs } from "./toolchain-guard";
+import {
+  dependabotManifestEcosystem,
+  dependabotManifestEcosystems,
   githubAutomationFileKind,
   isDependabotGithubActionsPath,
   isDockerDefinitionPath,
@@ -19,6 +29,7 @@ import { parseToolchainPolicy } from "./toolchain-schema";
 
 test("both input readers exclude dependency trees for every accepted input kind", () => {
   const inputs = [
+    ...Object.keys(dependabotManifestEcosystems),
     "package.json",
     "consumer-compat.json",
     ...javascriptDependencyLockfiles,
@@ -46,6 +57,52 @@ test("both input readers exclude dependency trees for every accepted input kind"
   expect(githubAutomationFileKind("vendor-example/action.yml")).toBe("action");
 });
 
+test("every declared dependency ecosystem enters tracked snapshots as presence", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "stll-dependency-inputs-"));
+  try {
+    execFileSync("git", ["init", "-q", root]);
+    const expected: Record<string, string> = {};
+    for (const [name, ecosystem] of Object.entries(
+      dependabotManifestEcosystems,
+    )) {
+      for (const prefix of ["", "nested/"]) {
+        const file = `${prefix}${name}`;
+        expect(dependabotManifestEcosystem(file)).toBe(ecosystem);
+        expect(toolchainInputKind(file)).toBe("presence");
+        mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+        writeFileSync(
+          path.join(root, file),
+          "dependency graph bytes are not read",
+        );
+        expected[file] = "";
+      }
+      for (const prefix of ["vendor/", "nested/node_modules/"]) {
+        const file = `${prefix}${name}`;
+        expect(dependabotManifestEcosystem(file)).toBeUndefined();
+        mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+        writeFileSync(path.join(root, file), "ignored dependency graph");
+      }
+    }
+    execFileSync("git", ["add", "-f", "."], { cwd: root });
+    const snapshot = readToolchainInputs(root);
+    expect(snapshot.diagnostics).toEqual([]);
+    expect(snapshot.files).toEqual(expected);
+    const policy = parseToolchainPolicy(toolchain).dependabot;
+    const generated = generateDependabotConfig({
+      files: snapshot.files,
+      policy,
+    });
+    expect(
+      checkDependabot({
+        files: { ...snapshot.files, ".github/dependabot.yml": generated },
+        policy,
+      }),
+    ).toEqual([]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("JavaScript installation lockfiles are tracked as presence without reading dependency graphs", () => {
   for (const file of javascriptDependencyLockfiles) {
     expect(toolchainInputKind(file)).toBe("presence");
@@ -53,6 +110,57 @@ test("JavaScript installation lockfiles are tracked as presence without reading 
   }
   for (const file of ["unrelated.lock", "pnpm-lock.yml", "package-lock.txt"])
     expect(toolchainInputKind(file)).not.toBe("presence");
+});
+
+test("presence snapshots omit deleted tracked declarations across every dependency ecosystem", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "stll-deleted-inputs-"));
+  const paths = [
+    ...Object.keys(dependabotManifestEcosystems),
+    ...javascriptDependencyLockfiles,
+    "Pipfile.lock",
+    "uv.lock",
+  ].flatMap((name) => [name, `nested/${name}`]);
+  try {
+    execFileSync("git", ["init", "-q", root]);
+    mkdirSync(path.join(root, "nested"));
+    for (const file of paths) {
+      expect(toolchainInputKind(file)).toBe("presence");
+      writeFileSync(path.join(root, file), "presence only");
+    }
+    execFileSync("git", ["add", "."], { cwd: root });
+    expect(Object.keys(readToolchainInputs(root).files).sort()).toEqual(
+      paths.toSorted(),
+    );
+    for (const file of paths) rmSync(path.join(root, file));
+    const deleted = readToolchainInputs(root);
+    expect(deleted.trackedFiles).toEqual(new Set(paths));
+    expect(deleted.files).toEqual({});
+    expect(deleted.diagnostics).toEqual([]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("non-absence presence probe failures remain configuration diagnostics", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "stll-input-failure-"));
+  try {
+    execFileSync("git", ["init", "-q", root]);
+    mkdirSync(path.join(root, "nested"));
+    writeFileSync(path.join(root, "nested/Gemfile"), "presence only");
+    execFileSync("git", ["add", "."], { cwd: root });
+    rmSync(path.join(root, "nested"), { recursive: true });
+    writeFileSync(path.join(root, "nested"), "not a directory");
+    expect(readToolchainInputs(root).diagnostics).toEqual([
+      {
+        rule: "configuration",
+        path: "nested/Gemfile",
+        line: 1,
+        message: "cannot read tracked configuration file",
+      },
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("tracked executable action metadata remains discoverable under dependency-named directories", () => {

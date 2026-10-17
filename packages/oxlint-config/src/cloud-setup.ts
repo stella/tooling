@@ -89,19 +89,35 @@ esac
 
 @NETWORK@
 
+node_ready() {
+  local node_version npm_version npx_version
+  [[ -x "$NODE_DIR/bin/node" && -x "$NODE_DIR/bin/npm" && -x "$NODE_DIR/bin/npx" ]] || return 1
+  node_version="$("$NODE_DIR/bin/node" --version)" || return 1
+  [[ "$node_version" == "v$NODE_VERSION" ]] || return 1
+  npm_version="$("$NODE_DIR/bin/npm" --version)" || return 1
+  [[ "$npm_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+  npx_version="$("$NODE_DIR/bin/npx" --version)" || return 1
+  [[ "$npx_version" == "$npm_version" ]] || return 1
+}
 runtime_ready() {
-  [[ -x "$NODE_DIR/bin/node" && "$($NODE_DIR/bin/node --version)" == "v$NODE_VERSION" ]] || fail 'Pinned Node is unavailable; run install'
+  node_ready || fail 'Pinned Node, npm or npx is unavailable; run install'
   [[ -x "$BUN_DIR/bun" && "$($BUN_DIR/bun --version)" == "$BUN_VERSION" ]] || fail 'Pinned Bun is unavailable; run install'
 }
-install_runtimes() {
+install_runtimes() (
+  if [[ ! -s /etc/ssl/certs/ca-certificates.crt ]]; then
+    command -v update-ca-certificates >/dev/null || fail 'System CA certificate bundle is missing; restore ca-certificates in the base image offline before install'
+    update-ca-certificates || fail 'System CA certificate bundle could not be repaired offline; restore ca-certificates in the base image before install'
+  fi
+  [[ -s /etc/ssl/certs/ca-certificates.crt ]] || fail 'System CA certificate bundle is unavailable after offline repair; restore ca-certificates in the base image before install'
   if ! command -v curl >/dev/null || ! command -v unzip >/dev/null || ! command -v xz >/dev/null || ! command -v openssl >/dev/null || ! command -v gpg >/dev/null || ! ldconfig -p | awk '$1 == "libatomic.so.1" { found=1 } END { exit !found }'; then
     apt_refresh_for ca-certificates curl unzip xz-utils openssl gnupg util-linux libatomic1
     DEBIAN_FRONTEND=noninteractive apt_install ca-certificates curl unzip xz-utils openssl gnupg util-linux libatomic1
   fi
-  local scratch node_archive bun_archive bun_folder
+  local node_archive bun_archive bun_folder
+  # Subshell scope retains scratch for EXIT cleanup after a failed command.
   scratch="$(mktemp -d)"
-  trap 'rm -rf -- "$scratch"' RETURN
-  if [[ ! -x "$NODE_DIR/bin/node" ]] || [[ "$($NODE_DIR/bin/node --version)" != "v$NODE_VERSION" ]]; then
+  trap 'rm -rf -- "$scratch"' EXIT
+  if ! node_ready; then
     node_archive="node-v$NODE_VERSION-linux-$NODE_ARCH.tar.xz"
     download_file "https://nodejs.org/dist/v$NODE_VERSION/$node_archive" "$scratch/$node_archive" 120
     download_file "https://nodejs.org/dist/v$NODE_VERSION/SHASUMS256.txt" "$scratch/node-sums" 45
@@ -124,9 +140,7 @@ install_runtimes() {
   ln -sfnT -- "$NODE_DIR/bin/npm" /usr/local/bin/npm
   ln -sfnT -- "$NODE_DIR/bin/npx" /usr/local/bin/npx
   ln -sfnT -- "$BUN_DIR/bun" /usr/local/bin/bun
-  rm -rf -- "$scratch"
-  trap - RETURN
-}
+)
 
 dependency_install() {
   local directory download_hosts
@@ -365,10 +379,11 @@ export const generateCloudSetup = ({
       }),
     ],
   ]);
-  return script.replace(/@[A-Z0-9_]+@/g, (token) => {
+  const rendered = script.replace(/@[A-Z0-9_]+@/g, (token) => {
     const value = replacements.get(token);
     if (value === undefined)
       throw new Error(`Missing cloud setup field: ${token}`);
     return value;
   });
+  return `${rendered.replace(/[ \t]+$/gm, "").trimEnd()}\n`;
 };

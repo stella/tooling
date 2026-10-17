@@ -303,7 +303,8 @@ test("permitted named rules have reasoned opt-outs; mandatory and malformed choi
     if (
       rule === "node-engine" ||
       rule === "cloud-setup-drift" ||
-      rule === "type-aware-projects"
+      rule === "type-aware-projects" ||
+      rule === "workflow-trust"
     ) {
       expect(() =>
         parseToolchainConfiguration({

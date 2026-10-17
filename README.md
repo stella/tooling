@@ -161,7 +161,7 @@ rule opt-outs; literal pins and local-action provenance remain enforced.
 
 The named rules are `bun-pins`, `package-pins`, `typescript-layout`,
 `node-engine`, `node-version`, `python-version`, `rust-version`,
-`runtime-manager`, `runtime-docker`, `runtime-workflow`, `action-pins`,
+`runtime-manager`, `runtime-docker`, `runtime-workflow`, `action-pins`, `workflow-trust`,
 `dependabot-policy`, and `cloud-setup-drift`. Non-Rust rule exceptions require a
 tracked root `stll-toolchain.json` listing the rule and its reason:
 
@@ -179,12 +179,15 @@ Peer ranges declare support: they must include the policy compiler release and t
 compatibility release when the selected layout uses it. Ranges do not contribute
 to the installed compiler inventory.
 
-JavaScript update roots come from the repository root, declared workspace membership,
+JavaScript update roots include the repository root, declared workspace membership,
 and directories with their own `bun.lock`, `package-lock.json`, `yarn.lock`, or
-`pnpm-lock.yaml`. Other package manifests do not create update roots; directory names
-have no special meaning. Workspace members share their owner's update entry.
+`pnpm-lock.yaml`. Independent manifests with dependencies, an explicit package manager,
+or dependency-bearing workspace members also create update roots. Metadata-only
+fixtures do not. Package-manager selection follows the nearest declaration or lock;
+workspace members share their owner's update entry. Bundler `Gemfile`/`Gemfile.lock`
+and Composer `composer.json`/`composer.lock` declare roots at their own directories.
 
-`rust-version`, `node-engine` and `cloud-setup-drift` are mandatory: opt-outs cannot bypass the
+`rust-version`, `node-engine`, `workflow-trust` and `cloud-setup-drift` are mandatory: opt-outs cannot bypass the
 shared Node support range or generated cloud setup requirements.
 
 Unknown rules, empty reasons, duplicate rules, and malformed configurations
@@ -200,8 +203,11 @@ includes only the root, matching the current pnpm contract; declare member
 patterns explicitly to keep membership stable across pnpm versions.
 The generator derives the reference from the same policy and ecosystem
 registry as the guard: run `bun scripts/write-dependabot-policy.ts` after
-policy changes. Consumers can copy its applicable entries and directory paths;
-the CLI rejects missing coverage and policy drift. Owned package pins follow
+policy changes. Consumers run `bunx --no-install stll-dependabot` from their
+repository root; the command reads tracked declarations and writes canonical
+`.github/dependabot.yml` (or updates an existing `.yaml`). `stll-toolchain-check`
+rejects missing coverage and policy drift. The published `@stll/oxlint-config/dependabot` subpath exports
+`generateDependabotConfig` and `parseToolchainPolicy` for programmatic generation. Owned package pins follow
 release metadata. The `changeset:version` command first includes the policy
 package in the release plan whenever an owned workspace pin changes, then
 synchronizes pins through `bun scripts/check-lockfile-workspace-versions.ts
@@ -522,6 +528,8 @@ versioned `stella/.github` contract. Package tags use the immutable
 Declare `cloud` in tracked root `stll-toolchain.json`, then run
 `bunx --no-install stll-cloud-setup` to generate `.agents/cloud-setup.sh` and merge
 its remote-only Claude `SessionStart` hook into `.claude/settings.json`.
+Generation recreates its deleted tracked output files and requires unrelated
+tracked inputs to remain readable.
 The declaration requires `install` exactly `bun install --frozen-lockfile` or
 `bun install --frozen-lockfile --ignore-scripts`. Use the second when lifecycle
 scripts (for example postinstall code generation) are too heavy for cloud setup;
@@ -533,7 +541,11 @@ as `.env.cloud`, is required with services and rejected without services.
 Runtime-only scripts emit no environment file code. A tracked root
 `.node-version` must select an exact stable patch within the shared Node series.
 Root `rust-toolchain.toml` enables pinned Rust automatically; `cloud.rust` can
-also declare its toolchain, components, and targets. Optional `cloud.tools`
+also declare its toolchain, components, and targets. To provision another authorized
+compiler, explicitly select `cloud.rust.additionalToolchains: ["1.97.1"]`; each
+extra must match the shared pin or a valid `rustExceptions` entry. Extras use the
+minimal Rust profile. Exceptions alone authorize versions and install nothing;
+additional compilers do not install Hawk or its required components. Optional `cloud.tools`
 installs exact supported releases of `cargo-nextest`, `wasm-bindgen-cli`, and
 `uv` from verified prebuilt artifacts. The wasm-bindgen CLI pin must match the
 crate in `Cargo.lock`. Installed commands work in a fresh shell without sourcing
@@ -685,6 +697,74 @@ It prints one JSON object with `changed`, `tools`, and `status`; the detector
 exits successfully even when history is unreadable, reporting `changed: true`
 and `status: "unreadable"`. Use `changed` to force the full CI depth on both
 pull requests and merge-queue runs. An unreadable snapshot never skips checks.
+
+Run repository-installed tools only after the workflow's existing trust decision.
+The mandatory `workflow-trust` rule applies to PR workflows declaring a
+`trust-check` job. Repository execution requires a direct dependency and a
+condition requiring its `trusted == 'true'` output for every PR trigger.
+Before that boundary, commands must match a small metadata allowlist: shell
+output and string comparisons, bounded Git `rev-parse`/`merge-base` queries,
+and GET-only GitHub API reads. File readers, directory listings and
+file predicates require the job trust gate, including workspace and symlink paths. The trust job's
+`if`/`elif` comparisons and writes to `GITHUB_OUTPUT` use the same checks.
+Job containers and nonempty services require the job-level trust gate because
+they start before steps and supply executable code. A step condition cannot
+authorize their startup. Digest pinning alone does not approve an image for
+pre-trust execution; the guard has no implicit image approval catalog.
+Before trust, step actions must use a full SHA and match the explicit bootstrap
+catalog: `actions/checkout` and `oven-sh/setup-bun`, with
+bounded selector inputs. Bun installation requires an explicit literal version;
+version-file and path inputs require the job trust gate, including repository
+paths that may be symlinks. Checkout path and submodule traversal inputs also
+require trust. `actions/setup-node` requires trust because it also invokes
+package-manager commands from the checkout directory. Other actions and unsupported inputs require the
+job-level gate; a step condition cannot authorize them. Every job-level reusable workflow
+call requires the job-level trust condition, including pinned calls without inputs.
+
+Interpreters, sourced files, executable paths, package managers (including
+metadata and script-disabled install modes), launchers, custom shells, and
+unknown commands or syntax require trust. Git history/diff commands and
+working-tree, index and fetch operations require trust; they are outside the
+revision-query allowlist. Unquoted pathname expansion also requires trust. Unsupported options and query programs
+also require the gate. For example, gate the entire
+detector job, including dependency installation:
+
+```yaml
+check-changes:
+  needs: [trust-check]
+  if: >-
+    always() && !cancelled()
+    && ((github.event_name != 'pull_request'
+         && github.event_name != 'pull_request_target')
+        || needs.trust-check.outputs.trusted == 'true')
+  runs-on: ubuntu-latest
+  steps:
+    # Check out, set up Bun, install dependencies, then run the shared detector.
+    - run: bunx --no-install stll-toolchain-changed --since "$BASE_REF"
+```
+
+Actions interpolation is checked before shell quoting or comments. Only the
+bounded identity expressions `github.sha`, `github.run_id`, `github.run_attempt`
+and `github.repository` may appear directly in pre-trust scripts. Other contexts,
+functions and matrix values require environment indirection or the trust gate;
+the guard does not infer that an expression is safe from its shell quotes.
+Pass contributor-controlled metadata through a supported data environment key
+(`PR_TITLE`, `HEAD_REF`, `ISSUE_BODY` or `COMMENT_BODY`) and quote its expansion:
+
+```yaml
+- env:
+    PR_TITLE: ${{ github.event.pull_request.title }}
+  run: echo "$PR_TITLE"
+```
+
+The trust job must classify each PR trigger used by the workflow. Main/manual
+jobs remain runnable when the PR-only trust job is skipped. Job or step
+conditions may prove that execution is limited to non-PR events; event string
+comparisons follow Actions case-insensitive equality. The guard
+proves only supported static metadata commands and boolean conditions; unknown
+commands and conditions cannot authorize execution. It does not validate the
+trust job's authorization policy.
+Workflows with no declared trust job retain their existing fork-CI policy.
 
 The comparison includes Bun declarations, Node selectors and support ranges,
 resolved TypeScript compiler versions (including workspace and compatibility

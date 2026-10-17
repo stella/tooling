@@ -196,3 +196,73 @@ test("all tool subsets emit executable Bash and persistent pinned launchers", ()
     expect(script).not.toMatch(/@[A-Z_]+@/);
   }
 });
+
+test("additional Rust toolchains require explicit exact authorized selection", () => {
+  const rustExceptions = [
+    {
+      pin: "1.97.1",
+      reason: "Compiler dependency",
+      tracking: "https://github.com/stella/tooling/issues/99",
+      expires: "2099-01-01",
+    },
+  ];
+  const selected = (additionalToolchains: unknown) => {
+    const cloud = parseCloudSetup({
+      install: cloudInstallCommand,
+      rust: { additionalToolchains },
+    });
+    if (cloud === undefined) throw new Error("Cloud declaration missing");
+    return resolveCloudToolchains({
+      cloud,
+      files: {},
+      rust: policy.rust,
+      rustExceptions,
+    });
+  };
+  expect(selected(undefined).rust?.additionalToolchains).toEqual([]);
+  expect(selected(["1.97.1"]).rust?.additionalToolchains).toEqual(["1.97.1"]);
+  for (const additional of [
+    null,
+    false,
+    "1.97.1",
+    ["stable"],
+    ["1.97"],
+    ["1.97.1-beta"],
+    ["01.97.1"],
+    [undefined],
+    ["1.97.1", "1.97.1"],
+  ]) {
+    expect(() => selected(additional)).toThrow();
+  }
+  expect(() => selected(["1.98.0"])).toThrow("authorized rustExceptions");
+  expect(() => selected([policy.rust])).toThrow("primary toolchain");
+  const declared = parseCloudSetup({ install: cloudInstallCommand, rust: {} });
+  if (declared === undefined) throw new Error("Cloud declaration missing");
+  const implicit = generateCloudSetup({
+    policy,
+    cloud: declared,
+    files: {},
+    nodeVersion: "26.10.0",
+    rustExceptions,
+  });
+  expect(implicit).not.toContain("toolchain install 1.97.1");
+  expect(implicit).not.toContain('rustc" +1.97.1');
+  const explicit = parseCloudSetup({
+    install: cloudInstallCommand,
+    rust: { additionalToolchains: ["1.97.1"] },
+  });
+  if (explicit === undefined) throw new Error("Cloud declaration missing");
+  const generated = generateCloudSetup({
+    policy,
+    cloud: explicit,
+    files: {},
+    nodeVersion: "26.10.0",
+    rustExceptions,
+  });
+  expect(generated).toContain(
+    "toolchain install 1.97.1 --profile minimal --no-self-update",
+  );
+  expect(generated).toContain('"$CARGO_HOME/bin/rustc" +1.97.1 --version');
+  expect(generated).toContain("export RUSTUP_AUTO_INSTALL=0");
+  expect(generated).toContain(`rustup" default ${policy.rust}`);
+});

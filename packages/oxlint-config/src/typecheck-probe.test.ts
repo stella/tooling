@@ -56,51 +56,52 @@ const command = ["typecheck", "--noEmit"] as const;
 
 test("probe requires its own diagnostic, removes the seed and repeats the exact command cleanly", async () => {
   for (const diagnostic of ["tsc", "colon", "xml"])
-    await withProject(async ({ repo, project, directory }) => {
-      let calls = 0;
-      const outputs: string[] = [];
-      await runTypecheckProbe({
-        repo,
-        project,
-        command,
-        output: (value) => outputs.push(value),
-        run: async (options) => {
-          expect(options.command).toEqual(command);
-          expect(options.cwd).toBe(repo);
-          expect(options.signal.aborted).toBe(false);
-          calls++;
-          if (calls === 2) {
-            expect(
-              (await readdir(directory)).filter((file) =>
-                file.startsWith("stll-typecheck-probe-"),
-              ),
-            ).toEqual([]);
-            return { status: 0, output: "clean\n" };
-          }
-          const seed = path.relative(
-            repo,
-            path.join(directory, await seedIn(directory)),
-          );
-          if (diagnostic === "xml")
+    for (const origin of ["repository", "project"])
+      await withProject(async ({ repo, project, directory }) => {
+        let calls = 0;
+        const outputs: string[] = [];
+        await runTypecheckProbe({
+          repo,
+          project,
+          command,
+          output: (value) => outputs.push(value),
+          run: async (options) => {
+            expect(options.command).toEqual(command);
+            expect(options.cwd).toBe(repo);
+            expect(options.signal.aborted).toBe(false);
+            calls++;
+            if (calls === 2) {
+              expect(
+                (await readdir(directory)).filter((file) =>
+                  file.startsWith("stll-typecheck-probe-"),
+                ),
+              ).toEqual([]);
+              return { status: 0, output: "clean\n" };
+            }
+            const seed = path.relative(
+              origin === "repository" ? repo : directory,
+              path.join(directory, await seedIn(directory)),
+            );
+            if (diagnostic === "xml")
+              return {
+                status: 1,
+                output: `<error file="${seed}" line="1" code="TS2322">Mismatch</error>`,
+              };
+            if (diagnostic === "colon")
+              return {
+                status: 1,
+                output: `${seed}:1:14: error TS2322: Mismatch`,
+              };
             return {
-              status: 1,
-              output: `<error file="${seed}" line="1" code="TS2322">Mismatch</error>`,
+              status: 2,
+              output: `\u001b[31m${seed}(1,14): error TS2322: Mismatch\u001b[0m`,
             };
-          if (diagnostic === "colon")
-            return {
-              status: 1,
-              output: `${seed}:1:14: error TS2322: Mismatch`,
-            };
-          return {
-            status: 2,
-            output: `\u001b[31m${seed}(1,14): error TS2322: Mismatch\u001b[0m`,
-          };
-        },
+          },
+        });
+        expect(calls).toBe(2);
+        expect(outputs).toHaveLength(2);
+        expect(outputs.at(-1)).toBe("clean\n");
       });
-      expect(calls).toBe(2);
-      expect(outputs).toHaveLength(2);
-      expect(outputs.at(-1)).toBe("clean\n");
-    });
 });
 
 test("successful seeded runs, excluded seeds and unrelated failures never activate the probe", async () => {

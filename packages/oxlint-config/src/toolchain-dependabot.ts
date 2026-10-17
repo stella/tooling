@@ -22,6 +22,7 @@ import {
   pythonDependencyManifestKind,
   isPythonDependencyManifest,
   javascriptDependencyLockfiles,
+  dependabotManifestEcosystem,
 } from "./toolchain-inputs";
 import { workspaceContains } from "./toolchain-workspaces";
 
@@ -105,7 +106,27 @@ const workspaceTable = (
   }
 };
 
-/** Installable workspace members share their update root; own-lock projects stay discoverable. */
+const declaresJavascriptInstallation = (text: string | undefined) => {
+  try {
+    const manifest: unknown = JSON.parse(text ?? "");
+    if (!record(manifest)) return false;
+    if (typeof manifest["packageManager"] === "string") return true;
+    return [
+      "dependencies",
+      "devDependencies",
+      "optionalDependencies",
+      "peerDependencies",
+    ].some((field) => {
+      const dependencies = manifest[field];
+      return record(dependencies) && Object.keys(dependencies).length > 0;
+    });
+  } catch {
+    // Manifest validation reports invalid JSON independently.
+    return false;
+  }
+};
+
+/** Dependency-bearing projects and workspace members need coverage without requiring a lock. */
 const workspaceRoots = (
   files: Record<string, string>,
   ecosystem: keyof typeof workspaceManifests,
@@ -207,6 +228,9 @@ const workspaceRoots = (
     for (const file of manifests) {
       const directory = path.posix.dirname(file);
       if (
+        declaresJavascriptInstallation(
+          files[path.posix.join(directory, "package.json")],
+        ) ||
         javascriptDependencyLockfiles.some(
           (name) => files[path.posix.join(directory, name)] !== undefined,
         )
@@ -217,7 +241,16 @@ const workspaceRoots = (
     while (changed) {
       changed = false;
       for (const [root, patterns] of workspaces) {
-        if (!installable.has(root)) continue;
+        if (!installable.has(root)) {
+          if (
+            ![...installable].some((directory) =>
+              declaredMember(root, patterns, directory),
+            )
+          )
+            continue;
+          installable.add(root);
+          changed = true;
+        }
         for (const file of manifests) {
           const directory = path.posix.dirname(file);
           if (
@@ -357,22 +390,23 @@ const javascriptEcosystem = (
   directory: string,
   files: Record<string, string>,
 ) => {
-  const root = directory === "/" ? "." : directory.slice(1);
-  if (files[path.posix.join(root, "bun.lock")] !== undefined) return "bun";
-  try {
-    const manifest: unknown = JSON.parse(
-      files[path.posix.join(root, "package.json")] ?? "{}",
-    );
-    if (
-      record(manifest) &&
-      typeof manifest["packageManager"] === "string" &&
-      manifest["packageManager"].startsWith("bun@")
-    )
-      return "bun";
-  } catch {
-    // Package rules diagnose malformed JSON; the root still needs update coverage.
+  let root = directory === "/" ? "." : directory.slice(1);
+  for (;;) {
+    if (files[path.posix.join(root, "bun.lock")] !== undefined) return "bun";
+    try {
+      const manifest: unknown = JSON.parse(
+        files[path.posix.join(root, "package.json")] ?? "{}",
+      );
+      if (record(manifest) && typeof manifest["packageManager"] === "string")
+        return manifest["packageManager"].startsWith("bun@") ? "bun" : "npm";
+    } catch {
+      // Package rules diagnose malformed JSON; retain its update coverage.
+    }
+    for (const name of javascriptDependencyLockfiles)
+      if (files[path.posix.join(root, name)] !== undefined) return "npm";
+    if (root === ".") return "npm";
+    root = path.posix.dirname(root);
   }
-  return "npm";
 };
 
 const pythonEcosystem = (file: string, files: Record<string, string>) => {
@@ -423,6 +457,9 @@ const ecosystemRoots = (files: Record<string, string>) => {
   for (const file of Object.keys(files)) {
     if (isDependabotGithubActionsPath(file)) requireRoot("github-actions", "/");
     const name = path.posix.basename(file);
+    const manifestEcosystem = dependabotManifestEcosystem(file);
+    if (manifestEcosystem !== undefined)
+      requireRoot(manifestEcosystem, directoryOf(file));
     if (isDockerDefinitionPath(file)) requireRoot("docker", directoryOf(file));
     if (isComposeDefinitionPath(file) || isKubernetesDefinitionPath(file)) {
       for (const document of parseAllDocuments(files[file] ?? "", {
