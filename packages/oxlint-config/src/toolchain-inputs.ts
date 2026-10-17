@@ -97,6 +97,7 @@ export const isShellScript = (file: string, text = "") =>
 /** Lockfiles establish ecosystem presence without reading their dependency graphs. */
 export const toolchainInputKind = (file: string, text = "") => {
   if (
+    file === "bunfig.toml" ||
     file === cloudSetupPath ||
     file === cloudClaudeSettingsPath ||
     file === "Cargo.lock"

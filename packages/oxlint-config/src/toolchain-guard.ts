@@ -19,6 +19,7 @@ import {
 } from "./cloud-setup-claude";
 import { parseCloudSetup } from "./cloud-setup-schema";
 import { readGitTrackedOutput } from "./git-tracked-output";
+import { checkRepositoryQuarantine } from "./quarantine-policy";
 import {
   checkConsumerChecks,
   parseConsumerChecks,
@@ -51,6 +52,7 @@ export const toolchainRules = [
     ...dependabotRules,
     nodeProjectRule,
     "cloud-setup-drift",
+    "quarantine-policy",
   ] as const),
 ] as const;
 export type ToolchainRule = (typeof toolchainRules)[number];
@@ -101,6 +103,10 @@ export const parseToolchainConfiguration = (input: unknown) => {
       throw new Error(
         "each opt-out requires a unique known rule and a nonempty reason",
       );
+    if (entry["rule"] === "quarantine-policy")
+      throw new Error(
+        "quarantine-policy cannot be opted out; temporary third-party exclusions require expiry",
+      );
     if (entry["rule"] === "rust-version")
       throw new Error(
         "rust-version requires expiring exact-pin rustExceptions, not an opt-out",
@@ -133,8 +139,15 @@ export const parseToolchainConfiguration = (input: unknown) => {
   };
 };
 
-/** Read one tracked configuration snapshot for guards and policy generation. */
-export const readToolchainInputs = (root: string) => {
+type ReadToolchainInputsOptions = {
+  bunLock?: "presence" | "content";
+};
+
+/** Dependency graphs stay opaque unless a caller explicitly needs registry identities. */
+export const readToolchainInputs = (
+  root: string,
+  { bunLock = "presence" }: ReadToolchainInputsOptions = {},
+) => {
   const diagnostics: SharedToolchainDiagnostic[] = [];
   const tracked = readGitTrackedOutput(root, "staged")
     .split("\0")
@@ -156,7 +169,10 @@ export const readToolchainInputs = (root: string) => {
     if (kind === undefined && !shebangCandidate) continue;
     try {
       const inputPath = path.join(resolvedRoot, file);
-      if (kind === "presence") {
+      if (
+        kind === "presence" &&
+        !(file === "bun.lock" && bunLock === "content")
+      ) {
         // The index can retain deleted declarations; presence follows the worktree.
         lstatSync(inputPath);
         files[file] = "";
@@ -216,14 +232,20 @@ type CheckSharedToolchainOptions = {
   root: string;
   policy: ReturnType<typeof parseToolchainPolicy>;
   onDelegated?: ((report: RuntimeDelegation) => void) | undefined;
+  onWarning?: ((report: SharedToolchainDiagnostic) => void) | undefined;
+  now?: Date | undefined;
 };
 
 export const checkToolchain = ({
   root,
   policy,
   onDelegated,
+  onWarning,
+  now,
 }: CheckSharedToolchainOptions) => {
-  const { files, trackedFiles, diagnostics } = readToolchainInputs(root);
+  const { files, trackedFiles, diagnostics } = readToolchainInputs(root, {
+    bunLock: "content",
+  });
   let repository: string | undefined;
   try {
     const origin = execFileSync("git", ["remote", "get-url", "origin"], {
@@ -326,6 +348,36 @@ export const checkToolchain = ({
     }),
   );
   diagnostics.push(...checkPackageFiles({ files, policy }));
+  if (files["bunfig.toml"] !== undefined) {
+    try {
+      const result = checkRepositoryQuarantine({
+        files,
+        now,
+        npmrcPresent: trackedFiles.has(".npmrc"),
+      });
+      for (const message of result.errors)
+        diagnostics.push({
+          rule: "quarantine-policy",
+          path: "bunfig.toml",
+          line: 1,
+          message,
+        });
+      for (const message of result.warnings)
+        onWarning?.({
+          rule: "quarantine-policy",
+          path: "bunfig.toml",
+          line: 1,
+          message,
+        });
+    } catch (error) {
+      diagnostics.push({
+        rule: "quarantine-policy",
+        path: "bunfig.toml",
+        line: 1,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
   if (files["package.json"] !== undefined) {
     let manifest: unknown;
     try {
