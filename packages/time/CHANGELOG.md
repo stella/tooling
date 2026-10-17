@@ -1,5 +1,11 @@
 # @stll/time
 
+## 0.4.0
+
+### Minor Changes
+
+- [#147](https://github.com/stella/tooling/pull/147) [`5bee738`](https://github.com/stella/tooling/commit/5bee738d86a3cc154c5cefb835ee989cffd0cf79) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Publish `@stll/time` from this repository with ESM and CommonJS builds.
+
 ## 0.3.0
 
 ### Minor Changes
