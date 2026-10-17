@@ -487,3 +487,225 @@ test("a symlinked intermediate glob directory fails before writes even alongside
     }
   });
 });
+
+test("former explicit, excluded and path-dependency members retire inheritance and replay cleanup safely", async () => {
+  for (const transition of ["removed", "excluded", "path-dependency"])
+    await fixture(async (root) => {
+      await mkdir(join(root, "keep"));
+      await mkdir(join(root, "retire"));
+      await writeFile(
+        join(root, "Cargo.toml"),
+        `[workspace]\nmembers = ${transition === "path-dependency" ? '["keep"]' : '["keep", "retire"]'}\n`,
+      );
+      const keep = '[package]\nname = "keep"\nversion = "0.1.0"\n';
+      await writeFile(
+        join(root, "keep/Cargo.toml"),
+        keep +
+          (transition === "path-dependency"
+            ? '[dependencies]\nretire = { path = "../retire" }\n'
+            : ""),
+      );
+      await writeFile(
+        join(root, "retire/Cargo.toml"),
+        '[package]\nname = "retire"\nversion = "0.1.0"\n[package.metadata]\ncustom = "preserved"\n',
+      );
+      const input = { kind: "workspace" };
+      await generateRustPolicy({ root, input, mode: "write" });
+      expect(await read(root, "retire/Cargo.toml")).toMatchObject({
+        lints: { workspace: true },
+      });
+      let source = await readFile(join(root, "Cargo.toml"), "utf8");
+      if (transition === "removed")
+        source = source.replace(/members = \[[^\]]*\]/u, 'members = ["keep"]');
+      if (transition === "excluded")
+        source = source.replace(
+          "[workspace]\n",
+          '[workspace]\nexclude = ["retire"]\n',
+        );
+      if (transition === "path-dependency") {
+        const previous = await readFile(join(root, "keep/Cargo.toml"), "utf8");
+        const header = previous
+          .split("\n")
+          .filter((line) => line.startsWith("#"))
+          .join("\n");
+        await writeFile(
+          join(root, "keep/Cargo.toml"),
+          `${header}\n${keep}[lints]\nworkspace = true\n`,
+        );
+      }
+      await writeFile(join(root, "Cargo.toml"), source);
+      expect(
+        await generateRustPolicy({ root, input, mode: "check" }),
+      ).toContain("retire/Cargo.toml");
+      expect(await read(root, "retire/Cargo.toml")).toMatchObject({
+        lints: { workspace: true },
+      });
+      await generateRustPolicy({ root, input, mode: "write" });
+      expect(await read(root, "retire/Cargo.toml")).not.toHaveProperty("lints");
+      expect(await read(root, "retire/Cargo.toml")).toMatchObject({
+        package: { metadata: { custom: "preserved" } },
+      });
+      expect(await generateRustPolicy({ root, input, mode: "check" })).toEqual(
+        [],
+      );
+      // Replay a completed member cleanup with the old root journal still present.
+      await writeFile(join(root, "Cargo.toml"), source);
+      await generateRustPolicy({ root, input, mode: "write" });
+      expect(await generateRustPolicy({ root, input, mode: "check" })).toEqual(
+        [],
+      );
+      expect(await read(root, "retire/Cargo.toml")).not.toHaveProperty("lints");
+    });
+});
+
+test("hidden member and exclude globs follow Cargo matching", async () => {
+  await fixture(async (root) => {
+    await mkdir(join(root, "crates/.included"), { recursive: true });
+    await mkdir(join(root, "crates/.excluded"));
+    await writeFile(
+      join(root, "Cargo.toml"),
+      '[workspace]\nmembers = ["crates/*"]\nexclude = ["crates/*excluded"]\n',
+    );
+    const member = '[package]\nname = "member"\nversion = "0.1.0"\n';
+    await writeFile(join(root, "crates/.included/Cargo.toml"), member);
+    await writeFile(join(root, "crates/.excluded/Cargo.toml"), member);
+    await generateRustPolicy({
+      root,
+      input: { kind: "workspace" },
+      mode: "write",
+    });
+    expect(await read(root, "crates/.included/Cargo.toml")).toMatchObject({
+      lints: { workspace: true },
+    });
+    expect(
+      await readFile(join(root, "crates/.excluded/Cargo.toml"), "utf8"),
+    ).toBe(member);
+    expect(
+      await generateRustPolicy({
+        root,
+        input: { kind: "workspace" },
+        mode: "check",
+      }),
+    ).toEqual([]);
+  });
+});
+
+test("every glob-matched directory requires Cargo.toml even alongside valid members", async () => {
+  await fixture(async (root) => {
+    await mkdir(join(root, "crates/valid"), { recursive: true });
+    await mkdir(join(root, "crates/missing"));
+    const source = '[workspace]\nmembers = ["crates/*"]\n';
+    const member = '[package]\nname = "valid"\nversion = "0.1.0"\n';
+    await writeFile(join(root, "Cargo.toml"), source);
+    await writeFile(join(root, "crates/valid/Cargo.toml"), member);
+    await expect(
+      generateRustPolicy({ root, input: { kind: "workspace" }, mode: "write" }),
+    ).rejects.toThrow("missing workspace member manifest");
+    expect(await readFile(join(root, "Cargo.toml"), "utf8")).toBe(source);
+    expect(await readFile(join(root, "crates/valid/Cargo.toml"), "utf8")).toBe(
+      member,
+    );
+    expect(
+      await readFile(join(root, "rustfmt.toml"), "utf8").catch(() => undefined),
+    ).toBeUndefined();
+  });
+});
+
+test("retired member paths retain source provenance and reject symlink substitutions before writes", async () => {
+  await fixture(async (root) => {
+    await mkdir(join(root, "keep"));
+    await mkdir(join(root, "retire"));
+    const member = '[package]\nname = "member"\nversion = "0.1.0"\n';
+    await writeFile(
+      join(root, "Cargo.toml"),
+      '[workspace]\nmembers = ["keep", "retire"]\n',
+    );
+    await writeFile(join(root, "keep/Cargo.toml"), member);
+    await writeFile(join(root, "retire/Cargo.toml"), member);
+    const input = { kind: "workspace" };
+    await generateRustPolicy({ root, input, mode: "write" });
+    const source = (await readFile(join(root, "Cargo.toml"), "utf8")).replace(
+      /members = \[[^\]]*\]/u,
+      'members = ["keep"]',
+    );
+    await writeFile(join(root, "Cargo.toml"), source);
+    const keep = await readFile(join(root, "keep/Cargo.toml"), "utf8");
+    await rm(join(root, "retire"), { recursive: true });
+    await symlink(join(root, "keep"), join(root, "retire"));
+    await expect(
+      generateRustPolicy({ root, input, mode: "write" }),
+    ).rejects.toThrow("real repository directory");
+    expect(await readFile(join(root, "Cargo.toml"), "utf8")).toBe(source);
+    expect(await readFile(join(root, "keep/Cargo.toml"), "utf8")).toBe(keep);
+  });
+});
+
+test("write-ahead member obligations recover interrupted enrollment before or after the member write", async () => {
+  for (const enrollment of ["pending", "written"])
+    await fixture(async (root) => {
+      await mkdir(join(root, "keep"));
+      await mkdir(join(root, "new"));
+      const member = '[package]\nname = "member"\nversion = "0.1.0"\n';
+      await writeFile(
+        join(root, "Cargo.toml"),
+        '[workspace]\nmembers = ["keep", "new"]\n',
+      );
+      await writeFile(join(root, "keep/Cargo.toml"), member);
+      await writeFile(join(root, "new/Cargo.toml"), member);
+      const input = { kind: "workspace" };
+      await generateRustPolicy({ root, input, mode: "write" });
+      // Keep the persisted union obligation but remove the new member from Cargo.
+      const source = (await readFile(join(root, "Cargo.toml"), "utf8")).replace(
+        /members = \[[^\]]*\]/u,
+        'members = ["keep"]',
+      );
+      await writeFile(join(root, "Cargo.toml"), source);
+      if (enrollment === "pending")
+        await writeFile(join(root, "new/Cargo.toml"), member);
+      expect(
+        await generateRustPolicy({ root, input, mode: "check" }),
+      ).toContain("Cargo.toml");
+      await generateRustPolicy({ root, input, mode: "write" });
+      expect(await read(root, "new/Cargo.toml")).not.toHaveProperty("lints");
+      if (enrollment === "pending")
+        expect(await readFile(join(root, "new/Cargo.toml"), "utf8")).toBe(
+          member,
+        );
+      expect(await generateRustPolicy({ root, input, mode: "check" })).toEqual(
+        [],
+      );
+    });
+});
+
+test("member ownership indexes reject noncanonical paths and cannot erase unowned inherited policy", async () => {
+  await fixture(async (root) => {
+    const original = await readFile(join(root, "Cargo.toml"), "utf8");
+    for (const paths of [
+      ["../other/Cargo.toml"],
+      ["/other/Cargo.toml"],
+      ["Cargo.toml"],
+      ["other//Cargo.toml"],
+      ["other/Cargo.toml", "other/Cargo.toml"],
+    ]) {
+      const source = `# stll-rust-policy-members-v1: ${JSON.stringify(paths)}\n${original}`;
+      await writeFile(join(root, "Cargo.toml"), source);
+      await expect(
+        generateRustPolicy({ root, input: single, mode: "write" }),
+      ).rejects.toThrow();
+      expect(await readFile(join(root, "Cargo.toml"), "utf8")).toBe(source);
+    }
+    await mkdir(join(root, "unowned"));
+    const unowned =
+      '[package]\nname = "unowned"\nversion = "0.1.0"\n[lints]\nworkspace = true\n';
+    await writeFile(join(root, "unowned/Cargo.toml"), unowned);
+    const source = `# stll-rust-policy-members-v1: ["unowned/Cargo.toml"]\n${original}`;
+    await writeFile(join(root, "Cargo.toml"), source);
+    await expect(
+      generateRustPolicy({ root, input: single, mode: "write" }),
+    ).rejects.toThrow("retain its generated inheritance ownership");
+    expect(await readFile(join(root, "unowned/Cargo.toml"), "utf8")).toBe(
+      unowned,
+    );
+    expect(await readFile(join(root, "Cargo.toml"), "utf8")).toBe(source);
+  });
+});

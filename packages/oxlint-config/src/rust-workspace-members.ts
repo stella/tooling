@@ -46,7 +46,9 @@ export const rustWorkspaceMembers = async (
     throw new Error("workspace kind requires a workspace manifest");
   const excludes = patterns(workspace["exclude"]);
   const excluded = (directory: string) =>
-    excludes.some((pattern) => picomatch.isMatch(directory, pattern));
+    excludes.some((pattern) =>
+      picomatch.isMatch(directory, pattern, { dot: true }),
+    );
   const members = new Map<string, Record<string, unknown>>();
   if (record(manifest["package"])) members.set(".", manifest);
   for (const pattern of patterns(workspace["members"])) {
@@ -66,12 +68,12 @@ export const rustWorkspaceMembers = async (
     const walk = async (directory: string) => {
       const depth = directory === "." ? 0 : directory.split("/").length;
       if (excluded(directory)) return;
-      if (picomatch.isMatch(directory, pattern)) {
+      if (picomatch.isMatch(directory, pattern, { dot: true })) {
         const member = await safeManifest(root, directory);
-        if (member !== undefined) {
-          members.set(directory, member);
-          matches++;
-        }
+        if (member === undefined)
+          throw new Error(`missing workspace member manifest: ${directory}`);
+        members.set(directory, member);
+        matches++;
       }
       if (depth >= maximumDepth) return;
       // Validate ancestors before traversing a declared subtree.

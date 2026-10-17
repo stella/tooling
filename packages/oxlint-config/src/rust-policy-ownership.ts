@@ -110,18 +110,14 @@ const removeLeaf = (table: Record<string, unknown>, path: string[]) => {
   if (Object.keys(value).length === 0) delete table[key];
 };
 
-export const removePreviousPolicy = (
-  file: string,
-  current: string | undefined,
-  document: Record<string, unknown>,
-) => {
+const previousPolicyPaths = (file: string, current: string | undefined) => {
   const declarations: string[] = [];
   // Metadata belongs to the leading comment block, never a TOML string value.
   for (const line of (current ?? "").split("\n")) {
     if (line.trim() !== "" && !line.startsWith("#")) break;
     if (line.startsWith(markerPrefix)) declarations.push(line);
   }
-  if (declarations.length === 0) return;
+  if (declarations.length === 0) return undefined;
   const declaration = declarations.at(0);
   if (
     declarations.length !== 1 ||
@@ -133,5 +129,83 @@ export const removePreviousPolicy = (
     file,
     JSON.parse(declaration.slice(marker.length)),
   );
-  for (const path of paths) removeLeaf(document, path);
+  return paths;
 };
+
+export const removePreviousPolicy = (
+  file: string,
+  current: string | undefined,
+  document: Record<string, unknown>,
+) => {
+  for (const path of previousPolicyPaths(file, current) ?? [])
+    removeLeaf(document, path);
+};
+
+export const removePreviousMemberPolicy = (
+  file: string,
+  current: string,
+  document: Record<string, unknown>,
+) => {
+  const paths = previousPolicyPaths(file, current);
+  if (paths === undefined) {
+    const lints = document["lints"];
+    if (record(lints) && Object.hasOwn(lints, "workspace"))
+      throw new Error(
+        `retired member must retain its generated inheritance ownership: ${file}`,
+      );
+    return "unmanaged";
+  }
+  if (paths.some((path) => JSON.stringify(path) !== '["lints","workspace"]'))
+    throw new Error(
+      `retired member must retain its generated inheritance ownership: ${file}`,
+    );
+  for (const path of paths) removeLeaf(document, path);
+  return "owned";
+};
+
+const memberMarker = "# stll-rust-policy-members-v1: ";
+const memberPrefix = "# stll-rust-policy-members-";
+const memberPaths = (input: unknown) => {
+  if (!Array.isArray(input))
+    throw new Error("invalid Rust member ownership index");
+  const paths = input.map((value: unknown) => {
+    if (
+      typeof value !== "string" ||
+      value === "Cargo.toml" ||
+      !value.endsWith("/Cargo.toml") ||
+      value.includes("\\") ||
+      /[\u0000-\u001f\u007f]/u.test(value) ||
+      /^[A-Za-z]:/u.test(value) ||
+      value
+        .split("/")
+        .some((part) => part === "." || part === ".." || part === "")
+    )
+      throw new Error(
+        "Rust member ownership paths must be canonical repository Cargo.toml paths",
+      );
+    return value;
+  });
+  if (new Set(paths).size !== paths.length)
+    throw new Error("duplicate Rust member ownership path");
+  return paths;
+};
+
+export const previousMemberPaths = (source: string) => {
+  const declarations: string[] = [];
+  for (const line of source.split("\n")) {
+    if (line.trim() !== "" && !line.startsWith("#")) break;
+    if (line.startsWith(memberPrefix)) declarations.push(line);
+  }
+  if (declarations.length === 0) return [];
+  const declaration = declarations.at(0);
+  if (
+    declarations.length !== 1 ||
+    declaration === undefined ||
+    !declaration.startsWith(memberMarker)
+  )
+    throw new Error("invalid Rust member ownership index version or count");
+  return memberPaths(JSON.parse(declaration.slice(memberMarker.length)));
+};
+
+export const memberOwnershipHeader = (members: string[]) =>
+  `${memberMarker}${JSON.stringify(memberPaths(members.filter((file) => file !== "Cargo.toml")))}\n`;

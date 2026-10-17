@@ -108,3 +108,16 @@ are validated and Cargo markers cannot name dependencies, package metadata,
 workspace membership, resolver, or custom profile tables. Keep these comments
 with generated files. The first generation of an unmarked file cannot identify
 retired values from older manual copies; review and remove those once at adoption.
+
+The root manifest also records the generated workspace member paths. When
+membership, exclusions, or path dependencies change, generation retires owned
+lint inheritance in former member manifests while retaining unrelated values.
+After full validation, the root records the union of old and current members
+before member writes; it drops retired obligations only after those writes.
+Interrupted enrollment and cleanup therefore remain recoverable. Former member files still require safe repository paths and their
+generated ownership comments; missing former manifests need no cleanup. The
+first adoption of a manifest without a member index cannot discover previously
+managed members that are already absent from the current workspace.
+
+Cargo member and exclude globs include hidden directories. Every selected
+directory must contain a manifest; missing manifests fail before writes.
