@@ -47,11 +47,9 @@ test("project ownership flags precisely the unowned part of every script extensi
     expect(diagnostics.map(({ path: file }) => file)).toEqual(
       sources.filter((file) => !owned.includes(file)),
     );
-    expect(
-      diagnostics.every(
-        ({ rule, line }) => rule === nodeProjectRule && line === 1,
-      ),
-    ).toBe(true);
+    expect(diagnostics.map(({ rule, line }) => ({ rule, line }))).toEqual(
+      diagnostics.map(() => ({ rule: nodeProjectRule, line: 1 })),
+    );
   }
 });
 
@@ -487,13 +485,13 @@ test("the documented Node script layout gives GitHub tools their own nearest pro
     const toolSources = Object.keys(scriptSourceExtensions).map(
       (extension) => `.github/tools/check-${extension.slice(1)}${extension}`,
     );
-    const sources = [
+    const recipeSources = [
       ...Object.keys(scriptSourceExtensions).map(
         (extension) => `scripts/release-${extension.slice(1)}${extension}`,
       ),
       ...toolSources,
     ];
-    for (const source of sources) {
+    for (const source of recipeSources) {
       writeFileSync(
         path.join(root, source),
         'import { existsSync } from "node:fs";\nexport const found = existsSync(".");\n',

@@ -69,7 +69,7 @@ const literalWord = (raw: string) => {
     if (
       quote === undefined &&
       character !== undefined &&
-      /[*?\[\]{}~]/.test(character)
+      /[*?[\]{}~]/.test(character)
     )
       return false;
   }
@@ -145,7 +145,7 @@ export const lintInventoryCommands = (
 ) => {
   const commands: string[][] = [];
   const errors: string[] = [];
-  let workspaceTask = false;
+  const workspaceTasks = new Set<string>();
   const declaresEngine =
     record(manifest) &&
     [manifest["dependencies"], manifest["devDependencies"]].some(
@@ -153,13 +153,13 @@ export const lintInventoryCommands = (
         record(dependencies) && "oxlint-tsgolint" in dependencies,
     );
   const enabled = forceEnabled || declaresEngine;
-  if (!enabled) return { commands, errors, enabled, workspaceTask };
+  if (!enabled) return { commands, errors, enabled, workspaceTask: false };
   if (!record(manifest))
     return {
       commands,
       errors: ["lint inventory requires an object package manifest"],
       enabled,
-      workspaceTask,
+      workspaceTask: false,
     };
   const scripts = manifest["scripts"];
   if (!record(scripts))
@@ -167,7 +167,7 @@ export const lintInventoryCommands = (
       commands,
       errors: ["type-aware linting requires a root lint script"],
       enabled,
-      workspaceTask,
+      workspaceTask: false,
     };
   const active = new Set<string>();
   const visited = new Set<string>();
@@ -201,7 +201,7 @@ export const lintInventoryCommands = (
           words.at(2) === "lint" &&
           raw.every(literalWord)
         )
-          workspaceTask = true;
+          workspaceTasks.add(name);
         else if (words.includes("lint") || !raw.every(literalWord))
           errors.push(
             `${name}: workspace lint delegation requires literal turbo run lint without options`,
@@ -297,14 +297,14 @@ export const lintInventoryCommands = (
       const inventory = inventoryArguments(raw.slice(offset));
       if (inventory.error !== undefined)
         errors.push(`${name}: ${inventory.error}`);
-      else if (inventory.args !== undefined) commands.push(inventory.args);
+      else commands.push(inventory.args);
     }
     active.delete(name);
     visited.add(name);
   };
   visit("lint");
+  const workspaceTask = workspaceTasks.size > 0;
   if (
-    forceEnabled &&
     !declaresEngine &&
     commands.length === 0 &&
     !workspaceTask &&
