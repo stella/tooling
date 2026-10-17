@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { constants } from "node:fs";
-import { lstat, mkdir, open, readFile, realpath } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { open, readFile, realpath } from "node:fs/promises";
+import { join } from "node:path";
 
 import { cloudSetupPath, generateCloudSetup } from "./cloud-setup";
 import {
@@ -10,6 +10,11 @@ import {
   mergeCloudClaudeSettings,
 } from "./cloud-setup-claude";
 import {
+  checkGeneratedOutput,
+  generationDiagnostics,
+  writeGeneratedFile,
+} from "./generated-file";
+import {
   parseToolchainConfiguration,
   readToolchainInputs,
 } from "./toolchain-guard";
@@ -17,68 +22,10 @@ import { parseToolchainPolicy } from "./toolchain-schema";
 
 const usage =
   "Usage: stll-cloud-setup (run from repository root)\n       stll-cloud-setup --help";
-const optionalStat = async (path: string) => {
-  try {
-    return await lstat(path);
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT")
-      return undefined;
-    throw error;
-  }
-};
-
-const checkOutput = async (destination: string) => {
-  const parent = dirname(destination);
-  const parentStat = await optionalStat(parent);
-  if (
-    parentStat !== undefined &&
-    (parentStat.isSymbolicLink() || !parentStat.isDirectory())
-  )
-    throw new Error("cloud setup parent must be a real repository directory");
-  const destinationStat = await optionalStat(destination);
-  if (
-    destinationStat !== undefined &&
-    (destinationStat.isSymbolicLink() ||
-      !destinationStat.isFile() ||
-      destinationStat.nlink !== 1)
-  )
-    throw new Error(
-      "cloud setup destination must be a single-link regular repository file",
-    );
-  return destinationStat;
-};
-
-type WriteOutputOptions = {
-  destination: string;
-  text: string;
-  mode: number;
-};
-
-const writeOutput = async ({ destination, text, mode }: WriteOutputOptions) => {
-  await checkOutput(destination);
-  await mkdir(dirname(destination), { recursive: true });
-  const output = await open(
-    destination,
-    constants.O_WRONLY | constants.O_CREAT | constants.O_NOFOLLOW,
-    mode,
-  );
-  try {
-    const opened = await output.stat();
-    if (!opened.isFile() || opened.nlink !== 1)
-      throw new Error(
-        "cloud setup destination must be a single-link regular repository file",
-      );
-    await output.truncate(0);
-    await output.writeFile(text, "utf8");
-    await output.chmod(mode);
-  } finally {
-    await output.close();
-  }
-};
-
 const readClaudeSettings = async (destination: string) => {
   try {
-    if ((await checkOutput(destination)) === undefined) return undefined;
+    if ((await checkGeneratedOutput(destination)) === undefined)
+      return undefined;
     const input = await open(
       destination,
       constants.O_RDONLY | constants.O_NOFOLLOW,
@@ -109,9 +56,20 @@ const main = async () => {
   if (args.length !== 0) throw new Error(usage);
   const root = await realpath(process.cwd());
   const { files, diagnostics } = readToolchainInputs(root);
-  if (diagnostics.length > 0)
+  const destination = join(root, cloudSetupPath);
+  const settingsDestination = join(root, cloudClaudeSettingsPath);
+  // Validate settings separately to retain actionable merge diagnostics.
+  const settings = await readClaudeSettings(settingsDestination);
+  const remainingDiagnostics = await generationDiagnostics({
+    diagnostics,
+    outputs: [
+      { relative: cloudSetupPath, destination },
+      { relative: cloudClaudeSettingsPath, destination: settingsDestination },
+    ],
+  });
+  if (remainingDiagnostics.length > 0)
     throw new Error(
-      diagnostics
+      remainingDiagnostics
         .map(
           ({ path, message }) =>
             `${path}: ${message}${path === cloudClaudeSettingsPath ? `; ${cloudSessionStartFix}` : ""}`,
@@ -141,14 +99,10 @@ const main = async () => {
     files,
     rustExceptions,
   });
-  const destination = join(root, cloudSetupPath);
-  await checkOutput(destination);
-  const settingsDestination = join(root, cloudClaudeSettingsPath);
-  const settings = await readClaudeSettings(settingsDestination);
   const mergedSettings = mergeCloudClaudeSettings(settings?.text);
-  await writeOutput({ destination, text: script, mode: 0o755 });
+  await writeGeneratedFile({ destination, text: script, mode: 0o755 });
   if (mergedSettings !== settings?.text)
-    await writeOutput({
+    await writeGeneratedFile({
       destination: settingsDestination,
       text: mergedSettings,
       mode: settings?.mode ?? 0o644,

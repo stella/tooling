@@ -863,6 +863,12 @@ const cases = [
     pass: `runs:\n  using: composite\n  steps:\n    - uses: 'actions/checkout@${sha}' # v5`,
     fail: "runs:\n  using: composite\n  steps:\n    - uses: 'actions/checkout@v5' # v5",
   },
+  {
+    rule: "workflow-trust",
+    file: ".github/workflows/ci.yml",
+    pass: "on: pull_request\njobs:\n  trust-check: {runs-on: ubuntu-latest, steps: [{run: 'echo trusted'}]}\n  detector:\n    needs: trust-check\n    if: needs.trust-check.outputs.trusted == 'true'\n    steps: [{run: 'bunx --no-install stll-toolchain-changed --since origin/main'}]\n",
+    fail: "on: pull_request\njobs:\n  trust-check: {runs-on: ubuntu-latest, steps: [{run: 'echo trusted'}]}\n  detector:\n    steps: [{run: 'bunx --no-install stll-toolchain-changed --since origin/main'}]\n",
+  },
 ] satisfies {
   rule: (typeof runtimeRules)[number];
   file: string;
@@ -872,6 +878,127 @@ const cases = [
 
 test("fixture coverage equals the declared runtime rules", () => {
   expect(new Set(cases.map(({ rule }) => rule))).toEqual(new Set(runtimeRules));
+});
+
+test.each([
+  "./.github/workflows/build.yml",
+  `stella/.github/.github/workflows/build.yml@${"a".repeat(40)}`,
+])("workflow trust diagnostics locate reusable workflow jobs: %s", (uses) => {
+  const file = ".github/workflows/ci.yml";
+  const source = `on: pull_request
+jobs:
+  trust-check:
+    steps: [{run: echo trust-decision}]
+  build:
+    uses: ${uses}
+`;
+  expect(
+    check(file, source).filter(({ rule }) => rule === "workflow-trust"),
+  ).toMatchObject([{ rule: "workflow-trust", path: file, line: 6 }]);
+  const gated = source.replace(
+    "  build:\n",
+    "  build:\n    needs: trust-check\n    if: needs.trust-check.outputs.trusted == 'true'\n",
+  );
+  expect(
+    check(file, gated).filter(({ rule }) => rule === "workflow-trust"),
+  ).toEqual([]);
+});
+
+test("workflow trust diagnostics locate non-Bun manager commands", () => {
+  const file = ".github/workflows/ci.yml";
+  for (const command of ["npm test", "pnpm install", "yarn test"]) {
+    const source = `on: pull_request
+jobs:
+  trust-check:
+    steps: [{run: echo trust-decision}]
+  build:
+    steps:
+      - run: ${command}
+`;
+    expect(check(file, source).filter(({ rule }) => rule === "workflow-trust"))
+      .toMatchObject([{ rule: "workflow-trust", path: file, line: 7 }]);
+  }
+});
+
+test("workflow trust diagnostics locate runtime discovery modes without filenames", () => {
+  const file = ".github/workflows/ci.yml";
+  for (const command of ["node --test", "python3 -m unittest discover"]) {
+    const source = `on: pull_request
+jobs:
+  trust-check:
+    steps: [{run: echo trust-decision}]
+  build:
+    steps:
+      - run: ${command}
+`;
+    expect(check(file, source).filter(({ rule }) => rule === "workflow-trust"))
+      .toMatchObject([{ rule: "workflow-trust", path: file, line: 7 }]);
+  }
+});
+
+test("workflow trust diagnostics locate Corepack package-manager dispatch", () => {
+  const file = ".github/workflows/ci.yml";
+  for (const command of ["corepack pnpm test", "corepack yarn test", "corepack npm ci --ignore-scripts"]) {
+    const source = `on: pull_request
+jobs:
+  trust-check:
+    steps: [{run: echo trust-decision}]
+  build:
+    steps:
+      - run: ${command}
+`;
+    expect(check(file, source).filter(({ rule }) => rule === "workflow-trust"))
+      .toMatchObject([{ rule: "workflow-trust", path: file, line: 7 }]);
+  }
+});
+test("workflow trust diagnostics locate commands outside the metadata allowlist", () => {
+  const file = ".github/workflows/ci.yml";
+  for (const command of ["bash ./scripts/check", "source scripts/check.sh", ". ./x", "unknown-command"]) {
+    const source = `on: pull_request
+jobs:
+  trust-check:
+    steps: [{run: echo trust-decision}]
+  build:
+    steps:
+      - run: ${command}
+`;
+    expect(check(file, source).filter(({ rule }) => rule === "workflow-trust"))
+      .toMatchObject([{ rule: "workflow-trust", path: file, line: 7 }]);
+  }
+});
+test("workflow trust checks Actions interpolation before shell quoting", () => {
+  const file = ".github/workflows/ci.yml";
+  for (const quote of ["'", '"', ""]) {
+    const source = `on: pull_request
+jobs:
+  trust-check:
+    steps: [{run: echo trust-decision}]
+  build:
+    steps:
+      - run: ${JSON.stringify(`echo ${quote}\${{ github.event.pull_request.title }}${quote}`)}
+`;
+    expect(check(file, source).filter(({ rule }) => rule === "workflow-trust"))
+      .toMatchObject([{ rule: "workflow-trust", path: file, line: 7 }]);
+    expect(check(file, source.replace("github.event.pull_request.title", "github.sha"))
+      .filter(({ rule }) => rule === "workflow-trust")).toEqual([]);
+  }
+});
+test("workflow trust diagnostics locate container and service startup", () => {
+  const file = ".github/workflows/ci.yml";
+  for (const field of ["container: example/image", "services: {database: {image: 'example/image'}}"]) {
+    const source = `on: pull_request
+jobs:
+  trust-check:
+    steps: [{run: echo trust-decision}]
+  build:
+    ${field}
+    steps: [{run: echo metadata-only}]
+`;
+    expect(check(file, source).filter(({ rule }) => rule === "workflow-trust"))
+      .toMatchObject([{ rule: "workflow-trust", path: file, line: 6 }]);
+    const gated = source.replace("  build:\n", "  build:\n    needs: trust-check\n    if: needs.trust-check.outputs.trusted == 'true'\n");
+    expect(check(file, gated).filter(({ rule }) => rule === "workflow-trust")).toEqual([]);
+  }
 });
 for (const fixture of cases) {
   test(`${fixture.rule} accepts its shared pin and rejects a mutation`, () => {
