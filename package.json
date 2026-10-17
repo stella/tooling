@@ -9,6 +9,7 @@
   "scripts": {
     "build": "bun --filter @stll/oxlint-config build && bun --filter @stll/oxlint-plugin build && bun --filter @stll/time build && bun --filter @stll/test-kit build",
     "changeset": "changeset",
+    "generate:dependabot": "bun packages/oxlint-config/src/dependabot-cli.ts --config stll-dependabot.json",
     "changeset:version": "bun scripts/ensure-toolchain-release.ts && changeset version && bun scripts/check-lockfile-workspace-versions.ts --write && bun install --frozen-lockfile",
     "check:lockfile-versions": "bun scripts/check-lockfile-workspace-versions.ts",
     "check:registry-versions": "bun scripts/check-registry-versions.ts",
