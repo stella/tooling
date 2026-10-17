@@ -451,7 +451,7 @@ catch (error) { process.stdout.write(error.message); }
   expect(result.stdout).not.toContain(marker);
 });
 
-test("SessionStart profile reads and single appends fail visibly without changing existing environment", () => {
+test("SessionStart reads, writes and replacement fail visibly without changing existing environment", () => {
   const root = mkdtempSync(join(tmpdir(), "cloud-claude-write-failure-"));
   try {
     mkdirSync(join(root, ".agents"));
@@ -467,12 +467,14 @@ test("SessionStart profile reads and single appends fail visibly without changin
       cloudShellProfilePath,
       profile,
     );
-    for (const operation of ["read", "append"]) {
+    for (const operation of ["read", "append", "replace"]) {
       writeFileSync(environment, original);
       const failure =
         operation === "read"
           ? "cat() { return 74; }"
-          : String.raw`printf() { if [ "$1" = '\n%s\n' ]; then return 73; fi; builtin printf "$@"; }`;
+          : operation === "append"
+            ? 'printf() { if [[ -n "${cloud_env_temporary:-}" && /dev/fd/1 -ef "$cloud_env_temporary" ]]; then return 73; fi; builtin printf "$@"; }'
+            : "mv() { return 75; }";
       const result = spawnSync("bash", ["-c", `${failure}\n${command}`], {
         cwd: root,
         env: {
@@ -491,7 +493,11 @@ test("SessionStart profile reads and single appends fail visibly without changin
       expect(result.stdout).not.toContain("fixture-untrusted-start-output");
       expect(result.stdout).not.toContain("private-value");
       expect(result.stderr).toContain(
-        operation === "read" ? "could not be read" : "could not be persisted",
+        operation === "read"
+          ? "could not be read"
+          : operation === "append"
+            ? "could not be prepared"
+            : "could not be persisted",
       );
       expect(readFileSync(environment, "utf8")).toBe(original);
     }
