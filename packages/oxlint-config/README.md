@@ -384,6 +384,18 @@ repository-relative path; its existing parent must be safe at runtime. Track an 
 bunx --no-install stll-cloud-setup
 ```
 
+When PostgreSQL is enabled, the selected environment file contains `DATABASE_URL`
+and `POSTGRES_HOST`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB_NAME`,
+and `POSTGRES_ADDITIONAL_CONNECTION_DATA`. `DATABASE_URL` retains the
+`postgresql://` spelling; the component values assemble the same endpoint with
+`postgres://`. Additional connection data is empty by default.
+Remote Claude sessions receive these generated values as quoted `export`
+assignments after service startup succeeds. SessionStart does not source the
+selected environment file, and it preserves the configured `envFile` path for
+tools that load that file directly. Settings generation migrates only exact
+SessionStart hooks from releases 1.1.0 and 1.3.1 and the prior main-branch form
+at 783bc97; edited or unknown hook forms fail with the canonical repair.
+
 Rust is optional. A tracked root `rust-toolchain.toml` enables it automatically;
 otherwise declare `cloud.rust` to enable it. `cloud.rust.toolchain`, when given,
 must be an exact stable Rust patch. The root toolchain file supplies the pin when

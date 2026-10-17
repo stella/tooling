@@ -99,7 +99,12 @@ const postgresStart = String.raw`
   pg_pid="$(head -n 1 "$pg_data/postmaster.pid")"
   service_process "$pg_pid" "$pg_bin/postgres"
   [[ "$(env -u PGSERVICE -u PGSERVICEFILE -u PGOPTIONS PGHOSTADDR=127.0.0.1 PGPASSWORD="$pg_password" PGCONNECT_TIMEOUT=2 "$pg_bin/psql" -X -h 127.0.0.1 -p 55432 -U stll_cloud -d postgres -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_database WHERE datname = 'cloud_test'")" == 1 ]] || env -u PGSERVICE -u PGSERVICEFILE -u PGOPTIONS PGHOSTADDR=127.0.0.1 PGPASSWORD="$pg_password" PGCONNECT_TIMEOUT=2 "$pg_bin/createdb" -h 127.0.0.1 -p 55432 -U stll_cloud cloud_test || fail "PostgreSQL test database creation failed"
-  DATABASE_URL="postgresql://stll_cloud:$pg_password@127.0.0.1:55432/cloud_test"
+  POSTGRES_HOST='127.0.0.1:55432'
+  POSTGRES_USER='stll_cloud'
+  POSTGRES_PASSWORD="$pg_password"
+  POSTGRES_DB_NAME='cloud_test'
+  POSTGRES_ADDITIONAL_CONNECTION_DATA=''
+  DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST/$POSTGRES_DB_NAME$POSTGRES_ADDITIONAL_CONNECTION_DATA"
   printf 'postgres: %s\n' "$pg_state"
 `;
 

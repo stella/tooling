@@ -31,9 +31,9 @@ const script = String.raw`#!/usr/bin/env bash
 # Supported platform: Ubuntu 24.04 (noble), amd64/arm64, root or passwordless sudo.
 set -euo pipefail
 
-usage() { echo 'Usage: cloud-setup.sh install|start' >&2; exit 2; }
+usage() { echo 'Usage: cloud-setup.sh install|start|session' >&2; exit 2; }
 [[ "$#" == 1 ]] || usage
-case "$1" in install|start) MODE="$1" ;; *) usage ;; esac
+case "$1" in install|start|session) MODE="$1" ;; *) usage ;; esac
 fail() { echo "cloud-setup: $*" >&2; exit 1; }
 trap 'echo "cloud-setup: command failed at line $LINENO" >&2' ERR
 # Each phase logs its start and duration so a stalled phase is visible in the task log.
@@ -186,6 +186,8 @@ process.stdout.write([...hosts].sort().join(","));
 @INPUT_VALIDATION@
 
 @ENV_FUNCTIONS@
+@ENVIRONMENT_VALUES@
+@SESSION_ENVIRONMENT@
 
 @PREPARE_FUNCTION@
 
@@ -198,14 +200,39 @@ if [[ "$MODE" == install ]]; then
 @PREPARE_STEP@
   exit 0
 fi
-step runtime-check runtime_ready
-step tool-check verify_tools
-step shell install_shell_environment
-step shell-check verify_shell_environment
-@ENV_VALIDATE@
-step state prepare_state
-step service-start start_services
-@ENV_WRITE@
+@ENV_INITIALIZE@
+start_environment() {
+  step runtime-check runtime_ready
+  step tool-check verify_tools
+  step shell install_shell_environment
+  step shell-check verify_shell_environment
+  @ENV_VALIDATE@
+  step state prepare_state
+  step service-start start_services
+  @ENV_WRITE@
+}
+if [[ "$MODE" == session ]]; then
+  start_environment >&2
+else
+  start_environment
+fi
+@SESSION_ENVIRONMENT_CALL@
+`;
+
+const environmentValuesFunction = String.raw`
+environment_values() {
+  local emit="$1"
+  "$emit" NODE_ENV test
+  if [[ -n "$DATABASE_URL" ]]; then
+    "$emit" DATABASE_URL "$DATABASE_URL"
+    "$emit" POSTGRES_HOST "$POSTGRES_HOST"
+    "$emit" POSTGRES_USER "$POSTGRES_USER"
+    "$emit" POSTGRES_PASSWORD "$POSTGRES_PASSWORD"
+    "$emit" POSTGRES_DB_NAME "$POSTGRES_DB_NAME"
+    "$emit" POSTGRES_ADDITIONAL_CONNECTION_DATA "$POSTGRES_ADDITIONAL_CONNECTION_DATA"
+  fi
+  if [[ -n "$REDIS_URL" ]]; then "$emit" REDIS_URL "$REDIS_URL"; fi
+}
 `;
 
 const environmentFunctions = String.raw`
@@ -222,18 +249,25 @@ validate_environment() {
     [[ "$first_line" == "$ENV_MARKER" ]] || fail 'Refusing to overwrite an unowned environment file'
   fi
 }
+environment_file_value() { printf '%s=%s\n' "$1" "$2"; }
 write_environment() {
   validate_environment
   local env_path="$REPO_ROOT/$ENV_FILE" temporary
   temporary="$(mktemp "$(dirname -- "$env_path")/.stll-cloud-env.XXXXXX")"
   chmod 600 "$temporary"
   {
-    printf '%s\n' "$ENV_MARKER" 'NODE_ENV=test'
-    if [[ -n "$DATABASE_URL" ]]; then printf 'DATABASE_URL=%s\n' "$DATABASE_URL"; fi
-    if [[ -n "$REDIS_URL" ]]; then printf 'REDIS_URL=%s\n' "$REDIS_URL"; fi
+    printf '%s\n' "$ENV_MARKER"
+    environment_values environment_file_value
   } > "$temporary"
   chown "$OUTPUT_UID:$OUTPUT_GID" "$temporary"
   mv -f -- "$temporary" "$env_path"
+}
+`;
+
+const sessionEnvironmentFunction = String.raw`
+environment_shell_value() { printf 'export %s=%q\n' "$1" "$2"; }
+emit_session_environment() {
+  environment_values environment_shell_value
 }
 `;
 
@@ -350,10 +384,28 @@ export const generateCloudSetup = ({
       selected.envFile === undefined ? "" : environmentFunctions,
     ],
     [
-      "@ENV_VALIDATE@",
-      selected.envFile === undefined
+      "@ENVIRONMENT_VALUES@",
+      selected.services.length === 0 ? "" : environmentValuesFunction,
+    ],
+    [
+      "@ENV_INITIALIZE@",
+      selected.services.length === 0
         ? ""
-        : "DATABASE_URL=''\nREDIS_URL=''\nvalidate_environment",
+        : "DATABASE_URL=''\nPOSTGRES_HOST=''\nPOSTGRES_USER=''\nPOSTGRES_PASSWORD=''\nPOSTGRES_DB_NAME=''\nPOSTGRES_ADDITIONAL_CONNECTION_DATA=''\nREDIS_URL=''",
+    ],
+    [
+      "@ENV_VALIDATE@",
+      selected.envFile === undefined ? "" : "validate_environment",
+    ],
+    [
+      "@SESSION_ENVIRONMENT@",
+      selected.services.length === 0 ? "" : sessionEnvironmentFunction,
+    ],
+    [
+      "@SESSION_ENVIRONMENT_CALL@",
+      selected.services.length === 0
+        ? ""
+        : 'if [[ "$MODE" == session ]]; then emit_session_environment; fi',
     ],
     ["@ENV_WRITE@", selected.envFile === undefined ? "" : "write_environment"],
     ["@PREPARE_FUNCTION@", renderPrepare(selected.prepare, files)],

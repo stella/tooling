@@ -81,7 +81,12 @@ test("PostgreSQL uses authenticated private state and checks endpoint identity",
     "pg_version / 10000 == 18",
     "service_process",
     "cloud_test",
-    "DATABASE_URL=",
+    "POSTGRES_HOST='127.0.0.1:55432'",
+    "POSTGRES_USER='stll_cloud'",
+    "POSTGRES_PASSWORD=\"$pg_password\"",
+    "POSTGRES_DB_NAME='cloud_test'",
+    "POSTGRES_ADDITIONAL_CONNECTION_DATA=''",
+    'DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST/$POSTGRES_DB_NAME$POSTGRES_ADDITIONAL_CONNECTION_DATA"',
   ])
     expect(fragment).toContain(required);
   expect(fragment).not.toContain("--auth-local=trust");
