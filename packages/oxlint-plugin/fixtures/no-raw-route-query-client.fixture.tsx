@@ -57,6 +57,11 @@ export const Route = createFileRoute("/__fixture")({
     context.queryClient.prefetchQuery(options);
   },
   loader: async ({ context: { queryClient } }) => {
+    const qc = queryClient;
+
+    // oxlint-disable-next-line no-raw-route-query-client/no-raw-route-query-client -- fixture: raw loader calls require the route query wrapper
+    await qc.ensureQueryData(options);
+
     // oxlint-disable-next-line no-raw-route-query-client/no-raw-route-query-client
     await ensureCriticalQueryData(queryClient, options);
 
