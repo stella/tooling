@@ -1420,10 +1420,12 @@ test(
         const fileSpreads = spreads.filter((edit) => edit.file === original.path);
         const fileJsxRoots = jsxRoots.filter((edit) => edit.file === original.path);
         const inventory = jsxInventory.find((edit) => edit.file === original.path);
-        expect(inventory).toBeDefined();
+        if (inventory === undefined) {
+          throw new Error(`Missing JSX inventory for ${original.path}`);
+        }
         expect(
           fileJsxRoots.reduce((count, edit) => count + edit.elementCount, 0),
-        ).toBe(inventory?.elementCount);
+        ).toBe(inventory.elementCount);
         const variants = [
           {
             name: "bracket",
