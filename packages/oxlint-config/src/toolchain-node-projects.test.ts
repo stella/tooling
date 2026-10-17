@@ -252,3 +252,64 @@ test("workspace inventories preserve package cwd and ignore validation-only task
     expect(checkNodeProjects({ root, manifest, trackedFiles })).toEqual([]);
   });
 });
+
+test("explicitly selected tracked configs establish ownership without a default project", () => {
+  withInventoryFixture((root, trackedFiles) => {
+    const source = "scripts/selected.ts";
+    const selected = "tsconfig.lint.json";
+    writeFileSync(path.join(root, source), "export const value = 1;\n");
+    writeFileSync(
+      path.join(root, selected),
+      JSON.stringify({ files: [source] }),
+    );
+    for (const file of ["package.json", ".oxlintrc.json", source, selected])
+      trackedFiles.add(file);
+    for (const argument of [
+      "--tsconfig tsconfig.lint.json",
+      "--tsconfig=tsconfig.lint.json",
+    ]) {
+      const manifest = {
+        ...fixtureManifest,
+        scripts: {
+          lint: `oxlint -c .oxlintrc.json --type-aware ${argument} .`,
+        },
+      };
+      writeFileSync(path.join(root, "package.json"), JSON.stringify(manifest));
+      expect(checkNodeProjects({ root, manifest, trackedFiles })).toEqual([]);
+    }
+
+    // A workspace selector resolves against that package's cwd, not the root.
+    const manifest = {
+      ...fixtureManifest,
+      workspaces: ["packages/*"],
+      scripts: { lint: "turbo run lint" },
+    };
+    writeFileSync(path.join(root, "package.json"), JSON.stringify(manifest));
+    mkdirSync(path.join(root, "packages/a/config"), { recursive: true });
+    mkdirSync(path.join(root, "packages/a/src"));
+    writeFileSync(
+      path.join(root, "packages/a/package.json"),
+      JSON.stringify({
+        name: "@fixture/a",
+        scripts: {
+          lint: "oxlint -c ../../.oxlintrc.json --type-aware --tsconfig=config/tsconfig.lint.json .",
+        },
+      }),
+    );
+    writeFileSync(
+      path.join(root, "packages/a/src/selected.ts"),
+      "export const value = 1;\n",
+    );
+    writeFileSync(
+      path.join(root, "packages/a/config/tsconfig.lint.json"),
+      JSON.stringify({ files: ["../src/selected.ts"] }),
+    );
+    for (const file of [
+      "packages/a/package.json",
+      "packages/a/src/selected.ts",
+      "packages/a/config/tsconfig.lint.json",
+    ])
+      trackedFiles.add(file);
+    expect(checkNodeProjects({ root, manifest, trackedFiles })).toEqual([]);
+  });
+});
