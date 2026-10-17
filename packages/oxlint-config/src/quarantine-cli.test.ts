@@ -36,10 +36,10 @@ const fixture = async (run: (root: string) => Promise<void>) => {
 test("preset synchronization initializes before install and converges for untracked output and lock identities", async () => {
   await fixture(async (root) => {
     expect(invoke(root, ["--check"]).status).toBe(1);
-    await expect(stat(join(root, "bunfig.toml"))).rejects.toHaveProperty(
-      "code",
-      "ENOENT",
+    const missingFile = await stat(join(root, "bunfig.toml")).catch(
+      (error: unknown) => error,
     );
+    expect(missingFile).toHaveProperty("code", "ENOENT");
     const first = invoke(root, ["--sync"]);
     expect(first.status, first.stderr).toBe(0);
     const path = join(root, "bunfig.toml");

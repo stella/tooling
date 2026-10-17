@@ -112,7 +112,7 @@ const tokensOf = (text: string): Token[] => {
       type = "atom";
       while (
         index < text.length &&
-        !/[\s#\[\]=.,{}"']/u.test(text.charAt(index))
+        !/[\s#[\]=.,{}"']/u.test(text.charAt(index))
       )
         index++;
     }
@@ -182,7 +182,7 @@ const readSourceArray = (bunfig: string, parseToml: ParseToml): SourceArray => {
     const open = meaningful.at(equals + 1);
     const close = meaningful.at(-1);
     if (open?.text !== "[" || close?.text !== "]" || found !== undefined)
-      return fail(
+      fail(
         "bunfig.toml must declare a single install minimumReleaseAgeExcludes array",
       );
     const values = meaningful.slice(equals + 2, -1);
@@ -475,7 +475,9 @@ export const synchronizeFirstPartyExcludes = ({
       `  ${JSON.stringify(entry.name)}, # quarantine-excluded-since: ${timestamp}`,
     );
   }
-  for (const name of [...required].filter((name) => !seen.has(name)).sort())
+  for (const name of [...required]
+    .filter((requiredPackage) => !seen.has(requiredPackage))
+    .sort())
     lines.push(
       `  ${JSON.stringify(name)}, # quarantine-excluded-since: ${now.toISOString()}`,
     );
