@@ -344,7 +344,7 @@ test("import-resolution tsconfig flags cannot claim files excluded by the neares
   });
 });
 
-test("ancestor and sibling projects cannot override the nearest exclusion without an explicit reference", () => {
+test("ancestor roots can own nearest misses while unreferenced sibling projects cannot", () => {
   withInventoryFixture((root, trackedFiles) => {
     mkdirSync(path.join(root, "scripts/nested"));
     mkdirSync(path.join(root, "scripts/sibling"));
@@ -377,6 +377,16 @@ test("ancestor and sibling projects cannot override the nearest exclusion withou
       checkNodeProjects({ root, manifest: fixtureManifest, trackedFiles }).map(
         ({ path: file }) => file,
       ),
+    ).toEqual([]);
+
+    writeFileSync(
+      path.join(root, "tsconfig.json"),
+      JSON.stringify({ files: [owned] }),
+    );
+    expect(
+      checkNodeProjects({ root, manifest: fixtureManifest, trackedFiles }).map(
+        ({ path: file }) => file,
+      ),
     ).toEqual([orphan]);
 
     writeFileSync(
@@ -386,6 +396,37 @@ test("ancestor and sibling projects cannot override the nearest exclusion withou
         references: [{ path: "../sibling" }],
       }),
     );
+    expect(
+      checkNodeProjects({ root, manifest: fixtureManifest, trackedFiles }),
+    ).toEqual([]);
+  });
+});
+
+test("imports do not establish root membership but ancestor roots can claim imported files", () => {
+  withInventoryFixture((root, trackedFiles) => {
+    const entry = "scripts/index.ts";
+    const helper = "scripts/helper.ts";
+    writeFileSync(
+      path.join(root, entry),
+      'import { value } from "./helper"; export { value };\n',
+    );
+    writeFileSync(path.join(root, helper), "export const value = 1;\n");
+    writeFileSync(
+      path.join(root, "scripts/tsconfig.json"),
+      JSON.stringify({ include: ["index.ts"] }),
+    );
+    for (const file of [entry, helper, "scripts/tsconfig.json"])
+      trackedFiles.add(file);
+    expect(
+      checkNodeProjects({ root, manifest: fixtureManifest, trackedFiles }).map(
+        ({ path: file }) => file,
+      ),
+    ).toEqual([helper]);
+    writeFileSync(
+      path.join(root, "tsconfig.json"),
+      JSON.stringify({ files: [helper] }),
+    );
+    trackedFiles.add("tsconfig.json");
     expect(
       checkNodeProjects({ root, manifest: fixtureManifest, trackedFiles }),
     ).toEqual([]);

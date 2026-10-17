@@ -81,47 +81,52 @@ const lintFixture = (root: string, source: string) => {
   return { status: result.status, output: result.stdout + result.stderr };
 };
 
+const prepareNodeFixture = (root: string) => {
+  mkdirSync(path.join(root, "scripts"));
+  mkdirSync(path.join(root, "node_modules/@types"), { recursive: true });
+  mkdirSync(path.join(root, "node_modules/@stll"), { recursive: true });
+  mkdirSync(path.join(root, "node_modules/.bin"));
+  symlinkSync(
+    backendDirectory,
+    path.join(root, "node_modules/oxlint-tsgolint"),
+    "dir",
+  );
+  // Oxlint discovers the backend through the consumer's node_modules/.bin.
+  symlinkSync(
+    path.join(backendDirectory, "bin/tsgolint.js"),
+    path.join(root, "node_modules/.bin/tsgolint"),
+  );
+  // Model an isolated consumer's direct dependency, not a hoisted root @types tree.
+  symlinkSync(
+    nodeTypesDirectory,
+    path.join(root, "node_modules/@types/node"),
+    "dir",
+  );
+  symlinkSync(
+    configDirectory,
+    path.join(root, "node_modules/@stll/typescript-config"),
+    "dir",
+  );
+  writeFileSync(
+    path.join(root, "package.json"),
+    JSON.stringify({ type: "module" }),
+  );
+  writeFileSync(
+    path.join(root, ".oxlintrc.json"),
+    JSON.stringify({
+      plugins: ["typescript"],
+      ignorePatterns: ["node_modules/**"],
+      rules: { "typescript/strict-boolean-expressions": "error" },
+    }),
+  );
+};
+
 test.each(["js", "mjs", "cjs"] as const)(
   "the shared Node preset supplies real Node types for owned .%s scripts",
   (extension) => {
     const root = mkdtempSync(path.join(tmpdir(), "stll-node-scripts-"));
     try {
-      mkdirSync(path.join(root, "scripts"));
-      mkdirSync(path.join(root, "node_modules/@types"), { recursive: true });
-      mkdirSync(path.join(root, "node_modules/@stll"), { recursive: true });
-      mkdirSync(path.join(root, "node_modules/.bin"));
-      symlinkSync(
-        backendDirectory,
-        path.join(root, "node_modules/oxlint-tsgolint"),
-        "dir",
-      );
-      // Oxlint discovers the backend through the consumer's node_modules/.bin.
-      symlinkSync(
-        path.join(backendDirectory, "bin/tsgolint.js"),
-        path.join(root, "node_modules/.bin/tsgolint"),
-      );
-      // Model an isolated consumer's direct dependency, not a hoisted root @types tree.
-      symlinkSync(
-        nodeTypesDirectory,
-        path.join(root, "node_modules/@types/node"),
-        "dir",
-      );
-      symlinkSync(
-        configDirectory,
-        path.join(root, "node_modules/@stll/typescript-config"),
-        "dir",
-      );
-      writeFileSync(
-        path.join(root, "package.json"),
-        JSON.stringify({ type: "module" }),
-      );
-      writeFileSync(
-        path.join(root, ".oxlintrc.json"),
-        JSON.stringify({
-          plugins: ["typescript"],
-          rules: { "typescript/strict-boolean-expressions": "error" },
-        }),
-      );
+      prepareNodeFixture(root);
       const project = path.join(root, "scripts/tsconfig.json");
       const writeProject = (preset: "library" | "node") =>
         writeFileSync(
@@ -166,3 +171,78 @@ test.each(["js", "mjs", "cjs"] as const)(
     }
   },
 );
+
+test("imported program files still need root membership, including combined inventory", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "stll-import-membership-"));
+  try {
+    prepareNodeFixture(root);
+    writeFileSync(
+      path.join(root, "scripts/tsconfig.json"),
+      JSON.stringify({
+        extends: "@stll/typescript-config/node.json",
+        include: ["index.ts"],
+      }),
+    );
+    writeFileSync(
+      path.join(root, "scripts/index.ts"),
+      'import { description } from "./helper"; export const result = description;\n',
+    );
+    writeFileSync(
+      path.join(root, "scripts/helper.ts"),
+      'import { existsSync } from "node:fs"; export const description = existsSync(".") ? "present" : "missing";\n',
+    );
+    const compiler = path.join(
+      path.dirname(require.resolve("typescript/package.json")),
+      "bin/tsc",
+    );
+    const invoke = (executable: string, args: string[]) => {
+      const result = spawnSync(process.execPath, [executable, ...args], {
+        cwd: root,
+        encoding: "utf8",
+        timeout: 30_000,
+      });
+      if (result.error !== undefined) throw result.error;
+      return { status: result.status, output: result.stdout + result.stderr };
+    };
+    const roots = invoke(compiler, [
+      "--showConfig",
+      "-p",
+      "scripts/tsconfig.json",
+    ]);
+    const program = invoke(compiler, [
+      "--listFilesOnly",
+      "-p",
+      "scripts/tsconfig.json",
+    ]);
+    expect(roots.status, roots.output).toBe(0);
+    expect(roots.output).toContain('"./index.ts"');
+    expect(roots.output).not.toContain('"./helper.ts"');
+    expect(program.status, program.output).toBe(0);
+    expect(program.output).toContain(path.join(root, "scripts/helper.ts"));
+    const oxlint = path.join(oxlintDirectory, "bin/oxlint");
+    const args = ["--config", ".oxlintrc.json", "--type-aware", "--type-check"];
+    const rootOnly = invoke(oxlint, [...args, "scripts/index.ts"]);
+    expect(rootOnly.status, rootOnly.output).toBe(0);
+    for (const selection of [
+      ["scripts/helper.ts"],
+      ["scripts/index.ts", "scripts/helper.ts"],
+      ["."],
+    ]) {
+      const inferred = invoke(oxlint, [...args, ...selection]);
+      expect(inferred.status, inferred.output).not.toBe(0);
+      expect(inferred.output).toContain("TS2591");
+      expect(inferred.output).toContain("Unexpected any");
+    }
+    writeFileSync(
+      path.join(root, "tsconfig.json"),
+      JSON.stringify({
+        extends: "@stll/typescript-config/node.json",
+        files: ["scripts/helper.ts"],
+      }),
+    );
+    const ancestor = invoke(oxlint, [...args, "."]);
+    expect(ancestor.status, ancestor.output).toBe(0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

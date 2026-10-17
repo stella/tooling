@@ -140,22 +140,24 @@ export const checkNodeProjects = ({
         .filter((file) => file !== "")
         .map((file) => relativePath(root, path.resolve(cwd, file))),
     );
+    const nearestProject = (start: string) => {
+      let directory = start;
+      while (true) {
+        const config = path.posix.join(directory, "tsconfig.json");
+        if (trackedFiles.has(config)) return config;
+        if (directory === ".") return undefined;
+        directory = path.posix.dirname(directory);
+      }
+    };
     const groups = new Map<string, string[]>();
     for (const file of new Set(lintedFiles)) {
       if (!trackedFiles.has(file) || scriptSourceKind(file) === undefined)
         continue;
-      let directory = path.posix.dirname(file);
-      while (true) {
-        const config = path.posix.join(directory, "tsconfig.json");
-        if (trackedFiles.has(config)) {
-          const group = groups.get(config);
-          if (group === undefined) groups.set(config, [file]);
-          else group.push(file);
-          break;
-        }
-        if (directory === ".") break;
-        directory = path.posix.dirname(directory);
-      }
+      const config = nearestProject(path.posix.dirname(file));
+      if (config === undefined) continue;
+      const group = groups.get(config);
+      if (group === undefined) groups.set(config, [file]);
+      else group.push(file);
     }
     type Project = { files: Set<string>; references: string[] };
     const projects = new Map<string, Project>();
@@ -219,18 +221,30 @@ export const checkNodeProjects = ({
     };
     const projectFiles = new Set<string>();
     for (const [nearest, sources] of groups) {
-      const pending = [nearest];
+      const remaining = new Set(sources);
       const visited = new Set<string>();
-      let config = pending.pop();
-      while (config !== undefined) {
-        if (!visited.has(config)) {
-          visited.add(config);
-          const project = readProject(config);
-          for (const source of sources)
-            if (project.files.has(source)) projectFiles.add(source);
-          pending.push(...project.references);
+      let ancestor: string | undefined = nearest;
+      while (ancestor !== undefined && remaining.size > 0) {
+        const pending = [ancestor];
+        let config = pending.pop();
+        while (config !== undefined && remaining.size > 0) {
+          if (!visited.has(config)) {
+            visited.add(config);
+            const project = readProject(config);
+            for (const source of remaining) {
+              if (!project.files.has(source)) continue;
+              projectFiles.add(source);
+              remaining.delete(source);
+            }
+            pending.push(...project.references);
+          }
+          config = pending.pop();
         }
-        config = pending.pop();
+        const directory = path.posix.dirname(ancestor);
+        ancestor =
+          directory === "."
+            ? undefined
+            : nearestProject(path.posix.dirname(directory));
       }
     }
     diagnostics.push(
