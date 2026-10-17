@@ -118,6 +118,10 @@ export const checkNodeProjects = ({
   trackedFiles,
 }: CheckNodeProjectsOptions) => {
   let buildPackages: ReturnType<typeof discoverConsumerManifests> | undefined;
+  const filteredCommands: (ReturnType<
+    typeof lintInventoryCommands
+  >["commands"][number] & { cwd: string })[] = [];
+  const activeBuilds = new Set<string>();
   const lifecycle: ScriptLifecycleContext = {
     packageManager: record(manifest) ? manifest["packageManager"] : undefined,
     npmrc: lifecycleFile(root, ".npmrc", trackedFiles),
@@ -136,15 +140,17 @@ export const checkNodeProjects = ({
             files[file] = readFileSync(path.join(root, file), "utf8");
         buildPackages = discoverConsumerManifests(files);
       }
-      const selected = [...buildPackages.values()].filter(
-        (pkg) => pkg["name"] === selector,
+      const selected = [...buildPackages.entries()].filter(
+        ([, pkg]) => pkg["name"] === selector,
       );
       if (selected.length !== 1)
         throw new Error(
           "Filtered Bun build requires one declared workspace package",
         );
-      const pkg = selected.at(0);
-      const scripts = pkg?.["scripts"];
+      const member = selected.at(0);
+      if (member === undefined) throw new Error("Missing selected workspace");
+      const [directory, pkg] = member;
+      const scripts = pkg["scripts"];
       if (!record(scripts) || typeof scripts["build"] !== "string")
         throw new Error("Filtered Bun build requires a literal build script");
       if (
@@ -155,6 +161,30 @@ export const checkNodeProjects = ({
         throw new Error(
           "Filtered Bun build lifecycle hooks are unsupported for lint inventory; invoke lint scopes explicitly",
         );
+      if (activeBuilds.has(directory))
+        throw new Error("Cyclic filtered Bun build delegation");
+      activeBuilds.add(directory);
+      try {
+        const nested = lintInventoryCommands(pkg, true, {
+          ...lifecycle,
+          entryScript: "build",
+        });
+        if (nested.workspaceTask)
+          throw new Error(
+            "Nested workspace lint delegation is unsupported in filtered builds",
+          );
+        if (nested.errors.length > 0)
+          throw new Error(
+            `${directory}/package.json: ${nested.errors.join("; ")}`,
+          );
+        for (const command of nested.commands)
+          filteredCommands.push({
+            cwd: path.join(root, directory),
+            ...command,
+          });
+      } finally {
+        activeBuilds.delete(directory);
+      }
     },
   };
   const inventory = lintInventoryCommands(manifest, false, lifecycle);
@@ -230,9 +260,10 @@ export const checkNodeProjects = ({
         for (const command of nested.commands)
           commands.push({ cwd: path.join(root, directory), ...command });
       }
-      if (commands.length === 0)
+      if (commands.length === 0 && filteredCommands.length === 0)
         throw new Error("workspace lint task has no declared oxlint commands");
     }
+    commands.push(...filteredCommands);
     const lintedFiles = commands.flatMap(({ cwd, args, runtime }) =>
       readCommand({
         root: cwd,

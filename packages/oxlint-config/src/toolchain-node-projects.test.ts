@@ -698,6 +698,55 @@ test("filtered Bun build preparation cannot hide selected workspace lifecycle ho
     };
     writeFileSync(packageFile, JSON.stringify(member));
     expect(checkNodeProjects({ root, manifest, trackedFiles })).toEqual([]);
+    writeFileSync(
+      path.join(root, "packages/a/orphan.mjs"),
+      "export const orphan = 1;\n",
+    );
+    trackedFiles.add("packages/a/orphan.mjs");
+    for (const build of ["oxlint orphan.mjs", "bun run inspect"]) {
+      writeFileSync(
+        packageFile,
+        JSON.stringify({
+          ...member,
+          scripts: { build, inspect: "oxlint orphan.mjs" },
+        }),
+      );
+      expect(
+        checkNodeProjects({ root, manifest, trackedFiles }).map(
+          ({ path }) => path,
+        ),
+      ).toEqual(["packages/a/orphan.mjs"]);
+    }
+    expect(
+      checkNodeProjects({
+        root,
+        manifest: {
+          ...manifest,
+          scripts: { lint: "bun --filter @fixture/a build" },
+        },
+        trackedFiles,
+      }).map(({ path }) => path),
+    ).toEqual(["packages/a/orphan.mjs"]);
+    writeFileSync(
+      packageFile,
+      JSON.stringify({
+        ...member,
+        scripts: { build: "npm exec oxlint orphan.mjs" },
+      }),
+    );
+    expect(
+      checkNodeProjects({ root, manifest, trackedFiles }).at(0)?.message,
+    ).toContain("unsupported or dynamic oxlint launcher");
+    writeFileSync(
+      packageFile,
+      JSON.stringify({
+        ...member,
+        scripts: { build: "bun --filter @fixture/a build" },
+      }),
+    );
+    expect(
+      checkNodeProjects({ root, manifest, trackedFiles }).at(0)?.message,
+    ).toContain("Cyclic filtered Bun build");
     for (const hook of ["prebuild", "postbuild"]) {
       writeFileSync(
         packageFile,

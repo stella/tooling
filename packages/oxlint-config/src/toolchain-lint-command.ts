@@ -152,11 +152,12 @@ type LintInventoryCommand = {
 export const lintInventoryCommands = (
   manifest: unknown,
   forceEnabled = false,
-  context: ScriptLifecycleContext = {},
+  context: ScriptLifecycleContext & { entryScript?: string } = {},
 ) => {
   const commands: LintInventoryCommand[] = [];
   const errors: string[] = [];
   const workspaceTasks = new Set<string>();
+  const filteredBuilds = new Set<string>();
   const declaresEngine =
     record(manifest) &&
     [manifest["dependencies"], manifest["devDependencies"]].some(
@@ -238,6 +239,7 @@ export const lintInventoryCommands = (
               "Filtered Bun builds require verified workspace lifecycle context",
             );
           context.assertFilteredBunBuild(selector);
+          filteredBuilds.add(selector);
         } catch (error) {
           errors.push(
             error instanceof Error
@@ -368,16 +370,25 @@ export const lintInventoryCommands = (
       activeInvocations.delete(key);
     }
   };
-  invoke({ name: "lint", manager: rootScriptManager(manifest, context) });
+  invoke({
+    name: context.entryScript ?? "lint",
+    manager: rootScriptManager(manifest, context),
+  });
   const workspaceTask = workspaceTasks.size > 0;
   if (
     !declaresEngine &&
     commands.length === 0 &&
     !workspaceTask &&
+    filteredBuilds.size === 0 &&
     errors.length === 0
   )
     return { commands, errors, enabled: false, workspaceTask };
-  if (commands.length === 0 && !workspaceTask)
+  if (
+    commands.length === 0 &&
+    !workspaceTask &&
+    filteredBuilds.size === 0 &&
+    context.entryScript === undefined
+  )
     errors.push("root lint scripts contain no supported oxlint invocation");
   return {
     commands: errors.length === 0 ? commands : [],
