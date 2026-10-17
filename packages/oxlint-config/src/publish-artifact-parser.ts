@@ -1,5 +1,5 @@
 import { parse, type Options } from "acorn";
-import { wrap } from "node:module";
+import Module from "node:module";
 import path from "node:path";
 
 const record = (value: unknown): value is Record<string, unknown> =>
@@ -33,7 +33,7 @@ export const parseArtifactSource = (source: string, options: Options) => {
     ? source.replace(/^\uFEFF/, "").replace(/^#![^\r\n]*/, "")
     : source;
   try {
-    return parse(script ? wrap(content) : content, options);
+    return parse(script ? Module.wrap(content) : content, options);
   } catch (error) {
     if (
       !script ||
@@ -42,7 +42,7 @@ export const parseArtifactSource = (source: string, options: Options) => {
       typeof error["pos"] !== "number"
     )
       throw error;
-    const prefixLength = wrap("\u0000").indexOf("\u0000");
+    const prefixLength = Module.wrap("\u0000").indexOf("\u0000");
     const position = Math.max(
       0,
       Math.min(

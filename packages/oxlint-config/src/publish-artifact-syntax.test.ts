@@ -306,3 +306,35 @@ test("declared extensionless Node executables obey the syntax bound", () => {
     assertPackedArtifactSyntax({ files: content, target, node }),
   ).toThrow("Unsupported packed executable language");
 });
+
+test("the shared parser loads in native Node with its CommonJS wrapper API", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "node-artifact-parser-"));
+  try {
+    const build = await Bun.build({
+      entrypoints: [path.join(import.meta.dir, "publish-artifact-parser.ts")],
+      outdir: root,
+      naming: "parser.mjs",
+      target: "node",
+    });
+    expect(build.success).toBe(true);
+    const result = execFileSync(
+      "node",
+      [
+        "--input-type=module",
+        "-e",
+        `
+      import assert from "node:assert/strict";
+      import { pathToFileURL } from "node:url";
+      const { parseArtifactSource } = await import(pathToFileURL(${JSON.stringify(path.join(root, "parser.mjs"))}).href);
+      const tree = parseArtifactSource("return new.target;", {ecmaVersion: "latest", sourceType: "script", allowReturnOutsideFunction: true});
+      assert.equal(tree.body.length, 1);
+      assert.throws(() => parseArtifactSource("const =;", {ecmaVersion: "latest", sourceType: "script"}), SyntaxError);
+    `,
+      ],
+      { encoding: "utf8" },
+    );
+    expect(result).toBe("");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
