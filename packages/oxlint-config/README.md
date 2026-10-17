@@ -963,3 +963,32 @@ fail closed. This is an ownership check for ordinary authored package scripts,
 not a security boundary against deliberately obfuscated code or lint invocations
 hidden inside arbitrary program bodies. Unsupported forms require an explicit
 supported script invocation or a separately tested extension to the model.
+
+## Quarantine preset and expiry checks
+
+Run `bunx --no-install stll-quarantine --sync` before installation to create the
+five-day Bun preset and synchronize permanent exact-name `@stll/` exemptions.
+The command derives registry identities from dependency declarations and the
+root Bun lockfile, including transitive platform packages. Existing first-party
+creation timestamps remain stable across runs; they are not expiries.
+
+Third-party entries require `# quarantine-expires: YYYY-MM-DDTHH:mm:ss.sssZ`.
+`stll-toolchain-check` warns 48 hours before expiry; warnings continue through
+the existing 24-hour removal grace, after which expired entries fail. The
+quarantine rule cannot be opted out. `stll-quarantine --check` is read-only;
+`--prune` removes expired third-party entries without removing first-party ones.
+`--help` lists modes. Linked output files are rejected.
+
+`@stll/oxlint-config/quarantine` exports the Node-compatible repository helpers
+`checkRepositoryQuarantine`, `synchronizeRepositoryQuarantine`, and
+`pruneRepositoryQuarantine`, accepting a tracked `files` snapshot and optional
+`now`. The toolchain API reports advisory expiry messages through `onWarning`;
+its returned diagnostics remain failures. Snapshot readers keep lockfiles
+opaque by default; `{ bunLock: "content" }` explicitly requests the root graph
+when quarantine identity checks need it.
+
+The shared scheduled workflow imports the same dependency-free policy core
+from an exact tooling commit; it does not install consumer dependencies to
+perform enforcement or pruning. Its stable removal branch updates one PR per
+repository. See the [root guide](../../README.md#package-quarantine) for the
+inline annotation format and adoption boundary.

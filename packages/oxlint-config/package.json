@@ -13,6 +13,7 @@
     "stll-consumer-compat": "./dist/consumer-compat-cli.mjs",
     "stll-dependabot": "./dist/dependabot-cli.mjs",
     "stll-publish-contract": "./dist/publish-contract-cli.mjs",
+    "stll-quarantine": "./dist/quarantine-cli.mjs",
     "stll-toolchain-changed": "./dist/toolchain-changed-cli.mjs",
     "stll-toolchain-check": "./dist/toolchain-check-cli.mjs",
     "stll-typecheck-parity": "./dist/typecheck-parity-cli.mjs",
@@ -93,6 +94,17 @@
         "default": "./dist/dependabot.cjs"
       },
       "default": "./dist/dependabot.mjs"
+    },
+    "./quarantine": {
+      "import": {
+        "types": "./dist/quarantine-policy.d.mts",
+        "default": "./dist/quarantine-policy.mjs"
+      },
+      "require": {
+        "types": "./dist/quarantine-policy.d.cts",
+        "default": "./dist/quarantine-policy.cjs"
+      },
+      "default": "./dist/quarantine-policy.mjs"
     }
   },
   "publishConfig": {
