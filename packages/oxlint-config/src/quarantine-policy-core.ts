@@ -181,8 +181,14 @@ const readSourceArray = (bunfig: string, parseToml: ParseToml): SourceArray => {
       return;
     const open = meaningful.at(equals + 1);
     const close = meaningful.at(-1);
-    if (open?.text !== "[" || close?.text !== "]" || found !== undefined)
-      fail(
+    if (
+      open === undefined ||
+      close === undefined ||
+      open.text !== "[" ||
+      close.text !== "]" ||
+      found !== undefined
+    )
+      return fail(
         "bunfig.toml must declare a single install minimumReleaseAgeExcludes array",
       );
     const values = meaningful.slice(equals + 2, -1);
