@@ -5,7 +5,13 @@ import { basename, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { expect, test } from "bun:test";
 import type { ESTree } from "@oxlint/plugins";
-import { DOM_ELEMENT_PRODUCERS } from "./no-unsafe-inner-html.ts";
+import {
+  DOCUMENT_WRITE_METHODS,
+  DOM_ELEMENT_PRODUCERS,
+  HTML_ATTRIBUTE_SINKS,
+  REACT_ELEMENT_FACTORIES,
+  REACT_HTML_PROPS,
+} from "./no-unsafe-inner-html.ts";
 import { EXPRESSION_WRAPPER_TYPES, unwrapExpression } from "./utils.ts";
 
 const repositoryRoot = resolve(import.meta.dir, "../../../");
@@ -629,16 +635,15 @@ const domTargetCollectorPlugin = `import {
   resolveLiteralArraySpreads,
   unwrapExpression,
 } from ${JSON.stringify(pathToFileURL(join(repositoryRoot, "packages/oxlint-plugin/src/utils.ts")).href)};
-` + String.raw`
-const htmlProperties = new Set(["innerHTML", "outerHTML", "srcdoc"]);
-const htmlMethods = new Set([
+const htmlMethods = new Set(${JSON.stringify([
   "createContextualFragment",
   "insertAdjacentHTML",
-  "setAttribute",
   "setHTMLUnsafe",
-  "write",
-  "writeln",
-]);
+  ...HTML_ATTRIBUTE_SINKS.map(({ name }) => name),
+  ...DOCUMENT_WRITE_METHODS,
+])});
+` + String.raw`
+const htmlProperties = new Set(["innerHTML", "outerHTML", "srcdoc"]);
 const staticMemberName = (node) => memberPropertyName(node);
 const isObjectAssign = (node) =>
   isAstNode(node) &&
@@ -1098,6 +1103,155 @@ const producerCorpus = (): {
   };
 };
 
+const generatedHtmlSinkCorpus = (): {
+  source: string;
+  invalidCount: number;
+  reactPropIds: string[];
+  attributeSinkIds: string[];
+  documentMethodIds: string[];
+} => {
+  const lines = [
+    'declare const rawHtml: string;',
+    'declare const config: { write(...values: string[]): void; writeln(...values: string[]): void };',
+    'declare function createElement(type: string, props: object): unknown;',
+    'declare function jsx(type: string, props: object): unknown;',
+    'declare function jsxs(type: string, props: object): unknown;',
+    'declare function jsxDEV(type: string, props: object): unknown;',
+    'declare const React: { createElement: typeof createElement };',
+    '',
+  ];
+  let invalidCount = 0;
+  const reactPropIds: string[] = [];
+  const attributeSinkIds: string[] = [];
+  const documentMethodIds: string[] = [];
+  type HtmlSinkCase =
+    | { kind: "invalid"; label: string; code: string }
+    | { kind: "clean"; label: string; code: string };
+  const addCase = ({ kind, label, code }: HtmlSinkCase): void => {
+    if (kind === "invalid") {
+      lines.push(
+        `// ${label}`,
+        `// oxlint-disable-next-line ${ruleId} -- generated unsafe HTML sink case`,
+        code,
+      );
+      invalidCount += 1;
+      return;
+    }
+    lines.push(`// expect-clean: ${ruleId} -- ${label}`, code);
+  };
+
+  const factories = ["JSX", ...REACT_ELEMENT_FACTORIES];
+  const propsFor = (
+    prop: (typeof REACT_HTML_PROPS)[number],
+    html: string,
+  ): string => {
+    const value =
+      prop.kind === "payload"
+        ? `{ ...{ ${prop.htmlKey}: ${html} } }`
+        : html;
+    return `{ ...{ ...{ ${prop.name}: ${value} } } }`;
+  };
+  type RenderOptions = { factory: string; props: string };
+  const render = ({ factory, props }: RenderOptions): string =>
+    factory === "JSX"
+      ? `<iframe {...${props}} />;`
+      : `${factory}("iframe", ${props});`;
+  for (const prop of REACT_HTML_PROPS) {
+    for (const factory of factories) {
+      const id = `${factory}:${prop.name}`;
+      reactPropIds.push(id);
+      addCase({
+        kind: "invalid",
+        label: `React HTML prop ${id} has a nested dynamic spread`,
+        code: render({ factory, props: propsFor(prop, "rawHtml") }),
+      });
+      addCase({
+        kind: "clean",
+        label: `React HTML prop ${id} allows nested literal static content`,
+        code: render({ factory, props: propsFor(prop, '"<p>static</p>"') }),
+      });
+    }
+  }
+
+  for (const method of DOCUMENT_WRITE_METHODS) {
+    documentMethodIds.push(method);
+    addCase({
+      kind: "invalid",
+      label: `${method} resolves a const document alias`,
+      code: `{ const doc = document; doc.${method}(rawHtml); }`,
+    });
+    addCase({
+      kind: "invalid",
+      label: `${method} resolves a const alias chain`,
+      code: `{ const root = document; const doc = root; doc.${method}(rawHtml); }`,
+    });
+    addCase({
+      kind: "invalid",
+      label: `${method} resolves a never-reassigned let document alias`,
+      code: `{ let doc = document; doc.${method}(rawHtml); }`,
+    });
+    addCase({
+      kind: "clean",
+      label: `${method} allows static content through a document alias`,
+      code: `{ const doc = document; doc.${method}("<p>static</p>"); }`,
+    });
+    addCase({
+      kind: "clean",
+      label: `${method} leaves a cyclic alias unresolved`,
+      code: `{ const first = second; const second = first; first.${method}(rawHtml); }`,
+    });
+    addCase({
+      kind: "clean",
+      label: `${method} leaves a reassigned document alias unresolved`,
+      code: `{ let doc = document; doc = config; doc.${method}(rawHtml); }`,
+    });
+    addCase({
+      kind: "clean",
+      label: `${method} ignores a non-document receiver`,
+      code: `config.${method}(rawHtml);`,
+    });
+  }
+
+  for (const sink of HTML_ATTRIBUTE_SINKS) {
+    attributeSinkIds.push(sink.name);
+    type AttributeArguments = { name: string; value: string };
+    const argsFor = ({ name, value }: AttributeArguments): string[] => {
+      const args = Array.from(
+        { length: Math.max(sink.nameIndex, sink.valueIndex) + 1 },
+        () => '"unused"',
+      );
+      args[sink.nameIndex] = JSON.stringify(name);
+      args[sink.valueIndex] = value;
+      return args;
+    };
+    for (const name of ["srcdoc", "sRcDoC"]) {
+      addCase({
+        kind: "invalid",
+        label: `${sink.name} recognizes ${name}`,
+        code: `document.createElement("div").${sink.name}(${argsFor({ name, value: "rawHtml" }).join(", ")});`,
+      });
+      addCase({
+        kind: "clean",
+        label: `${sink.name} allows a static ${name}`,
+        code: `document.createElement("div").${sink.name}(${argsFor({ name, value: '"<p>static</p>"' }).join(", ")});`,
+      });
+    }
+    addCase({
+      kind: "clean",
+      label: `${sink.name} ignores unrelated attributes`,
+      code: `document.createElement("div").${sink.name}(${argsFor({ name: "title", value: "rawHtml" }).join(", ")});`,
+    });
+  }
+
+  return {
+    source: `${lines.join("\n")}\n`,
+    invalidCount,
+    reactPropIds,
+    attributeSinkIds,
+    documentMethodIds,
+  };
+};
+
 test(
   "HTML sink fixtures keep their invalid and clean outcomes across equivalent syntax",
   async () => {
@@ -1106,6 +1260,34 @@ test(
       invalidCount: producerInvalidCount,
       producerIds,
     } = producerCorpus();
+    const {
+      source: htmlSinkSource,
+      invalidCount: htmlSinkInvalidCount,
+      reactPropIds,
+      attributeSinkIds,
+      documentMethodIds,
+    } = generatedHtmlSinkCorpus();
+    const htmlSinkFactories = ["JSX", ...REACT_ELEMENT_FACTORIES];
+    const expectedReactPropIds = REACT_HTML_PROPS.flatMap((prop) =>
+      htmlSinkFactories.map((factory) => `${factory}:${prop.name}`),
+    );
+    const expectedHtmlSinkInvalidCount =
+      REACT_HTML_PROPS.length * htmlSinkFactories.length +
+      DOCUMENT_WRITE_METHODS.size * 3 +
+      HTML_ATTRIBUTE_SINKS.length * 2;
+    expect(htmlSinkInvalidCount).toBe(expectedHtmlSinkInvalidCount);
+    expect([...new Set(reactPropIds)].sort()).toEqual(
+      [...new Set(expectedReactPropIds)].sort(),
+    );
+    expect(reactPropIds).toHaveLength(expectedReactPropIds.length);
+    expect(attributeSinkIds).toHaveLength(HTML_ATTRIBUTE_SINKS.length);
+    expect([...new Set(attributeSinkIds)].sort()).toEqual(
+      HTML_ATTRIBUTE_SINKS.map(({ name }) => name).sort(),
+    );
+    expect(documentMethodIds).toHaveLength(DOCUMENT_WRITE_METHODS.size);
+    expect([...new Set(documentMethodIds)].sort()).toEqual(
+      [...DOCUMENT_WRITE_METHODS].sort(),
+    );
     const expectedProducerIds = DOM_ELEMENT_PRODUCERS.map(
       ({ receiver, kind, name }) => `${receiver}:${kind}:${name}`,
     );
@@ -1121,10 +1303,12 @@ test(
     const targetCollectorConfigPath = join(repositoryRoot, `${configPrefix}-targets.json`);
     const ruleConfigPath = join(repositoryRoot, `${configPrefix}-rule.json`);
     const producerCorpusPath = join(tempDirectory, "dom-producer-corpus.fixture.tsx");
+    const htmlSinkCorpusPath = join(tempDirectory, "html-sink-corpus.fixture.tsx");
     const targetCollectorPath = join(tempDirectory, "target-collector.mjs");
 
     try {
       await writeFile(producerCorpusPath, producerSource);
+      await writeFile(htmlSinkCorpusPath, htmlSinkSource);
       const originalPaths = (await readdir(fixtureRoot))
         .filter(
           (name) =>
@@ -1134,7 +1318,7 @@ test(
         .sort()
         .map((name) => join(fixtureRoot, name));
       expect(originalPaths.length).toBeGreaterThan(0);
-      originalPaths.push(producerCorpusPath);
+      originalPaths.push(producerCorpusPath, htmlSinkCorpusPath);
       const originals = await Promise.all(
         originalPaths.map(async (path) => ({ path, source: await readFile(path, "utf8") })),
       );
@@ -1151,6 +1335,9 @@ test(
       expect(
         countMatches(invalidDirective, producerSource),
       ).toBe(producerInvalidCount);
+      expect(countMatches(invalidDirective, htmlSinkSource)).toBe(
+        htmlSinkInvalidCount,
+      );
 
       await writeFile(collectorPath, collectorPlugin);
       const collectorConfig = {

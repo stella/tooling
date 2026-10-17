@@ -12,7 +12,8 @@
 //     bracket notation, and the same keys in an `Object.assign` source.
 //   • the JSX `srcDoc` attribute.
 //   • `insertAdjacentHTML`, `setHTMLUnsafe`, `createContextualFragment`,
-//     `setAttribute("srcdoc", …)`, and `write` / `writeln` on a document.
+//     `setAttribute("srcdoc", …)` / `setAttributeNS(…, "srcdoc", …)`,
+//     and `write` / `writeln` on a document.
 //
 // In the default `allowlist` policy, a value is allowed when it is:
 //   • a static string Literal or TemplateLiteral whose interpolations are all
@@ -91,7 +92,7 @@ export const REACT_HTML_PROPS = [
   { name: "srcdoc", kind: "value" },
 ] as const;
 type ReactHtmlProp = (typeof REACT_HTML_PROPS)[number];
-const REACT_ELEMENT_FACTORIES: ReadonlySet<string> = new Set([
+export const REACT_ELEMENT_FACTORIES: ReadonlySet<string> = new Set([
   "createElement",
   "React.createElement",
   "jsx",
@@ -108,10 +109,14 @@ const HTML_FIRST_ARGUMENT_METHODS: ReadonlySet<string> = new Set([
   "createContextualFragment",
   "setHTMLUnsafe",
 ]);
-const DOCUMENT_WRITE_METHODS: ReadonlySet<string> = new Set([
+export const DOCUMENT_WRITE_METHODS: ReadonlySet<string> = new Set([
   "write",
   "writeln",
 ]);
+export const HTML_ATTRIBUTE_SINKS = [
+  { name: "setAttribute", nameIndex: 0, valueIndex: 1 },
+  { name: "setAttributeNS", nameIndex: 1, valueIndex: 2 },
+] as const;
 const DOCUMENT_MEMBERS: ReadonlySet<string> = new Set([
   "contentDocument",
   "document",
@@ -281,7 +286,18 @@ const objectProperties = (node: unknown): AstNode[] => {
   ) {
     return [];
   }
-  return expression.properties.filter(isAstNode);
+  const properties: AstNode[] = [];
+  for (const property of expression.properties.filter(isAstNode)) {
+    if (
+      property.type === "SpreadElement" &&
+      unwrapExpression(property.argument)?.type === "ObjectExpression"
+    ) {
+      properties.push(...objectProperties(property.argument));
+      continue;
+    }
+    properties.push(property);
+  }
+  return properties;
 };
 
 type AppliedArguments = LiteralArgumentResolution;
@@ -323,20 +339,6 @@ const invokedArguments = (call: unknown): AppliedArguments => {
   return appliedArgumentsFor(resolved.args);
 };
 
-// `document.write`, `window.document.write`, `frame.contentDocument.write`,
-// `node.ownerDocument.write`.
-const isDocumentReceiver = (node: unknown): boolean => {
-  const receiver = unwrapExpression(node);
-  if (isIdentifier(receiver, "document")) {
-    return true;
-  }
-  if (receiver?.type !== "MemberExpression") {
-    return false;
-  }
-  const name = memberPropertyName(receiver);
-  return name !== null && DOCUMENT_MEMBERS.has(name);
-};
-
 export default eslintCompatPlugin({
   meta: { name: "no-unsafe-inner-html" },
   rules: {
@@ -369,6 +371,81 @@ export default eslintCompatPlugin({
         },
       },
       createOnce(context) {
+        type BindingOptions = {
+          node: unknown;
+          scope: Scope;
+          seen: Set<Variable>;
+        };
+        type BindingSource = {
+          kind: "expression" | "iteration";
+          node: AstNode | null;
+          scope: Scope;
+        };
+        // All document, element and collection checks share one stable-binding path.
+        const resolveStableBinding = ({
+          node,
+          scope,
+          seen,
+        }: BindingOptions): BindingSource | null => {
+          let target = unwrapExpression(node);
+          while (isIdentifier(target)) {
+            let current: Scope | null = scope;
+            let variable: Variable | undefined;
+            while (current !== null) {
+              variable = current.set.get(target.name);
+              if (variable !== undefined) break;
+              current = current.upper;
+            }
+            if (variable === undefined || variable.defs.length === 0) {
+              return { kind: "expression", node: target, scope };
+            }
+            if (seen.has(variable)) return null;
+            seen.add(variable);
+            const definition = variable.defs.at(0);
+            if (
+              variable.defs.length !== 1 ||
+              definition?.type !== "Variable" ||
+              definition.node.type !== "VariableDeclarator" ||
+              definition.node.id.type !== "Identifier" ||
+              variable.references.some(
+                (reference) => reference.isWrite() && !reference.init,
+              )
+            ) {
+              return null;
+            }
+            const declarator = definition.node;
+            if (declarator.init !== null) {
+              target = unwrapExpression(declarator.init);
+              scope = context.sourceCode.getScope(declarator);
+              continue;
+            }
+            const declaration = declarator.parent;
+            if (declaration.type !== "VariableDeclaration") return null;
+            const loop = declaration.parent;
+            if (loop.type !== "ForOfStatement" || loop.left !== declaration) {
+              return null;
+            }
+            return {
+              kind: "iteration",
+              node: unwrapExpression(loop.right),
+              scope: context.sourceCode.getScope(loop.right),
+            };
+          }
+          return { kind: "expression", node: target, scope };
+        };
+        const isDocumentReceiver = (node: unknown, scope: Scope): boolean => {
+          const source = resolveStableBinding({
+            node,
+            scope,
+            seen: new Set<Variable>(),
+          });
+          if (source === null || source.kind !== "expression") return false;
+          const receiver = source.node;
+          if (isIdentifier(receiver, "document")) return true;
+          if (receiver?.type !== "MemberExpression") return false;
+          const name = memberPropertyName(receiver);
+          return name !== null && DOCUMENT_MEMBERS.has(name);
+        };
         type DomTargetOptions = {
           node: unknown;
           scope: Scope;
@@ -381,67 +458,28 @@ export default eslintCompatPlugin({
           seen = new Set<Variable>(),
           kind = "element",
         }: DomTargetOptions): boolean => {
-          const target = unwrapExpression(node);
-          if (isIdentifier(target)) {
-            let current: Scope | null = scope;
-            while (current !== null) {
-              const variable = current.set.get(target.name);
-              if (variable === undefined) {
-                current = current.upper;
-                continue;
-              }
-              if (variable.defs.length === 0) {
-                return kind === "element" && isDocumentReceiver(target);
-              }
-              if (seen.has(variable)) return false;
-              seen.add(variable);
-              const definition = variable.defs.at(0);
-              if (
-                variable.defs.length !== 1 ||
-                definition?.type !== "Variable" ||
-                definition.node.type !== "VariableDeclarator" ||
-                definition.node.id.type !== "Identifier" ||
-                variable.references.some(
-                  (reference) => reference.isWrite() && !reference.init,
-                )
-              ) {
-                return false;
-              }
-              const declarator = definition.node;
-              if (declarator.init !== null) {
-                return isKnownDomTarget({
-                  node: declarator.init,
-                  scope: context.sourceCode.getScope(declarator),
-                  seen,
-                  kind,
-                });
-              }
-              const declaration = declarator.parent;
-              if (
-                kind !== "element" ||
-                declaration.type !== "VariableDeclaration"
-              ) {
-                return false;
-              }
-              const loop = declaration.parent;
-              if (loop.type !== "ForOfStatement" || loop.left !== declaration) {
-                return false;
-              }
-              return isKnownDomTarget({
-                node: loop.right,
-                scope: context.sourceCode.getScope(loop.right),
+          const source = resolveStableBinding({ node, scope, seen });
+          if (source === null) return false;
+          if (source.kind === "iteration") {
+            return (
+              kind === "element" &&
+              isKnownDomTarget({
+                node: source.node,
+                scope: source.scope,
                 seen,
                 kind: "collection",
-              });
-            }
+              })
+            );
           }
+          const target = source.node;
+          scope = source.scope;
           const hasProducerReceiver = (
             receiver: unknown,
             producer: DomElementProducer,
           ): boolean => {
             if (
               producer.receiver !== "element" &&
-              isDocumentReceiver(receiver)
+              isDocumentReceiver(receiver, scope)
             ) {
               return true;
             }
@@ -496,7 +534,7 @@ export default eslintCompatPlugin({
               hasProducerReceiver(callee.object, producer)
             );
           }
-          return kind === "element" && isDocumentReceiver(target);
+          return kind === "element" && isDocumentReceiver(target, scope);
         };
 
         let sanitizerPolicy: SanitizerPolicy = SANITIZER_POLICY.allowlist;
@@ -566,6 +604,16 @@ export default eslintCompatPlugin({
               const exhaustive: never = prop;
               throw new Error(`Unknown React HTML prop: ${exhaustive}`);
             }
+          }
+        };
+
+        const checkReactProps = (value: unknown): void => {
+          for (const property of objectProperties(value)) {
+            if (property.type !== "Property") continue;
+            const key = objectPropertyKey(property);
+            const prop = REACT_HTML_PROPS.find((entry) => entry.name === key);
+            // Payload properties are checked once by the Property visitor.
+            if (prop?.kind === "value") checkReactHtmlProp(prop, property.value);
           }
         };
 
@@ -642,8 +690,12 @@ export default eslintCompatPlugin({
             );
           },
 
+          JSXSpreadAttribute(node) {
+            checkReactProps(node.argument);
+          },
+
           // Payload objects remain checked when hoisted or spread into JSX.
-          // Direct value props require a recognized factory-call context below.
+          // Direct value props use the JSX and factory props contexts.
           Property(node) {
             const key = objectPropertyKey(node);
             const prop = REACT_HTML_PROPS.find((entry) => entry.name === key);
@@ -671,15 +723,7 @@ export default eslintCompatPlugin({
             const invoked = invokedArguments(node);
             const factory = staticCalleeName(callee);
             if (factory !== null && REACT_ELEMENT_FACTORIES.has(factory)) {
-              for (const property of objectProperties(invoked.args.at(1))) {
-                if (property.type !== "Property") continue;
-                const key = objectPropertyKey(property);
-                const prop = REACT_HTML_PROPS.find((entry) => entry.name === key);
-                // Payload props are already checked by the Property visitor.
-                if (prop?.kind === "value") {
-                  checkReactHtmlProp(prop, property.value);
-                }
-              }
+              checkReactProps(invoked.args.at(1));
               return;
             }
             if (callee?.type !== "MemberExpression") {
@@ -705,20 +749,28 @@ export default eslintCompatPlugin({
               reportIfUnsafe(invoked.args.at(1));
               return;
             }
-            if (method === "setAttribute") {
+            const attributeSink = HTML_ATTRIBUTE_SINKS.find(
+              (entry) => entry.name === method,
+            );
+            if (attributeSink !== undefined) {
               if (invoked.status === "opaque") {
                 reportIfUnsafe(node);
                 return;
               }
-              const attribute = staticStringValue(invoked.args.at(0));
+              const attribute = staticStringValue(
+                invoked.args.at(attributeSink.nameIndex),
+              );
               if (attribute?.toLowerCase() === "srcdoc") {
-                reportIfUnsafe(invoked.args.at(1));
+                reportIfUnsafe(invoked.args.at(attributeSink.valueIndex));
               }
               return;
             }
             if (
               DOCUMENT_WRITE_METHODS.has(method) &&
-              isDocumentReceiver(callee.object)
+              isDocumentReceiver(
+                callee.object,
+                context.sourceCode.getScope(node),
+              )
             ) {
               if (invoked.status === "opaque") {
                 reportIfUnsafe(node);
