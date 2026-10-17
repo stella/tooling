@@ -80,6 +80,7 @@ jobs:
       - name: Shared toolchain check
         run: |
           bun run check:toolchain
+          node packages/oxlint-config/dist/dependabot-cli.mjs --config stll-dependabot.json --check
           node packages/oxlint-config/dist/toolchain-check-cli.mjs
           node packages/oxlint-config/dist/toolchain-changed-cli.mjs --since "$TOOLCHAIN_BASE"
 

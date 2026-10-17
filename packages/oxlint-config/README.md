@@ -300,8 +300,33 @@ deleted from the working tree. Conflicting indexed or existing spellings are
 rejected, and unrelated unreadable inputs still stop generation. Repeated runs
 produce identical bytes; linked output files and directories are rejected.
 
+Use `stll-dependabot --check` in CI to compare bytes without writing. Missing or
+stale output exits with status 1; current output exits with status 0. Pass the
+same `--config` argument to write and check commands when using explicit input.
+
+An optional `--config stll-dependabot.json` input declares only coverage:
+
+```json
+{
+  "updates": [
+    { "ecosystem": "bun", "directories": ["/"] },
+    { "ecosystem": "github-actions", "directories": ["/"] },
+    { "ecosystem": "cargo", "directories": ["/native"] }
+  ]
+}
+```
+
+Each ecosystem appears once, and directories must be unique literal absolute
+repository paths. Declarations must cover every detected update root; they may
+also declare ecosystems whose manifests are outside automatic discovery.
+Shared `toolchain.json` owns the schedule, cooldown, groups, and tooling-owned
+package/action/image ignores. The input rejects policy overrides. Without
+`--config`, the tracked manifest inventory supplies ecosystem roots.
+
 For programmatic generation, the `@stll/oxlint-config/dependabot` subpath exports
-`generateDependabotConfig({ files, policy })` and `parseToolchainPolicy`:
+`generateDependabotConfig({ files, policy, updates? })`, `parseDependabotInput`,
+and `parseToolchainPolicy`. `parseDependabotInput` validates the JSON shape above
+and returns the `updates` array:
 
 ```ts
 import {
