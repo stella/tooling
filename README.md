@@ -292,6 +292,38 @@ Use the library TypeScript preset:
 }
 ```
 
+The package also exports `base.json`, `node.json`, `bun.json`,
+`published.json` (JavaScript disabled, isolated declarations enabled), and
+`react-library.json` (DOM libraries and the React JSX runtime). These profiles
+inherit errors for unreachable code and unused labels.
+
+With the TypeScript 7 native compiler, opt into one checker per project by
+adding `@stll/typescript-config/single-checker.json` after the main profile in
+an `extends` array. This additive profile changes only the checker count:
+
+```json
+{
+  "extends": [
+    "@stll/typescript-config/react-library.json",
+    "@stll/typescript-config/single-checker.json"
+  ],
+  "include": ["src"]
+}
+```
+
+`checkers: 1` also applies to native checker consumers that read tsconfig, such
+as oxlint-tsgolint. This profile requires the native compiler; TypeScript 6 does
+not recognize `checkers`. A repository-recorded application measurement compared
+one checker at 82 seconds / 3.0 GB / 12.0 million instantiations with four at
+87 seconds / 5.3 GB / 31.3 million instantiations. These results are specific to
+that project, not a benchmark of every consumer.
+
+Import-extension rewriting, symlink preservation, incremental compilation, and
+`tsBuildInfoFile` placement remain explicit consumer options: they depend on
+emit requirements, module identity, and cache ownership. The shared base sets
+none of them.
+
+
 Node scripts need an explicit TypeScript project when the library project's
 `include` does not cover them. Install `@types/node` as a direct development
 dependency of the consumer, then add `scripts/tsconfig.json`:

@@ -27,6 +27,8 @@
     "noUncheckedIndexedAccess": true,
     "noPropertyAccessFromIndexSignature": true,
     "exactOptionalPropertyTypes": true,
-    "erasableSyntaxOnly": true
+    "erasableSyntaxOnly": true,
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false
   }
 }
