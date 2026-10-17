@@ -1,5 +1,10 @@
 import { decodeShellWord, shellCommandSegments } from "./toolchain-packages";
 import { scriptSourceKind } from "./toolchain-script-extensions";
+import {
+  rootScriptManager,
+  scriptLifecycleStages,
+  type ScriptLifecycleContext,
+} from "./toolchain-script-lifecycle";
 
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -142,6 +147,7 @@ const inventoryArguments = (raw: readonly string[]) => {
 export const lintInventoryCommands = (
   manifest: unknown,
   forceEnabled = false,
+  context: ScriptLifecycleContext = {},
 ) => {
   const commands: string[][] = [];
   const errors: string[] = [];
@@ -216,8 +222,26 @@ export const lintInventoryCommands = (
         !words.at(2)?.startsWith("-") &&
         words.at(3) === "build" &&
         raw.every(literalWord)
-      )
+      ) {
+        const selector = words.at(2);
+        try {
+          if (
+            selector === undefined ||
+            context.assertFilteredBunBuild === undefined
+          )
+            throw new Error(
+              "Filtered Bun builds require verified workspace lifecycle context",
+            );
+          context.assertFilteredBunBuild(selector);
+        } catch (error) {
+          errors.push(
+            error instanceof Error
+              ? error.message
+              : "Cannot determine filtered build lifecycle stages",
+          );
+        }
         continue;
+      }
       if (
         first !== undefined &&
         scriptManagers.has(first) &&
@@ -243,7 +267,7 @@ export const lintInventoryCommands = (
           continue;
         }
         const alias = words.at(2);
-        if (alias !== undefined) visit(alias);
+        if (alias !== undefined) invoke({ name: alias, manager: first });
         continue;
       }
       let offset: number | undefined;
@@ -302,7 +326,40 @@ export const lintInventoryCommands = (
     active.delete(name);
     visited.add(name);
   };
-  visit("lint");
+  const activeInvocations = new Set<string>();
+  const invoke = ({
+    name,
+    manager,
+  }: {
+    name: string;
+    manager: string | undefined;
+  }) => {
+    const key = `${manager ?? "unknown"}:${name}`;
+    if (activeInvocations.has(key)) {
+      errors.push(`cyclic lint script alias: ${name}`);
+      return;
+    }
+    activeInvocations.add(key);
+    try {
+      const stages = scriptLifecycleStages({
+        name,
+        manager,
+        manifest,
+        scripts,
+        context,
+      });
+      for (const stage of stages) visit(stage);
+    } catch (error) {
+      errors.push(
+        error instanceof Error
+          ? error.message
+          : "Cannot determine script lifecycle stages",
+      );
+    } finally {
+      activeInvocations.delete(key);
+    }
+  };
+  invoke({ name: "lint", manager: rootScriptManager(manifest, context) });
   const workspaceTask = workspaceTasks.size > 0;
   if (
     !declaresEngine &&

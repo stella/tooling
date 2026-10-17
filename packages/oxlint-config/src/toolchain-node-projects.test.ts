@@ -563,3 +563,204 @@ test("caller thread options retain real inventory ownership at root and workspac
     }
   }
 });
+
+test("real inventory flags a source selected only by an npm prelint alias", () => {
+  for (const [manager, version, runsHooks] of [
+    ["npm", "12.2.0", true],
+    ["bun", "1.4.3", true],
+    ["pnpm", "12.9.1", true],
+    ["yarn", "4.11.0", false],
+  ] as const) {
+    withInventoryFixture((root, trackedFiles) => {
+      const manifest = {
+        ...fixtureManifest,
+        packageManager: `${manager}@${version}`,
+        scripts: {
+          lint: `${manager} run lint:core`,
+          "prelint:core": "oxlint --config .oxlintrc.json scripts/pre-only.mjs",
+          "lint:core": "oxlint --config .oxlintrc.json scripts/owned.mjs",
+        },
+      };
+      for (const file of ["scripts/owned.mjs", "scripts/pre-only.mjs"]) {
+        writeFileSync(path.join(root, file), "export const value = 1;\n");
+        trackedFiles.add(file);
+      }
+      writeFileSync(
+        path.join(root, "scripts/tsconfig.json"),
+        JSON.stringify({
+          compilerOptions: { allowJs: true },
+          files: ["owned.mjs"],
+        }),
+      );
+      trackedFiles.add("scripts/tsconfig.json");
+      expect(
+        checkNodeProjects({ root, manifest, trackedFiles }).map(
+          ({ path: file }) => file,
+        ),
+        manager,
+      ).toEqual(runsHooks ? ["scripts/pre-only.mjs"] : []);
+      if (manager === "npm" || manager === "pnpm") {
+        const config = manager === "npm" ? ".npmrc" : "pnpm-workspace.yaml";
+        const source =
+          manager === "npm"
+            ? "ignore-scripts=true\n"
+            : "enablePrePostScripts: false\n";
+        writeFileSync(path.join(root, config), source);
+        trackedFiles.add(config);
+        expect(checkNodeProjects({ root, manifest, trackedFiles })).toEqual([]);
+      }
+    });
+  }
+});
+
+test("workspace hooks use the root manager and unresolved pnpm configuration fails closed", () => {
+  withInventoryFixture((root, trackedFiles) => {
+    const manifest = {
+      ...fixtureManifest,
+      packageManager: "pnpm@12.9.1",
+      workspaces: ["packages/*"],
+      scripts: { lint: "turbo run lint" },
+    };
+    mkdirSync(path.join(root, "packages/a"), { recursive: true });
+    const files = {
+      "packages/a/package.json": JSON.stringify({
+        name: "@fixture/a",
+        scripts: { prelint: "oxlint orphan.mjs", lint: "oxlint owned.mjs" },
+      }),
+      "packages/a/owned.mjs": "export const value = 1;\n",
+      "packages/a/orphan.mjs": "export const value = 1;\n",
+      "packages/a/tsconfig.json": JSON.stringify({
+        compilerOptions: { allowJs: true },
+        files: ["owned.mjs"],
+      }),
+    };
+    for (const [file, source] of Object.entries(files)) {
+      writeFileSync(path.join(root, file), source);
+      trackedFiles.add(file);
+    }
+    writeFileSync(
+      path.join(root, "pnpm-workspace.yaml"),
+      "packages: ['packages/*']\n",
+    );
+    trackedFiles.add("pnpm-workspace.yaml");
+    expect(
+      checkNodeProjects({ root, manifest, trackedFiles }).map(
+        ({ path: file }) => file,
+      ),
+    ).toEqual(["packages/a/orphan.mjs"]);
+    trackedFiles.delete("pnpm-workspace.yaml");
+    writeFileSync(
+      path.join(root, "pnpm-workspace.yaml"),
+      "enablePrePostScripts: false\n",
+    );
+    const untracked = checkNodeProjects({ root, manifest, trackedFiles });
+    expect(untracked).toHaveLength(1);
+    expect(untracked.at(0)?.message).toContain("tracked regular");
+    trackedFiles.add("pnpm-workspace.yaml");
+    expect(checkNodeProjects({ root, manifest, trackedFiles })).toEqual([]);
+  });
+});
+
+test("filtered Bun build preparation cannot hide selected workspace lifecycle hooks", () => {
+  withInventoryFixture((root, trackedFiles) => {
+    const manifest = {
+      ...fixtureManifest,
+      packageManager: "bun@1.4.3",
+      workspaces: ["packages/*"],
+      scripts: {
+        lint: "bun --filter @fixture/a build && oxlint scripts/owned.mjs",
+      },
+    };
+    mkdirSync(path.join(root, "packages/a"), { recursive: true });
+    writeFileSync(
+      path.join(root, "scripts/owned.mjs"),
+      "export const value = 1;\n",
+    );
+    writeFileSync(
+      path.join(root, "scripts/tsconfig.json"),
+      JSON.stringify({
+        compilerOptions: { allowJs: true },
+        files: ["owned.mjs"],
+      }),
+    );
+    for (const file of [
+      "scripts/owned.mjs",
+      "scripts/tsconfig.json",
+      "packages/a/package.json",
+    ])
+      trackedFiles.add(file);
+    const packageFile = path.join(root, "packages/a/package.json");
+    const member = {
+      name: "@fixture/a",
+      private: true,
+      scripts: { build: "echo prepared" },
+    };
+    writeFileSync(packageFile, JSON.stringify(member));
+    expect(checkNodeProjects({ root, manifest, trackedFiles })).toEqual([]);
+    for (const hook of ["prebuild", "postbuild"]) {
+      writeFileSync(
+        packageFile,
+        JSON.stringify({
+          ...member,
+          scripts: { ...member.scripts, [hook]: "oxlint hidden.mjs" },
+        }),
+      );
+      const diagnostics = checkNodeProjects({ root, manifest, trackedFiles });
+      expect(diagnostics).toHaveLength(1);
+      expect(diagnostics.at(0)?.message).toContain(
+        "Filtered Bun build lifecycle hooks are unsupported",
+      );
+    }
+    const unknown = checkNodeProjects({
+      root,
+      manifest: {
+        ...manifest,
+        scripts: {
+          lint: "bun --filter '@fixture/*' build && oxlint scripts/owned.mjs",
+        },
+      },
+      trackedFiles,
+    });
+    expect(unknown).toHaveLength(1);
+    expect(unknown.at(0)?.message).toContain("one declared workspace package");
+  });
+});
+
+test("nested workspace lifecycle settings cannot silently override root hook selection", () => {
+  withInventoryFixture((root, trackedFiles) => {
+    const manifest = {
+      ...fixtureManifest,
+      packageManager: "pnpm@12.9.1",
+      workspaces: ["packages/*"],
+      scripts: { lint: "turbo run lint" },
+    };
+    mkdirSync(path.join(root, "packages/a"), { recursive: true });
+    const files = {
+      "pnpm-workspace.yaml":
+        "packages: ['packages/*']\nenablePrePostScripts: false\n",
+      "packages/a/package.json": JSON.stringify({
+        name: "@fixture/a",
+        scripts: { prelint: "oxlint orphan.mjs", lint: "oxlint owned.mjs" },
+      }),
+      "packages/a/owned.mjs": "export const value = 1;\n",
+      "packages/a/orphan.mjs": "export const value = 1;\n",
+      "packages/a/tsconfig.json": JSON.stringify({
+        compilerOptions: { allowJs: true },
+        files: ["owned.mjs"],
+      }),
+    };
+    for (const [file, source] of Object.entries(files)) {
+      writeFileSync(path.join(root, file), source);
+      trackedFiles.add(file);
+    }
+    expect(checkNodeProjects({ root, manifest, trackedFiles })).toEqual([]);
+    writeFileSync(
+      path.join(root, "packages/a/pnpm-workspace.yaml"),
+      "enablePrePostScripts: true\n",
+    );
+    trackedFiles.add("packages/a/pnpm-workspace.yaml");
+    const findings = checkNodeProjects({ root, manifest, trackedFiles });
+    expect(findings).toHaveLength(1);
+    expect(findings.at(0)?.message).toContain("nested workspace overrides");
+  });
+});

@@ -1,11 +1,16 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { lstatSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import picomatch from "picomatch";
 
+import { discoverConsumerManifests } from "./consumer-compat-config";
 import { lintInventoryCommands } from "./toolchain-lint-command";
 import { scriptSourceKind } from "./toolchain-script-extensions";
+import type {
+  LifecycleFile,
+  ScriptLifecycleContext,
+} from "./toolchain-script-lifecycle";
 
 export const nodeProjectRule = "type-aware-projects";
 
@@ -73,13 +78,70 @@ type CheckNodeProjectsOptions = {
   trackedFiles: ReadonlySet<string>;
 };
 
+const lifecycleFile = (
+  root: string,
+  file: string,
+  tracked: ReadonlySet<string>,
+): LifecycleFile => {
+  try {
+    const location = path.join(root, file);
+    const metadata = lstatSync(location);
+    if (!tracked.has(file) || !metadata.isFile()) return { type: "unknown" };
+    return { type: "tracked", source: readFileSync(location, "utf8") };
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT")
+      return { type: "absent" };
+    return { type: "unknown" };
+  }
+};
+
 /** Inventory and config expansion only: neither subprocess lints or typechecks. */
 export const checkNodeProjects = ({
   root,
   manifest,
   trackedFiles,
 }: CheckNodeProjectsOptions) => {
-  const inventory = lintInventoryCommands(manifest);
+  let buildPackages: ReturnType<typeof discoverConsumerManifests> | undefined;
+  const lifecycle: ScriptLifecycleContext = {
+    packageManager: record(manifest) ? manifest["packageManager"] : undefined,
+    npmrc: lifecycleFile(root, ".npmrc", trackedFiles),
+    pnpmWorkspace: lifecycleFile(root, "pnpm-workspace.yaml", trackedFiles),
+    yarnrc: lifecycleFile(root, ".yarnrc.yml", trackedFiles),
+    assertFilteredBunBuild: (selector) => {
+      if (buildPackages === undefined) {
+        const files: Record<string, string> = {
+          "package.json": JSON.stringify(manifest),
+        };
+        for (const file of trackedFiles)
+          if (
+            file.endsWith("/package.json") &&
+            !file.split("/").includes("node_modules")
+          )
+            files[file] = readFileSync(path.join(root, file), "utf8");
+        buildPackages = discoverConsumerManifests(files);
+      }
+      const selected = [...buildPackages.values()].filter(
+        (pkg) => pkg["name"] === selector,
+      );
+      if (selected.length !== 1)
+        throw new Error(
+          "Filtered Bun build requires one declared workspace package",
+        );
+      const pkg = selected.at(0);
+      const scripts = pkg?.["scripts"];
+      if (!record(scripts) || typeof scripts["build"] !== "string")
+        throw new Error("Filtered Bun build requires a literal build script");
+      if (
+        ["prebuild", "postbuild"].some(
+          (name) => scripts[name] !== undefined && scripts[name] !== "",
+        )
+      )
+        throw new Error(
+          "Filtered Bun build lifecycle hooks are unsupported for lint inventory; invoke lint scopes explicitly",
+        );
+    },
+  };
+  const inventory = lintInventoryCommands(manifest, false, lifecycle);
   if (!inventory.enabled) return [];
   const diagnostics: ReturnType<typeof checkProjectOwnership> = [];
   const addConfiguration = (file: string, message: string) =>
@@ -121,7 +183,25 @@ export const checkNodeProjects = ({
           workspace["scripts"]["lint"] === undefined
         )
           continue;
-        const nested = lintInventoryCommands(workspace, true);
+        const nestedLifecycle = { ...lifecycle };
+        for (const [key, name] of [
+          ["npmrc", ".npmrc"],
+          ["pnpmWorkspace", "pnpm-workspace.yaml"],
+          ["yarnrc", ".yarnrc.yml"],
+        ] as const) {
+          let ancestor = directory;
+          while (ancestor !== ".") {
+            if (
+              lifecycleFile(root, path.posix.join(ancestor, name), trackedFiles)
+                .type !== "absent"
+            ) {
+              nestedLifecycle[key] = { type: "unknown" };
+              break;
+            }
+            ancestor = path.posix.dirname(ancestor);
+          }
+        }
+        const nested = lintInventoryCommands(workspace, true, nestedLifecycle);
         if (nested.workspaceTask)
           throw new Error(
             `nested workspace lint delegation is unsupported: ${file}`,

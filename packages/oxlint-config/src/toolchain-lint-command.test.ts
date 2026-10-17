@@ -333,7 +333,9 @@ test("manager alias cycles and ambiguous invocations cannot silently omit a lint
 });
 
 test("literal filtered Bun builds prepare lint without becoming linter launchers", () => {
-  const build = ["oxlint-config", "oxlint-plugin", "time", "test-kit"]
+  const packages = ["oxlint-config", "oxlint-plugin", "time", "test-kit"];
+  const selected: string[] = [];
+  const build = packages
     .map((name) => `bun --filter @stll/${name} build`)
     .join(" && ");
   expect(
@@ -342,6 +344,12 @@ test("literal filtered Bun builds prepare lint without becoming linter launchers
         lint: "bun run build && bun --bun oxlint --type-aware .",
         build,
       }),
+      false,
+      {
+        assertFilteredBunBuild: (selector) => {
+          selected.push(selector);
+        },
+      },
     ),
   ).toEqual({
     enabled: true,
@@ -349,6 +357,7 @@ test("literal filtered Bun builds prepare lint without becoming linter launchers
     errors: [],
     commands: [["."]],
   });
+  expect(selected).toEqual(packages.map((name) => `@stll/${name}`));
   for (const command of [
     "bun --filter core lint",
     'bun --filter "$WORKSPACE" build',
@@ -403,5 +412,176 @@ test("inventory never hides malformed or repeated caller thread options", () => 
     );
     expect(result.errors.length, threads).toBeGreaterThan(0);
     expect(result.commands, threads).toEqual([]);
+  }
+});
+
+test("script aliases discover the stages actually run by each declared manager", () => {
+  for (const [manager, version, hooks] of [
+    ["npm", "12.2.0", true],
+    ["bun", "1.4.3", true],
+    ["pnpm", "12.9.1", true],
+    ["yarn", "4.11.0", false],
+  ] as const) {
+    const result = lintInventoryCommands({
+      ...manifest({
+        lint: `${manager} run lint:core`,
+        "prelint:core": "oxlint before.mjs",
+        "lint:core": "oxlint main.mjs",
+        "postlint:core": "oxlint after.mjs",
+        "preprelint:core": "oxlint never.mjs",
+      }),
+      packageManager: `${manager}@${version}`,
+    });
+    expect(result.errors, manager).toEqual([]);
+    expect(result.commands, manager).toEqual(
+      hooks ? [["before.mjs"], ["main.mjs"], ["after.mjs"]] : [["main.mjs"]],
+    );
+  }
+});
+
+test("root script hooks inherit the declared manager and hook aliases retain discovery", () => {
+  const result = lintInventoryCommands({
+    ...manifest({
+      prelint: "npm run lint:before",
+      "lint:before": "oxlint before.mjs",
+      lint: "oxlint main.mjs",
+      postlint: "oxlint after.mjs",
+    }),
+    packageManager: "bun@1.4.3",
+  });
+  expect(result.errors).toEqual([]);
+  expect(result.commands).toEqual([
+    ["before.mjs"],
+    ["main.mjs"],
+    ["after.mjs"],
+  ]);
+});
+
+test("pnpm lifecycle configuration and substring suppression follow the pinned implementation", () => {
+  const scripts = manifest({
+    lint: "pnpm run core",
+    precore: "oxlint before.mjs",
+    core: "echo precore && oxlint main.mjs",
+    postcore: "oxlint after.mjs",
+  });
+  const input = { ...scripts, packageManager: "pnpm@12.9.1" };
+  expect(lintInventoryCommands(input).commands).toEqual([
+    ["main.mjs"],
+    ["after.mjs"],
+  ]);
+  expect(
+    lintInventoryCommands(input, false, {
+      pnpmWorkspace: {
+        type: "tracked",
+        source: "enablePrePostScripts: false\n",
+      },
+    }).commands,
+  ).toEqual([["main.mjs"]]);
+  expect(
+    lintInventoryCommands(input, false, {
+      pnpmWorkspace: {
+        type: "tracked",
+        source: "enablePrePostScripts: true\n",
+      },
+      npmrc: { type: "tracked", source: "enable-pre-post-scripts=false\n" },
+    }).commands,
+  ).toEqual([["main.mjs"], ["after.mjs"]]);
+});
+
+test("undetermined lifecycle configuration or manager flavors fail closed", () => {
+  for (const packageManager of [
+    undefined,
+    "yarn@1.22.22",
+    "yarn@5.0.0",
+    "pnpm@10.0.0",
+    "pnpm@latest",
+  ]) {
+    const input = {
+      ...manifest({ lint: "oxlint main.mjs", prelint: "oxlint before.mjs" }),
+      packageManager,
+    };
+    const result = lintInventoryCommands(input);
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(result.commands).toEqual([]);
+  }
+  const input = {
+    ...manifest({
+      lint: "pnpm run core",
+      core: "oxlint main.mjs",
+      precore: "oxlint before.mjs",
+    }),
+    packageManager: "pnpm@12.9.1",
+  };
+  for (const pnpmWorkspace of [
+    { type: "unknown" },
+    { type: "tracked", source: "enablePrePostScripts: '${DYNAMIC}'\n" },
+    { type: "tracked", source: "[\n" },
+  ] as const) {
+    const result = lintInventoryCommands(input, false, { pnpmWorkspace });
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(result.commands).toEqual([]);
+  }
+});
+
+test("npm ignore-scripts controls hooks and lifecycle cycles cannot hide scopes", () => {
+  const input = {
+    ...manifest({
+      lint: "npm run core",
+      core: "oxlint main.mjs",
+      precore: "oxlint before.mjs",
+      postcore: "oxlint after.mjs",
+    }),
+    packageManager: "npm@12.2.0",
+  };
+  for (const enabled of [true, false]) {
+    const result = lintInventoryCommands(input, false, {
+      npmrc: { type: "tracked", source: `ignore-scripts=${!enabled}\n` },
+    });
+    expect(result.errors).toEqual([]);
+    expect(result.commands).toEqual(
+      enabled ? [["before.mjs"], ["main.mjs"], ["after.mjs"]] : [["main.mjs"]],
+    );
+  }
+  for (const key of ["IGNORE-SCRIPTS", "Ignore-Scripts"]) {
+    const result = lintInventoryCommands(input, false, {
+      npmrc: { type: "tracked", source: `${key}=true\n` },
+    });
+    expect(result.errors).toContain(
+      "npm ignore-scripts must use its canonical lowercase key",
+    );
+    expect(result.commands).toEqual([]);
+  }
+  const cycle = lintInventoryCommands({
+    ...input,
+    scripts: {
+      lint: "npm run core",
+      core: "oxlint main.mjs",
+      precore: "npm run core",
+    },
+  });
+  expect(cycle.errors).toContain("cyclic lint script alias: core");
+  expect(cycle.commands).toEqual([]);
+});
+
+test("custom Yarn runtimes cannot inherit the stock Berry no-hooks policy", () => {
+  const input = {
+    ...manifest({
+      lint: "yarn run core",
+      core: "oxlint main.mjs",
+      precore: "oxlint before.mjs",
+    }),
+    packageManager: "yarn@4.11.0",
+  };
+  for (const source of [
+    "yarnPath: .yarn/classic.cjs\n",
+    "plugins: ['./custom-run.cjs']\n",
+  ]) {
+    const result = lintInventoryCommands(input, false, {
+      yarnrc: { type: "tracked", source },
+    });
+    expect(result.errors).toContain(
+      "Custom Yarn executables or plugins require explicit lifecycle discovery support",
+    );
+    expect(result.commands).toEqual([]);
   }
 });

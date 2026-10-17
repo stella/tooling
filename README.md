@@ -333,6 +333,21 @@ unreadable project configurations produce diagnostics rather than bypassing the
 check. Add the appropriate shared project declaration instead of suppressing the
 rule.
 
+Script inventory includes automatic pre/post stages of literal package-manager
+`run` aliases and the root lint script. Declare the root `packageManager` when
+root hooks exist; workspace lint tasks inherit it. npm and Bun run those hooks;
+tracked project `.npmrc` `ignore-scripts=true` suppresses npm hooks. Pinned pnpm
+12.9.1 defaults to running them and reads the boolean `enablePrePostScripts` from
+tracked `pnpm-workspace.yaml`; it skips a hook whose name already occurs in the
+main script body, matching that version's behavior. Yarn Berry (declared major
+2, 3 or 4) does not run arbitrary pre/post hooks. Unknown manager flavors,
+unreadable configuration, nested workspace overrides, custom Yarn executables or
+plugins, and dynamic lifecycle settings produce diagnostics.
+Automatic hook bodies do not recursively invent further pre/post stages.
+Filtered Bun build preparation requires one exact workspace package name and no
+prebuild/postbuild hooks; unsupported hook scopes must be made explicit instead
+of being omitted from inventory.
+
 Use the oxlint preset with local exceptions:
 
 ```ts
