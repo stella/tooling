@@ -2,8 +2,11 @@
 
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { basename, join, relative, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { expect, test } from "bun:test";
+import type { ESTree } from "@oxlint/plugins";
 import { DOM_ELEMENT_PRODUCERS } from "./no-unsafe-inner-html.ts";
+import { EXPRESSION_WRAPPER_TYPES, unwrapExpression } from "./utils.ts";
 
 const repositoryRoot = resolve(import.meta.dir, "../../../");
 const fixtureRoot = join(repositoryRoot, "packages/oxlint-plugin/fixtures");
@@ -17,6 +20,184 @@ const invalidDirective = new RegExp(
   "gu",
 );
 const cleanMarker = new RegExp(`expect-clean:\\s*${ruleId.replaceAll("/", "\\/")}\\b`, "gu");
+type ExpressionBearingNode = Extract<ESTree.Node, { expression: ESTree.Node }>;
+const expressionWrapperPolicies = {
+  ArrayExpression: {
+    disposition: "preserve",
+    reason: "array construction changes the value",
+  },
+  ArrowFunctionExpression: {
+    disposition: "preserve",
+    reason: "function creation is a runtime operation",
+  },
+  AssignmentExpression: {
+    disposition: "preserve",
+    reason: "assignment mutates state",
+  },
+  AwaitExpression: {
+    disposition: "preserve",
+    reason: "await changes control flow and value timing",
+  },
+  BinaryExpression: {
+    disposition: "preserve",
+    reason: "binary operation computes a value",
+  },
+  CallExpression: {
+    disposition: "preserve",
+    reason: "call executes a function",
+  },
+  ChainExpression: {
+    disposition: "peel",
+    reason: "chain syntax preserves the wrapped value",
+  },
+  ClassDeclaration: {
+    disposition: "preserve",
+    reason: "class declaration creates a binding",
+  },
+  ClassExpression: {
+    disposition: "preserve",
+    reason: "class creation is a runtime operation",
+  },
+  ConditionalExpression: {
+    disposition: "preserve",
+    reason: "conditional expression selects a branch",
+  },
+  FunctionDeclaration: {
+    disposition: "preserve",
+    reason: "function declaration creates a binding",
+  },
+  FunctionExpression: {
+    disposition: "preserve",
+    reason: "function creation is a runtime operation",
+  },
+  Identifier: {
+    disposition: "preserve",
+    reason: "identifier resolves a binding",
+  },
+  ImportExpression: {
+    disposition: "preserve",
+    reason: "dynamic import executes a module load",
+  },
+  JSXElement: {
+    disposition: "preserve",
+    reason: "JSX construction creates an element",
+  },
+  JSXFragment: {
+    disposition: "preserve",
+    reason: "JSX construction creates a fragment",
+  },
+  LogicalExpression: {
+    disposition: "preserve",
+    reason: "logical expression selects a value",
+  },
+  MemberExpression: {
+    disposition: "preserve",
+    reason: "member access reads a property",
+  },
+  MetaProperty: {
+    disposition: "preserve",
+    reason: "meta property supplies runtime context",
+  },
+  NewExpression: {
+    disposition: "preserve",
+    reason: "constructor call creates a value",
+  },
+  Literal: {
+    disposition: "preserve",
+    reason: "literal is the value itself",
+  },
+  ObjectExpression: {
+    disposition: "preserve",
+    reason: "object construction changes the value",
+  },
+  ParenthesizedExpression: {
+    disposition: "peel",
+    reason: "parentheses preserve the wrapped value",
+  },
+  SequenceExpression: {
+    disposition: "preserve",
+    reason: "sequence expression executes preceding expressions",
+  },
+  Super: {
+    disposition: "preserve",
+    reason: "super is a runtime receiver",
+  },
+  TaggedTemplateExpression: {
+    disposition: "preserve",
+    reason: "tagged template executes a function",
+  },
+  TemplateLiteral: {
+    disposition: "preserve",
+    reason: "template interpolations compute a value",
+  },
+  ThisExpression: {
+    disposition: "preserve",
+    reason: "this resolves a runtime receiver",
+  },
+  TSDeclareFunction: {
+    disposition: "preserve",
+    reason: "declaration has no runtime expression to peel",
+  },
+  TSEmptyBodyFunctionExpression: {
+    disposition: "preserve",
+    reason: "function signature has no runtime expression to peel",
+  },
+  TSAsExpression: {
+    disposition: "peel",
+    reason: "a TypeScript assertion preserves runtime value",
+  },
+  TSInstantiationExpression: {
+    disposition: "peel",
+    reason: "type arguments do not change runtime value",
+  },
+  TSNonNullExpression: {
+    disposition: "peel",
+    reason: "the non-null assertion preserves runtime value",
+  },
+  TSSatisfiesExpression: {
+    disposition: "peel",
+    reason: "satisfies only checks a static type",
+  },
+  TSTypeAssertion: {
+    disposition: "peel",
+    reason: "a TypeScript assertion preserves runtime value",
+  },
+  UnaryExpression: {
+    disposition: "preserve",
+    reason: "unary operation computes a value",
+  },
+  UpdateExpression: {
+    disposition: "preserve",
+    reason: "update operation mutates state",
+  },
+  V8IntrinsicExpression: {
+    disposition: "preserve",
+    reason: "intrinsic expression executes runtime behavior",
+  },
+  YieldExpression: {
+    disposition: "preserve",
+    reason: "yield changes generator control flow",
+  },
+} as const satisfies Readonly<
+  Record<
+    ESTree.Expression["type"],
+    { disposition: "peel" | "preserve"; reason: string }
+  >
+>;
+type ExpressionCarrierKind = Exclude<
+  ExpressionBearingNode["type"],
+  (typeof EXPRESSION_WRAPPER_TYPES)[number]
+>;
+const expressionCarrierPolicies = {
+  Decorator: "decorator owns a semantic expression",
+  ExpressionStatement: "statement owns its executed expression",
+  JSXExpressionContainer: "JSX owns its embedded expression",
+  JSXSpreadChild: "JSX child owns its spread expression",
+  TSClassImplements: "class declaration owns its implemented type expression",
+  TSExportAssignment: "export declaration owns its value expression",
+  TSExternalModuleReference: "import declaration owns its module expression",
+  TSInterfaceHeritage: "interface declaration owns its heritage expression",
+} as const satisfies Readonly<Record<ExpressionCarrierKind, string>>;
 
 type MemberEdit = {
   kind: "member";
@@ -62,7 +243,26 @@ type JsxInventoryEdit = {
   elementCount: number;
 };
 
-type Edit = MemberEdit | AliasEdit | SpreadEdit | JsxEdit | JsxInventoryEdit;
+type DomTarget = { start: number; end: number };
+type DomTargetInventoryEdit = {
+  kind: "dom-target-inventory";
+  file: string;
+  targets: DomTarget[];
+};
+type ExpressionWrapperInventoryEdit = {
+  kind: "expression-wrapper-inventory";
+  file: string;
+  types: string[];
+};
+
+type Edit =
+  | MemberEdit
+  | AliasEdit
+  | SpreadEdit
+  | JsxEdit
+  | JsxInventoryEdit
+  | DomTargetInventoryEdit
+  | ExpressionWrapperInventoryEdit;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -105,6 +305,25 @@ const isEdit = (value: unknown): value is Edit => {
       typeof value.elementCount === "number"
     );
   }
+  if (value.kind === "dom-target-inventory") {
+    return (
+      typeof value.file === "string" &&
+      Array.isArray(value.targets) &&
+      value.targets.every(
+        (target) =>
+          isRecord(target) &&
+          typeof target.start === "number" &&
+          typeof target.end === "number",
+      )
+    );
+  }
+  if (value.kind === "expression-wrapper-inventory") {
+    return (
+      typeof value.file === "string" &&
+      Array.isArray(value.types) &&
+      value.types.every((type) => typeof type === "string")
+    );
+  }
   return (
     value.kind === "spread" &&
     typeof value.file === "string" &&
@@ -116,7 +335,6 @@ const isEdit = (value: unknown): value is Edit => {
 
 const collectorPlugin = String.raw`
 const htmlMethods = new Set([
-  "assign",
   "createContextualFragment",
   "insertAdjacentHTML",
   "setAttribute",
@@ -403,6 +621,129 @@ export default {
 };
 `;
 
+const domTargetCollectorPlugin = `import {
+  invokedCallee,
+  isAstNode,
+  isIdentifier,
+  memberPropertyName,
+  resolveLiteralArraySpreads,
+  unwrapExpression,
+} from ${JSON.stringify(pathToFileURL(join(repositoryRoot, "packages/oxlint-plugin/src/utils.ts")).href)};
+` + String.raw`
+const htmlProperties = new Set(["innerHTML", "outerHTML", "srcdoc"]);
+const htmlMethods = new Set([
+  "createContextualFragment",
+  "insertAdjacentHTML",
+  "setAttribute",
+  "setHTMLUnsafe",
+  "write",
+  "writeln",
+]);
+const staticMemberName = (node) => memberPropertyName(node);
+const isObjectAssign = (node) =>
+  isAstNode(node) &&
+  node.type === "MemberExpression" &&
+  isIdentifier(node.object, "Object") &&
+  staticMemberName(node) === "assign";
+const objectAssignArguments = (node) => {
+  const callee = invokedCallee(node);
+  if (!isObjectAssign(callee)) return null;
+  const directCallee = unwrapExpression(node.callee);
+  const wrapper = directCallee?.type === "MemberExpression"
+    ? staticMemberName(directCallee)
+    : null;
+  const args = resolveLiteralArraySpreads(node.arguments).args;
+  if (wrapper === "call") return args.slice(1);
+  if (wrapper === "apply") {
+    const argsArray = unwrapExpression(args.at(1));
+    if (!argsArray || argsArray.type !== "ArrayExpression" || !Array.isArray(argsArray.elements)) {
+      return [];
+    }
+    return resolveLiteralArraySpreads(argsArray.elements).args;
+  }
+  return args;
+};
+const ranges = (context) => {
+  const targets = new Map();
+  const add = (node) => {
+    if (!node?.range) return;
+    targets.set(node.range[0] + ":" + node.range[1], {
+      start: node.range[0],
+      end: node.range[1],
+    });
+  };
+  const visit = (node) => {
+    if (!node || typeof node !== "object") return;
+    if (node.type === "AssignmentExpression" && node.left?.type === "MemberExpression") {
+      if (htmlProperties.has(staticMemberName(node.left))) add(node.left.object);
+    }
+    if (node.type === "CallExpression") {
+      const assignArgs = objectAssignArguments(node);
+      if (assignArgs?.length) add(assignArgs[0]);
+      const callee = node.callee;
+      let method = null;
+      let receiver = null;
+      let target = callee;
+      while (target?.type === "MemberExpression") {
+        const name = staticMemberName(target);
+        if (name === "call" || name === "apply") {
+          target = target.object;
+          continue;
+        }
+        method = name;
+        receiver = target.object;
+        break;
+      }
+      if (htmlMethods.has(method)) add(receiver);
+    }
+    for (const [key, value] of Object.entries(node)) {
+      if (key === "parent" || key === "loc" || key === "range") continue;
+      if (Array.isArray(value)) {
+        for (const child of value) visit(child);
+      } else if (value && typeof value === "object") {
+        visit(value);
+      }
+    }
+  };
+  visit(context.sourceCode.ast);
+  return [...targets.values()].sort((left, right) => left.start - right.start);
+};
+export default {
+  rules: {
+    targets: {
+      meta: { type: "problem" },
+      create(context) {
+        return {
+          "Program:exit"(node) {
+            const visitorKeys = context.sourceCode.visitorKeys;
+            if (!visitorKeys) throw new Error("Oxlint did not expose parser visitor keys");
+            context.report({
+              node,
+              message: "EQUIVALENCE:" + JSON.stringify({
+                kind: "dom-target-inventory",
+                file: context.filename,
+                targets: ranges(context),
+              }),
+            });
+            context.report({
+              node,
+              message: "EQUIVALENCE:" + JSON.stringify({
+                kind: "expression-wrapper-inventory",
+                file: context.filename,
+                types: Object.entries(visitorKeys)
+                  .filter(([, keys]) => keys.includes("expression"))
+                  .map(([type]) => type)
+                  .sort(),
+              }),
+            });
+          },
+        };
+      },
+    },
+  },
+};
+`;
+
 const collectMessages = (value: unknown, messages: string[]): void => {
   if (typeof value === "string") {
     if (value.startsWith("EQUIVALENCE:")) messages.push(value);
@@ -524,6 +865,77 @@ const spreadEdits = (
     ];
   });
 
+const wrapperKinds = [
+  "non-null",
+  "as",
+  "satisfies",
+  "parentheses",
+  "type-assertion",
+  "instantiation",
+] as const;
+type WrapperKind = (typeof wrapperKinds)[number];
+
+const wrapperInsertions = (
+  source: string,
+  targets: readonly DomTarget[],
+  wrapper: WrapperKind,
+): Array<{ start: number; end: number; text: string }> => {
+  const insertions: Array<{ start: number; end: number; text: string }> = [];
+  const seen = new Set<string>();
+  for (const target of targets) {
+    const key = `${target.start}:${target.end}`;
+    if (seen.has(key)) throw new Error(`Duplicate DOM target ${key}`);
+    seen.add(key);
+    const expression = source.slice(target.start, target.end);
+    const prefix = (() => {
+      switch (wrapper) {
+        case "non-null":
+          return "(";
+        case "as":
+          return "(";
+        case "satisfies":
+          return "(";
+        case "parentheses":
+          return "(";
+        case "type-assertion":
+          return "(<HTMLElement>(";
+        case "instantiation":
+          return "((";
+        default: {
+          const exhaustive: never = wrapper;
+          throw new Error(`Unknown wrapper: ${exhaustive}`);
+        }
+      }
+    })();
+    const suffix = (() => {
+      switch (wrapper) {
+        case "non-null":
+          return ")!";
+        case "as":
+          return " as HTMLElement)";
+        case "satisfies":
+          return " satisfies HTMLElement)";
+        case "parentheses":
+          return ")";
+        case "type-assertion":
+          return "))";
+        case "instantiation":
+          return ")<unknown>)";
+        default: {
+          const exhaustive: never = wrapper;
+          throw new Error(`Unknown wrapper: ${exhaustive}`);
+        }
+      }
+    })();
+    if (expression.length === 0) throw new Error("Empty DOM target range");
+    insertions.push(
+      { start: target.start, end: target.start, text: prefix },
+      { start: target.end, end: target.end, text: suffix },
+    );
+  }
+  return insertions;
+};
+
 const aliasEdits = (
   source: string,
   edits: readonly AliasEdit[],
@@ -602,6 +1014,11 @@ const producerExpressions = (entry: DomElementProducer): string[] => {
         expressions.push(`${collection}[0]`, `${collection}.item(0)`);
         break;
       }
+      case "collection-property": {
+        const collection = `${receiver}.${entry.name}`;
+        expressions.push(`${collection}[0]`, `${collection}.item(0)`);
+        break;
+      }
       default: {
         const exhaustive: never = entry;
         throw new Error(`Unknown DOM producer kind: ${exhaustive}`);
@@ -637,9 +1054,12 @@ const producerCorpus = (): {
       );
       invalidCount += 1;
     }
-    if (entry.kind === "collection") {
+    if (entry.kind === "collection" || entry.kind === "collection-property") {
       for (const receiver of producerReceivers(entry.receiver)) {
-        const collection = `${receiver}.${entry.name}(${producerArguments[entry.name]})`;
+        const collection =
+          entry.kind === "collection"
+            ? `${receiver}.${entry.name}(${producerArguments[entry.name]})`
+            : `${receiver}.${entry.name}`;
         for (const access of ["elements[0]", "elements.item(0)"]) {
           lines.push(
             "{",
@@ -698,8 +1118,10 @@ test(
     const collectorPath = join(tempDirectory, "collector.mjs");
     const configPrefix = `.html-equivalence-${basename(tempDirectory)}`;
     const collectorConfigPath = join(repositoryRoot, `${configPrefix}-collector.json`);
+    const targetCollectorConfigPath = join(repositoryRoot, `${configPrefix}-targets.json`);
     const ruleConfigPath = join(repositoryRoot, `${configPrefix}-rule.json`);
     const producerCorpusPath = join(tempDirectory, "dom-producer-corpus.fixture.tsx");
+    const targetCollectorPath = join(tempDirectory, "target-collector.mjs");
 
     try {
       await writeFile(producerCorpusPath, producerSource);
@@ -738,6 +1160,13 @@ test(
         ],
         rules: { "equivalence-collector/edits": "error" },
       };
+      const targetCollectorConfig = {
+        categories: { correctness: "off" },
+        jsPlugins: [
+          { name: "dom-target-collector", specifier: targetCollectorPath },
+        ],
+        rules: { "dom-target-collector/targets": "error" },
+      };
       const ruleConfig = {
         categories: { correctness: "off" },
         jsPlugins: [
@@ -751,6 +1180,7 @@ test(
                 .filter((path) => basename(path).includes("provenance"))
                 .map((path) => relative(repositoryRoot, path)),
               `${relative(repositoryRoot, tempDirectory)}/**/*provenance*.tsx`,
+              `${relative(repositoryRoot, tempDirectory)}/**/*provenance*.ts`,
             ],
             rules: {
               [ruleId]: ["error", { sanitizerPolicy: "provenance" }],
@@ -760,7 +1190,9 @@ test(
       };
       await Promise.all([
         writeFile(collectorConfigPath, JSON.stringify(collectorConfig)),
+        writeFile(targetCollectorConfigPath, JSON.stringify(targetCollectorConfig)),
         writeFile(ruleConfigPath, JSON.stringify(ruleConfig)),
+        writeFile(targetCollectorPath, domTargetCollectorPlugin),
       ]);
 
       const collected = await runOxlint({
@@ -799,6 +1231,7 @@ test(
 
       const generatedPaths: string[] = [];
       const generatedSources = new Map<string, string>();
+      const jsxFreeSources = new Map<string, string>();
       for (const original of originals) {
         const fixtureBasename = basename(original.path);
         const fileMembers = members.filter((edit) => edit.file === original.path);
@@ -852,6 +1285,15 @@ test(
             ),
           },
         ];
+        const reactSource = variants.find(
+          (variant) => variant.name === "react-create-element",
+        )?.source;
+        if (reactSource === undefined) throw new Error("Missing JSX-free source");
+        const jsxFreePath = join(
+          tempDirectory,
+          `${fixtureBasename.replace(".fixture.tsx", "")}-react-base.ts`,
+        );
+        jsxFreeSources.set(jsxFreePath, reactSource);
         for (const variant of variants) {
           const generatedPath = join(
             tempDirectory,
@@ -875,10 +1317,99 @@ test(
       await Promise.all(
         [...generatedSources].map(([path, source]) => writeFile(path, source)),
       );
+      await Promise.all(
+        [...jsxFreeSources].map(([path, source]) => writeFile(path, source)),
+      );
+
+      const targetCollection = await runOxlint({
+        configPath: targetCollectorConfigPath,
+        filePaths: [...jsxFreeSources.keys()],
+      });
+      expect(targetCollection.exitCode).toBe(1);
+      const collectedTargetEdits = parseEdits(targetCollection.stdout);
+      const expressionWrapperInventories = collectedTargetEdits.filter(
+        (edit): edit is ExpressionWrapperInventoryEdit =>
+          edit.kind === "expression-wrapper-inventory",
+      );
+      expect(expressionWrapperInventories).toHaveLength(jsxFreeSources.size);
+      const expectedExpressionNodeTypes = [
+        ...EXPRESSION_WRAPPER_TYPES,
+        ...Object.keys(expressionCarrierPolicies),
+      ].sort();
+      const peeledExpressionNodeTypes = Object.entries(expressionWrapperPolicies)
+        .filter(([, policy]) => policy.disposition === "peel")
+        .map(([type]) => type)
+        .sort();
+      expect(peeledExpressionNodeTypes).toEqual([...EXPRESSION_WRAPPER_TYPES].sort());
+      expect(
+        Object.values(expressionWrapperPolicies).every(
+          ({ reason }) => reason.length > 0,
+        ),
+      ).toBe(true);
+      for (const inventory of expressionWrapperInventories) {
+        expect(inventory.types).toEqual(expectedExpressionNodeTypes);
+      }
+      const targetEdits = collectedTargetEdits.filter(
+        (edit): edit is DomTargetInventoryEdit =>
+          edit.kind === "dom-target-inventory",
+      );
+      expect(targetEdits).toHaveLength(jsxFreeSources.size);
+      const targetEditsByFile = new Map<string, DomTarget[]>();
+      for (const edit of targetEdits) {
+        if (targetEditsByFile.has(edit.file)) {
+          throw new Error(`Duplicate target inventory for ${edit.file}`);
+        }
+        targetEditsByFile.set(edit.file, edit.targets);
+      }
+      const wrapperPaths: string[] = [];
+      const wrapperSources = new Map<string, string>();
+      let wrappedTargetCount = 0;
+      for (const [basePath, source] of jsxFreeSources) {
+        const targets = targetEditsByFile.get(resolve(basePath));
+        if (!targets) throw new Error(`Missing target inventory for ${basePath}`);
+        const uniqueTargets = new Set(targets.map(({ start, end }) => `${start}:${end}`));
+        expect(uniqueTargets.size).toBe(targets.length);
+        for (const wrapper of wrapperKinds) {
+          const insertions = wrapperInsertions(source, targets, wrapper);
+          expect(insertions).toHaveLength(targets.length * 2);
+          const wrapped = applyEdits(source, insertions);
+          expect(countMatches(invalidDirective, wrapped)).toBe(
+            countMatches(invalidDirective, source),
+          );
+          expect(countMatches(cleanMarker, wrapped)).toBe(
+            countMatches(cleanMarker, source),
+          );
+          const wrapperPath = join(
+            tempDirectory,
+            `${basename(basePath, ".ts")}-${wrapper}.fixture.ts`,
+          );
+          wrapperPaths.push(wrapperPath);
+          wrapperSources.set(wrapperPath, wrapped);
+          wrappedTargetCount += targets.length;
+        }
+      }
+      expect(
+        [...targetEditsByFile.values()].reduce(
+          (total, targets) => total + targets.length,
+          0,
+        ),
+      ).toBeGreaterThan(0);
+      expect(wrappedTargetCount).toBe(
+        [...targetEditsByFile.values()].reduce(
+          (total, targets) => total + targets.length * wrapperKinds.length,
+          0,
+        ),
+      );
+      expect(wrapperPaths).toHaveLength(
+        jsxFreeSources.size * wrapperKinds.length,
+      );
+      await Promise.all(
+        [...wrapperSources].map(([path, source]) => writeFile(path, source)),
+      );
 
       const verified = await runOxlint({
         configPath: ruleConfigPath,
-        filePaths: [...originalPaths, ...generatedPaths],
+        filePaths: [...originalPaths, ...generatedPaths, ...wrapperPaths],
         extraArgs: [
           "--report-unused-disable-directives-severity=error",
           "--deny-warnings",
@@ -893,9 +1424,27 @@ test(
       await rm(tempDirectory, { recursive: true, force: true });
       await Promise.all([
         rm(collectorConfigPath, { force: true }),
+        rm(targetCollectorConfigPath, { force: true }),
         rm(ruleConfigPath, { force: true }),
       ]);
     }
   },
   30_000,
 );
+
+test("expression unwrapping follows the syntax wrapper policy exactly", () => {
+  let nested: unknown = { type: "Identifier", range: [0, 1] };
+  for (const type of EXPRESSION_WRAPPER_TYPES) {
+    nested = { type, range: [0, 1], expression: nested };
+  }
+  expect(unwrapExpression(nested)?.type).toBe("Identifier");
+
+  for (const type of Object.keys(expressionCarrierPolicies)) {
+    const node = {
+      type,
+      range: [0, 1],
+      expression: { type: "Identifier", range: [0, 1] },
+    };
+    expect(unwrapExpression(node)?.type).toBe(type);
+  }
+});

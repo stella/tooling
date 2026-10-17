@@ -287,6 +287,39 @@ export const SafeObjectAssignReassignedTarget = () => {
   Object.assign(element, unsafeDomProperties);
 };
 
+export const UnsafeForOfDomCollection = () => {
+  for (const element of document.querySelectorAll("div")) {
+    // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- for-of bindings inherit their collection's DOM element provenance
+    Object.assign(element, unsafeDomProperties);
+  }
+};
+
+export const UnsafeForOfAliasedChildren = () => {
+  const parent = document.createElement("div");
+  const elements = parent.children;
+  const collection = elements;
+  for (const element of collection) {
+    const alias = element;
+    // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- collection and element aliases share the same stable-binding resolver
+    Object.assign(alias, unsafeDomProperties);
+  }
+};
+
+export const SafeForOfOrdinaryCollection = () => {
+  for (const options of [{}, {}]) {
+    // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
+    Object.assign(options, unsafeDomProperties);
+  }
+};
+
+export const SafeReassignedForOfBinding = () => {
+  for (let element of document.querySelectorAll("div")) {
+    element = document.createElement("div");
+    // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
+    Object.assign(element, unsafeDomProperties);
+  }
+};
+
 export const SafeObjectAssignNonDomConstTarget = () => {
   const options = {};
   // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html

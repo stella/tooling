@@ -50,7 +50,7 @@ import {
 
 type DomElementProducer = {
   name: string;
-  kind: "property" | "method" | "collection";
+  kind: "property" | "method" | "collection" | "collection-property";
   receiver: "document" | "element" | "either";
 };
 
@@ -73,6 +73,7 @@ export const DOM_ELEMENT_PRODUCERS = [
   { name: "getElementsByTagNameNS", kind: "collection", receiver: "either" },
   { name: "getElementsByName", kind: "collection", receiver: "document" },
   { name: "querySelectorAll", kind: "collection", receiver: "either" },
+  { name: "children", kind: "collection-property", receiver: "element" },
   { name: "parentElement", kind: "property", receiver: "element" },
   { name: "firstElementChild", kind: "property", receiver: "element" },
   { name: "lastElementChild", kind: "property", receiver: "element" },
@@ -400,18 +401,37 @@ export default eslintCompatPlugin({
                 definition?.type !== "Variable" ||
                 definition.node.type !== "VariableDeclarator" ||
                 definition.node.id.type !== "Identifier" ||
-                definition.node.init === null ||
                 variable.references.some(
                   (reference) => reference.isWrite() && !reference.init,
                 )
               ) {
                 return false;
               }
+              const declarator = definition.node;
+              if (declarator.init !== null) {
+                return isKnownDomTarget({
+                  node: declarator.init,
+                  scope: context.sourceCode.getScope(declarator),
+                  seen,
+                  kind,
+                });
+              }
+              const declaration = declarator.parent;
+              if (
+                kind !== "element" ||
+                declaration.type !== "VariableDeclaration"
+              ) {
+                return false;
+              }
+              const loop = declaration.parent;
+              if (loop.type !== "ForOfStatement" || loop.left !== declaration) {
+                return false;
+              }
               return isKnownDomTarget({
-                node: definition.node.init,
-                scope: context.sourceCode.getScope(definition.node),
+                node: loop.right,
+                scope: context.sourceCode.getScope(loop.right),
                 seen,
-                kind,
+                kind: "collection",
               });
             }
           }
@@ -432,16 +452,20 @@ export default eslintCompatPlugin({
           };
           const isElementCollection = (node: unknown): boolean =>
             isKnownDomTarget({ node, scope, seen, kind: "collection" });
-          if (kind === "element" && target?.type === "MemberExpression") {
+          if (target?.type === "MemberExpression") {
             const property = memberPropertyName(target);
             const producer = DOM_ELEMENT_PRODUCERS.find(
-              (entry) => entry.kind === "property" && entry.name === property,
+              (entry) =>
+                entry.kind ===
+                  (kind === "collection" ? "collection-property" : "property") &&
+                entry.name === property,
             );
             if (producer !== undefined) {
               return hasProducerReceiver(target.object, producer);
             }
             const index = unwrapExpression(target.property);
             if (
+              kind === "element" &&
               target.computed === true &&
               index?.type === "Literal" &&
               typeof index.value === "number" &&

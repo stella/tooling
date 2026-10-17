@@ -4,7 +4,7 @@
 // `unknown` so rule files can call them without per-call type ceremony or
 // shared type-import boilerplate.
 
-import type { Ranged } from "@oxlint/plugins";
+import type { ESTree, Ranged } from "@oxlint/plugins";
 
 export type AstNode = Ranged & { type: string } & Record<string, unknown>;
 
@@ -157,20 +157,25 @@ export const getCalleeName = (callee: unknown): string | null => {
   return objectName === null ? propertyName : `${objectName}.${propertyName}`;
 };
 
-// Peel TS-only wrapping nodes so a shape check sees the underlying
-// expression. Returns the original node when no wrapping is present.
+// Parser wrappers with no value transformation of their own.
+export const EXPRESSION_WRAPPER_TYPES = [
+  "ParenthesizedExpression",
+  "ChainExpression",
+  "TSNonNullExpression",
+  "TSAsExpression",
+  "TSSatisfiesExpression",
+  "TSTypeAssertion",
+  "TSInstantiationExpression",
+] as const satisfies readonly ESTree.Node["type"][];
+
+// Keep the parser's other expression-bearing contexts intact.
 export const unwrapExpression = (node: unknown): AstNode | null => {
-  if (!isAstNode(node)) {
-    return null;
+  while (isAstNode(node)) {
+    const { type } = node;
+    if (!EXPRESSION_WRAPPER_TYPES.some((wrapper) => wrapper === type)) return node;
+    node = node.expression;
   }
-  if (
-    node.type === "TSAsExpression" ||
-    node.type === "TSSatisfiesExpression" ||
-    node.type === "ChainExpression"
-  ) {
-    return unwrapExpression(node.expression);
-  }
-  return node;
+  return null;
 };
 
 export type LiteralArgumentResolution =
