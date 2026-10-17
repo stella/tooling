@@ -11,6 +11,7 @@
   "bin": {
     "stll-cloud-setup": "./dist/cloud-setup-cli.mjs",
     "stll-consumer-compat": "./dist/consumer-compat-cli.mjs",
+    "stll-dependabot": "./dist/dependabot-cli.mjs",
     "stll-publish-contract": "./dist/publish-contract-cli.mjs",
     "stll-toolchain-changed": "./dist/toolchain-changed-cli.mjs",
     "stll-toolchain-check": "./dist/toolchain-check-cli.mjs",
@@ -81,6 +82,17 @@
         "default": "./dist/publish-build-target-vite-dts-helper.cjs"
       },
       "default": "./dist/publish-build-target-vite-dts-helper.mjs"
+    },
+    "./dependabot": {
+      "import": {
+        "types": "./dist/dependabot.d.mts",
+        "default": "./dist/dependabot.mjs"
+      },
+      "require": {
+        "types": "./dist/dependabot.d.cts",
+        "default": "./dist/dependabot.cjs"
+      },
+      "default": "./dist/dependabot.mjs"
     }
   },
   "publishConfig": {

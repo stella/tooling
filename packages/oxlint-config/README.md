@@ -257,12 +257,15 @@ Peer ranges declare support: they must include the policy compiler release and t
 compatibility release when the selected layout uses it. Ranges do not contribute
 to the installed compiler inventory.
 
-JavaScript update roots come from the repository root, declared workspace membership,
+JavaScript update roots include the repository root, declared workspace membership,
 and directories with their own `bun.lock`, `package-lock.json`, `yarn.lock`, or
-`pnpm-lock.yaml`. Other package manifests do not create update roots; directory names
-have no special meaning. Workspace members share their owner's update entry.
+`pnpm-lock.yaml`. Independent manifests with dependencies, an explicit package manager,
+or dependency-bearing workspace members also create update roots. Metadata-only
+fixtures do not. Package-manager selection follows the nearest declaration or lock;
+workspace members share their owner's update entry. Bundler `Gemfile`/`Gemfile.lock`
+and Composer `composer.json`/`composer.lock` declare roots at their own directories.
 
-`node-engine` and `cloud-setup-drift` are mandatory: opt-outs cannot bypass the
+`node-engine`, `workflow-trust` and `cloud-setup-drift` are mandatory: opt-outs cannot bypass the
 shared Node support range or generated cloud setup requirements.
 
 Opt-outs apply to the entire repository for that rule. Unknown or duplicate
@@ -287,6 +290,37 @@ is unnecessary. Their original reference metadata is preserved without
 discovering or building referenced projects. Missing, unreadable, and zero-input
 selected configs fail the check. `--help` prints usage and exits successfully;
 unknown arguments fail.
+
+## Generate dependency update configuration
+
+Run `bunx --no-install stll-dependabot` from the repository root. It reads tracked
+configuration and writes canonical `.github/dependabot.yml`, preserving an existing
+`.github/dependabot.yaml` spelling, including when the indexed output has been
+deleted from the working tree. Conflicting indexed or existing spellings are
+rejected, and unrelated unreadable inputs still stop generation. Repeated runs
+produce identical bytes; linked output files and directories are rejected.
+
+For programmatic generation, the `@stll/oxlint-config/dependabot` subpath exports
+`generateDependabotConfig({ files, policy })` and `parseToolchainPolicy`:
+
+```ts
+import {
+  generateDependabotConfig,
+  parseToolchainPolicy,
+} from "@stll/oxlint-config/dependabot";
+import sharedPolicy from "@stll/oxlint-config/toolchain.json";
+
+const yaml = generateDependabotConfig({
+  files: trackedConfiguration,
+  policy: parseToolchainPolicy(sharedPolicy).dependabot,
+});
+```
+
+The root lint-config entry does not load the tooling parser dependencies
+`yaml`, `picomatch` or `smol-toml`; they belong to the tooling subpath and CLIs.
+`files` maps existing tracked repository-relative configuration paths to their text.
+Deleted tracked manifests are absent from the generator snapshot. Use the
+CLI when a tracked snapshot is not already available; no source imports are needed.
 
 ## Shared cloud setup
 
@@ -337,6 +371,13 @@ the minimal profile and a pinned, checksum-verified rustup installer. Rust-enabl
 setup also provisions Ubuntu's `build-essential` package for native compilation
 and linking.
 
+`cloud.rust.additionalToolchains` explicitly selects extra exact compiler releases.
+Each must match the shared pin or a valid `rustExceptions` entry and differ from the
+primary compiler. Extras are installed once with the minimal profile and verified
+offline at session start. An exception alone authorizes a version; it does not
+provision it. This setting installs neither Hawk nor extra compiler components.
+Generated scripts contain no trailing whitespace and end with one newline.
+
 `cloud.tools` is a closed object: the supported keys are `cargo-nextest`,
 `wasm-bindgen-cli`, `gitleaks`, `uv`, and `time`. Each value must be an exact release supported by
 the installed tooling package. Unknown tools and unsupported versions fail
@@ -371,8 +412,8 @@ The command writes `.agents/cloud-setup.sh` with executable permissions and
 merges a `SessionStart` hook into `.claude/settings.json`. The hook runs
 `bash "$CLAUDE_PROJECT_DIR/.agents/cloud-setup.sh" start` only when
 `CLAUDE_CODE_REMOTE=true`, including sessions that reuse cached filesystems and
-sessions started from a repository subdirectory. Generation replaces the
-relative-path hook written by 1.1.0 in place. After successful startup, it appends the
+sessions started from a repository subdirectory. Generation replaces the exact hooks written by 1.1.0 and 1.3.1 in place.
+After successful startup, it appends the
 managed shell profile's literal exports to `CLAUDE_ENV_FILE` when available, so
 subsequent Claude commands select pinned runtimes and tools before preinstalled
 versions while retaining their inherited `PATH`. The settings also set
@@ -380,8 +421,12 @@ versions while retaining their inherited `PATH`. The settings also set
 attribution to commits or pull requests. Existing environment-file
 content, unrelated settings, and hooks are preserved. Invalid JSON, disabled
 hooks, conflicting cloud startup entries, or a different `attribution` value stop
-generation with a repair instruction. Commit both generated files.
+generation with a repair instruction. Startup or environment persistence failures
+produce actionable session context and a stderr reason; SessionStart cannot block
+a session. Successful startup is silent on stdout. Commit both generated files.
 Generation refuses symlink parents or destinations and hard-linked destinations.
+Generation recreates its deleted tracked output files and requires unrelated
+tracked inputs to remain readable.
 `stll-toolchain-check` rejects missing, drifted, or undeclared tracked scripts,
 missing or conflicting startup hooks, and missing or different attribution
 settings with mandatory `cloud-setup-drift`.
@@ -392,6 +437,11 @@ prints usage without reading repository configuration.
 | ----------------------- | ------------------------------------- |
 | Networked install       | `bash .agents/cloud-setup.sh install` |
 | Offline session startup | `bash .agents/cloud-setup.sh start`   |
+
+Runtime installation repairs and verifies a missing or empty system CA bundle
+offline before any apt refresh or download, including when the certificate package
+is already current. If the certificate updater is unavailable or cannot restore
+trust, restore the base image offline before rerunning installation.
 
 Both commands can be rerun. Missing or unknown subcommands print usage and
 exit 2; there is no implicit lifecycle mode. The script supports Ubuntu 24.04
@@ -686,6 +736,118 @@ It prints one JSON object with `changed`, `tools`, and `status`; the detector
 exits successfully even when history is unreadable, reporting `changed: true`
 and `status: "unreadable"`. Use `changed` to force the full CI depth on both
 pull requests and merge-queue runs. An unreadable snapshot never skips checks.
+
+Run repository-installed tools only after the workflow's existing trust decision.
+The mandatory `workflow-trust` rule applies to PR workflows declaring a
+`trust-check` job. Repository execution requires a direct dependency and a
+condition requiring its `trusted == 'true'` output for every PR trigger.
+Before that boundary, only literal output, bounded comparisons, `true`, `false`,
+`exit`, bounded Git `rev-parse`/`merge-base` object queries, and GET-only `gh api`
+reads are accepted. The trust job's structural `if`/`elif` comparisons use the
+same checks; output may go only to `GITHUB_OUTPUT` or `/dev/null`. Variables must
+be quoted, and command names and `printf` formats must be literal.
+
+The following catalog is the production allowlist. Command kinds select the
+corresponding bounded argument validator; a listed command does not authorize
+arbitrary arguments. Git requires the stated number of explicit object refs.
+Bootstrap action inputs are restricted to the listed keys; Bun requires a literal
+version rather than a repository version file.
+
+<!-- workflow-trust-bootstrap-catalog:start -->
+
+```json
+{
+  "commands": {
+    "test": "comparison",
+    "[": "comparison",
+    "[[": "comparison",
+    "true": "status",
+    "false": "status",
+    "exit": "exit",
+    "echo": "output",
+    "printf": "format",
+    "git": "git",
+    "gh": "github"
+  },
+  "git": {
+    "rev-parse": {
+      "flags": ["--short", "--verify"],
+      "references": 1
+    },
+    "merge-base": {
+      "flags": ["--all", "--is-ancestor"],
+      "references": 2
+    }
+  },
+  "github": ["api"],
+  "actions": {
+    "actions/checkout": [
+      "fetch-depth",
+      "persist-credentials",
+      "ref",
+      "repository",
+      "submodules"
+    ],
+    "oven-sh/setup-bun": ["bun-version", "no-cache"]
+  }
+}
+```
+
+<!-- workflow-trust-bootstrap-catalog:end -->
+
+Job containers and nonempty services require the job-level trust gate because
+they start before steps and supply executable code. A step condition cannot
+authorize their startup. Digest pinning alone does not approve an image for
+pre-trust execution; the guard has no implicit image approval catalog.
+Before trust, step actions must use a full SHA and match the explicit bootstrap
+catalog: `actions/checkout` or `oven-sh/setup-bun`, with
+bounded selector inputs. Other actions and unsupported inputs require the
+job-level gate; a step condition cannot authorize them. Every job-level reusable workflow
+call requires the job-level trust condition, including pinned calls without inputs.
+
+Interpreters, sourced files, executable paths, package managers (including
+metadata and script-disabled install modes), launchers, custom shells, and
+unknown commands or syntax require trust. File readers, file-presence tests,
+`jq`/`yq`, Git working-tree/history commands, and `actions/setup-node` require the
+job-level gate. Unsupported options and query programs also require the gate. For example, gate the entire
+detector job, including dependency installation:
+
+```yaml
+check-changes:
+  needs: [trust-check]
+  if: >-
+    always() && !cancelled()
+    && ((github.event_name != 'pull_request'
+         && github.event_name != 'pull_request_target')
+        || needs.trust-check.outputs.trusted == 'true')
+  runs-on: ubuntu-latest
+  steps:
+    # Check out, set up Bun, install dependencies, then run the shared detector.
+    - run: bunx --no-install stll-toolchain-changed --since "$BASE_REF"
+```
+
+Actions interpolation is checked before shell quoting or comments. Only the
+bounded identity expressions `github.sha`, `github.run_id`, `github.run_attempt`
+and `github.repository` may appear directly in pre-trust scripts. Other contexts,
+functions and matrix values require environment indirection or the trust gate;
+the guard does not infer that an expression is safe from its shell quotes.
+Pass contributor-controlled metadata through a supported data environment key
+(`PR_TITLE`, `HEAD_REF`, `ISSUE_BODY` or `COMMENT_BODY`) and quote its expansion:
+
+```yaml
+- env:
+    PR_TITLE: ${{ github.event.pull_request.title }}
+  run: echo "$PR_TITLE"
+```
+
+The trust job must classify each PR trigger used by the workflow. Main/manual
+jobs remain runnable when the PR-only trust job is skipped. Job or step
+conditions may prove that execution is limited to non-PR events; event string
+comparisons follow Actions case-insensitive equality. The guard
+proves only supported static metadata commands and boolean conditions; unknown
+commands and conditions cannot authorize execution. It does not validate the
+trust job's authorization policy.
+Workflows with no declared trust job retain their existing fork-CI policy.
 
 The comparison includes Bun declarations, Node selectors and support ranges,
 resolved TypeScript compiler versions (including workspace and compatibility

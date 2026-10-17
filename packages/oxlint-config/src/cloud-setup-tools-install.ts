@@ -39,7 +39,7 @@ rust_run() {
     *) fail 'Invalid Rust execution mode' ;;
   esac
 }
-rust_ready() {
+primary_rust_ready() {
   local directory
   for directory in "$RUSTUP_HOME" "$CARGO_HOME"; do
     [[ -d "$directory" && ! -L "$directory" && "$(stat -c '%u' "$directory")" == "$OUTPUT_UID" ]] || return 1
@@ -53,13 +53,19 @@ rust_ready() {
   @VERIFY_TARGETS@
   return 0
 }
+rust_ready() {
+  local additional_version
+  primary_rust_ready || return 1
+  @VERIFY_ADDITIONAL_TOOLCHAINS@
+  return 0
+}
 verify_rust() { rust_ready || fail 'Pinned Rust, components or targets are unavailable; run install'; }
 install_rust() (
   if ! command -v cc >/dev/null || ! command -v ld >/dev/null || [[ ! -f /usr/include/stdlib.h ]]; then
     apt_refresh_for build-essential
     apt_install build-essential
   fi
-  local artifact_url artifact_sha
+  local artifact_url artifact_sha additional_version
   # Subshell scope retains scratch for EXIT cleanup after a failed command.
   scratch="$(mktemp -d)"
   trap 'rm -rf -- "$scratch"' EXIT
@@ -78,9 +84,10 @@ install_rust() (
     rust_run network "$scratch/rustup-init" -y --no-modify-path --default-toolchain none --profile minimal
   fi
   rust_run local "$CARGO_HOME/bin/rustup" set auto-self-update disable
-  if ! rust_ready; then
+  if ! primary_rust_ready; then
     rust_run network "$CARGO_HOME/bin/rustup" toolchain install @RUST@ --profile minimal --no-self-update @RUST_ARGS@
   fi
+  @INSTALL_ADDITIONAL_TOOLCHAINS@
   rust_run local "$CARGO_HOME/bin/rustup" default @RUST@
   verify_rust
   for tool in rustup cargo rustc rustdoc @RUST_PROXIES@; do
@@ -92,6 +99,24 @@ install_rust() (
   done
 )
 `
+    .replace(
+      "@VERIFY_ADDITIONAL_TOOLCHAINS@",
+      rust.additionalToolchains
+        .map(
+          (pin) =>
+            `additional_version="$(rust_run local "$CARGO_HOME/bin/rustc" +${pin} --version)" || return 1\n  [[ "$additional_version" == 'rustc ${pin} '* ]] || return 1`,
+        )
+        .join("\n  "),
+    )
+    .replace(
+      "@INSTALL_ADDITIONAL_TOOLCHAINS@",
+      rust.additionalToolchains
+        .map(
+          (pin) =>
+            `if ! additional_version="$(rust_run local "$CARGO_HOME/bin/rustc" +${pin} --version)" || [[ "$additional_version" != 'rustc ${pin} '* ]]; then\n    rust_run network "$CARGO_HOME/bin/rustup" toolchain install ${pin} --profile minimal --no-self-update\n  fi`,
+        )
+        .join("\n  "),
+    )
     .replaceAll("@RUSTUP@", rust.installer.version)
     .replaceAll("@RUST@", rust.channel)
     .replace("@RUSTUP_ARTIFACT@", artifactSelection(rust.installer))

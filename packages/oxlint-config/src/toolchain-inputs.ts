@@ -16,6 +16,22 @@ export const javascriptDependencyLockfiles = [
   "pnpm-lock.yaml",
 ] as const;
 
+export const dependabotManifestEcosystems = {
+  Gemfile: "bundler",
+  "Gemfile.lock": "bundler",
+  "composer.json": "composer",
+  "composer.lock": "composer",
+} as const;
+
+/** Share ecosystem inventory with snapshot selection; no dependency graph reads are needed. */
+export const dependabotManifestEcosystem = (file: string) => {
+  if (excludedInputPath(file)) return undefined;
+  const basename = file.split("/").at(-1);
+  for (const [name, ecosystem] of Object.entries(dependabotManifestEcosystems))
+    if (basename === name) return ecosystem;
+  return undefined;
+};
+
 /** Match project, environment, local, and fragment filenames recognized by mise. */
 export const isMiseConfigPath = (file: string) =>
   !excludedInputPath(file) &&
@@ -89,6 +105,7 @@ export const toolchainInputKind = (file: string, text = "") => {
   if (githubAutomationFileKind(file) !== undefined) return "config";
   if (excludedInputPath(file)) return undefined;
   if (
+    dependabotManifestEcosystem(file) !== undefined ||
     pythonDependencyManifestKind(file) === "pipfile-lock" ||
     javascriptDependencyLockfiles.some(
       (name) => file.split("/").at(-1) === name,

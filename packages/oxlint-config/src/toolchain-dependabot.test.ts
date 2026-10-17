@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { describe, expect, test } from "bun:test";
-import { isSeq, parseDocument, stringify } from "yaml";
+import { isScalar, isSeq, parseDocument, stringify } from "yaml";
 
 import {
   checkDependabot,
@@ -79,7 +79,147 @@ const ignoreDeclaration = (name: string) =>
 const config = (updates: unknown[] = [update()]) =>
   stringify({ version: 2, updates }, { version: "1.1" });
 
+const generatedRoots = (text: string) => {
+  const document = parseDocument(text);
+  const updates = document.get("updates");
+  if (!isSeq(updates)) throw new Error("expected generated update sequence");
+  const roots: string[] = [];
+  for (const index of updates.items.keys()) {
+    const ecosystem = document.getIn(["updates", index, "package-ecosystem"]);
+    if (typeof ecosystem !== "string") throw new Error("expected ecosystem");
+    const directory = document.getIn(["updates", index, "directory"]);
+    if (typeof directory === "string") {
+      roots.push(`${ecosystem}:${directory}`);
+      continue;
+    }
+    const directories = document.getIn(["updates", index, "directories"]);
+    if (!isSeq(directories)) throw new Error("expected generated directories");
+    for (const item of directories.items) {
+      if (!isScalar(item) || typeof item.value !== "string")
+        throw new Error("expected generated directory");
+      roots.push(`${ecosystem}:${item.value}`);
+    }
+  }
+  return roots.toSorted();
+};
+
 describe("Dependabot policy", () => {
+  test("Bundler and Composer manifests and locks share generator and guard roots", () => {
+    for (const [ecosystem, names] of [
+      ["bundler", ["Gemfile", "Gemfile.lock"]],
+      ["composer", ["composer.json", "composer.lock"]],
+    ] as const) {
+      for (const selected of [[names[0]], [names[1]], names]) {
+        const files = Object.fromEntries(
+          selected.flatMap((name) => [
+            [name, ""],
+            [`nested/${name}`, ""],
+          ]),
+        );
+        const generated = generateDependabotConfig({ files, policy });
+        expect(generatedRoots(generated)).toEqual([
+          `${ecosystem}:/`,
+          `${ecosystem}:/nested`,
+        ]);
+        expect(check(generated, files)).toEqual([]);
+        for (const directory of ["/", "/nested"]) {
+          expect(
+            check(
+              config([update(ecosystem, directory === "/" ? "/nested" : "/")]),
+              files,
+            ).some(
+              ({ message }) =>
+                message ===
+                `add a ${ecosystem} update entry covering ${directory}`,
+            ),
+          ).toBe(true);
+        }
+      }
+    }
+  });
+
+  test("lockless dependency manifests inherit their nearest manager without duplicating workspace roots", () => {
+    for (const dependencyField of [
+      "dependencies",
+      "devDependencies",
+      "optionalDependencies",
+      "peerDependencies",
+    ]) {
+      for (const rootManager of [undefined, "bun@1.4.3"]) {
+        const dependency = JSON.stringify({
+          [dependencyField]: { example: "1.0.0" },
+        });
+        const ecosystem = rootManager === undefined ? "npm" : "bun";
+        const files: Record<string, string> = {
+          "package.json": JSON.stringify({ packageManager: rootManager }),
+          "wasm/package.json": dependency,
+          "nested/independent/package.json": dependency,
+          "standalone/package.json": JSON.stringify({
+            workspaces: ["packages/*"],
+          }),
+          "standalone/packages/member/package.json": dependency,
+          "standalone/extra/package.json": dependency,
+          "npm/package.json": JSON.stringify({ packageManager: "npm@11.6.0" }),
+          "npm/child/package.json": dependency,
+          "locked/package.json": dependency,
+          "locked/package-lock.json": "",
+          "locked/nested/package.json": dependency,
+          "bun/package.json": dependency,
+          "bun/bun.lock": "",
+          "bun/nested/package.json": dependency,
+          "workspace/package.json": JSON.stringify({
+            workspaces: ["packages/*", "!packages/excluded"],
+          }),
+          "workspace/packages/member/package.json": dependency,
+          "workspace/packages/excluded/package.json": dependency,
+          "metadata/package.json": "{}",
+        };
+        const expected = [
+          update(ecosystem),
+          ...[
+            "/wasm",
+            "/nested/independent",
+            "/standalone",
+            "/standalone/extra",
+            "/workspace",
+            "/workspace/packages/excluded",
+          ].map((directory) => update(ecosystem, directory)),
+          ...["/npm", "/npm/child", "/locked", "/locked/nested"].map(
+            (directory) => update("npm", directory),
+          ),
+          ...["/bun", "/bun/nested"].map((directory) =>
+            update("bun", directory),
+          ),
+        ];
+        const generated = generateDependabotConfig({ files, policy });
+        expect(
+          generateDependabotConfig({
+            files: Object.fromEntries(Object.entries(files).reverse()),
+            policy,
+          }),
+        ).toBe(generated);
+        expect(generatedRoots(generated)).toEqual(
+          expected
+            .map((entry) => `${entry["package-ecosystem"]}:${entry.directory}`)
+            .toSorted(),
+        );
+        expect(check(generated, files)).toEqual([]);
+        expect(check(config(expected), files)).toEqual([]);
+        for (const [index, missing] of expected.entries()) {
+          expect(
+            check(
+              config(expected.filter((_, other) => other !== index)),
+              files,
+            ).some(
+              ({ message }) =>
+                message ===
+                `add a ${missing["package-ecosystem"]} update entry covering ${missing.directory}`,
+            ),
+          ).toBe(true);
+        }
+      }
+    }
+  });
   test("fixture schedules preserve clock strings under both YAML schemas", () => {
     for (const time of ["00:00", "07:00", "17:00", "23:59"]) {
       const entries = [];

@@ -5,7 +5,7 @@ import { cloudSetupPath } from "./cloud-setup";
 import { cloudShellProfilePath } from "./cloud-setup-shell";
 
 export const cloudClaudeSettingsPath = ".claude/settings.json";
-const sessionStartHook = (script: string) =>
+const releasedSessionStartHook = (script: string) =>
   ({
     matcher: "",
     hooks: [
@@ -25,14 +25,41 @@ fi`,
       },
     ],
   }) as const;
+// SessionStart cannot block a session; successful stdout supplies model context.
+const sessionStartHook = (script: string) =>
+  ({
+    matcher: "",
+    hooks: [
+      {
+        type: "command",
+        command: `if [ "\${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
+  cloud_setup_incomplete() {
+    printf '%s\\n' 'Cloud setup could not establish a verified session environment. From the repository root, run bash .agents/cloud-setup.sh install and then bash .agents/cloud-setup.sh start. Do not assume pinned tools or services are ready until start succeeds.'
+    printf '%s\\n' "cloud-setup: $1" >&2
+    exit 0
+  }
+  ${script} start >&2 || cloud_setup_incomplete 'startup failed; run install'
+  if [ -n "\${CLAUDE_ENV_FILE:-}" ]; then
+    if [ ! -s ${cloudShellProfilePath} ]; then
+      cloud_setup_incomplete 'cloud shell profile is unavailable; run install'
+    fi
+    cloud_shell_exports="$(cat ${cloudShellProfilePath})" || cloud_setup_incomplete 'cloud shell profile could not be read; run install'
+    [ -n "$cloud_shell_exports" ] || cloud_setup_incomplete 'cloud shell profile is unavailable; run install'
+    printf '\\n%s\\n' "$cloud_shell_exports" >> "$CLAUDE_ENV_FILE" || cloud_setup_incomplete 'session environment could not be persisted; check its write access and rerun start'
+  fi
+fi`,
+      },
+    ],
+  }) as const;
 // Hooks run in the session's working directory; resolve the script from the project root.
 export const cloudSessionStartHook = sessionStartHook(
   `bash "$CLAUDE_PROJECT_DIR/${cloudSetupPath}"`,
 );
-// @stll/oxlint-config 1.1.0 generated this form; regeneration replaces it in place.
-// Remove once supported consumers have regenerated with a later release.
+// Releases 1.1.0 and 1.3.1 persisted these exact forms in consumer settings.
+// Remove after supported consumers regenerate with a release containing this hook.
 const previousCloudSessionStartHooks = [
-  sessionStartHook(`bash ${cloudSetupPath}`),
+  releasedSessionStartHook(`bash ${cloudSetupPath}`),
+  releasedSessionStartHook(`bash "$CLAUDE_PROJECT_DIR/${cloudSetupPath}"`),
 ];
 export const cloudAttribution = { commit: "", pr: "" } as const;
 
