@@ -1,5 +1,24 @@
 # @stll/oxlint-config
 
+## 1.4.0
+
+### Minor Changes
+
+- [#148](https://github.com/stella/tooling/pull/148) [`45bf51a`](https://github.com/stella/tooling/commit/45bf51a9f15aee81c7a426295ed5e18aaffffcf7) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Support pinned, checksum-verified gitleaks 8.30.1 binaries in cloud setup.
+
+- [#151](https://github.com/stella/tooling/pull/151) [`8d69306`](https://github.com/stella/tooling/commit/8d693065e8fecd48e5a4676c8b804dcde8f4276f) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Require lint-covered tracked JavaScript and TypeScript files to belong to declared TypeScript projects. Document the shared Node scripts project and test real Node type resolution.
+
+  Include package-manager pre/post lifecycle scripts in lint inventory with tracked project configuration and fail closed for unresolved hook scopes.
+
+- [#152](https://github.com/stella/tooling/pull/152) [`bbac255`](https://github.com/stella/tooling/commit/bbac2552e55c0a4cc8e1941445e6793c9007891f) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Check packed static runtime import closures and expose artifact validation through stll-publish-contract.
+
+- [#150](https://github.com/stella/tooling/pull/150) [`af84549`](https://github.com/stella/tooling/commit/af84549cfbfe5ee31be2ebd389a57ce21837ff89) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Publish the Dependabot generator through its dedicated subpath and write CLI without loading tooling parsers from the lint entry, cover standalone JavaScript, Bundler and Composer dependency roots, generate clean, recoverable cloud setup scripts with actionable startup context, recognize package-relative compiler probe diagnostics, enforce declared workflow trust ordering, and recreate deleted tracked generator outputs.
+
+### Patch Changes
+
+- [#147](https://github.com/stella/tooling/pull/147) [`5bee738`](https://github.com/stella/tooling/commit/5bee738d86a3cc154c5cefb835ee989cffd0cf79) Thanks [@jan-kubica](https://github.com/jan-kubica)! - `stll-toolchain-changed` checks a registry range that Bun links to a workspace
+  member against that member's version.
+
 ## 1.3.1
 
 ### Patch Changes
