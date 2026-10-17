@@ -1,4 +1,4 @@
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { posix, join } from "node:path";
 import picomatch from "picomatch";
 import { parse } from "smol-toml";
@@ -36,6 +36,48 @@ const safeManifest = async (root: string, directory: string) => {
   return stat === undefined ? undefined : parse(await readFile(path, "utf8"));
 };
 
+/** Keep globstar states alive while consuming only actual directory components. */
+const memberPrefixMatcher = (pattern: string) => {
+  const segments = pattern.split("/");
+  // Cross-separator groups cannot be matched one component at a time. Retain
+  // conservative feasibility from that group onward, after matching its prefix.
+  const uncertain = segments.findIndex((segment) => {
+    const closing: string[] = [];
+    for (const character of segment) {
+      if (closing.at(-1) === "]") {
+        if (character === "]") closing.pop();
+        continue;
+      }
+      if (character === "[") closing.push("]");
+      else if (character === "{") closing.push("}");
+      else if (character === "(") closing.push(")");
+      else if (character === closing.at(-1)) closing.pop();
+    }
+    return closing.length > 0;
+  });
+  const matchers = segments.map((segment) => picomatch(segment, { dot: true }));
+  return (directory: string) => {
+    if (pattern.startsWith("!") && !pattern.startsWith("!(")) return true;
+    let states = new Set([0]);
+    const expand = () => {
+      for (const state of states)
+        if (segments[state] === "**") states.add(state + 1);
+    };
+    expand();
+    for (const component of directory === "." ? [] : directory.split("/")) {
+      if (uncertain >= 0 && states.has(uncertain)) return true;
+      const next = new Set<number>();
+      for (const state of states) {
+        if (segments[state] === "**") next.add(state);
+        else if (matchers[state]?.(component)) next.add(state + 1);
+      }
+      states = next;
+      expand();
+    }
+    return states.size > 0;
+  };
+};
+
 /** Expand only declared member subtrees, then follow in-tree path dependencies. */
 export const rustWorkspaceMembers = async (
   root: string,
@@ -62,12 +104,13 @@ export const rustWorkspaceMembers = async (
       continue;
     }
     let matches = 0;
+    const canContainMember = memberPrefixMatcher(pattern);
     const maximumDepth = pattern.includes("**")
       ? Infinity
       : pattern.split("/").length;
     const walk = async (directory: string) => {
       const depth = directory === "." ? 0 : directory.split("/").length;
-      if (excluded(directory)) return;
+      if (excluded(directory) || !canContainMember(directory)) return;
       if (picomatch.isMatch(directory, pattern, { dot: true })) {
         const member = await safeManifest(root, directory);
         if (member === undefined)
@@ -83,8 +126,14 @@ export const rustWorkspaceMembers = async (
       })) {
         if ([".git", "node_modules", "target"].includes(entry.name)) continue;
         const child = posix.join(directory, entry.name);
-        if (entry.isSymbolicLink())
-          throw new Error("workspace members must use real directories");
+        if (excluded(child) || !canContainMember(child)) continue;
+        if (entry.isSymbolicLink()) {
+          // Follow metadata only: regular-file links cannot contain members.
+          // Relevant dangling/cyclic links fail closed when stat throws.
+          if ((await stat(join(root, child))).isDirectory())
+            throw new Error("workspace members must use real directories");
+          continue;
+        }
         if (entry.isDirectory()) await walk(child);
       }
     };

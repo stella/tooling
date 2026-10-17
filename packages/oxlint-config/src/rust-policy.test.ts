@@ -449,6 +449,200 @@ test("workspace inheritance cannot be overridden by exceptions on members or roo
   });
 });
 
+test("workspace glob discovery ignores regular-file links and impossible directory prefixes", async () => {
+  for (const scenario of [
+    {
+      pattern: "crates/*",
+      member: "crates/member",
+      link: "crates/README.md",
+      target: "file",
+    },
+    {
+      pattern: "crates/*",
+      member: "crates/member",
+      link: "crates/directory",
+      target: "file",
+    },
+    {
+      pattern: "crates/*/members/*",
+      member: "crates/team/members/member",
+      link: "crates/team/other",
+      target: "directory",
+    },
+    {
+      pattern: "crates/{one,two}/members/*",
+      member: "crates/one/members/member",
+      link: "crates/three",
+      target: "directory",
+    },
+  ]) {
+    await fixture(async (root) => {
+      const outside = await mkdtemp(join(tmpdir(), "rust-policy-links-"));
+      try {
+        await mkdir(join(root, scenario.member), { recursive: true });
+        await writeFile(
+          join(root, "Cargo.toml"),
+          `[workspace]\nmembers = ["${scenario.pattern}"]\n`,
+        );
+        await writeFile(
+          join(root, scenario.member, "Cargo.toml"),
+          '[package]\nname = "member"\nversion = "0.1.0"\n',
+        );
+        const target = join(outside, "target");
+        if (scenario.target === "file")
+          await writeFile(target, "ordinary file");
+        else await mkdir(target);
+        await symlink(target, join(root, scenario.link));
+        await generateRustPolicy({
+          root,
+          input: { kind: "workspace" },
+          mode: "write",
+        });
+        expect(
+          await generateRustPolicy({
+            root,
+            input: { kind: "workspace" },
+            mode: "check",
+          }),
+        ).toEqual([]);
+        expect(await read(root, `${scenario.member}/Cargo.toml`)).toMatchObject(
+          { lints: { workspace: true } },
+        );
+      } finally {
+        await rm(outside, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
+test("workspace glob discovery prunes excluded symlinks before inspecting targets", async () => {
+  for (const scenario of [
+    {
+      pattern: "crates/*",
+      member: "crates/member",
+      link: "crates/ignored",
+      exclude: "crates/ignored",
+    },
+    {
+      pattern: "crates/**/members/*",
+      member: "crates/team/members/member",
+      link: "crates/team/ignored",
+      exclude: "crates/**/ignored",
+    },
+    {
+      pattern: "crates/*/members/*",
+      member: "crates/team/members/member",
+      link: "crates/team/members/ignored",
+      exclude: "crates/*/members/ignored",
+    },
+  ]) {
+    await fixture(async (root) => {
+      await mkdir(join(root, scenario.member), { recursive: true });
+      await writeFile(
+        join(root, "Cargo.toml"),
+        `[workspace]\nmembers = ["${scenario.pattern}"]\nexclude = ["${scenario.exclude}"]\n`,
+      );
+      await writeFile(
+        join(root, scenario.member, "Cargo.toml"),
+        '[package]\nname = "member"\nversion = "0.1.0"\n',
+      );
+      // Excluded dangling targets must not be dereferenced even for metadata.
+      await symlink(join(root, "absent"), join(root, scenario.link));
+      await generateRustPolicy({
+        root,
+        input: { kind: "workspace" },
+        mode: "write",
+      });
+      expect(
+        await generateRustPolicy({
+          root,
+          input: { kind: "workspace" },
+          mode: "check",
+        }),
+      ).toEqual([]);
+    });
+  }
+});
+
+test("matching and ancestor directory links and unresolved relevant links fail before writes", async () => {
+  for (const scenario of [
+    {
+      pattern: "crates/*",
+      member: "crates/member",
+      link: "crates/linked",
+      target: "directory",
+    },
+    {
+      pattern: "crates/*/members/*",
+      member: "crates/team/members/member",
+      link: "crates/linked",
+      target: "directory",
+    },
+    {
+      pattern: "crates/**/members/*",
+      member: "crates/team/members/member",
+      link: "crates/team/linked",
+      target: "directory",
+    },
+    {
+      pattern: "crates/**/members/*",
+      member: "crates/team/members/member",
+      link: "crates/team/members/linked",
+      target: "directory",
+    },
+    {
+      pattern: "crates/*",
+      member: "crates/member",
+      link: "crates/dangling",
+      target: "missing",
+    },
+    {
+      pattern: "crates/*",
+      member: "crates/member",
+      link: "crates/cyclic",
+      target: "cycle",
+    },
+  ]) {
+    await fixture(async (root) => {
+      const outside = await mkdtemp(join(tmpdir(), "rust-policy-links-"));
+      try {
+        await mkdir(join(root, scenario.member), { recursive: true });
+        const rootText = `[workspace]\nmembers = ["${scenario.pattern}"]\n`;
+        const memberText = '[package]\nname = "member"\nversion = "0.1.0"\n';
+        await writeFile(join(root, "Cargo.toml"), rootText);
+        await writeFile(join(root, scenario.member, "Cargo.toml"), memberText);
+        const target =
+          scenario.target === "cycle"
+            ? join(root, scenario.link)
+            : join(outside, "target");
+        if (scenario.target === "directory") await mkdir(target);
+        await symlink(target, join(root, scenario.link));
+        await expect(
+          generateRustPolicy({
+            root,
+            input: { kind: "workspace" },
+            mode: "write",
+          }),
+        ).rejects.toThrow();
+        expect(await readFile(join(root, "Cargo.toml"), "utf8")).toBe(rootText);
+        expect(
+          await readFile(join(root, scenario.member, "Cargo.toml"), "utf8"),
+        ).toBe(memberText);
+        for (const file of [
+          "rustfmt.toml",
+          "clippy.toml",
+          ".cargo/config.toml",
+        ])
+          expect(
+            await readFile(join(root, file), "utf8").catch(() => undefined),
+          ).toBeUndefined();
+      } finally {
+        await rm(outside, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
 test("a symlinked intermediate glob directory fails before writes even alongside ordinary members", async () => {
   await fixture(async (root) => {
     const outside = await mkdtemp(join(tmpdir(), "rust-policy-external-"));
