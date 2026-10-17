@@ -8,9 +8,7 @@
   },
   "target": {
     "type": "javascript",
-    "targets": [
-      "node20.19.0"
-    ]
+    "targets": ["node20.19.0"]
   },
   "entryPoints": {
     "type": "module",
@@ -91,6 +89,17 @@
           "default": "./dist/require-loader-prefetch.cjs"
         },
         "default": "./dist/require-loader-prefetch.mjs"
+      },
+      "./bun-test-hygiene": {
+        "import": {
+          "types": "./dist/bun-test-hygiene.d.mts",
+          "default": "./dist/bun-test-hygiene.mjs"
+        },
+        "require": {
+          "types": "./dist/bun-test-hygiene.d.cts",
+          "default": "./dist/bun-test-hygiene.cjs"
+        },
+        "default": "./dist/bun-test-hygiene.mjs"
       }
     },
     "main": "dist/index.mjs",
