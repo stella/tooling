@@ -713,7 +713,7 @@ test("filtered Bun build preparation cannot hide selected workspace lifecycle ho
       );
       expect(
         checkNodeProjects({ root, manifest, trackedFiles }).map(
-          ({ path }) => path,
+          ({ path: file }) => file,
         ),
       ).toEqual(["packages/a/orphan.mjs"]);
     }
@@ -725,7 +725,7 @@ test("filtered Bun build preparation cannot hide selected workspace lifecycle ho
           scripts: { lint: "bun --filter @fixture/a build" },
         },
         trackedFiles,
-      }).map(({ path }) => path),
+      }).map(({ path: file }) => file),
     ).toEqual(["packages/a/orphan.mjs"]);
     writeFileSync(
       packageFile,
