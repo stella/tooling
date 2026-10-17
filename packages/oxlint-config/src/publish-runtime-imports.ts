@@ -76,7 +76,13 @@ const patternNames = (value: unknown): string[] => {
       return [];
   }
 };
-type Binding = "other" | "require" | "factory" | "module" | "module-api";
+type Binding =
+  | "other"
+  | "require"
+  | "factory"
+  | "module"
+  | "module-api"
+  | "filename";
 type Scope = Map<string, Binding>;
 const bindingScope = (scopes: readonly Scope[], name: string) =>
   scopes.findLast((scope) => scope.has(name));
@@ -91,7 +97,10 @@ const loaderBinding = (
   scopes: readonly Scope[],
 ): Binding | undefined => {
   const name = identifier(value);
-  if (name !== undefined) return binding(scopes, name);
+  if (name !== undefined) {
+    const resolved = binding(scopes, name);
+    return resolved === "filename" ? "other" : resolved;
+  }
   if (!record(value) || value["type"] !== "MemberExpression") return undefined;
   const owner = identifier(value["object"]);
   if (owner === undefined) return undefined;
@@ -150,9 +159,11 @@ const staticImports = (
   const loaderName = (name: string, scopes: readonly Scope[]) => {
     const previous = binding(scopes, name);
     return (
-      mode === "script" &&
-      (["require", "module", "createRequire"].includes(name) ||
-        (previous !== undefined && previous !== "other"))
+      (mode === "script" &&
+        ["require", "module", "createRequire"].includes(name)) ||
+      (previous !== undefined &&
+        previous !== "other" &&
+        previous !== "filename")
     );
   };
   const loaderValue = (value: unknown, scopes: readonly Scope[]): boolean => {
@@ -252,25 +263,37 @@ const staticImports = (
           bind(statement["id"]);
         else if (statement["type"] === "ImportDeclaration") {
           allowReference(statement["specifiers"]);
-          for (const specifier of nodes(statement["specifiers"])) {
-            const name = identifier(specifier["local"]);
-            if (name === undefined) continue;
-            local.set(
-              name,
-              ["node:module", "module"].includes(
-                literal(statement["source"]) ?? "",
-              )
-                ? identifier(specifier["imported"]) === "createRequire"
-                  ? "factory"
-                  : [
-                        "ImportDefaultSpecifier",
-                        "ImportNamespaceSpecifier",
-                      ].includes(String(specifier["type"])) ||
-                      identifier(specifier["imported"]) === "Module"
-                    ? "module-api"
-                    : "other"
-                : "other",
+          const moduleImport = ["node:module", "module"].includes(
+            literal(statement["source"]) ?? "",
+          );
+          const specifiers = nodes(statement["specifiers"]);
+          if (moduleImport && specifiers.length === 0)
+            throw unresolvable(
+              "module import needs recognized static bindings",
             );
+          for (const specifier of specifiers) {
+            const name = identifier(specifier["local"]);
+            if (name === undefined)
+              throw unresolvable(
+                "import binding cannot be resolved statically",
+              );
+            if (!moduleImport) {
+              local.set(name, "other");
+              continue;
+            }
+            const imported =
+              identifier(specifier["imported"]) ??
+              literal(specifier["imported"]);
+            if (imported === "createRequire") local.set(name, "factory");
+            else if (
+              ["ImportDefaultSpecifier", "ImportNamespaceSpecifier"].includes(
+                String(specifier["type"]),
+              ) ||
+              imported === "Module" ||
+              imported === "default"
+            )
+              local.set(name, "module-api");
+            else throw unresolvable("unsupported node:module import binding");
           }
         }
       }
@@ -344,7 +367,10 @@ const staticImports = (
                   factoryName,
                   key === "createRequire" ? "factory" : "module-api",
                 );
-              }
+              } else
+                throw unresolvable(
+                  "unsupported module namespace destructuring",
+                );
             }
           } else if (
             name === undefined &&
@@ -374,7 +400,8 @@ const staticImports = (
             if (
               nodes(initial["arguments"]).length !== 1 ||
               !(
-                identifier(argument) === "__filename" ||
+                (identifier(argument) === "__filename" &&
+                  binding(nested, "__filename") === "filename") ||
                 (argument?.["type"] === "MemberExpression" &&
                   argument["computed"] === false &&
                   importMeta &&
@@ -424,12 +451,23 @@ const staticImports = (
       kind === "ExportAllDeclaration"
     ) {
       const specifier = literal(node["source"]);
+      if (
+        kind !== "ImportDeclaration" &&
+        ["node:module", "module"].includes(specifier ?? "")
+      )
+        throw unresolvable(
+          "module re-export is not a recognized static binding",
+        );
       if (specifier !== undefined) result.push({ specifier, mode: "import" });
       if (kind === "ExportNamedDeclaration") allowReference(node["specifiers"]);
     }
     if (kind === "ImportExpression") {
       const specifier = literal(node["source"]);
-      if (specifier !== undefined) result.push({ specifier, mode: "import" });
+      if (specifier === undefined)
+        throw unresolvable("dynamic import needs a literal module specifier");
+      if (["node:module", "module"].includes(specifier))
+        throw unresolvable("dynamic module namespace imports are unsupported");
+      result.push({ specifier, mode: "import" });
     }
     if (kind === "CallExpression") {
       const callee = node["callee"];
@@ -544,10 +582,13 @@ const staticImports = (
   const root = nodes(tree).at(0);
   if (root !== undefined)
     walk(root, [
-      new Map([
-        ["require", "require"],
-        ["module", "module"],
-      ]),
+      mode === "script"
+        ? new Map<string, Binding>([
+            ["require", "require"],
+            ["module", "module"],
+            ["__filename", "filename"],
+          ])
+        : new Map<string, Binding>(),
     ]);
   return result;
 };

@@ -194,11 +194,11 @@ test("explicit JSON and native assets must be regular packed files but are never
   }
 });
 
-test("builtins, bare dependencies and computed dynamic imports have no local closure", async () => {
+test("builtins and bare dependencies have no local closure", async () => {
   const packed = fixture(
     {
       "entry.mjs":
-        'import "node:fs"; import "external-package"; export * from "@scope/dependency"; const target = "./consumer-config.mjs"; void import(target);',
+        'import "node:fs"; import "external-package"; export * from "@scope/dependency";',
     },
     { type: "module" },
   );
@@ -840,7 +840,7 @@ test("unsupported loader destructuring and resolution options fail explicitly", 
     ).rejects.toThrow("Unresolvable dynamic loader");
 });
 
-test("external literal loader calls, custom shadows and computed import expressions retain their boundaries", async () => {
+test("external literal loader calls and unrelated ESM shadows retain their boundaries", async () => {
   await assertPackedRuntimeImports(
     fixture({
       "entry.cjs":
@@ -855,15 +855,17 @@ test("external literal loader calls, custom shadows and computed import expressi
     await assertPackedRuntimeImports(
       fixture({ "entry.mjs": source }, { type: "module" }).options,
     );
-  await assertPackedRuntimeImports(
-    fixture(
-      {
-        "entry.mjs":
-          'const target = "./consumer-owned-config.mjs"; void import(target);',
-      },
-      { type: "module" },
-    ).options,
-  );
+  await expect(
+    assertPackedRuntimeImports(
+      fixture(
+        {
+          "entry.mjs":
+            'const target = "./consumer-owned-config.mjs"; void import(target);',
+        },
+        { type: "module" },
+      ).options,
+    ),
+  ).rejects.toThrow("Unresolvable dynamic loader");
 });
 
 test("function-owned var loader aliases remain visible throughout their function", async () => {
@@ -1023,4 +1025,154 @@ test("ambiguous CommonJS wrapper and inherited loader bindings fail closed", asy
           .options,
       ),
     ).rejects.toThrow("Unresolvable dynamic loader");
+});
+
+test("every supported node module import form preserves its local closure", async () => {
+  const forms = {
+    named: "import {createRequire as factory} from SOURCE;",
+    stringNamed: 'import {"createRequire" as factory} from SOURCE;',
+    default:
+      "import moduleApi from SOURCE; const factory = moduleApi.createRequire;",
+    namespace:
+      "import * as moduleApi from SOURCE; const factory = moduleApi.createRequire;",
+    namedModule:
+      "import {Module as moduleApi} from SOURCE; const factory = moduleApi.createRequire;",
+  };
+  for (const moduleName of ["node:module", "module"]) {
+    const exercised = new Set<string>();
+    for (const [name, declaration] of Object.entries(forms)) {
+      const source = declaration.replace("SOURCE", JSON.stringify(moduleName));
+      const packed = fixture(
+        {
+          "entry.mjs": `${source} const loader = factory(import.meta.url); loader("./helper.cjs");`,
+          "helper.cjs": "module.exports = 1;",
+        },
+        { type: "module" },
+      );
+      await assertPackedRuntimeImports(packed.options);
+      packed.members.delete("package/helper.cjs");
+      await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
+        "helper.cjs",
+      );
+      exercised.add(name);
+    }
+    expect(exercised).toEqual(new Set(Object.keys(forms)));
+  }
+});
+
+test("unsupported node module import and re-export categories fail closed", async () => {
+  const forms = {
+    unknownNamed: "import {unknownFactory as factory} from SOURCE;",
+    unknownStringNamed: 'import {"unknownFactory" as factory} from SOURCE;',
+    sideEffect: "import SOURCE;",
+    namedReexport: "export {createRequire} from SOURCE;",
+    stringNamedReexport: 'export {"createRequire" as factory} from SOURCE;',
+    starReexport: "export * from SOURCE;",
+    namespaceReexport: "export * as moduleApi from SOURCE;",
+    literalDynamic: "void import(SOURCE);",
+    variableDynamic: "const target = SOURCE; void import(target);",
+    templateDynamic: "void import(`node:module`);",
+    namespaceDestructuring:
+      "import * as moduleApi from SOURCE; const {unknownFactory} = moduleApi; unknownFactory();",
+  };
+  for (const moduleName of ["node:module", "module"]) {
+    const exercised = new Set<string>();
+    for (const [name, declaration] of Object.entries(forms)) {
+      await expect(
+        assertPackedRuntimeImports(
+          fixture(
+            {
+              "entry.mjs": declaration.replace(
+                "SOURCE",
+                JSON.stringify(moduleName),
+              ),
+            },
+            { type: "module" },
+          ).options,
+        ),
+      ).rejects.toThrow("Unresolvable dynamic loader");
+      exercised.add(name);
+    }
+    expect(exercised).toEqual(new Set(Object.keys(forms)));
+  }
+});
+
+test("module-derived ESM aliases cannot be shadowed by parameters or local bindings", async () => {
+  const shadows = {
+    factoryParameter:
+      "function use(factory) { return factory(import.meta.url); }",
+    factoryLocal:
+      "function use() { const factory = custom; return factory(import.meta.url); }",
+    namespaceParameter:
+      "function use(moduleApi) { return moduleApi.createRequire(import.meta.url); }",
+    namespaceLocal:
+      "function use() { let moduleApi = custom; return moduleApi.createRequire(import.meta.url); }",
+    loaderParameter:
+      'const loader = factory(import.meta.url); function use(loader) { return loader("./helper.cjs"); }',
+    loaderLocal:
+      'const loader = factory(import.meta.url); function use() { const loader = custom; return loader("./helper.cjs"); }',
+  };
+  const exercised = new Set<string>();
+  for (const [name, body] of Object.entries(shadows)) {
+    await expect(
+      assertPackedRuntimeImports(
+        fixture(
+          {
+            "entry.mjs": `import * as moduleApi from "node:module"; const factory = moduleApi.createRequire; ${body}`,
+            "helper.cjs": "module.exports = 1;",
+          },
+          { type: "module" },
+        ).options,
+      ),
+    ).rejects.toThrow("Unresolvable dynamic loader");
+    exercised.add(name);
+  }
+  expect(exercised).toEqual(new Set(Object.keys(shadows)));
+  await assertPackedRuntimeImports(
+    fixture(
+      {
+        "entry.mjs":
+          'function use(require) { return require("./consumer-owned.cjs"); } const require = custom; require(target);',
+      },
+      { type: "module" },
+    ).options,
+  );
+});
+
+test("createRequire filename bases must resolve to the actual CommonJS wrapper", async () => {
+  const bases = {
+    parameter:
+      'function use(__filename) { const loader = factory(__filename); loader("./helper.cjs"); }',
+    local:
+      'function use() { const __filename = custom; const loader = factory(__filename); loader("./helper.cjs"); }',
+    initializedVar:
+      'var __filename = custom; const loader = factory(__filename); loader("./helper.cjs");',
+    nestedVar:
+      'function use() { var __filename; const loader = factory(__filename); loader("./helper.cjs"); }',
+  };
+  const exercised = new Set<string>();
+  for (const [name, body] of Object.entries(bases)) {
+    await expect(
+      assertPackedRuntimeImports(
+        fixture({
+          "entry.cjs": `const {createRequire: factory} = require("node:module"); ${body}`,
+          "helper.cjs": "module.exports = 1;",
+        }).options,
+      ),
+    ).rejects.toThrow("Unresolvable dynamic loader");
+    exercised.add(name);
+  }
+  expect(exercised).toEqual(new Set(Object.keys(bases)));
+  await expect(
+    assertPackedRuntimeImports(
+      fixture(
+        {
+          "entry.mjs":
+            'import {createRequire as factory} from "node:module"; const __filename = "file:///consumer-owned.mjs"; const loader = factory(__filename); loader("./helper.cjs");',
+          "helper.cjs": "module.exports = 1;",
+        },
+        { type: "module" },
+      ).options,
+    ),
+  ).rejects.toThrow("Unresolvable dynamic loader");
 });

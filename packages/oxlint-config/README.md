@@ -470,9 +470,10 @@ literal import closure within the packed package and compares the archive's
 manifest with its declared public workspace package's committed contract and
 resolved build target. The command never packs
 or executes the archive, accepts exactly one archive, and cannot combine
-`--artifact` with `--write`. Unknown or private package artifacts fail. Computed
-`import()` specifiers and bare external package dependencies are outside this local
-archive check. The reader follows literal ESM imports/re-exports, CommonJS
+`--artifact` with `--write`. Unknown or private package artifacts fail. Bare external
+package dependencies are outside this local archive check. Dynamic imports require
+literal specifiers; computed values cannot exclude the module loader namespace.
+The reader follows literal ESM imports/re-exports, CommonJS
 require/resolve calls and named, destructured or namespace `createRequire` bindings based on
 `import.meta.url` or `__filename`. Asset references must be regular packed files;
 non-JavaScript ESM assets are not parsed as scripts. Recursive import mappings
@@ -489,6 +490,11 @@ In CommonJS scopes, declarations, parameters and assignments that shadow wrapper
 loader names or inherited loader aliases must resolve to a recognized static
 binding. Unknown bindings fail closed; uninitialized wrapper `var` declarations
 retain the existing loader binding.
+Imports from `node:module` or `module` must declare recognized factory or namespace
+bindings, including string-named `createRequire` imports. Unsupported named imports,
+side-effect imports, re-exports and dynamic namespace imports fail closed. Derived
+aliases retain this policy in ESM scopes. A `__filename` factory base must resolve
+to the unshadowed CommonJS wrapper binding; ESM factories use `import.meta.url`.
 
 The consumer policy pins Node 22.23.3, npm 12.2.0, pnpm 12.9.1, and TypeScript
 6.0.3 independently of the development toolchain. Published engines and TypeScript
