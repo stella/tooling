@@ -147,6 +147,14 @@ const staticImports = (
   };
   const unresolvable = (description: string) =>
     new Error(`Unresolvable dynamic loader: ${description}`);
+  const loaderName = (name: string, scopes: readonly Scope[]) => {
+    const previous = binding(scopes, name);
+    return (
+      mode === "script" &&
+      (["require", "module", "createRequire"].includes(name) ||
+        (previous !== undefined && previous !== "other"))
+    );
+  };
   const loaderValue = (value: unknown, scopes: readonly Scope[]): boolean => {
     if (!record(value)) return false;
     const kind = loaderBinding(value, scopes);
@@ -184,7 +192,11 @@ const staticImports = (
       const local: Scope = new Map();
       const bind = (pattern: unknown) => {
         allowPattern(pattern);
-        for (const name of patternNames(pattern)) local.set(name, "other");
+        for (const name of patternNames(pattern)) {
+          if (loaderName(name, scopes))
+            throw unresolvable(`unsupported loader binding: ${name}`);
+          local.set(name, "other");
+        }
       };
       const bindVariable = (
         entry: Record<string, unknown>,
@@ -379,6 +391,22 @@ const staticImports = (
       }
       for (const entry of declarations) {
         const initial = entry["init"];
+        for (const name of patternNames(entry["id"])) {
+          if (loaderName(name, scopes) && binding(nested, name) === "other")
+            throw unresolvable(`unknown loader declaration: ${name}`);
+          const resolved = binding(nested, name);
+          const source = loaderBinding(initial, nested);
+          if (
+            initial !== null &&
+            resolved !== undefined &&
+            resolved !== "other" &&
+            (source === undefined || source === "other") &&
+            (!record(initial) ||
+              (!resolvedFactories.has(initial) &&
+                !resolvedNamespaces.has(initial)))
+          )
+            throw unresolvable(`unknown loader initializer: ${name}`);
+        }
         if (
           loaderBinding(initial, nested) === undefined &&
           loaderValue(initial, nested)
@@ -459,6 +487,11 @@ const staticImports = (
       for (const name of patternNames(node["left"])) {
         const previous = binding(scopes, name);
         if (
+          loaderName(name, scopes) &&
+          (previous === undefined || previous === "other")
+        )
+          throw unresolvable(`unknown loader assignment: ${name}`);
+        if (
           previous !== undefined &&
           previous !== "other" &&
           (node["operator"] !== "=" ||
@@ -484,6 +517,15 @@ const staticImports = (
           parent["key"] === node &&
           parent["value"] !== node));
     const reference = loaderBinding(node, scopes);
+    const name = identifier(node);
+    if (
+      name !== undefined &&
+      loaderName(name, scopes) &&
+      (reference === undefined || reference === "other") &&
+      !nonReference &&
+      !allowedLoaderReferences.has(node)
+    )
+      throw unresolvable(`unknown loader reference: ${name}`);
     const moduleExports =
       reference === "module" &&
       parent?.["type"] === "MemberExpression" &&

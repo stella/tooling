@@ -485,6 +485,10 @@ calls; inline module factories and unsupported namespace references fail closed.
 Known loader calls require one literal specifier. Unresolved loader aliases,
 computed bases, unsupported propagation and conflicting bindings report an
 `Unresolvable dynamic loader` diagnostic instead of omitting dependencies.
+In CommonJS scopes, declarations, parameters and assignments that shadow wrapper
+loader names or inherited loader aliases must resolve to a recognized static
+binding. Unknown bindings fail closed; uninitialized wrapper `var` declarations
+retain the existing loader binding.
 
 The consumer policy pins Node 22.23.3, npm 12.2.0, pnpm 12.9.1, and TypeScript
 6.0.3 independently of the development toolchain. Published engines and TypeScript

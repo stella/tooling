@@ -224,7 +224,7 @@ test("declaration extensions and type-only export conditions are not runtime mod
     expect(packed.reads).not.toContain(`package/${path}`);
 });
 
-test("shadowed CommonJS require identifiers do not manufacture dependencies", async () => {
+test("ambiguous CommonJS shadows fail closed while ESM custom shadows remain external", async () => {
   for (const source of [
     'function use(require) { return require("./absent.cjs"); }',
     'const use = require => require.resolve("./absent.cjs");',
@@ -233,14 +233,19 @@ test("shadowed CommonJS require identifiers do not manufacture dependencies", as
     'try {} catch (require) { require("./absent.cjs"); }',
     '{ const require = () => 1; require("./absent.cjs"); }',
   ]) {
-    await assertPackedRuntimeImports(fixture({ "entry.cjs": source }).options);
+    await expect(
+      assertPackedRuntimeImports(fixture({ "entry.cjs": source }).options),
+    ).rejects.toThrow("Unresolvable dynamic loader");
+    await assertPackedRuntimeImports(
+      fixture({ "entry.mjs": source }, { type: "module" }).options,
+    );
   }
   const outside = fixture({
     "entry.cjs":
       'function use(require) { require("./shadowed.cjs"); } require("./actual.cjs");',
   });
   await expect(assertPackedRuntimeImports(outside.options)).rejects.toThrow(
-    "actual.cjs",
+    "Unresolvable dynamic loader",
   );
 });
 
@@ -485,12 +490,14 @@ test("unshadowed module require properties preserve static local dependencies", 
       "helper",
     );
   }
-  await assertPackedRuntimeImports(
-    fixture({
-      "entry.cjs":
-        'function use(module) { module.require("./not-local.cjs"); }',
-    }).options,
-  );
+  await expect(
+    assertPackedRuntimeImports(
+      fixture({
+        "entry.cjs":
+          'function use(module) { module.require("./not-local.cjs"); }',
+      }).options,
+    ),
+  ).rejects.toThrow("Unresolvable dynamic loader");
 });
 
 test("legacy main resolution and exported URLs follow their distinct path rules", async () => {
@@ -534,12 +541,14 @@ test("computed literal require.resolve methods retain static local targets", asy
       "helper",
     );
   }
-  await assertPackedRuntimeImports(
-    fixture({
-      "entry.cjs":
-        'function use(require) { require["resolve"]("./not-local.cjs"); }',
-    }).options,
-  );
+  await expect(
+    assertPackedRuntimeImports(
+      fixture({
+        "entry.cjs":
+          'function use(require) { require["resolve"]("./not-local.cjs"); }',
+      }).options,
+    ),
+  ).rejects.toThrow("Unresolvable dynamic loader");
 });
 
 test("uninitialized CommonJS var redeclarations retain wrapper loader bindings", async () => {
@@ -559,12 +568,14 @@ test("uninitialized CommonJS var redeclarations retain wrapper loader bindings",
       "helper",
     );
   }
-  await assertPackedRuntimeImports(
-    fixture({
-      "entry.cjs":
-        'function use(require) { var require; require("./not-local.cjs"); }',
-    }).options,
-  );
+  await expect(
+    assertPackedRuntimeImports(
+      fixture({
+        "entry.cjs":
+          'function use(require) { var require; require("./not-local.cjs"); }',
+      }).options,
+    ),
+  ).rejects.toThrow("Unresolvable dynamic loader");
 });
 
 test("CommonJS package-import mappings use exact URL resolution without extension fallback", async () => {
@@ -830,13 +841,20 @@ test("unsupported loader destructuring and resolution options fail explicitly", 
 });
 
 test("external literal loader calls, custom shadows and computed import expressions retain their boundaries", async () => {
+  await assertPackedRuntimeImports(
+    fixture({
+      "entry.cjs":
+        'require("node:fs"); require.resolve("external-package"); module.require("@scope/dependency");',
+    }).options,
+  );
   for (const source of [
-    'require("node:fs"); require.resolve("external-package"); module.require("@scope/dependency");',
     "function use(require, target) { require(target); require.resolve(target); }",
     "function use(module, target) { module.require(target); }",
     'function createRequire(base) { return target => target; } const loader = createRequire("custom"); loader(target);',
   ])
-    await assertPackedRuntimeImports(fixture({ "entry.cjs": source }).options);
+    await assertPackedRuntimeImports(
+      fixture({ "entry.mjs": source }, { type: "module" }).options,
+    );
   await assertPackedRuntimeImports(
     fixture(
       {
@@ -976,6 +994,32 @@ test("inline module factories and unsupported namespace references fail closed",
     await expect(
       assertPackedRuntimeImports(
         fixture({ [entry]: source, "helper.cjs": "module.exports = 1;" })
+          .options,
+      ),
+    ).rejects.toThrow("Unresolvable dynamic loader");
+});
+
+test("ambiguous CommonJS wrapper and inherited loader bindings fail closed", async () => {
+  for (const source of [
+    "void createRequire;",
+    "consume(createRequire);",
+    'var require = require; require("./helper.cjs");',
+    'require("./helper.cjs"); var require = custom;',
+    'require("./helper.cjs"); var require = require;',
+    'var require; require("./helper.cjs"); var require = custom;',
+    'var loader = require; var loader = custom; loader("./helper.cjs");',
+    'function use(require) { require("./helper.cjs"); }',
+    'function use(module) { module.require("./helper.cjs"); }',
+    'function use(createRequire) { createRequire(__filename)("./helper.cjs"); }',
+    'let {createRequire} = module; createRequire(__filename)("./helper.cjs");',
+    'const loader = require; function use(loader) { loader("./helper.cjs"); }',
+    'const loader = require; const use = ({loader}) => loader("./helper.cjs");',
+    'const loader = require; function use({custom: loader}) { loader("./helper.cjs"); }',
+    'const loader = require; function use() { const {loader} = custom; loader("./helper.cjs"); }',
+  ])
+    await expect(
+      assertPackedRuntimeImports(
+        fixture({ "entry.cjs": source, "helper.cjs": "module.exports = 1;" })
           .options,
       ),
     ).rejects.toThrow("Unresolvable dynamic loader");
