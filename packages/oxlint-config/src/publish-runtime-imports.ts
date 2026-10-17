@@ -128,6 +128,23 @@ const staticImports = (
 ): StaticImport[] => {
   const result: StaticImport[] = [];
   const resolvedFactories = new Set<Record<string, unknown>>();
+  const resolvedNamespaces = new Set<Record<string, unknown>>();
+  const allowedLoaderReferences = new Set<Record<string, unknown>>();
+  const allowReference = (value: unknown) => {
+    for (const node of nodes(value)) {
+      allowedLoaderReferences.add(node);
+      for (const child of children(node)) allowReference(child);
+    }
+  };
+  const allowPattern = (value: unknown) => {
+    if (!record(value)) return;
+    if (value["type"] === "Identifier") allowedLoaderReferences.add(value);
+    else if (value["type"] === "Property") allowPattern(value["value"]);
+    else if (value["type"] === "AssignmentPattern") allowPattern(value["left"]);
+    else if (value["type"] === "RestElement") allowPattern(value["argument"]);
+    else if (["ObjectPattern", "ArrayPattern"].includes(String(value["type"])))
+      for (const child of children(value)) allowPattern(child);
+  };
   const unresolvable = (description: string) =>
     new Error(`Unresolvable dynamic loader: ${description}`);
   const loaderValue = (value: unknown, scopes: readonly Scope[]): boolean => {
@@ -149,7 +166,11 @@ const staticImports = (
       return loaderValue(value["value"], scopes);
     return children(value).some((child) => loaderValue(child, scopes));
   };
-  const walk = (node: Record<string, unknown>, scopes: readonly Scope[]) => {
+  const walk = (
+    node: Record<string, unknown>,
+    scopes: readonly Scope[],
+    parent?: Record<string, unknown>,
+  ) => {
     const kind = node["type"];
     if (
       kind === "Program" ||
@@ -162,6 +183,7 @@ const staticImports = (
     ) {
       const local: Scope = new Map();
       const bind = (pattern: unknown) => {
+        allowPattern(pattern);
         for (const name of patternNames(pattern)) local.set(name, "other");
       };
       const bindVariable = (
@@ -174,6 +196,7 @@ const staticImports = (
           node !== root
         )
           return;
+        allowPattern(entry["id"]);
         for (const name of patternNames(entry["id"])) {
           // An uninitialized var redeclares, but does not replace, a CJS parameter.
           if (
@@ -216,6 +239,7 @@ const staticImports = (
         )
           bind(statement["id"]);
         else if (statement["type"] === "ImportDeclaration") {
+          allowReference(statement["specifiers"]);
           for (const specifier of nodes(statement["specifiers"])) {
             const name = identifier(specifier["local"]);
             if (name === undefined) continue;
@@ -319,6 +343,8 @@ const staticImports = (
               "loader destructuring cannot be resolved statically",
             );
           }
+          if (nodeModule) resolvedNamespaces.add(initial);
+          if (alias !== undefined && alias !== "other") allowReference(initial);
           if (name === undefined) continue;
           if (alias !== undefined && alias !== "other") assign(name, alias);
           if (nodeModule) assign(name, "module-api");
@@ -361,7 +387,7 @@ const staticImports = (
             "binding initializer cannot be resolved statically",
           );
       }
-      for (const child of children(node)) walk(child, nested);
+      for (const child of children(node)) walk(child, nested, node);
       return;
     }
     if (
@@ -371,6 +397,7 @@ const staticImports = (
     ) {
       const specifier = literal(node["source"]);
       if (specifier !== undefined) result.push({ specifier, mode: "import" });
+      if (kind === "ExportNamedDeclaration") allowReference(node["specifiers"]);
     }
     if (kind === "ImportExpression") {
       const specifier = literal(node["source"]);
@@ -385,12 +412,23 @@ const staticImports = (
           throw unresolvable(
             "require/resolve needs one literal module specifier",
           );
+        allowReference(callee);
+        if (
+          ["node:module", "module"].includes(specifier) &&
+          !resolvedNamespaces.has(node)
+        )
+          throw unresolvable(
+            "module namespace needs a resolvable local binding",
+          );
         result.push({ specifier, mode: "require" });
       }
-      if (resolved === "factory" && !resolvedFactories.has(node))
-        throw unresolvable(
-          "createRequire result needs a resolvable local binding",
-        );
+      if (resolved === "factory") {
+        if (!resolvedFactories.has(node))
+          throw unresolvable(
+            "createRequire result needs a resolvable local binding",
+          );
+        allowReference(callee);
+      }
       if (
         record(callee) &&
         callee["type"] === "MemberExpression" &&
@@ -433,7 +471,33 @@ const staticImports = (
     }
     if (kind === "ReturnStatement" && loaderValue(node["argument"], scopes))
       throw unresolvable("loader returned through an unsupported function");
-    for (const child of children(node)) walk(child, scopes);
+    // Only the recognized static forms grant permission to reference a loader.
+    const nonReference =
+      parent !== undefined &&
+      ((parent["type"] === "MemberExpression" &&
+        parent["computed"] === false &&
+        parent["property"] === node) ||
+        (["Property", "MethodDefinition", "PropertyDefinition"].includes(
+          String(parent["type"]),
+        ) &&
+          parent["computed"] === false &&
+          parent["key"] === node &&
+          parent["value"] !== node));
+    const reference = loaderBinding(node, scopes);
+    const moduleExports =
+      reference === "module" &&
+      parent?.["type"] === "MemberExpression" &&
+      parent["object"] === node &&
+      memberName(parent) === "exports";
+    if (
+      reference !== undefined &&
+      reference !== "other" &&
+      !moduleExports &&
+      !nonReference &&
+      !allowedLoaderReferences.has(node)
+    )
+      throw unresolvable("loader reference is not a recognized static form");
+    for (const child of children(node)) walk(child, scopes, node);
   };
   const root = nodes(tree).at(0);
   if (root !== undefined)
@@ -691,15 +755,19 @@ export const assertPackedRuntimeImports = async ({
       );
     return [resolved];
   };
-  const visited = new Set<string>();
+  const validated = new Set<string>();
+  const traversed = new Set<string>();
   while (pending.length > 0) {
     const file = pending.pop();
-    if (file === undefined || visited.has(file)) continue;
-    visited.add(file);
-    if (!members.has(file))
-      throw new Error(`Missing packed runtime file: ${file}`);
-    await assertRegular(file);
-    if (!scripts.has(file)) continue;
+    if (file === undefined) continue;
+    if (!validated.has(file)) {
+      if (!members.has(file))
+        throw new Error(`Missing packed runtime file: ${file}`);
+      await assertRegular(file);
+      validated.add(file);
+    }
+    if (!scripts.has(file) || traversed.has(file)) continue;
+    traversed.add(file);
     const source = await read(file);
     const mode = /\.mjs$/iu.test(file)
       ? "module"

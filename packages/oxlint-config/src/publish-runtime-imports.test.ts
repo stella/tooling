@@ -912,3 +912,71 @@ test("default-exported unbound createRequire results fail explicitly", async () 
     "Unresolvable dynamic loader",
   );
 });
+
+test("an ESM asset is still traversed as CommonJS in either archive order", async () => {
+  const entries = {
+    "asset-entry.mjs": 'import "./shared.payload";',
+    "require-entry.cjs": 'require("./shared.payload");',
+    "shared.payload": 'require("./helper.cjs");',
+    "helper.cjs": "module.exports = 1;",
+  };
+  for (const ordered of [
+    Object.entries(entries),
+    Object.entries(entries).toReversed(),
+  ]) {
+    const packed = fixture(Object.fromEntries(ordered));
+    await assertPackedRuntimeImports(packed.options);
+    expect(packed.reads).toContain("package/shared.payload");
+    packed.members.delete("package/helper.cjs");
+    await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
+      "helper.cjs",
+    );
+  }
+});
+
+test("inline module factories and unsupported namespace references fail closed", async () => {
+  for (const [entry, source] of [
+    ["entry.cjs", "void require;"],
+    ["entry.cjs", "typeof require;"],
+    ["entry.cjs", "function run(loader = require) {}"],
+    ["entry.cjs", "const holder = [require];"],
+    [
+      "entry.cjs",
+      'const loader = require("node:module").createRequire(__filename); loader("./helper.cjs");',
+    ],
+    [
+      "entry.cjs",
+      'require("node:module").createRequire(__filename)("./helper.cjs");',
+    ],
+    [
+      "entry.mjs",
+      'import * as moduleApi from "node:module"; const factory = moduleApi[field]; const loader = factory(import.meta.url); loader("./helper.cjs");',
+    ],
+    [
+      "entry.mjs",
+      'import * as moduleApi from "node:module"; const factory = moduleApi.unknownFactory; const loader = factory(import.meta.url); loader("./helper.cjs");',
+    ],
+    [
+      "entry.mjs",
+      'import * as moduleApi from "node:module"; consume(moduleApi);',
+    ],
+    [
+      "entry.mjs",
+      'import * as moduleApi from "node:module"; const holder = {moduleApi}; holder.moduleApi.createRequire(import.meta.url)("./helper.cjs");',
+    ],
+    [
+      "entry.mjs",
+      'import * as moduleApi from "node:module"; let factory; ({createRequire: factory} = moduleApi); const loader = factory(import.meta.url); loader("./helper.cjs");',
+    ],
+    [
+      "entry.mjs",
+      'import * as moduleApi from "node:module"; const {createRequire: {call: factory}} = moduleApi; factory(null, import.meta.url);',
+    ],
+  ] as const)
+    await expect(
+      assertPackedRuntimeImports(
+        fixture({ [entry]: source, "helper.cjs": "module.exports = 1;" })
+          .options,
+      ),
+    ).rejects.toThrow("Unresolvable dynamic loader");
+});

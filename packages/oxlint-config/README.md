@@ -477,7 +477,11 @@ require/resolve calls and named, destructured or namespace `createRequire` bindi
 `import.meta.url` or `__filename`. Asset references must be regular packed files;
 non-JavaScript ESM assets are not parsed as scripts. Recursive import mappings
 are rejected, including expanding wildcard aliases.
+Regular-file validation and script traversal are tracked separately: an asset
+later reached through CommonJS is parsed regardless of archive member order.
 Exported declarations use the same scope collection as ordinary declarations.
+Loader references are allowed only within recognized static declarations and
+calls; inline module factories and unsupported namespace references fail closed.
 Known loader calls require one literal specifier. Unresolved loader aliases,
 computed bases, unsupported propagation and conflicting bindings report an
 `Unresolvable dynamic loader` diagnostic instead of omitting dependencies.
