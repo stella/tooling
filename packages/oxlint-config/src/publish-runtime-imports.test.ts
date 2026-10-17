@@ -677,7 +677,7 @@ test("ESM asset targets are required packed members without being parsed as Java
   }
 });
 
-test("exported createRequire loader declarations retain their static local closure", async () => {
+test("exported createRequire loader declarations fail closed at the module boundary", async () => {
   for (const source of [
     'import { createRequire } from "node:module"; export const loader = createRequire(import.meta.url); loader("./helper.cjs");',
     'import { createRequire as factory } from "node:module"; export const loader = factory(import.meta.url); export const alias = loader; alias.resolve("./helper.cjs");',
@@ -688,16 +688,15 @@ test("exported createRequire loader declarations retain their static local closu
       { "entry.mjs": source, "helper.cjs": "module.exports = 1;" },
       { type: "module" },
     );
-    await assertPackedRuntimeImports(packed.options);
-    packed.members.delete("package/helper.cjs");
     await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
-      "helper.cjs",
+      "unsupported loader propagation",
     );
   }
 });
 
 test("exported named function and class declarations establish their normal scopes", async () => {
   for (const source of [
+    'import {createRequire} from "node:module"; const value = 1; export {value as createRequire}; export {createRequire as factory} from "external-package";',
     'export default function require() { return 1; } require("./not-local.cjs");',
     'export default class require { static resolve() { return 1; } } require.resolve("./not-local.cjs");',
     'export function require(target) { return target; } require("./not-local.cjs");',
@@ -779,7 +778,7 @@ test("namespace createRequire factories and plain namespace aliases retain local
   for (const [entry, source] of [
     [
       "entry.mjs",
-      'import * as moduleApi from "node:module"; export const loader = moduleApi.createRequire(import.meta.url); loader("./helper.cjs");',
+      'import * as moduleApi from "node:module"; const loader = moduleApi.createRequire(import.meta.url); loader("./helper.cjs");',
     ],
     [
       "entry.mjs",
@@ -795,7 +794,7 @@ test("namespace createRequire factories and plain namespace aliases retain local
     ],
     [
       "entry.mjs",
-      'import * as moduleApi from "node:module"; export const {["createRequire"]: factory} = moduleApi; const loader = factory(import.meta.url); loader("./helper.cjs");',
+      'import * as moduleApi from "node:module"; const {["createRequire"]: factory} = moduleApi; const loader = factory(import.meta.url); loader("./helper.cjs");',
     ],
     [
       "entry.mjs",
@@ -1262,4 +1261,85 @@ test("Node-selected external import mappings remain external dependencies", asyn
       ).options,
     );
   }
+});
+
+test("exported classified loader kinds cannot escape through ESM or CommonJS exports", async () => {
+  const exports = {
+    esmNamedFactory: [
+      "entry.mjs",
+      'import {createRequire as factory} from "node:module"; export {factory};',
+    ],
+    esmDefaultFactory: [
+      "entry.mjs",
+      'import {createRequire as factory} from "node:module"; export default factory;',
+    ],
+    esmNamespace: [
+      "entry.mjs",
+      'import * as moduleApi from "node:module"; export {moduleApi};',
+    ],
+    esmNamespaceAlias: [
+      "entry.mjs",
+      'import * as moduleApi from "node:module"; const alias = moduleApi; export default alias;',
+    ],
+    esmFactoryResult: [
+      "entry.mjs",
+      'import {createRequire} from "node:module"; const loader = createRequire(import.meta.url); export default loader;',
+    ],
+    esmLoaderAlias: [
+      "entry.mjs",
+      'import {createRequire} from "node:module"; const loader = createRequire(import.meta.url); const alias = loader; export {alias};',
+    ],
+    esmReexport: [
+      "entry.mjs",
+      'export {createRequire as factory} from "node:module";',
+    ],
+    cjsRequire: ["entry.cjs", "module.exports = require;"],
+    cjsNamedRequire: ["entry.cjs", "exports.loader = require;"],
+    cjsComputedRequire: ["entry.cjs", 'module["exports"]["loader"] = require;'],
+    cjsAlias: ["entry.cjs", "const loader = require; exports.loader = loader;"],
+    cjsFactory: [
+      "entry.cjs",
+      'const {createRequire: factory} = require("node:module"); module.exports = factory;',
+    ],
+    cjsFactoryResult: [
+      "entry.cjs",
+      'const {createRequire: factory} = require("node:module"); const loader = factory(__filename); exports.loader = loader;',
+    ],
+    cjsNamespace: [
+      "entry.cjs",
+      'const moduleApi = require("node:module"); module.exports = moduleApi;',
+    ],
+    cjsNamespaceAlias: [
+      "entry.cjs",
+      'const moduleApi = require("node:module"); const alias = moduleApi; exports.api = alias;',
+    ],
+  } as const;
+  const exercised = new Set<string>();
+  for (const [name, [entry, source]] of Object.entries(exports)) {
+    await expect(
+      assertPackedRuntimeImports(fixture({ [entry]: source }).options),
+    ).rejects.toThrow("unsupported loader propagation");
+    exercised.add(name);
+  }
+  expect(exercised).toEqual(new Set(Object.keys(exports)));
+});
+
+test("a second module cannot invoke an exported loader outside its declaring module analysis", async () => {
+  const callers = {
+    esm: {
+      "entry.mjs":
+        'import {loader} from "./loader.mjs"; const target = "./missing.cjs"; loader(target);',
+      "loader.mjs":
+        'import {createRequire} from "node:module"; export const loader = createRequire(import.meta.url);',
+    },
+    cjs: {
+      "entry.cjs":
+        'const loader = require("./loader.cjs"); const target = "./missing.cjs"; loader(target);',
+      "loader.cjs": "module.exports = require;",
+    },
+  };
+  for (const entries of Object.values(callers))
+    await expect(
+      assertPackedRuntimeImports(fixture(entries).options),
+    ).rejects.toThrow("unsupported loader propagation");
 });

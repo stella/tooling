@@ -188,6 +188,38 @@ const staticImports = (
       return loaderValue(value["value"], scopes);
     return children(value).some((child) => loaderValue(child, scopes));
   };
+  const exportedLoader = (
+    value: unknown,
+    scopes: readonly Scope[],
+  ): boolean => {
+    if (!record(value) || functionNode(value)) return false;
+    if (loaderValue(value, scopes)) return true;
+    if (value["type"] === "CallExpression") {
+      const callee = loaderBinding(value["callee"], scopes);
+      return (
+        callee === "factory" ||
+        (callee === "require" &&
+          ["node:module", "module"].includes(
+            literal(nodes(value["arguments"]).at(0)) ?? "",
+          ))
+      );
+    }
+    if (value["type"] === "Property")
+      return exportedLoader(value["value"], scopes);
+    if (
+      [
+        "ObjectExpression",
+        "ArrayExpression",
+        "ConditionalExpression",
+        "LogicalExpression",
+        "SequenceExpression",
+      ].includes(String(value["type"]))
+    )
+      return children(value).some((child) => exportedLoader(child, scopes));
+    return false;
+  };
+  const unsupportedPropagation = () =>
+    unresolvable("unsupported loader propagation across module exports");
   const walk = (
     node: Record<string, unknown>,
     scopes: readonly Scope[],
@@ -449,6 +481,36 @@ const staticImports = (
       return;
     }
     if (
+      kind === "ExportDefaultDeclaration" &&
+      exportedLoader(node["declaration"], scopes)
+    )
+      throw unsupportedPropagation();
+    if (kind === "ExportNamedDeclaration") {
+      const declaration = node["declaration"];
+      if (record(declaration) && declaration["type"] === "VariableDeclaration")
+        for (const entry of nodes(declaration["declarations"])) {
+          if (
+            patternNames(entry["id"]).some((name) => {
+              const resolved = binding(scopes, name);
+              return (
+                resolved !== undefined &&
+                resolved !== "other" &&
+                resolved !== "filename"
+              );
+            }) ||
+            exportedLoader(entry["init"], scopes)
+          )
+            throw unsupportedPropagation();
+        }
+      if (literal(node["source"]) === undefined)
+        for (const specifier of nodes(node["specifiers"]))
+          if (exportedLoader(specifier["local"], scopes))
+            throw unsupportedPropagation();
+      // Exported names and source re-export names are not lexical references.
+      // All actual local bindings were checked before granting this permission.
+      allowReference(node["specifiers"]);
+    }
+    if (
       kind === "ImportDeclaration" ||
       kind === "ExportNamedDeclaration" ||
       kind === "ExportAllDeclaration"
@@ -458,11 +520,8 @@ const staticImports = (
         kind !== "ImportDeclaration" &&
         ["node:module", "module"].includes(specifier ?? "")
       )
-        throw unresolvable(
-          "module re-export is not a recognized static binding",
-        );
+        throw unsupportedPropagation();
       if (specifier !== undefined) result.push({ specifier, mode: "import" });
-      if (kind === "ExportNamedDeclaration") allowReference(node["specifiers"]);
     }
     if (kind === "ImportExpression") {
       const specifier = literal(node["source"]);
@@ -519,12 +578,12 @@ const staticImports = (
     if (kind === "AssignmentExpression") {
       const assigned = loaderBinding(node["right"], scopes);
       if (
-        loaderValue(node["right"], scopes) &&
+        exportedLoader(node["right"], scopes) &&
         (node["operator"] !== "=" ||
           loaderBinding(node["left"], scopes) !== assigned ||
           assigned === undefined)
       )
-        throw unresolvable("loader assignment cannot be resolved statically");
+        throw unsupportedPropagation();
       for (const name of patternNames(node["left"])) {
         const previous = binding(scopes, name);
         if (

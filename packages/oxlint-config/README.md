@@ -503,6 +503,11 @@ bindings, including string-named `createRequire` imports. Unsupported named impo
 side-effect imports, re-exports and dynamic namespace imports fail closed. Derived
 aliases retain this policy in ESM scopes. A `__filename` factory base must resolve
 to the unshadowed CommonJS wrapper binding; ESM factories use `import.meta.url`.
+Loader bindings, factory results, module namespaces and their aliases cannot be
+exported through ESM declarations/defaults/re-exports or CommonJS exports. They
+produce an `unsupported loader propagation` diagnostic; analysis does not infer
+loader behavior across module boundaries. Ordinary exported functions may still
+make recognized static local loader calls.
 
 The consumer policy pins Node 22.23.3, npm 12.2.0, pnpm 12.9.1, and TypeScript
 6.0.3 independently of the development toolchain. Published engines and TypeScript
