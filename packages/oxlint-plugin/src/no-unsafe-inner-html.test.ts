@@ -181,8 +181,19 @@ const getRule = () => {
   return rule;
 };
 
+const flushProgram = (visitor: object, program: ESTree.Program): void => {
+  const onProgramExit = Reflect.get(visitor, "Program:exit");
+  if (typeof onProgramExit !== "function") {
+    throw new Error("expected a Program:exit visitor");
+  }
+  onProgramExit(program);
+};
+
 // el.innerHTML = sanitizeHtml(); with the same parent links Oxlint supplies.
-const sanitizerAssignment = (): ESTree.AssignmentExpression => {
+const sanitizerAssignment = (): {
+  assignment: ESTree.AssignmentExpression;
+  program: ESTree.Program;
+} => {
   const left: ESTree.StaticMemberExpression = {
     ...nodeSpan(0, 12),
     type: "MemberExpression",
@@ -252,7 +263,7 @@ const sanitizerAssignment = (): ESTree.AssignmentExpression => {
     tokens: [],
     parent: null,
   };
-  return assignment;
+  return { assignment, program };
 };
 
 const runCallVisitor = (node: ESTree.CallExpression): unknown[] => {
@@ -287,6 +298,7 @@ const runCallVisitor = (node: ESTree.CallExpression): unknown[] => {
     throw new Error("expected a CallExpression visitor");
   }
   onCall(node);
+  flushProgram(visitor, program);
   return diagnostics;
 };
 
@@ -327,7 +339,7 @@ test("sanitizer policy follows options set before each file", () => {
   // createOnce runs once with options still null; the compat wrapper supplies
   // the current file's options immediately before calling `before`.
   const visitor = rule.createOnce(context);
-  const assignment = sanitizerAssignment();
+  const { assignment, program } = sanitizerAssignment();
   const onAssignment = Reflect.get(visitor, "AssignmentExpression");
   if (typeof onAssignment !== "function") {
     throw new Error("expected an AssignmentExpression visitor");
@@ -336,16 +348,19 @@ test("sanitizer policy follows options set before each file", () => {
   context.options = [];
   visitor.before?.();
   onAssignment(assignment);
+  flushProgram(visitor, program);
   expect(diagnostics).toHaveLength(0);
 
   context.options = [{ sanitizerPolicy: "provenance" }];
   visitor.before?.();
   onAssignment(assignment);
+  flushProgram(visitor, program);
   expect(diagnostics).toHaveLength(1);
 
   context.options = [{ sanitizerPolicy: "allowlist" }];
   visitor.before?.();
   onAssignment(assignment);
+  flushProgram(visitor, program);
   expect(diagnostics).toHaveLength(1);
 });
 

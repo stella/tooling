@@ -443,6 +443,22 @@ export const UnsafeSecondSinkOnWaivedLine = (frame: HTMLIFrameElement) => {
   Object.assign(frame, { innerHTML: rawHtml, srcdoc: rawHtml }); // oxlint-disable-line no-unsafe-inner-html/no-unsafe-inner-html -- one marker covers one sink
 };
 
+export const SafeThenUnsafeSameLine = (element: HTMLElement) => {
+  // safe-html: fixture waiver is consumed by the first, statically safe assignment
+  element.innerHTML = ""; element.outerHTML = rawHtml; // oxlint-disable-line no-unsafe-inner-html/no-unsafe-inner-html -- the safe first sink cannot transfer its waiver
+};
+
+export const UnsafeThenSafeSameLine = (element: HTMLElement) => {
+  // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
+  // safe-html: fixture waiver applies to the first assignment only
+  element.innerHTML = rawHtml; element.outerHTML = "";
+};
+
+export const TwoUnsafeSameLine = (element: HTMLElement) => {
+  // safe-html: fixture waiver applies to the first assignment only
+  element.innerHTML = rawHtml; element.outerHTML = rawHtml; // oxlint-disable-line no-unsafe-inner-html/no-unsafe-inner-html -- second same-line sink is intentionally raw
+};
+
 // --- Cases the rule MUST NOT flag ---
 
 export const SafeSanitizedCallWithProvenance = () => (

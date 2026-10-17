@@ -473,9 +473,20 @@ export default eslintCompatPlugin({
         };
 
         let sanitizerPolicy: SanitizerPolicy = SANITIZER_POLICY.allowlist;
-        // Line of each waiver comment's end; a sink starting on the next line
-        // consumes it, so one comment covers exactly one sink.
+        // Associate waivers after visiting the file, so source position decides
+        // the first covered sink even when AST visitors inspect values out of order.
         const waiverLines = new Set<number>();
+        type SinkObservation = {
+          node: AstNode;
+          kind: "safe" | "unsafe" | "opaque-payload";
+        };
+        const sinks: SinkObservation[] = [];
+        const observeSink = (
+          node: unknown,
+          kind: SinkObservation["kind"],
+        ): void => {
+          if (isAstNode(node)) sinks.push({ node, kind });
+        };
 
         const consumeWaiver = (node: unknown): boolean => {
           const line = startLine(node) - 1;
@@ -487,13 +498,10 @@ export default eslintCompatPlugin({
         };
 
         const reportIfUnsafe = (node: unknown): void => {
-          if (!isAstNode(node) || isProvenSafeValue(node, sanitizerPolicy)) {
-            return;
-          }
-          if (consumeWaiver(node)) {
-            return;
-          }
-          context.report({ node, messageId: "unsafeInnerHtml" });
+          observeSink(
+            node,
+            isProvenSafeValue(node, sanitizerPolicy) ? "safe" : "unsafe",
+          );
         };
 
         // The value of a `dangerouslySetInnerHTML` prop: an inline object has
@@ -507,10 +515,7 @@ export default eslintCompatPlugin({
           }
           for (const property of objectProperties(expression)) {
             if (isOpaqueProperty(property)) {
-              context.report({
-                node: property,
-                messageId: "unsafeInnerHtmlSpread",
-              });
+              observeSink(property, "opaque-payload");
               continue;
             }
             if (
@@ -556,6 +561,22 @@ export default eslintCompatPlugin({
           before() {
             sanitizerPolicy = sanitizerPolicyFrom(context.options.at(0));
             waiverLines.clear();
+            sinks.length = 0;
+          },
+          "Program:exit"() {
+            sinks.sort((left, right) => left.node.range[0] - right.node.range[0]);
+            for (const { node, kind } of sinks) {
+              const waived = consumeWaiver(node);
+              if (kind === "safe" || (kind === "unsafe" && waived)) continue;
+              context.report({
+                node,
+                messageId:
+                  kind === "opaque-payload"
+                    ? "unsafeInnerHtmlSpread"
+                    : "unsafeInnerHtml",
+              });
+            }
+            sinks.length = 0;
           },
           Program(node) {
             const comments: unknown[] = Array.isArray(node.comments)
@@ -655,14 +676,14 @@ export default eslintCompatPlugin({
                 reportIfUnsafe(node);
                 return;
               }
-              if (
-                !invoked.args.every((argument) =>
+              observeSink(
+                node,
+                invoked.args.every((argument) =>
                   isProvenSafeValue(argument, sanitizerPolicy),
-                ) &&
-                !consumeWaiver(node)
-              ) {
-                context.report({ node, messageId: "unsafeInnerHtml" });
-              }
+                )
+                  ? "safe"
+                  : "unsafe",
+              );
               return;
             }
             if (isIdentifier(callee.object, "Object") && method === "assign") {

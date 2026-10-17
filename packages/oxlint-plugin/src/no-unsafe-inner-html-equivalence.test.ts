@@ -375,6 +375,7 @@ const producerCorpus = (): {
 } => {
   const lines = [
     'declare const payload: object;',
+    'declare const rawHtml: string;',
     'declare const config: Record<string, unknown>;',
     "",
   ];
@@ -421,6 +422,12 @@ const producerCorpus = (): {
       `Object.assign(${target}, payload);`,
     );
   }
+  lines.push(
+    "// safe-html: fixture waiver is consumed by the first, statically safe write",
+    'document.write(""); document.write(rawHtml); // oxlint-disable-line ' +
+      `${ruleId} -- second same-line document.write sink is intentionally opaque`,
+  );
+  invalidCount += 1;
   return {
     source: `${lines.join("\n")}\n`,
     invalidCount,
