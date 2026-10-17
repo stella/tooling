@@ -300,7 +300,11 @@ test("permitted named rules have reasoned opt-outs; mandatory and malformed choi
       ).toThrow("rust-version requires expiring");
       continue;
     }
-    if (rule === "node-engine" || rule === "cloud-setup-drift") {
+    if (
+      rule === "node-engine" ||
+      rule === "cloud-setup-drift" ||
+      rule === "type-aware-projects"
+    ) {
       expect(() =>
         parseToolchainConfiguration({
           optOuts: [{ rule, reason: "Explicit repository decision" }],

@@ -194,6 +194,16 @@ export const lintInventoryCommands = (
         continue;
       }
       if (
+        first === "bun" &&
+        words.length === 4 &&
+        words.at(1) === "--filter" &&
+        words.at(2) !== "" &&
+        !words.at(2)?.startsWith("-") &&
+        words.at(3) === "build" &&
+        raw.every(literalWord)
+      )
+        continue;
+      if (
         first !== undefined &&
         scriptManagers.has(first) &&
         words.at(1) === "run"

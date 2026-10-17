@@ -331,3 +331,37 @@ test("manager alias cycles and ambiguous invocations cannot silently omit a lint
     }
   }
 });
+
+test("literal filtered Bun builds prepare lint without becoming linter launchers", () => {
+  const build = ["oxlint-config", "oxlint-plugin", "time", "test-kit"]
+    .map((name) => `bun --filter @stll/${name} build`)
+    .join(" && ");
+  expect(
+    lintInventoryCommands(
+      manifest({
+        lint: "bun run build && bun --bun oxlint --type-aware .",
+        build,
+      }),
+    ),
+  ).toEqual({
+    enabled: true,
+    workspaceTask: false,
+    errors: [],
+    commands: [["."]],
+  });
+  for (const command of [
+    "bun --filter core lint",
+    'bun --filter "$WORKSPACE" build',
+    "bun --filter core build --future-option",
+    "bun --filter --unknown build",
+  ]) {
+    const result = lintInventoryCommands(
+      manifest({
+        lint: `oxlint . && ${command}`,
+        build,
+      }),
+    );
+    expect(result.errors.length, command).toBeGreaterThan(0);
+    expect(result.commands, command).toEqual([]);
+  }
+});
