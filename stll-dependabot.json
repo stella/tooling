@@ -1,0 +1,16 @@
+{
+  "updates": [
+    {
+      "ecosystem": "bun",
+      "directories": ["/"]
+    },
+    {
+      "ecosystem": "cargo",
+      "directories": ["/rust-lints/stella_source_lint"]
+    },
+    {
+      "ecosystem": "github-actions",
+      "directories": ["/"]
+    }
+  ]
+}

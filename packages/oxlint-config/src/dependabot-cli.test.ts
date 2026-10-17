@@ -123,6 +123,11 @@ test.skipIf(process.env["CI"] !== "true")(
       expect(await readFile(join(root, ".github/dependabot.yml"), "utf8")).toBe(
         expected,
       );
+      const checked = spawnSync("node", [built, "--check"], {
+        cwd: root,
+        encoding: "utf8",
+      });
+      expect(checked.status, checked.stderr).toBe(0);
     });
   },
 );
@@ -132,6 +137,7 @@ test("preserves the existing yaml spelling and rejects conflicting outputs", asy
     await mkdir(join(root, ".github"));
     await writeFile(join(root, ".github/dependabot.yaml"), "version: 2\n");
     expect(invoke(root).status).toBe(0);
+    expect(invoke(root, ["--check"]).status).toBe(0);
     await writeFile(join(root, ".github/dependabot.yml"), "sentinel\n");
     const result = invoke(root);
     expect(result.status).toBe(1);
@@ -158,6 +164,8 @@ test("recreates a deleted tracked output at its indexed spelling", async () => {
           files: readToolchainInputs(root).files,
           policy,
         });
+        expect(invoke(root, ["--check"]).status).toBe(1);
+        await assert.rejects(stat(output), { code: "ENOENT" });
         for (let attempt = 0; attempt < 2; attempt++) {
           const result = invoke(root);
           expect(result.status, result.stderr).toBe(0);
@@ -247,4 +255,129 @@ test("generated configuration never overwrites linked external targets", async (
       }
     });
   }
+});
+
+test("check mode reports absent or stale output without writing and accepts the generated fixed point", async () => {
+  await withRepository(async (root) => {
+    const output = join(root, ".github/dependabot.yml");
+    const absent = invoke(root, ["--check"]);
+    expect(absent.status).toBe(1);
+    expect(absent.stderr).toContain("has drifted");
+    await assert.rejects(stat(join(root, ".github")), { code: "ENOENT" });
+    expect(invoke(root).status).toBe(0);
+    const generated = await readFile(output, "utf8");
+    const before = await stat(output);
+    const checked = invoke(root, ["--check"]);
+    expect(checked.status, checked.stderr).toBe(0);
+    expect((await stat(output)).mtimeMs).toBe(before.mtimeMs);
+    await writeFile(output, `${generated}# stale\n`);
+    const stale = await stat(output);
+    expect(invoke(root, ["--check"]).status).toBe(1);
+    expect(await readFile(output, "utf8")).toBe(`${generated}# stale\n`);
+    expect((await stat(output)).mtimeMs).toBe(stale.mtimeMs);
+  });
+});
+
+test("explicit ecosystem declarations use shared policy and check the same generated output", async () => {
+  await withRepository(async (root) => {
+    const config = "updates.json";
+    await writeFile(
+      join(root, config),
+      JSON.stringify({
+        updates: [
+          { ecosystem: "bun", directories: ["/wasm", "/"] },
+          { ecosystem: "bundler", directories: ["/oracle"] },
+          { ecosystem: "composer", directories: ["/oracle"] },
+          { ecosystem: "terraform", directories: ["/infra"] },
+        ],
+      }),
+    );
+    const written = invoke(root, ["--config", config]);
+    expect(written.status, written.stderr).toBe(0);
+    const output = await readFile(join(root, ".github/dependabot.yml"), "utf8");
+    expect(output).toContain("package-ecosystem: terraform");
+    expect(output).toContain("/infra");
+    expect(output).toContain(`default-days: ${policy.cooldown.defaultDays}`);
+    expect(output).toContain("dependency-name: typescript");
+    expect(output).toContain("version-update:semver-major");
+    expect(invoke(root, ["--check", "--config", config]).status).toBe(0);
+    expect(invoke(root, ["--config", config, "--check"]).status).toBe(0);
+    expect(invoke(root, ["--check"]).status).toBe(1);
+    expect(await readFile(join(root, ".github/dependabot.yml"), "utf8")).toBe(
+      output,
+    );
+  });
+});
+
+test("declarations cannot omit detected coverage or override shared update policy", async () => {
+  const invalidInputs: unknown[] = [
+    {},
+    { updates: [] },
+    { updates: [{ ecosystem: "bun", directories: ["/"] }] },
+    { updates: [{ ecosystem: "bun", directories: ["/"], schedule: {} }] },
+    { updates: [{ ecosystem: "bun", directories: ["/"] }], cooldown: 0 },
+    { updates: [{ ecosystem: "bun", directories: ["/", "/"] }] },
+    {
+      updates: [
+        { ecosystem: "bun", directories: ["/"] },
+        { ecosystem: "bun", directories: ["/wasm"] },
+      ],
+    },
+    ...[
+      "relative",
+      "/../outside",
+      "/wasm/",
+      "/a//b",
+      "/a/./b",
+      "/**",
+      "/a\\b",
+    ].map((directory) => ({
+      updates: [{ ecosystem: "bun", directories: [directory] }],
+    })),
+  ];
+  await withRepository(async (root) => {
+    for (const input of invalidInputs) {
+      await writeFile(join(root, "updates.json"), JSON.stringify(input));
+      const result = invoke(root, ["--config", "updates.json"]);
+      expect(result.status, JSON.stringify(input)).toBe(1);
+      await assert.rejects(stat(join(root, ".github")), { code: "ENOENT" });
+    }
+    for (const args of [
+      ["--config"],
+      ["--config", "--check"],
+      ["--check", "--check"],
+      ["--config", "a", "--config", "b"],
+    ]) {
+      expect(invoke(root, args).status).toBe(1);
+    }
+  });
+});
+
+test("unsupported ecosystem declarations cannot write or validate generated output", async () => {
+  await withRepository(async (root) => {
+    expect(invoke(root).status).toBe(0);
+    const output = join(root, ".github/dependabot.yml");
+    const original = await readFile(output, "utf8");
+    for (const ecosystem of ["githb-actions", "unknown-ecosystem"]) {
+      await writeFile(
+        join(root, "updates.json"),
+        JSON.stringify({
+          updates: [
+            { ecosystem: "bun", directories: ["/", "/wasm"] },
+            { ecosystem: "bundler", directories: ["/oracle"] },
+            { ecosystem: "composer", directories: ["/oracle"] },
+            { ecosystem, directories: ["/"] },
+          ],
+        }),
+      );
+      for (const mode of [[], ["--check"]]) {
+        const result = invoke(root, ["--config", "updates.json", ...mode]);
+        expect(result.status, result.stderr).toBe(1);
+        expect(result.stderr).toContain(
+          `unsupported Dependabot ecosystem: ${ecosystem}`,
+        );
+        expect(await readFile(output, "utf8")).toBe(original);
+      }
+    }
+  });
 });

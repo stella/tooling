@@ -28,6 +28,47 @@ import { workspaceContains } from "./toolchain-workspaces";
 
 export const dependabotRules = ["dependabot-policy"] as const;
 
+// https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference#package-ecosystem
+export const supportedDependabotEcosystems = [
+  "bazel",
+  "bun",
+  "bundler",
+  "cargo",
+  "composer",
+  "conda",
+  "deno",
+  "devcontainers",
+  "docker",
+  "docker-compose",
+  "dotnet-sdk",
+  "elm",
+  "gitsubmodule",
+  "github-actions",
+  "gomod",
+  "gradle",
+  "helm",
+  "julia",
+  "maven",
+  "mix",
+  "nix",
+  "npm",
+  "nuget",
+  "opentofu",
+  "pip",
+  "pre-commit",
+  "pub",
+  "rust-toolchain",
+  "sbt",
+  "swift",
+  "terraform",
+  "uv",
+  "vcpkg",
+] as const;
+export type DependabotEcosystem =
+  (typeof supportedDependabotEcosystems)[number];
+const isDependabotEcosystem = (value: string): value is DependabotEcosystem =>
+  supportedDependabotEcosystems.some((ecosystem) => ecosystem === value);
+
 type DependabotPolicy = {
   schedule: { interval: string; day: string; time: string; timezone: string };
   cooldown: { defaultDays: number };
@@ -496,15 +537,90 @@ const ignoredFor = (ecosystem: string, policy: DependabotPolicy) => {
   return [];
 };
 
+/** Repository declarations own coverage only; shared policy owns every update option. */
+export const parseDependabotInput = (input: unknown) => {
+  if (
+    !record(input) ||
+    Object.keys(input).some((key) => key !== "updates") ||
+    !Array.isArray(input["updates"]) ||
+    input["updates"].length === 0
+  )
+    throw new Error(
+      "Dependabot input must contain a nonempty updates array only",
+    );
+  const ecosystems = new Set<string>();
+  return input["updates"].map((entry: unknown) => {
+    if (
+      !record(entry) ||
+      Object.keys(entry).some(
+        (key) => !["ecosystem", "directories"].includes(key),
+      ) ||
+      typeof entry["ecosystem"] !== "string" ||
+      !strings(entry["directories"]) ||
+      entry["directories"].length === 0
+    )
+      throw new Error(
+        "each Dependabot update must contain ecosystem and nonempty directories only",
+      );
+    const ecosystem = entry["ecosystem"];
+    if (!isDependabotEcosystem(ecosystem))
+      throw new Error(`unsupported Dependabot ecosystem: ${ecosystem}`);
+    const directories = entry["directories"];
+    if (ecosystems.has(ecosystem))
+      throw new Error(`duplicate Dependabot ecosystem: ${ecosystem}`);
+    ecosystems.add(ecosystem);
+    const seen = new Set<string>();
+    for (const directory of directories) {
+      if (
+        !directory.startsWith("/") ||
+        directory.includes("\\") ||
+        directory.split("/").some((part) => part === "." || part === "..") ||
+        path.posix.normalize(directory) !== directory ||
+        (directory !== "/" && directory.endsWith("/")) ||
+        /[*?[\]{}!]/.test(directory)
+      )
+        throw new Error(
+          `Dependabot directory must be a literal absolute repository path: ${directory}`,
+        );
+      if (seen.has(directory))
+        throw new Error(`duplicate Dependabot directory: ${directory}`);
+      seen.add(directory);
+    }
+    return { ecosystem, directories };
+  });
+};
+
+type GenerateDependabotOptions = CheckDependabotOptions & {
+  updates?: ReturnType<typeof parseDependabotInput> | undefined;
+};
+
 /** Generate canonical YAML from the same ecosystem enumeration used by the guard. */
 export const generateDependabotConfig = ({
   files,
   policy,
-}: CheckDependabotOptions) => {
-  const updates = [...ecosystemRoots(files)]
+  updates: declarations,
+}: GenerateDependabotOptions) => {
+  const detected = ecosystemRoots(files);
+  const roots =
+    declarations === undefined
+      ? detected
+      : new Map(
+          parseDependabotInput({ updates: declarations }).map(
+            ({ ecosystem, directories }) => [ecosystem, new Set(directories)],
+          ),
+        );
+  for (const [ecosystem, directories] of detected) {
+    for (const directory of directories) {
+      if (!roots.get(ecosystem)?.has(directory))
+        throw new Error(
+          `Dependabot input must cover ${ecosystem} directory ${directory}`,
+        );
+    }
+  }
+  const updates = [...roots]
     .sort(([left], [right]) => left.localeCompare(right))
-    .map(([ecosystem, roots]) => {
-      const directories = [...roots].sort();
+    .map(([ecosystem, ecosystemDirectories]) => {
+      const directories = [...ecosystemDirectories].sort();
       const ignored = ignoredFor(ecosystem, policy);
       const time = new Scalar(policy.schedule.time);
       time.type = Scalar.QUOTE_DOUBLE;

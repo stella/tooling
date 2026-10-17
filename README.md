@@ -202,11 +202,16 @@ members share their update root; independent manifests need their own entry.
 includes only the root, matching the current pnpm contract; declare member
 patterns explicitly to keep membership stable across pnpm versions.
 The generator derives the reference from the same policy and ecosystem
-registry as the guard: run `bun scripts/write-dependabot-policy.ts` after
+registry as the guard: run `bun run generate:dependabot` after
 policy changes. Consumers run `bunx --no-install stll-dependabot` from their
 repository root; the command reads tracked declarations and writes canonical
 `.github/dependabot.yml` (or updates an existing `.yaml`). `stll-toolchain-check`
-rejects missing coverage and policy drift. The published `@stll/oxlint-config/dependabot` subpath exports
+rejects missing coverage and policy drift. Use `stll-dependabot --check` in CI for
+read-only byte drift detection. Pass `--config stll-dependabot.json` to declare
+ecosystems and directories explicitly; the declaration cannot change shared
+schedule, cooldown, groups, or owned-tool ignores. See the
+[package guide](packages/oxlint-config/README.md#generate-dependency-update-configuration)
+for the input format. The published `@stll/oxlint-config/dependabot` subpath exports
 `generateDependabotConfig` and `parseToolchainPolicy` for programmatic generation. Owned package pins follow
 release metadata. The `changeset:version` command first includes the policy
 package in the release plan whenever an owned workspace pin changes, then
