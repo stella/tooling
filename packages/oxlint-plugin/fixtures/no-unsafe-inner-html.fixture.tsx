@@ -259,6 +259,40 @@ export const UnsafeObjectAssignHoistedSource = () => {
   Object.assign(document.createElement("div"), unsafeDomProperties);
 };
 
+export const UnsafeObjectAssignConstDomTarget = () => {
+  const element = document.createElement("div");
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- a stable local DOM target cannot hide an opaque HTML payload
+  Object.assign(element, unsafeDomProperties);
+};
+
+export const UnsafeObjectAssignDomAliasChain = () => {
+  const element = document.createElement("div");
+  const firstAlias = element;
+  const secondAlias = firstAlias;
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- stable aliases retain DOM target provenance
+  Object.assign(secondAlias, unsafeDomProperties);
+};
+
+export const SafeObjectAssignCyclicAliases = () => {
+  const first = second;
+  const second = first;
+  // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
+  Object.assign(first, unsafeDomProperties);
+};
+
+export const SafeObjectAssignReassignedTarget = () => {
+  let element: object = document.createElement("div");
+  element = config;
+  // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
+  Object.assign(element, unsafeDomProperties);
+};
+
+export const SafeObjectAssignNonDomConstTarget = () => {
+  const options = {};
+  // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
+  Object.assign(options, unsafeDomProperties);
+};
+
 export const UnsafeObjectAssignApplyHoistedSource = () => {
   Object.assign.apply(Object, [
     document.createElement("div"),

@@ -273,6 +273,9 @@ const runCallVisitor = (node: ESTree.CallExpression): unknown[] => {
   const context = Object.create(null);
   Object.defineProperties(context, {
     options: { value: [], writable: true, configurable: true },
+    sourceCode: {
+      value: { getScope: () => ({ set: new Map(), upper: null }) },
+    },
     report: {
       value: (diagnostic: unknown) => diagnostics.push(diagnostic),
     },

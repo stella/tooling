@@ -32,6 +32,7 @@
 // function can be named `sanitizeHtml`. Add explicit provenance at the sink
 // until the codebase has a branded SafeHtml boundary.
 
+import type { Scope, Variable } from "@oxlint/plugins";
 import { eslintCompatPlugin } from "@oxlint/plugins";
 
 import type { AstNode, LiteralArgumentResolution } from "./utils.ts";
@@ -286,24 +287,6 @@ const isDocumentReceiver = (node: unknown): boolean => {
   return name !== null && DOCUMENT_MEMBERS.has(name);
 };
 
-const isKnownDomTarget = (node: unknown): boolean => {
-  const target = unwrapExpression(node);
-  if (target?.type === "CallExpression") {
-    const callee = invokedCallee(target);
-    return (
-      callee?.type === "MemberExpression" &&
-      isDocumentReceiver(callee.object) &&
-      [
-        "createElement",
-        "createElementNS",
-        "getElementById",
-        "querySelector",
-      ].includes(memberPropertyName(callee) ?? "")
-    );
-  }
-  return isDocumentReceiver(target);
-};
-
 export default eslintCompatPlugin({
   meta: { name: "no-unsafe-inner-html" },
   rules: {
@@ -336,6 +319,64 @@ export default eslintCompatPlugin({
         },
       },
       createOnce(context) {
+        type DomTargetOptions = {
+          node: unknown;
+          scope: Scope;
+          seen?: Set<Variable>;
+        };
+        const isKnownDomTarget = ({
+          node,
+          scope,
+          seen = new Set<Variable>(),
+        }: DomTargetOptions): boolean => {
+          const target = unwrapExpression(node);
+          if (isIdentifier(target)) {
+            let current: Scope | null = scope;
+            while (current !== null) {
+              const variable = current.set.get(target.name);
+              if (variable === undefined) {
+                current = current.upper;
+                continue;
+              }
+              if (variable.defs.length === 0) return isDocumentReceiver(target);
+              if (seen.has(variable)) return false;
+              seen.add(variable);
+              const definition = variable.defs.at(0);
+              if (
+                variable.defs.length !== 1 ||
+                definition?.type !== "Variable" ||
+                definition.node.type !== "VariableDeclarator" ||
+                definition.node.id.type !== "Identifier" ||
+                definition.node.init === null ||
+                variable.references.some(
+                  (reference) => reference.isWrite() && !reference.init,
+                )
+              ) {
+                return false;
+              }
+              return isKnownDomTarget({
+                node: definition.node.init,
+                scope: context.sourceCode.getScope(definition.node),
+                seen,
+              });
+            }
+          }
+          if (target?.type === "CallExpression") {
+            const callee = invokedCallee(target);
+            return (
+              callee?.type === "MemberExpression" &&
+              isDocumentReceiver(callee.object) &&
+              [
+                "createElement",
+                "createElementNS",
+                "getElementById",
+                "querySelector",
+              ].includes(memberPropertyName(callee) ?? "")
+            );
+          }
+          return isDocumentReceiver(target);
+        };
+
         let sanitizerPolicy: SanitizerPolicy = SANITIZER_POLICY.allowlist;
         // Line of each waiver comment's end; a sink starting on the next line
         // consumes it, so one comment covers exactly one sink.
@@ -536,7 +577,10 @@ export default eslintCompatPlugin({
               return;
             }
             if (isMemberAccess(callee, "Object", "assign")) {
-              const domTarget = isKnownDomTarget(invoked.args.at(0));
+              const domTarget = isKnownDomTarget({
+                node: invoked.args.at(0),
+                scope: context.sourceCode.getScope(node),
+              });
               checkHtmlPropertySources(
                 [
                   ...invoked.args.slice(1),
