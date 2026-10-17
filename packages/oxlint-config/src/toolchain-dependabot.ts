@@ -28,6 +28,47 @@ import { workspaceContains } from "./toolchain-workspaces";
 
 export const dependabotRules = ["dependabot-policy"] as const;
 
+// https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference#package-ecosystem
+export const supportedDependabotEcosystems = [
+  "bazel",
+  "bun",
+  "bundler",
+  "cargo",
+  "composer",
+  "conda",
+  "deno",
+  "devcontainers",
+  "docker",
+  "docker-compose",
+  "dotnet-sdk",
+  "elm",
+  "gitsubmodule",
+  "github-actions",
+  "gomod",
+  "gradle",
+  "helm",
+  "julia",
+  "maven",
+  "mix",
+  "nix",
+  "npm",
+  "nuget",
+  "opentofu",
+  "pip",
+  "pre-commit",
+  "pub",
+  "rust-toolchain",
+  "sbt",
+  "swift",
+  "terraform",
+  "uv",
+  "vcpkg",
+] as const;
+export type DependabotEcosystem =
+  (typeof supportedDependabotEcosystems)[number];
+const isDependabotEcosystem = (value: string): value is DependabotEcosystem =>
+  supportedDependabotEcosystems.some((ecosystem) => ecosystem === value);
+
 type DependabotPolicy = {
   schedule: { interval: string; day: string; time: string; timezone: string };
   cooldown: { defaultDays: number };
@@ -515,7 +556,6 @@ export const parseDependabotInput = (input: unknown) => {
         (key) => !["ecosystem", "directories"].includes(key),
       ) ||
       typeof entry["ecosystem"] !== "string" ||
-      !/^[a-z][a-z0-9-]*$/.test(entry["ecosystem"]) ||
       !strings(entry["directories"]) ||
       entry["directories"].length === 0
     )
@@ -523,6 +563,8 @@ export const parseDependabotInput = (input: unknown) => {
         "each Dependabot update must contain ecosystem and nonempty directories only",
       );
     const ecosystem = entry["ecosystem"];
+    if (!isDependabotEcosystem(ecosystem))
+      throw new Error(`unsupported Dependabot ecosystem: ${ecosystem}`);
     const directories = entry["directories"];
     if (ecosystems.has(ecosystem))
       throw new Error(`duplicate Dependabot ecosystem: ${ecosystem}`);
@@ -535,7 +577,7 @@ export const parseDependabotInput = (input: unknown) => {
         directory.split("/").some((part) => part === "." || part === "..") ||
         path.posix.normalize(directory) !== directory ||
         (directory !== "/" && directory.endsWith("/")) ||
-        /[*?\[\]{}!]/.test(directory)
+        /[*?[\]{}!]/.test(directory)
       )
         throw new Error(
           `Dependabot directory must be a literal absolute repository path: ${directory}`,
@@ -577,8 +619,8 @@ export const generateDependabotConfig = ({
   }
   const updates = [...roots]
     .sort(([left], [right]) => left.localeCompare(right))
-    .map(([ecosystem, roots]) => {
-      const directories = [...roots].sort();
+    .map(([ecosystem, ecosystemDirectories]) => {
+      const directories = [...ecosystemDirectories].sort();
       const ignored = ignoredFor(ecosystem, policy);
       const time = new Scalar(policy.schedule.time);
       time.type = Scalar.QUOTE_DOUBLE;

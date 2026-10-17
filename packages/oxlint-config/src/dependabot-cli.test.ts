@@ -352,3 +352,32 @@ test("declarations cannot omit detected coverage or override shared update polic
     }
   });
 });
+
+test("unsupported ecosystem declarations cannot write or validate generated output", async () => {
+  await withRepository(async (root) => {
+    expect(invoke(root).status).toBe(0);
+    const output = join(root, ".github/dependabot.yml");
+    const original = await readFile(output, "utf8");
+    for (const ecosystem of ["githb-actions", "unknown-ecosystem"]) {
+      await writeFile(
+        join(root, "updates.json"),
+        JSON.stringify({
+          updates: [
+            { ecosystem: "bun", directories: ["/", "/wasm"] },
+            { ecosystem: "bundler", directories: ["/oracle"] },
+            { ecosystem: "composer", directories: ["/oracle"] },
+            { ecosystem, directories: ["/"] },
+          ],
+        }),
+      );
+      for (const mode of [[], ["--check"]]) {
+        const result = invoke(root, ["--config", "updates.json", ...mode]);
+        expect(result.status, result.stderr).toBe(1);
+        expect(result.stderr).toContain(
+          `unsupported Dependabot ecosystem: ${ecosystem}`,
+        );
+        expect(await readFile(output, "utf8")).toBe(original);
+      }
+    }
+  });
+});
