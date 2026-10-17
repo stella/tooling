@@ -6,11 +6,16 @@
 // and `--report-unused-disable-directives-severity=error` fails CI.
 
 import * as ReactQuery from "@tanstack/react-query";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useQuery,
+  useQuery as readQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 
 import {
   ensureCriticalQueryData,
+  ensureCriticalQueryData as ensureCriticalQueryDataAlias,
   ensureRouteInfiniteQueryData,
   ensureRouteQueryData,
   fetchRouteQuery,
@@ -34,6 +39,9 @@ const PendingComponent = () => {
   useQuery(options);
 
   // oxlint-disable-next-line no-raw-route-query-client/no-raw-route-query-client
+  readQuery(options);
+
+  // oxlint-disable-next-line no-raw-route-query-client/no-raw-route-query-client
   ReactQuery.useSuspenseQuery(options);
 
   const queryClient = useQueryClient();
@@ -44,9 +52,21 @@ const PendingComponent = () => {
 
 export const Route = createFileRoute("/__fixture")({
   pendingComponent: PendingComponent,
+  beforeLoad: ({ context }) => {
+    // oxlint-disable-next-line no-raw-route-query-client/no-raw-route-query-client
+    context.queryClient.prefetchQuery(options);
+  },
   loader: async ({ context: { queryClient } }) => {
+    const qc = queryClient;
+
+    // oxlint-disable-next-line no-raw-route-query-client/no-raw-route-query-client -- fixture: raw loader calls require the route query wrapper
+    await qc.ensureQueryData(options);
+
     // oxlint-disable-next-line no-raw-route-query-client/no-raw-route-query-client
     await ensureCriticalQueryData(queryClient, options);
+
+    // oxlint-disable-next-line no-raw-route-query-client/no-raw-route-query-client
+    await ensureCriticalQueryDataAlias(queryClient, options);
 
     // oxlint-disable-next-line no-raw-route-query-client/no-raw-route-query-client
     await prefetchNonCriticalQuery(queryClient, options, () => undefined);
@@ -60,6 +80,7 @@ export const Route = createFileRoute("/__fixture")({
     // oxlint-disable-next-line no-raw-route-query-client/no-raw-route-query-client
     await queryClient.fetchQuery(options);
 
+    // expect-clean: no-raw-route-query-client/no-raw-route-query-client
     await ensureRouteQueryData(queryClient, options);
     await ensureRouteInfiniteQueryData(queryClient, infiniteOptions);
     await fetchRouteQuery(queryClient, options);

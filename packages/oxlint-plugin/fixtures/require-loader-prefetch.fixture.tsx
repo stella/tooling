@@ -17,6 +17,12 @@ declare const membersOptions: {
   queryKey: readonly ["members"];
   queryFn: () => Promise<string>;
 };
+declare const opaqueOptions: {
+  items: (id: string) => {
+    queryKey: readonly ["opaque", string];
+    queryFn: () => Promise<string>;
+  };
+};
 
 export const Route = createFileRoute("/__fixture/no-loader")({
   component: NoLoaderComponent,
@@ -32,7 +38,12 @@ function NoLoaderComponent() {
   const members = useSuspenseQuery(membersOptions);
 
   // Member-expression argument the rule cannot attribute — NOT flagged.
+  // expect-clean: require-loader-prefetch/require-loader-prefetch
   const other = useSuspenseQuery({ queryKey: ["x"], queryFn: () => "x" });
 
-  return `${entity.data}${members.data}${other.data}`;
+  // Opaque member-call factory without a loader remains outside static attribution.
+  // expect-clean: require-loader-prefetch/require-loader-prefetch
+  const opaque = useSuspenseQuery(opaqueOptions.items("id"));
+
+  return `${entity.data}${members.data}${other.data}${opaque.data}`;
 }
