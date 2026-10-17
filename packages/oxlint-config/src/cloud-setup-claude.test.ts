@@ -467,14 +467,17 @@ test("SessionStart reads, writes and replacement fail visibly without changing e
       cloudShellProfilePath,
       profile,
     );
-    for (const operation of ["read", "append", "replace"]) {
+    const failures = [
+      { failure: "cat() { return 74; }", reason: "could not be read" },
+      {
+        failure:
+          'printf() { if [[ -n "${cloud_env_temporary:-}" && /dev/fd/1 -ef "$cloud_env_temporary" ]]; then return 73; fi; builtin printf "$@"; }',
+        reason: "could not be prepared",
+      },
+      { failure: "mv() { return 75; }", reason: "could not be persisted" },
+    ];
+    for (const { failure, reason } of failures) {
       writeFileSync(environment, original);
-      const failure =
-        operation === "read"
-          ? "cat() { return 74; }"
-          : operation === "append"
-            ? 'printf() { if [[ -n "${cloud_env_temporary:-}" && /dev/fd/1 -ef "$cloud_env_temporary" ]]; then return 73; fi; builtin printf "$@"; }'
-            : "mv() { return 75; }";
       const result = spawnSync("bash", ["-c", `${failure}\n${command}`], {
         cwd: root,
         env: {
@@ -492,13 +495,7 @@ test("SessionStart reads, writes and replacement fail visibly without changing e
       expect(result.stdout).toContain("bash .agents/cloud-setup.sh install");
       expect(result.stdout).not.toContain("fixture-untrusted-start-output");
       expect(result.stdout).not.toContain("private-value");
-      expect(result.stderr).toContain(
-        operation === "read"
-          ? "could not be read"
-          : operation === "append"
-            ? "could not be prepared"
-            : "could not be persisted",
-      );
+      expect(result.stderr).toContain(reason);
       expect(readFileSync(environment, "utf8")).toBe(original);
     }
   } finally {
