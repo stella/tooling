@@ -4,6 +4,7 @@ import { expect, test } from "bun:test";
 import {
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -18,6 +19,7 @@ import {
   checkProjectOwnership,
   nodeProjectRule,
 } from "./toolchain-node-projects";
+import { scriptSourceExtensions } from "./toolchain-script-extensions";
 
 const sources = [
   "scripts/a.js",
@@ -433,6 +435,39 @@ test("imports do not establish root membership but ancestor roots can claim impo
   });
 });
 
+const documentedNodeProject = () => {
+  const readme = readFileSync(
+    new URL("../../../README.md", import.meta.url),
+    "utf8",
+  );
+  const block = readme
+    .split("then add `scripts/tsconfig.json`:")
+    .at(1)
+    ?.match(/```json\n([\s\S]*?)\n```/u)
+    ?.at(1);
+  if (block === undefined)
+    throw new Error("Missing Node scripts project recipe");
+  const recipe: unknown = JSON.parse(block);
+  if (
+    typeof recipe !== "object" ||
+    recipe === null ||
+    !("extends" in recipe) ||
+    typeof recipe.extends !== "string" ||
+    !("include" in recipe) ||
+    !Array.isArray(recipe.include) ||
+    !recipe.include.every((entry: unknown) => typeof entry === "string")
+  )
+    throw new Error("Invalid Node scripts project recipe");
+  expect(recipe.extends).toBe("@stll/typescript-config/node.json");
+  const compare = (left: string, right: string) => left.localeCompare(right);
+  expect(recipe.include.toSorted(compare)).toEqual(
+    Object.keys(scriptSourceExtensions)
+      .map((extension) => `**/*${extension}`)
+      .toSorted(compare),
+  );
+  return { extends: recipe.extends, include: recipe.include };
+};
+
 test("the documented Node script layout gives GitHub tools their own nearest project", () => {
   withInventoryFixture((root, trackedFiles) => {
     const manifest = {
@@ -448,11 +483,16 @@ test("the documented Node script layout gives GitHub tools their own nearest pro
       path.join(root, "node_modules/@stll/typescript-config"),
       "dir",
     );
-    const project = {
-      extends: "@stll/typescript-config/node.json",
-      include: ["**/*.js", "**/*.mjs", "**/*.cjs", "**/*.ts"],
-    };
-    const sources = ["scripts/release.mjs", ".github/tools/check.mjs"];
+    const project = documentedNodeProject();
+    const toolSources = Object.keys(scriptSourceExtensions).map(
+      (extension) => `.github/tools/check-${extension.slice(1)}${extension}`,
+    );
+    const sources = [
+      ...Object.keys(scriptSourceExtensions).map(
+        (extension) => `scripts/release-${extension.slice(1)}${extension}`,
+      ),
+      ...toolSources,
+    ];
     for (const source of sources) {
       writeFileSync(
         path.join(root, source),
@@ -472,7 +512,7 @@ test("the documented Node script layout gives GitHub tools their own nearest pro
       checkNodeProjects({ root, manifest, trackedFiles }).map(
         ({ path: file }) => file,
       ),
-    ).toEqual([".github/tools/check.mjs"]);
+    ).toEqual(toolSources.toSorted((left, right) => left.localeCompare(right)));
 
     writeFileSync(
       path.join(root, "scripts/tsconfig.json"),
@@ -485,4 +525,43 @@ test("the documented Node script layout gives GitHub tools their own nearest pro
     trackedFiles.add(".github/tools/tsconfig.json");
     expect(checkNodeProjects({ root, manifest, trackedFiles })).toEqual([]);
   });
+});
+
+test("caller thread options retain real inventory ownership at root and workspace cwd", () => {
+  for (const threads of ["--threads 4", "--threads=4"]) {
+    for (const workspace of [false, true]) {
+      withInventoryFixture((root, trackedFiles) => {
+        const directory = workspace ? "packages/a" : "scripts";
+        mkdirSync(path.join(root, directory), { recursive: true });
+        const source = `${directory}/owned.mjs`;
+        writeFileSync(path.join(root, source), "export const value = 1;\n");
+        const config = `${directory}/tsconfig.json`;
+        writeFileSync(
+          path.join(root, config),
+          JSON.stringify({
+            compilerOptions: { allowJs: true },
+            include: ["**/*.mjs"],
+          }),
+        );
+        trackedFiles.add(source);
+        trackedFiles.add(config);
+        const lint = `oxlint --config ${workspace ? "../../" : ""}.oxlintrc.json ${threads} ${workspace ? "." : "scripts"}`;
+        const manifest = workspace
+          ? {
+              ...fixtureManifest,
+              workspaces: ["packages/*"],
+              scripts: { lint: "turbo run lint" },
+            }
+          : { ...fixtureManifest, scripts: { lint } };
+        if (workspace) {
+          writeFileSync(
+            path.join(root, "packages/a/package.json"),
+            JSON.stringify({ name: "@fixture/a", scripts: { lint } }),
+          );
+          trackedFiles.add("packages/a/package.json");
+        }
+        expect(checkNodeProjects({ root, manifest, trackedFiles })).toEqual([]);
+      });
+    }
+  }
 });

@@ -282,7 +282,7 @@ test("aliases visited repeatedly do not duplicate inventory commands", () => {
         "lint:core": "oxlint --ignore-pattern='**/dist/**' --threads 1 .",
       }),
     ).commands,
-  ).toEqual([["--ignore-pattern=**/dist/**", "--threads", "1", "."]]);
+  ).toEqual([["--ignore-pattern=**/dist/**", "."]]);
 });
 
 test("every package manager resolves literal run aliases alongside direct oxlint", () => {
@@ -363,5 +363,45 @@ test("literal filtered Bun builds prepare lint without becoming linter launchers
     );
     expect(result.errors.length, command).toBeGreaterThan(0);
     expect(result.commands, command).toEqual([]);
+  }
+});
+
+test("inventory strips validated caller thread options without changing other arguments", () => {
+  for (const threads of [
+    "--threads 0",
+    "--threads 4",
+    "--threads=4",
+    "--threads +4",
+    "--threads=04",
+  ]) {
+    const result = lintInventoryCommands(
+      manifest({
+        lint: `oxlint -c config.json ${threads} --deny-warnings scripts`,
+      }),
+    );
+    expect(result.errors).toEqual([]);
+    expect(result.commands).toEqual([
+      ["-c", "config.json", "--deny-warnings", "scripts"],
+    ]);
+  }
+});
+
+test("inventory never hides malformed or repeated caller thread options", () => {
+  for (const threads of [
+    "--threads",
+    "--threads=",
+    "--threads fast",
+    "--threads=4.5",
+    "--threads=-1",
+    "--threads=18446744073709551616",
+    "--threads $COUNT",
+    "--threads=4 --threads 2",
+    "--threads 4 --threads=2",
+  ]) {
+    const result = lintInventoryCommands(
+      manifest({ lint: `oxlint ${threads} scripts` }),
+    );
+    expect(result.errors.length, threads).toBeGreaterThan(0);
+    expect(result.commands, threads).toEqual([]);
   }
 });

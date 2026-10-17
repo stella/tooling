@@ -78,6 +78,7 @@ const literalWord = (raw: string) => {
 
 const inventoryArguments = (raw: readonly string[]) => {
   const args: string[] = [];
+  let threadsSeen = false;
   for (let index = 0; index < raw.length; index++) {
     const word = raw.at(index);
     if (word === undefined) break;
@@ -105,20 +106,34 @@ const inventoryArguments = (raw: readonly string[]) => {
     }
     if (!valueFlags.has(flag))
       return { error: `unsupported oxlint flag ${flag}` };
+    let argument: string;
     if (equals >= 0) {
-      if (value.slice(equals + 1) === "")
+      argument = value.slice(equals + 1);
+      if (argument === "")
         return { error: `missing value for oxlint flag ${flag}` };
-      args.push(value);
+    } else {
+      const next = raw.at(++index);
+      if (
+        next === undefined ||
+        !literalWord(next) ||
+        decodeShellWord(next).startsWith("-")
+      )
+        return { error: `missing or nonliteral value for oxlint flag ${flag}` };
+      argument = decodeShellWord(next);
+    }
+    if (flag === "--threads") {
+      // The pinned inventory process supplies one thread option of its own.
+      if (threadsSeen) return { error: "duplicate oxlint flag --threads" };
+      if (
+        !/^\+?[0-9]+$/u.test(argument) ||
+        BigInt(argument) > 18_446_744_073_709_551_615n
+      )
+        return { error: "invalid integer value for oxlint flag --threads" };
+      threadsSeen = true;
       continue;
     }
-    const next = raw.at(++index);
-    if (
-      next === undefined ||
-      !literalWord(next) ||
-      decodeShellWord(next).startsWith("-")
-    )
-      return { error: `missing or nonliteral value for oxlint flag ${flag}` };
-    args.push(value, decodeShellWord(next));
+    if (equals >= 0) args.push(value);
+    else args.push(value, argument);
   }
   return { args };
 };

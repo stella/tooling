@@ -288,14 +288,23 @@ dependency of the consumer, then add `scripts/tsconfig.json`:
 ```json
 {
   "extends": "@stll/typescript-config/node.json",
-  "include": ["**/*.js", "**/*.mjs", "**/*.cjs", "**/*.ts"]
+  "include": [
+    "**/*.js",
+    "**/*.jsx",
+    "**/*.mjs",
+    "**/*.cjs",
+    "**/*.ts",
+    "**/*.tsx",
+    "**/*.mts",
+    "**/*.cts"
+  ]
 }
 ```
 
 The existing Node preset selects Node ambient types; the local `include` assigns
 ownership of scripts to that project. Keep the library project unchanged. For
 scripts in `.github/tools`, add `.github/tools/tsconfig.json` with the same
-`extends` and four local `include` patterns shown above. A sibling
+`extends` and all local `include` patterns shown above. A sibling
 `scripts/tsconfig.json` that includes `../.github/tools` does not own those files:
 Oxlint discovers the nearest `tsconfig.json`; run the ordinary type-aware lint
 command from the repository root. Missing Node ambient types can otherwise appear
