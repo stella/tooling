@@ -9,9 +9,7 @@
   },
   "target": {
     "type": "javascript",
-    "targets": [
-      "node20.19.0"
-    ]
+    "targets": ["node20.19.0"]
   },
   "entryPoints": {
     "type": "module",
@@ -94,7 +92,8 @@
       "stll-toolchain-changed": "./dist/toolchain-changed-cli.mjs",
       "stll-toolchain-check": "./dist/toolchain-check-cli.mjs",
       "stll-typecheck-parity": "./dist/typecheck-parity-cli.mjs",
-      "stll-typecheck-probe": "./dist/typecheck-probe-cli.mjs"
+      "stll-typecheck-probe": "./dist/typecheck-probe-cli.mjs",
+      "stll-rust-policy": "./dist/rust-policy-cli.mjs"
     }
   }
 }

@@ -1,4 +1,4 @@
-# Copy these snippets into the root Cargo.toml for a single-crate package.
+# Source template for stll-rust-policy single-crate manifests.
 
 [lints.rust]
 warnings = { level = "deny", priority = -1 }

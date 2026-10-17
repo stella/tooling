@@ -1,7 +1,25 @@
+import { readFileSync } from "node:fs";
 import { defineConfig } from "tsdown";
 
 export default defineConfig({
+  define: {
+    STLL_RUST_TEMPLATES: JSON.stringify(
+      Object.fromEntries(
+        [
+          "cargo-root.toml",
+          "cargo-workspace.toml",
+          "cargo-config.toml",
+          "rustfmt.toml",
+          "clippy.toml",
+        ].map((name) => [
+          name,
+          readFileSync(new URL(`../../rust/${name}`, import.meta.url), "utf8"),
+        ]),
+      ),
+    ),
+  },
   entry: [
+    "src/rust-policy-cli.ts",
     "src/index.ts",
     "src/plugin.ts",
     "src/no-raw-colors.ts",
