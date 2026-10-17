@@ -65,6 +65,8 @@ printf '%s\\n' "$*" >> commands.log
 if [[ "$*" == "run build" ]]; then
   test ! -e packages/oxlint-config/dist
   test ! -e packages/oxlint-plugin/dist
+  test ! -e packages/time/dist
+  test ! -e packages/test-kit/dist
   if [[ "$FAIL_BUILD" == "yes" ]]; then exit 23; fi
   mkdir -p packages/oxlint-config/dist packages/oxlint-plugin/dist
   touch packages/oxlint-config/dist/built
@@ -74,7 +76,12 @@ if [[ "$*" == "run test" ]]; then test -f packages/oxlint-config/dist/built; fi
       { mode: 0o755 },
     );
     for (const failBuild of ["no", "yes"]) {
-      for (const name of ["oxlint-config", "oxlint-plugin"]) {
+      for (const name of [
+        "oxlint-config",
+        "oxlint-plugin",
+        "time",
+        "test-kit",
+      ]) {
         await mkdir(path.join(directory, "packages", name, "dist"), {
           recursive: true,
         });

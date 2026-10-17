@@ -625,6 +625,54 @@ test("a nested version 2 Bun lockfile beside a version 1 root is compared", asyn
   });
 });
 
+test("a registry range Bun links to a workspace member is checked against its version", async () => {
+  const { repo, write, commit } = fixture();
+  const setup = (range: string) => {
+    write("package.json", {
+      packageManager: "bun@1.4.3",
+      workspaces: ["packages/*"],
+    });
+    write("packages/base/package.json", {
+      name: "@stll/base",
+      version: "0.3.0",
+    });
+    write("packages/kit/package.json", {
+      name: "@stll/kit",
+      version: "0.1.0",
+      dependencies: { "@stll/base": range },
+    });
+    write("bun.lock", {
+      lockfileVersion: 1,
+      workspaces: {
+        "": {},
+        "packages/base": { name: "@stll/base", version: "0.3.0" },
+        "packages/kit": {
+          name: "@stll/kit",
+          version: "0.1.0",
+          dependencies: { "@stll/base": range },
+        },
+      },
+      packages: {
+        "@stll/base": ["@stll/base@workspace:packages/base"],
+        "@stll/kit": ["@stll/kit@workspace:packages/kit"],
+      },
+    });
+  };
+  setup("0.3.0");
+  const since = commit();
+  expect(await detectToolchainChanges({ repo, since })).toMatchObject({
+    status: "compared",
+    changed: false,
+  });
+  setup("0.4.0");
+  commit();
+  expect(await detectToolchainChanges({ repo, since })).toMatchObject({
+    status: "unreadable",
+    error:
+      "Toolchain lock resolution does not satisfy manifest: packages/kit/package.json:@stll/base",
+  });
+});
+
 test("pnpm importer alias swaps detect changes with an unchanged global package pool", async () => {
   const { repo, write, commit } = fixture();
   write("package.json", {

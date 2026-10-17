@@ -1,0 +1,67 @@
+{
+  "name": "@stll/test-kit",
+  "version": "0.0.0",
+  "description": "Hermetic, deterministic test primitives for Bun: a controllable clock, event-based waits, per-test temp directories and an outbound network guard.",
+  "keywords": [
+    "bun",
+    "clock",
+    "deterministic",
+    "test",
+    "testing"
+  ],
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stella/tooling.git",
+    "directory": "packages/test-kit"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "type": "module",
+  "sideEffects": [
+    "./dist/forbid-network.mjs"
+  ],
+  "main": "dist/index.mjs",
+  "types": "dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    },
+    "./db": {
+      "types": "./dist/db-clock.d.mts",
+      "default": "./dist/db-clock.mjs"
+    },
+    "./forbid-network": {
+      "types": "./dist/forbid-network.d.mts",
+      "default": "./dist/forbid-network.mjs"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "bun check",
+    "test": "bun test src"
+  },
+  "dependencies": {
+    "@stll/time": "0.3.0",
+    "better-result": "3.0.1"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.8",
+    "@stll/typescript-config": "workspace:*",
+    "drizzle-orm": "1.0.0-rc.4"
+  },
+  "peerDependencies": {
+    "drizzle-orm": ">=1.0.0-rc.4 <2"
+  },
+  "peerDependenciesMeta": {
+    "drizzle-orm": {
+      "optional": true
+    }
+  }
+}
