@@ -1,20 +1,177 @@
+/// <reference types="bun-types" />
+
 import type { ESTree, Span } from "@oxlint/plugins";
 import { expect, test } from "bun:test";
 
 import noUnsafeInnerHtml from "./no-unsafe-inner-html";
 
-const astNode = (type: string, properties: Record<string, unknown> = {}) => ({
-  type,
-  range: [0, 1],
-  ...properties,
+const nodeSpan = (start: number, end: number): Span => ({
+  start,
+  end,
+  range: [start, end],
+  loc: { start: { line: 1, column: start }, end: { line: 1, column: end } },
 });
 
-const identifier = (name: string) => astNode("Identifier", { name });
+const fixtureProgram = (): ESTree.Program => ({
+  ...nodeSpan(0, 1),
+  type: "Program",
+  sourceType: "module",
+  body: [],
+  comments: [],
+  tokens: [],
+  parent: null,
+});
 
-const member = (object: unknown, property: unknown) =>
-  astNode("MemberExpression", { object, property, computed: false });
+const withParents = <T extends ESTree.Node>(
+  node: T,
+  children: readonly (ESTree.Node | null)[],
+): T => {
+  for (const child of children) {
+    if (child !== null) {
+      child.parent = node;
+    }
+  }
+  return node;
+};
 
-const literal = (value: unknown) => astNode("Literal", { value });
+const identifier = (name: string): ESTree.IdentifierReference => ({
+  ...nodeSpan(0, 1),
+  type: "Identifier",
+  name,
+  parent: fixtureProgram(),
+});
+
+const member = (
+  object: ESTree.Expression,
+  property: ESTree.IdentifierName,
+): ESTree.StaticMemberExpression =>
+  withParents(
+    {
+      ...nodeSpan(0, 1),
+      type: "MemberExpression",
+      object,
+      property,
+      computed: false,
+      optional: false,
+      parent: fixtureProgram(),
+    } satisfies ESTree.StaticMemberExpression,
+    [object, property],
+  );
+
+const literal = (value: string | null): ESTree.StringLiteral | ESTree.NullLiteral =>
+  value === null
+    ? {
+        ...nodeSpan(0, 1),
+        type: "Literal",
+        value: null,
+        raw: "null",
+        parent: fixtureProgram(),
+      }
+    : {
+        ...nodeSpan(0, 1),
+        type: "Literal",
+        value,
+        raw: null,
+        parent: fixtureProgram(),
+      };
+
+const call = (
+  callee: ESTree.Expression,
+  args: ESTree.Argument[],
+): ESTree.CallExpression =>
+  withParents(
+    {
+      ...nodeSpan(0, 1),
+      type: "CallExpression",
+      callee,
+      arguments: args,
+      optional: false,
+      parent: fixtureProgram(),
+    } satisfies ESTree.CallExpression,
+    [callee, ...args],
+  );
+
+const array = ({ elements }: Pick<ESTree.ArrayExpression, "elements">) =>
+  withParents(
+    {
+      ...nodeSpan(0, 1),
+      type: "ArrayExpression",
+      elements,
+      parent: fixtureProgram(),
+    } satisfies ESTree.ArrayExpression,
+    elements,
+  );
+
+const objectLiteral = ({
+  properties,
+}: Pick<ESTree.ObjectExpression, "properties">) =>
+  withParents(
+    {
+      ...nodeSpan(0, 1),
+      type: "ObjectExpression",
+      properties,
+      parent: fixtureProgram(),
+    } satisfies ESTree.ObjectExpression,
+    properties,
+  );
+
+const spread = ({ argument }: Pick<ESTree.SpreadElement, "argument">) =>
+  withParents(
+    {
+      ...nodeSpan(0, 1),
+      type: "SpreadElement",
+      argument,
+      parent: fixtureProgram(),
+    } satisfies ESTree.SpreadElement,
+    [argument],
+  );
+
+const objectProperty = ({
+  key,
+  value,
+  computed,
+}: Pick<ESTree.ObjectProperty, "key" | "value" | "computed">) =>
+  withParents(
+    {
+      ...nodeSpan(0, 1),
+      type: "Property",
+      kind: "init",
+      method: false,
+      shorthand: false,
+      computed,
+      key,
+      value,
+      parent: fixtureProgram(),
+    } satisfies ESTree.ObjectProperty,
+    [key, value],
+  );
+
+const template = ({
+  expressions,
+  quasis,
+}: Pick<ESTree.TemplateLiteral, "expressions" | "quasis">) =>
+  withParents(
+    {
+      ...nodeSpan(0, 1),
+      type: "TemplateLiteral",
+      expressions,
+      quasis,
+      parent: fixtureProgram(),
+    } satisfies ESTree.TemplateLiteral,
+    [...expressions, ...quasis],
+  );
+
+const templateElement = ({
+  value,
+}: {
+  value: { cooked: string };
+}): ESTree.TemplateElement => ({
+  ...nodeSpan(0, 1),
+  type: "TemplateElement",
+  value: { cooked: value.cooked, raw: value.cooked },
+  tail: true,
+  parent: fixtureProgram(),
+});
 
 const getRule = () => {
   const rule = noUnsafeInnerHtml.rules["no-unsafe-inner-html"];
@@ -23,20 +180,6 @@ const getRule = () => {
   }
   return rule;
 };
-
-const call = (callee: unknown, args: unknown[]) =>
-  astNode("CallExpression", {
-    callee,
-    arguments: args,
-    loc: { start: { line: 1 } },
-  });
-
-const nodeSpan = (start: number, end: number): Span => ({
-  start,
-  end,
-  range: [start, end],
-  loc: { start: { line: 1, column: start }, end: { line: 1, column: end } },
-});
 
 // el.innerHTML = sanitizeHtml(); with the same parent links Oxlint supplies.
 const sanitizerAssignment = (): ESTree.AssignmentExpression => {
@@ -112,7 +255,16 @@ const sanitizerAssignment = (): ESTree.AssignmentExpression => {
   return assignment;
 };
 
-const runCallVisitor = (node: unknown): unknown[] => {
+const runCallVisitor = (node: ESTree.CallExpression): unknown[] => {
+  const program = fixtureProgram();
+  const statement: ESTree.ExpressionStatement = {
+    ...nodeSpan(0, 1),
+    type: "ExpressionStatement",
+    expression: node,
+    parent: program,
+  };
+  program.body.push(statement);
+  node.parent = statement;
   const rule = getRule();
   if (!("createOnce" in rule) || typeof rule.createOnce !== "function") {
     throw new Error("expected an Oxlint createOnce rule");
@@ -199,7 +351,7 @@ test("apply forwards static arrays and fails closed for opaque HTML arguments", 
     identifier("element"),
     identifier("insertAdjacentHTML"),
   );
-  const applyInsert = (argumentsValue: unknown) =>
+  const applyInsert = (argumentsValue: ESTree.Expression) =>
     call(member(insertAdjacentHtml, identifier("apply")), [
       identifier("element"),
       argumentsValue,
@@ -208,7 +360,7 @@ test("apply forwards static arrays and fails closed for opaque HTML arguments", 
   expect(
     runCallVisitor(
       applyInsert(
-        astNode("ArrayExpression", {
+        array({
           elements: [literal("beforeend"), identifier("rawHtml")],
         }),
       ),
@@ -217,7 +369,7 @@ test("apply forwards static arrays and fails closed for opaque HTML arguments", 
   expect(
     runCallVisitor(
       applyInsert(
-        astNode("ArrayExpression", {
+        array({
           elements: [literal("beforeend"), literal("<b>Static</b>")],
         }),
       ),
@@ -229,7 +381,7 @@ test("apply forwards static arrays and fails closed for opaque HTML arguments", 
   expect(
     runCallVisitor(
       applyInsert(
-        astNode("ArrayExpression", {
+        array({
           elements: [null, literal("<b>Static</b>"), identifier("rawHtml")],
         }),
       ),
@@ -238,9 +390,9 @@ test("apply forwards static arrays and fails closed for opaque HTML arguments", 
   expect(
     runCallVisitor(
       applyInsert(
-        astNode("ArrayExpression", {
+        array({
           elements: [
-            astNode("SpreadElement", { argument: identifier("arguments") }),
+            spread({ argument: identifier("arguments") }),
           ],
         }),
       ),
@@ -248,7 +400,7 @@ test("apply forwards static arrays and fails closed for opaque HTML arguments", 
   ).toHaveLength(1);
 
   const documentWrite = member(identifier("document"), identifier("write"));
-  const applyWrite = (argumentsValue: unknown) =>
+  const applyWrite = (argumentsValue: ESTree.Expression) =>
     call(member(documentWrite, identifier("apply")), [
       identifier("document"),
       argumentsValue,
@@ -256,14 +408,14 @@ test("apply forwards static arrays and fails closed for opaque HTML arguments", 
   expect(
     runCallVisitor(
       applyWrite(
-        astNode("ArrayExpression", { elements: [identifier("rawHtml")] }),
+        array({ elements: [identifier("rawHtml")] }),
       ),
     ),
   ).toHaveLength(1);
   expect(
     runCallVisitor(
       applyWrite(
-        astNode("ArrayExpression", { elements: [literal("<p>Static</p>")] }),
+        array({ elements: [literal("<p>Static</p>")] }),
       ),
     ),
   ).toHaveLength(0);
@@ -279,9 +431,9 @@ test("Object.assign checks opaque sources only for known DOM targets", () => {
     member(identifier("document"), identifier("createElement")),
     [literal("div")],
   );
-  const assign = (target: unknown, source: unknown) =>
+  const assign = (target: ESTree.Expression, source: ESTree.Expression) =>
     call(member(identifier("Object"), identifier("assign")), [target, source]);
-  const applyAssign = (argumentsValue: unknown) =>
+  const applyAssign = (argumentsValue: ESTree.Expression) =>
     call(
       member(
         member(identifier("Object"), identifier("assign")),
@@ -297,9 +449,9 @@ test("Object.assign checks opaque sources only for known DOM targets", () => {
     runCallVisitor(
       assign(
         createElement,
-        astNode("ObjectExpression", {
+        objectLiteral({
           properties: [
-            astNode("SpreadElement", { argument: identifier("payload") }),
+            spread({ argument: identifier("payload") }),
           ],
         }),
       ),
@@ -311,7 +463,7 @@ test("Object.assign checks opaque sources only for known DOM targets", () => {
   expect(
     runCallVisitor(
       applyAssign(
-        astNode("ArrayExpression", {
+        array({
           elements: [createElement, identifier("payload")],
         }),
       ),
@@ -320,10 +472,10 @@ test("Object.assign checks opaque sources only for known DOM targets", () => {
   expect(
     runCallVisitor(
       applyAssign(
-        astNode("ArrayExpression", {
+        array({
           elements: [
             createElement,
-            astNode("SpreadElement", { argument: identifier("sources") }),
+            spread({ argument: identifier("sources") }),
           ],
         }),
       ),
@@ -332,12 +484,12 @@ test("Object.assign checks opaque sources only for known DOM targets", () => {
   expect(
     runCallVisitor(
       applyAssign(
-        astNode("ArrayExpression", {
+        array({
           elements: [
             createElement,
-            astNode("ObjectExpression", {
+            objectLiteral({
               properties: [
-                astNode("Property", {
+                objectProperty({
                   computed: false,
                   key: identifier("textContent"),
                   value: identifier("text"),
@@ -356,9 +508,9 @@ test("Object.assign checks opaque sources only for known DOM targets", () => {
     runCallVisitor(
       assign(
         createElement,
-        astNode("ObjectExpression", {
+        objectLiteral({
           properties: [
-            astNode("Property", {
+            objectProperty({
               computed: false,
               key: identifier("textContent"),
               value: identifier("text"),
@@ -372,9 +524,9 @@ test("Object.assign checks opaque sources only for known DOM targets", () => {
     runCallVisitor(
       assign(
         createElement,
-        astNode("ObjectExpression", {
+        objectLiteral({
           properties: [
-            astNode("Property", {
+            objectProperty({
               computed: true,
               key: identifier("dynamicKey"),
               value: identifier("dynamicValue"),
@@ -388,14 +540,14 @@ test("Object.assign checks opaque sources only for known DOM targets", () => {
     runCallVisitor(
       assign(
         createElement,
-        astNode("ObjectExpression", {
+        objectLiteral({
           properties: [
-            astNode("Property", {
+            objectProperty({
               computed: true,
-              key: astNode("TemplateLiteral", {
+              key: template({
                 expressions: [],
                 quasis: [
-                  astNode("TemplateElement", {
+                  templateElement({
                     value: { cooked: "innerHTML" },
                   }),
                 ],
