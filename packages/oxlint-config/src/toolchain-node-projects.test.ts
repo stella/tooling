@@ -391,3 +391,57 @@ test("ancestor and sibling projects cannot override the nearest exclusion withou
     ).toEqual([]);
   });
 });
+
+test("the documented Node script layout gives GitHub tools their own nearest project", () => {
+  withInventoryFixture((root, trackedFiles) => {
+    const manifest = {
+      ...fixtureManifest,
+      scripts: {
+        lint: "oxlint --config .oxlintrc.json --type-aware scripts .github/tools",
+      },
+    };
+    mkdirSync(path.join(root, ".github/tools"), { recursive: true });
+    mkdirSync(path.join(root, "node_modules/@stll"));
+    symlinkSync(
+      path.resolve(import.meta.dir, "../../typescript-config"),
+      path.join(root, "node_modules/@stll/typescript-config"),
+      "dir",
+    );
+    const project = {
+      extends: "@stll/typescript-config/node.json",
+      include: ["**/*.js", "**/*.mjs", "**/*.cjs", "**/*.ts"],
+    };
+    const sources = ["scripts/release.mjs", ".github/tools/check.mjs"];
+    for (const source of sources) {
+      writeFileSync(
+        path.join(root, source),
+        'import { existsSync } from "node:fs";\nexport const found = existsSync(".");\n',
+      );
+      trackedFiles.add(source);
+    }
+    writeFileSync(
+      path.join(root, "scripts/tsconfig.json"),
+      JSON.stringify({
+        ...project,
+        include: [...project.include, "../.github/tools/**/*.mjs"],
+      }),
+    );
+    trackedFiles.add("scripts/tsconfig.json");
+    expect(
+      checkNodeProjects({ root, manifest, trackedFiles }).map(
+        ({ path: file }) => file,
+      ),
+    ).toEqual([".github/tools/check.mjs"]);
+
+    writeFileSync(
+      path.join(root, "scripts/tsconfig.json"),
+      JSON.stringify(project),
+    );
+    writeFileSync(
+      path.join(root, ".github/tools/tsconfig.json"),
+      JSON.stringify(project),
+    );
+    trackedFiles.add(".github/tools/tsconfig.json");
+    expect(checkNodeProjects({ root, manifest, trackedFiles })).toEqual([]);
+  });
+});
