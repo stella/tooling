@@ -116,36 +116,39 @@ export const checkNodeProjects = ({
   manifest,
   trackedFiles,
 }: CheckNodeProjectsOptions) => {
-  let members: ReturnType<typeof discoverConsumerManifests> | undefined;
-  // One membership source for filtered builds and workspace lint tasks: package
-  // workspaces and pnpm-workspace.yaml, including exclusion patterns.
-  const workspaceMembers = () => {
-    if (members === undefined) {
-      const files: Record<string, string> = {
-        "package.json": JSON.stringify(manifest),
-      };
-      // pnpm-workspace.yaml declares membership only when pnpm is the manager;
-      // other managers may track it for settings alone.
-      const packageManager = record(manifest)
-        ? manifest["packageManager"]
-        : undefined;
-      const pnpmMembership =
-        packageManager === undefined ||
-        (typeof packageManager === "string" &&
-          packageManager.startsWith("pnpm@"));
-      for (const file of trackedFiles) {
-        const name = path.posix.basename(file);
-        if (
-          file !== "package.json" &&
-          (name === "package.json" ||
-            (pnpmMembership && name === "pnpm-workspace.yaml")) &&
-          !file.split("/").includes("node_modules")
-        )
-          files[file] = readFileSync(path.join(root, file), "utf8");
-      }
-      members = discoverConsumerManifests(files);
+  // Membership comes from the canonical workspace discovery, including exclusion
+  // patterns. pnpm-workspace.yaml declares members only for pnpm itself; other
+  // managers may track it for settings alone, and `bun --filter` always selects
+  // from package.json workspaces.
+  const packageManager = record(manifest)
+    ? manifest["packageManager"]
+    : undefined;
+  const managerUsesPnpmWorkspace =
+    packageManager === undefined ||
+    (typeof packageManager === "string" && packageManager.startsWith("pnpm@"));
+  const discovered = new Map<
+    boolean,
+    ReturnType<typeof discoverConsumerManifests>
+  >();
+  const workspaceMembers = (pnpmMembership: boolean) => {
+    const cached = discovered.get(pnpmMembership);
+    if (cached !== undefined) return cached;
+    const files: Record<string, string> = {
+      "package.json": JSON.stringify(manifest),
+    };
+    for (const file of trackedFiles) {
+      const name = path.posix.basename(file);
+      if (
+        file !== "package.json" &&
+        (name === "package.json" ||
+          (pnpmMembership && name === "pnpm-workspace.yaml")) &&
+        !file.split("/").includes("node_modules")
+      )
+        files[file] = readFileSync(path.join(root, file), "utf8");
     }
-    return members;
+    const result = discoverConsumerManifests(files);
+    discovered.set(pnpmMembership, result);
+    return result;
   };
   const filteredCommands: (ReturnType<
     typeof lintInventoryCommands
@@ -178,7 +181,7 @@ export const checkNodeProjects = ({
     pnpmWorkspace: lifecycleFile(root, "pnpm-workspace.yaml", trackedFiles),
     yarnrc: lifecycleFile(root, ".yarnrc.yml", trackedFiles),
     assertFilteredBunBuild: (selector) => {
-      const selected = [...workspaceMembers().entries()].filter(
+      const selected = [...workspaceMembers(false).entries()].filter(
         ([, pkg]) => pkg["name"] === selector,
       );
       if (selected.length !== 1)
@@ -247,7 +250,9 @@ export const checkNodeProjects = ({
       ...command,
     }));
     if (inventory.workspaceTask) {
-      for (const [directory, workspace] of workspaceMembers()) {
+      for (const [directory, workspace] of workspaceMembers(
+        managerUsesPnpmWorkspace,
+      )) {
         if (directory === ".") continue;
         const file = `${directory}/package.json`;
         if (

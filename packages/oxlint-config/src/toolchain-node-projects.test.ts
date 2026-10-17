@@ -713,6 +713,60 @@ test("workspace lint tasks read pnpm-workspace.yaml membership and exclusions", 
   });
 });
 
+test("filtered Bun builds select package.json workspaces even under pnpm", () => {
+  withInventoryFixture((root, trackedFiles) => {
+    const manifest = {
+      ...fixtureManifest,
+      packageManager: "pnpm@12.9.1",
+      workspaces: ["packages/bun-member"],
+      scripts: { lint: "bun --filter @fixture/bun-member build" },
+    };
+    const member = (name: string) => ({
+      [`packages/${name}/package.json`]: JSON.stringify({
+        name: `@fixture/${name}`,
+        private: true,
+        scripts: { build: "oxlint orphan.mjs" },
+      }),
+      [`packages/${name}/orphan.mjs`]: "export const value = 1;\n",
+      [`packages/${name}/tsconfig.json`]: JSON.stringify({
+        compilerOptions: { allowJs: true },
+        files: [],
+      }),
+    });
+    const files = {
+      "pnpm-workspace.yaml": "packages: ['packages/pnpm-member']\n",
+      ...member("bun-member"),
+      ...member("pnpm-member"),
+    };
+    for (const [file, source] of Object.entries(files)) {
+      mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+      writeFileSync(path.join(root, file), source);
+      trackedFiles.add(file);
+    }
+    expect(
+      checkNodeProjects({ root, manifest, trackedFiles }).map(
+        ({ path: file }) => file,
+      ),
+    ).toEqual(["packages/bun-member/orphan.mjs"]);
+    const pnpmOnly = checkNodeProjects({
+      root,
+      manifest: {
+        ...manifest,
+        scripts: { lint: "bun --filter @fixture/pnpm-member build" },
+      },
+      trackedFiles,
+    });
+    expect(new Set(pnpmOnly.map(({ path: file }) => file))).toEqual(
+      new Set(["package.json"]),
+    );
+    expect(
+      pnpmOnly.some(({ message }) =>
+        message.includes("one declared workspace package"),
+      ),
+    ).toBe(true);
+  });
+});
+
 test("a nearest project that owns no roots defers to its ancestor", () => {
   withInventoryFixture((root, trackedFiles) => {
     const manifest = {
