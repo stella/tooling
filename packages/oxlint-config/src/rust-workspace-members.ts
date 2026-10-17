@@ -23,17 +23,20 @@ const patterns = (value: unknown) => {
     return posix.normalize(entry);
   });
 };
-const safeManifest = async (root: string, directory: string) => {
+const checkRealAncestors = async (root: string, directory: string) => {
   let parent = root;
-  for (const part of directory
+  for (const component of directory
     .split("/")
     .filter((part) => part !== "." && part !== "")) {
-    parent = join(parent, part);
+    parent = join(parent, component);
     await checkGeneratedOutput(join(parent, ".stll-path-check"));
   }
+};
+const safeManifest = async (root: string, directory: string) => {
+  await checkRealAncestors(root, directory);
   const path = join(root, directory, "Cargo.toml");
-  const stat = await checkGeneratedOutput(path);
-  return stat === undefined ? undefined : parse(await readFile(path, "utf8"));
+  const output = await checkGeneratedOutput(path);
+  return output === undefined ? undefined : parse(await readFile(path, "utf8"));
 };
 
 /** Keep globstar states alive while consuming only actual directory components. */
@@ -86,14 +89,21 @@ export const rustWorkspaceMembers = async (
   const workspace = manifest["workspace"];
   if (!record(workspace))
     throw new Error("workspace kind requires a workspace manifest");
+  const declaredMembers = patterns(workspace["members"]);
   const excludes = patterns(workspace["exclude"]);
+  const within = (directory: string, prefix: string) =>
+    prefix === "." || directory === prefix || directory.startsWith(`${prefix}/`);
+  // Cargo checks literal path prefixes here, including the original member
+  // strings. A glob-expanded member does not override an exclusion prefix.
   const excluded = (directory: string) =>
-    excludes.some((pattern) =>
-      picomatch.isMatch(directory, pattern, { dot: true }),
-    );
+    excludes.some((prefix) => within(directory, prefix)) &&
+    !declaredMembers.some((prefix) => within(directory, prefix));
+  const excludedSubtree = (directory: string) =>
+    excluded(directory) &&
+    !declaredMembers.some((member) => within(member, directory));
   const members = new Map<string, Record<string, unknown>>();
   if (record(manifest["package"])) members.set(".", manifest);
-  for (const pattern of patterns(workspace["members"])) {
+  for (const pattern of declaredMembers) {
     const scan = picomatch.scan(pattern);
     if (!scan.isGlob) {
       if (excluded(pattern)) continue;
@@ -104,29 +114,40 @@ export const rustWorkspaceMembers = async (
       continue;
     }
     let matches = 0;
+    let prunedExclusion = false;
     const canContainMember = memberPrefixMatcher(pattern);
     const maximumDepth = pattern.includes("**")
       ? Infinity
       : pattern.split("/").length;
     const walk = async (directory: string) => {
       const depth = directory === "." ? 0 : directory.split("/").length;
-      if (excluded(directory) || !canContainMember(directory)) return;
+      if (!canContainMember(directory)) return;
+      if (excludedSubtree(directory)) {
+        prunedExclusion = true;
+        return;
+      }
       if (picomatch.isMatch(directory, pattern, { dot: true })) {
-        const member = await safeManifest(root, directory);
-        if (member === undefined)
-          throw new Error(`missing workspace member manifest: ${directory}`);
-        members.set(directory, member);
         matches++;
+        if (!excluded(directory)) {
+          const member = await safeManifest(root, directory);
+          if (member === undefined)
+            throw new Error(`missing workspace member manifest: ${directory}`);
+          members.set(directory, member);
+        }
       }
       if (depth >= maximumDepth) return;
       // Validate ancestors before traversing a declared subtree.
-      await safeManifest(root, directory);
+      await checkRealAncestors(root, directory);
       for (const entry of await readdir(join(root, directory), {
         withFileTypes: true,
       })) {
         if ([".git", "node_modules", "target"].includes(entry.name)) continue;
         const child = posix.join(directory, entry.name);
-        if (excluded(child) || !canContainMember(child)) continue;
+        if (!canContainMember(child)) continue;
+        if (excludedSubtree(child)) {
+          prunedExclusion = true;
+          continue;
+        }
         if (entry.isSymbolicLink()) {
           // Follow metadata only: regular-file links cannot contain members.
           // Relevant dangling/cyclic links fail closed when stat throws.
@@ -138,7 +159,7 @@ export const rustWorkspaceMembers = async (
       }
     };
     await walk(scan.base || ".");
-    if (matches === 0)
+    if (matches === 0 && !prunedExclusion)
       throw new Error(`workspace pattern matched no manifests: ${pattern}`);
   }
   const inherited = workspace["dependencies"];

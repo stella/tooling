@@ -277,6 +277,73 @@ test("workspace discovery follows globs, exclusions, inherited target dependenci
   });
 });
 
+test("workspace exclusions use literal path prefixes and literal member precedence", async () => {
+  await fixture(async (root) => {
+    const directories = [
+      "crates/member",
+      "crates/ignored",
+      "vendor/dependency",
+      "vendor/members/explicit",
+      "vendor/members/globbed",
+      "vendorized/dependency",
+    ];
+    for (const directory of directories) {
+      await mkdir(join(root, directory), { recursive: true });
+      await writeFile(
+        join(root, directory, "Cargo.toml"),
+        '[package]\nname = "member"\nversion = "0.1.0"\n',
+      );
+    }
+    await writeFile(
+      join(root, "Cargo.toml"),
+      '[workspace]\nmembers = ["crates/*", "vendor/members/*", "vendor/members/explicit"]\nexclude = ["vendor", "crates/*ignored"]\n',
+    );
+    await writeFile(
+      join(root, "crates/member/Cargo.toml"),
+      '[package]\nname = "member"\nversion = "0.1.0"\n[dependencies]\nexcluded = { path = "../../vendor/dependency" }\nboundary = { path = "../../vendorized/dependency" }\n',
+    );
+    const input = { kind: "workspace" };
+    await generateRustPolicy({ root, input, mode: "write" });
+    for (const directory of directories) {
+      const member = await read(root, `${directory}/Cargo.toml`);
+      if (["vendor/dependency", "vendor/members/globbed"].includes(directory))
+        expect(member).not.toHaveProperty("lints");
+      else expect(member).toMatchObject({ lints: { workspace: true } });
+    }
+    expect(await generateRustPolicy({ root, input, mode: "check" })).toEqual([]);
+  });
+});
+
+test("glob traversal leaves non-member manifests unparsed and unmanaged", async () => {
+  for (const kind of ["malformed", "hardlink"])
+    await fixture(async (root) => {
+      await mkdir(join(root, "crates/team/members/member"), { recursive: true });
+      await writeFile(
+        join(root, "Cargo.toml"),
+        '[workspace]\nmembers = ["crates/**/members/*"]\n',
+      );
+      await writeFile(
+        join(root, "crates/team/members/member/Cargo.toml"),
+        '[package]\nname = "member"\nversion = "0.1.0"\n',
+      );
+      const unrelated = join(root, "crates/team/Cargo.toml");
+      const text = "unmanaged malformed [TOML";
+      if (kind === "malformed") await writeFile(unrelated, text);
+      else {
+        const original = join(root, "unmanaged.toml");
+        await writeFile(original, text);
+        await link(original, unrelated);
+      }
+      const input = { kind: "workspace" };
+      await generateRustPolicy({ root, input, mode: "write" });
+      expect(await readFile(unrelated, "utf8")).toBe(text);
+      expect(
+        await read(root, "crates/team/members/member/Cargo.toml"),
+      ).toMatchObject({ lints: { workspace: true } });
+      expect(await generateRustPolicy({ root, input, mode: "check" })).toEqual([]);
+    });
+});
+
 test("workspace discovery rejects escaping paths and existing local member lint tables before writes", async () => {
   await fixture(async (root) => {
     await mkdir(join(root, "member"));
@@ -527,13 +594,13 @@ test("workspace glob discovery prunes excluded symlinks before inspecting target
       pattern: "crates/**/members/*",
       member: "crates/team/members/member",
       link: "crates/team/ignored",
-      exclude: "crates/**/ignored",
+      exclude: "crates/team/ignored",
     },
     {
       pattern: "crates/*/members/*",
       member: "crates/team/members/member",
       link: "crates/team/members/ignored",
-      exclude: "crates/*/members/ignored",
+      exclude: "crates/team/members/ignored",
     },
   ]) {
     await fixture(async (root) => {
@@ -689,7 +756,7 @@ test("former explicit, excluded and path-dependency members retire inheritance a
       await mkdir(join(root, "retire"));
       await writeFile(
         join(root, "Cargo.toml"),
-        `[workspace]\nmembers = ${transition === "path-dependency" ? '["keep"]' : '["keep", "retire"]'}\n`,
+        `[workspace]\nmembers = ${transition === "path-dependency" ? '["keep"]' : '["keep", "ret*"]'}\n`,
       );
       const keep = '[package]\nname = "keep"\nversion = "0.1.0"\n';
       await writeFile(
@@ -752,13 +819,13 @@ test("former explicit, excluded and path-dependency members retire inheritance a
     });
 });
 
-test("hidden member and exclude globs follow Cargo matching", async () => {
+test("hidden member globs and literal exclude paths follow Cargo matching", async () => {
   await fixture(async (root) => {
     await mkdir(join(root, "crates/.included"), { recursive: true });
     await mkdir(join(root, "crates/.excluded"));
     await writeFile(
       join(root, "Cargo.toml"),
-      '[workspace]\nmembers = ["crates/*"]\nexclude = ["crates/*excluded"]\n',
+      '[workspace]\nmembers = ["crates/*"]\nexclude = ["crates/.excluded"]\n',
     );
     const member = '[package]\nname = "member"\nversion = "0.1.0"\n';
     await writeFile(join(root, "crates/.included/Cargo.toml"), member);

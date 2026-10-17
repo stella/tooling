@@ -119,5 +119,8 @@ generated ownership comments; missing former manifests need no cleanup. The
 first adoption of a manifest without a member index cannot discover previously
 managed members that are already absent from the current workspace.
 
-Cargo member and exclude globs include hidden directories. Every selected
+Cargo member globs include hidden directories. Exclusions are literal path
+prefixes with directory boundaries; literal member paths override them, while
+glob-expanded members remain subject to exclusions. Every selected member
 directory must contain a manifest; missing manifests fail before writes.
+Traversal checks ancestor directories without reading non-member manifests.
