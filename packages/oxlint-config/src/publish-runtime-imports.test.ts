@@ -1,6 +1,27 @@
 import { expect, test } from "bun:test";
+import assert from "node:assert/strict";
 
 import { assertPackedRuntimeImports } from "./publish-runtime-imports";
+
+type RejectionOptions = {
+  expected?: string | RegExp;
+  message?: string;
+};
+const expectRejection = (
+  promise: Promise<unknown>,
+  { expected, message }: RejectionOptions = {},
+) =>
+  assert.rejects(
+    promise,
+    (error: unknown) => {
+      if (expected === undefined) return true;
+      if (!(error instanceof Error)) return false;
+      return typeof expected === "string"
+        ? error.message.includes(expected)
+        : expected.test(error.message);
+    },
+    message,
+  );
 
 const fixture = (entries: Record<string, string>, manifest: unknown = {}) => {
   const files = new Map([
@@ -53,9 +74,9 @@ test("the published native-package command requires its local helper", async () 
       },
     },
   );
-  await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
-    "native-script-contracts.mjs",
-  );
+  await expectRejection(assertPackedRuntimeImports(packed.options), {
+    expected: "native-script-contracts.mjs",
+  });
   packed.files.set(
     "package/scripts/native-script-contracts.mjs",
     "export const readNativePackageInput = value => value;",
@@ -97,9 +118,7 @@ test("every required local member is necessary across the full static import gra
   for (const path of Object.keys(closureEntries)) {
     const incomplete = fixture(closureEntries, closureManifest);
     incomplete.members.delete(`package/${path}`);
-    await expect(
-      assertPackedRuntimeImports(incomplete.options),
-    ).rejects.toThrow();
+    await expectRejection(assertPackedRuntimeImports(incomplete.options));
   }
 });
 
@@ -107,9 +126,9 @@ test("non-entry scripts also require their static import closure", async () => {
   const packed = fixture({
     "lib/unreferenced.mjs": 'export * from "./missing.mjs";',
   });
-  await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
-    "missing.mjs",
-  );
+  await expectRejection(assertPackedRuntimeImports(packed.options), {
+    expected: "missing.mjs",
+  });
 });
 
 test("extensionless bin, main and export roots traverse extensionless intermediate modules", async () => {
@@ -127,9 +146,9 @@ test("extensionless bin, main and export roots traverse extensionless intermedia
     await assertPackedRuntimeImports(packed.options);
     expect(packed.reads).toContain("package/bin/helper");
     packed.members.delete("package/bin/leaf.mjs");
-    await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
-      "leaf.mjs",
-    );
+    await expectRejection(assertPackedRuntimeImports(packed.options), {
+      expected: "leaf.mjs",
+    });
   }
 });
 
@@ -167,9 +186,9 @@ test("CommonJS extension and index resolution does not authorize extensionless E
       { "entry.mjs": source, "helper.js": "export const value = 1;" },
       { type: "module" },
     );
-    await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
-      "helper",
-    );
+    await expectRejection(assertPackedRuntimeImports(packed.options), {
+      expected: "helper",
+    });
   }
 });
 
@@ -188,9 +207,9 @@ test("explicit JSON and native assets must be regular packed files but are never
       [path]: "opaque",
     });
     nonregular.regular.delete(`package/${path}`);
-    await expect(
-      assertPackedRuntimeImports(nonregular.options),
-    ).rejects.toThrow("Not a regular");
+    await expectRejection(assertPackedRuntimeImports(nonregular.options), {
+      expected: "Not a regular",
+    });
   }
 });
 
@@ -233,9 +252,10 @@ test("ambiguous CommonJS shadows fail closed while ESM custom shadows remain ext
     'try {} catch (require) { require("./absent.cjs"); }',
     '{ const require = () => 1; require("./absent.cjs"); }',
   ]) {
-    await expect(
+    await expectRejection(
       assertPackedRuntimeImports(fixture({ "entry.cjs": source }).options),
-    ).rejects.toThrow("Unresolvable dynamic loader");
+      { expected: "Unresolvable dynamic loader" },
+    );
     await assertPackedRuntimeImports(
       fixture({ "entry.mjs": source }, { type: "module" }).options,
     );
@@ -244,9 +264,9 @@ test("ambiguous CommonJS shadows fail closed while ESM custom shadows remain ext
     "entry.cjs":
       'function use(require) { require("./shadowed.cjs"); } require("./actual.cjs");',
   });
-  await expect(assertPackedRuntimeImports(outside.options)).rejects.toThrow(
-    "Unresolvable dynamic loader",
-  );
+  await expectRejection(assertPackedRuntimeImports(outside.options), {
+    expected: "Unresolvable dynamic loader",
+  });
 });
 
 test("missing declared entries, escaped paths and unresolved package mappings fail closed", async () => {
@@ -255,21 +275,22 @@ test("missing declared entries, escaped paths and unresolved package mappings fa
     { main: "./absent.js" },
     { exports: { ".": "./absent.mjs" } },
   ])
-    await expect(
+    await expectRejection(
       assertPackedRuntimeImports(fixture({}, manifest).options),
-    ).rejects.toThrow("absent");
+      { expected: "absent" },
+    );
   for (const specifier of [
     "../outside.mjs",
     "/absolute.mjs",
     "file:///outside.mjs",
     "#unmapped",
   ])
-    await expect(
+    await expectRejection(
       assertPackedRuntimeImports(
         fixture({ "entry.mjs": `import "${specifier}";` }, { type: "module" })
           .options,
       ),
-    ).rejects.toThrow();
+    );
 });
 
 test("literal package-local import mappings preserve the same closure requirement", async () => {
@@ -282,9 +303,9 @@ test("literal package-local import mappings preserve the same closure requiremen
   );
   await assertPackedRuntimeImports(packed.options);
   packed.members.delete("package/helper.mjs");
-  await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
-    "helper.mjs",
-  );
+  await expectRejection(assertPackedRuntimeImports(packed.options), {
+    expected: "helper.mjs",
+  });
 });
 
 test("regular-file validation covers entry scripts as well as dependencies", async () => {
@@ -297,9 +318,9 @@ test("regular-file validation covers entry scripts as well as dependencies", asy
       { type: "module", bin: "./bin/entry" },
     );
     packed.regular.delete(path);
-    await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
-      "Not a regular",
-    );
+    await expectRejection(assertPackedRuntimeImports(packed.options), {
+      expected: "Not a regular",
+    });
   }
 });
 
@@ -324,9 +345,9 @@ test("package import conditions and wildcard mappings follow the selected Node b
     await assertPackedRuntimeImports(packed.options);
     expect(packed.checks).toContain(`package/node${suffix}.mjs`);
     packed.members.delete(`package/node${suffix}.mjs`);
-    await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
-      /node/u,
-    );
+    await expectRejection(assertPackedRuntimeImports(packed.options), {
+      expected: /node/u,
+    });
   }
 });
 
@@ -339,9 +360,9 @@ test("package import arrays fall back on invalid targets, not missing selected f
     const missingFirst = fixture(entries, {
       imports: { "#helper": ["./missing.cjs", "./second.cjs"] },
     });
-    await expect(
-      assertPackedRuntimeImports(missingFirst.options),
-    ).rejects.toThrow(/missing/u);
+    await expectRejection(assertPackedRuntimeImports(missingFirst.options), {
+      expected: /missing/u,
+    });
     const invalidFirst = fixture(entries, {
       imports: { "#helper": ["../invalid.cjs", "./second.cjs"] },
     });
@@ -367,9 +388,7 @@ test("createRequire aliases resolve static local calls and resolve calls", async
     for (const path of ["helper.js", "resolved/index.js"]) {
       const incomplete = fixture(entries);
       incomplete.members.delete(`package/${path}`);
-      await expect(
-        assertPackedRuntimeImports(incomplete.options),
-      ).rejects.toThrow();
+      await expectRejection(assertPackedRuntimeImports(incomplete.options));
     }
   }
 });
@@ -397,7 +416,7 @@ test("ESM URL suffixes and encoded filename characters resolve without allowing 
       },
       { type: "module" },
     );
-    await expect(assertPackedRuntimeImports(invalid.options)).rejects.toThrow();
+    await expectRejection(assertPackedRuntimeImports(invalid.options));
   }
 });
 
@@ -420,9 +439,7 @@ test("package-local imports use the nearest nested package scope", async () => {
   for (const path of ["root-helper.mjs", "nested/nested-helper.mjs"]) {
     const incomplete = fixture(entries, manifest);
     incomplete.members.delete(`package/${path}`);
-    await expect(
-      assertPackedRuntimeImports(incomplete.options),
-    ).rejects.toThrow();
+    await expectRejection(assertPackedRuntimeImports(incomplete.options));
   }
 });
 
@@ -436,7 +453,7 @@ test("cyclic package import mappings fail explicitly", async () => {
       { "entry.mjs": 'import "#a";' },
       { type: "module", imports },
     );
-    await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow();
+    await expectRejection(assertPackedRuntimeImports(packed.options));
   }
 });
 
@@ -457,9 +474,9 @@ test("CommonJS directory resolution uses package main and its index fallback", a
     expect(packed.checks).toContain(`package/${target}`);
     expect(packed.reads).toContain("package/helper/package.json");
     packed.members.delete("package/helper/leaf.cjs");
-    await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
-      "leaf.cjs",
-    );
+    await expectRejection(assertPackedRuntimeImports(packed.options), {
+      expected: "leaf.cjs",
+    });
   }
 });
 
@@ -474,9 +491,9 @@ test("declared entry roots cannot escape the package", async () => {
       { main: root },
       { exports: { ".": root } },
     ]) {
-      await expect(
+      await expectRejection(
         assertPackedRuntimeImports(fixture({}, manifest).options),
-      ).rejects.toThrow();
+      );
     }
   }
 });
@@ -489,14 +506,15 @@ test("CommonJS module require properties reject even literal targets", async () 
     'function use(module) { module.require("./helper"); }',
     'var module; module.require("./helper");',
   ]) {
-    await expect(
+    await expectRejection(
       assertPackedRuntimeImports(
         fixture({
           "entry.cjs": source,
           "helper.js": "module.exports = 1;",
         }).options,
       ),
-    ).rejects.toThrow("Unresolvable dynamic loader");
+      { expected: "Unresolvable dynamic loader" },
+    );
   }
 });
 
@@ -511,9 +529,9 @@ test("legacy main resolution and exported URLs follow their distinct path rules"
     );
     await assertPackedRuntimeImports(packed.options);
     packed.members.delete("package/helper.cjs");
-    await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
-      "helper.cjs",
-    );
+    await expectRejection(assertPackedRuntimeImports(packed.options), {
+      expected: "helper.cjs",
+    });
   }
   const packed = fixture(
     { "entry file.mjs": "export const value = 1;" },
@@ -537,18 +555,19 @@ test("computed literal require.resolve methods retain static local targets", asy
     });
     await assertPackedRuntimeImports(packed.options);
     packed.members.delete("package/helper.js");
-    await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
-      "helper",
-    );
+    await expectRejection(assertPackedRuntimeImports(packed.options), {
+      expected: "helper",
+    });
   }
-  await expect(
+  await expectRejection(
     assertPackedRuntimeImports(
       fixture({
         "entry.cjs":
           'function use(require) { require["resolve"]("./not-local.cjs"); }',
       }).options,
     ),
-  ).rejects.toThrow("Unresolvable dynamic loader");
+    { expected: "Unresolvable dynamic loader" },
+  );
 });
 
 test("uninitialized CommonJS var redeclarations retain wrapper loader bindings", async () => {
@@ -563,18 +582,19 @@ test("uninitialized CommonJS var redeclarations retain wrapper loader bindings",
     });
     await assertPackedRuntimeImports(packed.options);
     packed.members.delete("package/helper.js");
-    await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
-      "helper",
-    );
+    await expectRejection(assertPackedRuntimeImports(packed.options), {
+      expected: "helper",
+    });
   }
-  await expect(
+  await expectRejection(
     assertPackedRuntimeImports(
       fixture({
         "entry.cjs":
           'function use(require) { var require; require("./not-local.cjs"); }',
       }).options,
     ),
-  ).rejects.toThrow("Unresolvable dynamic loader");
+    { expected: "Unresolvable dynamic loader" },
+  );
 });
 
 test("CommonJS package-import mappings use exact URL resolution without extension fallback", async () => {
@@ -583,9 +603,9 @@ test("CommonJS package-import mappings use exact URL resolution without extensio
       { "entry.cjs": 'require("#helper");', [target]: "module.exports = 1;" },
       { imports: { "#helper": "./helper" } },
     );
-    await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
-      "helper",
-    );
+    await expectRejection(assertPackedRuntimeImports(packed.options), {
+      expected: "helper",
+    });
   }
   const packed = fixture(
     {
@@ -607,7 +627,7 @@ test("expanding wildcard alias cycles reject without repeating the concrete spec
       { "entry.mjs": 'import "#loop/value";' },
       { type: "module", imports },
     );
-    await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow();
+    await expectRejection(assertPackedRuntimeImports(packed.options));
   }
 });
 
@@ -622,9 +642,9 @@ test("only lowercase JSON and native asset extensions are opaque", async () => {
     await assertPackedRuntimeImports(packed.options);
     expect(packed.reads).toContain(`package/helper.${extension}`);
     packed.members.delete("package/leaf.cjs");
-    await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
-      "leaf.cjs",
-    );
+    await expectRejection(assertPackedRuntimeImports(packed.options), {
+      expected: "leaf.cjs",
+    });
   }
 });
 
@@ -641,9 +661,9 @@ test("declared bins are scripts independently of executable name and extension",
     await assertPackedRuntimeImports(packed.options);
     expect(packed.reads).toContain(`package/${path}`);
     packed.members.delete("package/helper.cjs");
-    await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
-      "helper.cjs",
-    );
+    await expectRejection(assertPackedRuntimeImports(packed.options), {
+      expected: "helper.cjs",
+    });
   }
 });
 
@@ -660,9 +680,9 @@ test("ESM asset targets are required packed members without being parsed as Java
     expect(packed.checks).toContain(`package/${asset}`);
     expect(packed.reads).not.toContain(`package/${asset}`);
     packed.regular.delete(`package/${asset}`);
-    await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
-      "Not a regular",
-    );
+    await expectRejection(assertPackedRuntimeImports(packed.options), {
+      expected: "Not a regular",
+    });
   }
 });
 
@@ -677,9 +697,9 @@ test("exported createRequire loader declarations fail closed at the module bound
       { "entry.mjs": source, "helper.cjs": "module.exports = 1;" },
       { type: "module" },
     );
-    await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
-      "unsupported loader propagation",
-    );
+    await expectRejection(assertPackedRuntimeImports(packed.options), {
+      expected: "unsupported loader propagation",
+    });
   }
 });
 
@@ -707,9 +727,9 @@ test("exported named function and class declarations establish their normal scop
     );
     await assertPackedRuntimeImports(packed.options);
     packed.members.delete("package/helper.cjs");
-    await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
-      "helper.cjs",
-    );
+    await expectRejection(assertPackedRuntimeImports(packed.options), {
+      expected: "helper.cjs",
+    });
   }
 });
 
@@ -722,12 +742,13 @@ test("known CommonJS loader calls with computed arguments fail closed", async ()
     'const target = "./helper.cjs"; module["require"](target);',
     'const loader = require; const target = "./helper.cjs"; loader(target);',
   ])
-    await expect(
+    await expectRejection(
       assertPackedRuntimeImports(
         fixture({ "entry.cjs": source, "helper.cjs": "module.exports = 1;" })
           .options,
       ),
-    ).rejects.toThrow("Unresolvable dynamic loader");
+      { expected: "Unresolvable dynamic loader" },
+    );
 });
 
 test("computed createRequire bases and unsupported result propagation fail closed", async () => {
@@ -743,9 +764,9 @@ test("computed createRequire bases and unsupported result propagation fail close
       },
       { type: "module" },
     );
-    await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
-      "Unresolvable dynamic loader",
-    );
+    await expectRejection(assertPackedRuntimeImports(packed.options), {
+      expected: "Unresolvable dynamic loader",
+    });
   }
 });
 
@@ -755,12 +776,13 @@ test("conditional aliases containing known loaders cannot silently erase depende
     'const custom = () => 1; const loader = condition ? custom : require; loader("./helper.cjs");',
     'const custom = () => 1; const loader = condition && require; loader("./helper.cjs");',
   ])
-    await expect(
+    await expectRejection(
       assertPackedRuntimeImports(
         fixture({ "entry.cjs": source, "helper.cjs": "module.exports = 1;" })
           .options,
       ),
-    ).rejects.toThrow("Unresolvable dynamic loader");
+      { expected: "Unresolvable dynamic loader" },
+    );
 });
 
 test("namespace createRequire factories and plain namespace aliases retain local dependencies", async () => {
@@ -804,9 +826,9 @@ test("namespace createRequire factories and plain namespace aliases retain local
     });
     await assertPackedRuntimeImports(packed.options);
     packed.members.delete("package/helper.cjs");
-    await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
-      "helper.cjs",
-    );
+    await expectRejection(assertPackedRuntimeImports(packed.options), {
+      expected: "helper.cjs",
+    });
   }
 });
 
@@ -828,12 +850,13 @@ test("unsupported loader destructuring and resolution options fail explicitly", 
     ["entry.cjs", 'const {require: loader} = module; loader("./helper.cjs");'],
     ["entry.cjs", 'require.resolve("./helper.cjs", {paths: ["./other"]});'],
   ] as const)
-    await expect(
+    await expectRejection(
       assertPackedRuntimeImports(
         fixture({ [entry]: source, "helper.cjs": "module.exports = 1;" })
           .options,
       ),
-    ).rejects.toThrow("Unresolvable dynamic loader");
+      { expected: "Unresolvable dynamic loader" },
+    );
 });
 
 test("external literal loader calls and unrelated ESM shadows retain their boundaries", async () => {
@@ -850,7 +873,7 @@ test("external literal loader calls and unrelated ESM shadows retain their bound
     await assertPackedRuntimeImports(
       fixture({ "entry.mjs": source }, { type: "module" }).options,
     );
-  await expect(
+  await expectRejection(
     assertPackedRuntimeImports(
       fixture(
         {
@@ -860,7 +883,8 @@ test("external literal loader calls and unrelated ESM shadows retain their bound
         { type: "module" },
       ).options,
     ),
-  ).rejects.toThrow("Unresolvable dynamic loader");
+    { expected: "Unresolvable dynamic loader" },
+  );
 });
 
 test("function-owned var loader aliases remain visible throughout their function", async () => {
@@ -874,9 +898,9 @@ test("function-owned var loader aliases remain visible throughout their function
     });
     await assertPackedRuntimeImports(packed.options);
     packed.members.delete("package/helper.cjs");
-    await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
-      "helper.cjs",
-    );
+    await expectRejection(assertPackedRuntimeImports(packed.options), {
+      expected: "helper.cjs",
+    });
   }
 });
 
@@ -885,12 +909,13 @@ test("conflicting var loader kinds fail explicitly instead of oscillating infere
     'const { createRequire } = require("node:module"); var loader = require; var loader = createRequire; loader("./helper.cjs");',
     'var loader = require; var loader = module; loader.require("./helper.cjs");',
   ])
-    await expect(
+    await expectRejection(
       assertPackedRuntimeImports(
         fixture({ "entry.cjs": source, "helper.cjs": "module.exports = 1;" })
           .options,
       ),
-    ).rejects.toThrow("Unresolvable dynamic loader");
+      { expected: "Unresolvable dynamic loader" },
+    );
 });
 
 test("known loaders cannot escape through bind, call, apply, consumers or reassignment", async () => {
@@ -907,12 +932,13 @@ test("known loaders cannot escape through bind, call, apply, consumers or reassi
     'let loader = require; loader = custom; loader("./helper.cjs");',
     'require = custom; require("./helper.cjs");',
   ])
-    await expect(
+    await expectRejection(
       assertPackedRuntimeImports(
         fixture({ "entry.cjs": source, "helper.cjs": "module.exports = 1;" })
           .options,
       ),
-    ).rejects.toThrow("Unresolvable dynamic loader");
+      { expected: "Unresolvable dynamic loader" },
+    );
 });
 
 test("default-exported unbound createRequire results fail explicitly", async () => {
@@ -923,9 +949,9 @@ test("default-exported unbound createRequire results fail explicitly", async () 
     },
     { type: "module" },
   );
-  await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
-    "Unresolvable dynamic loader",
-  );
+  await expectRejection(assertPackedRuntimeImports(packed.options), {
+    expected: "Unresolvable dynamic loader",
+  });
 });
 
 test("an ESM asset is still traversed as CommonJS in either archive order", async () => {
@@ -943,9 +969,9 @@ test("an ESM asset is still traversed as CommonJS in either archive order", asyn
     await assertPackedRuntimeImports(packed.options);
     expect(packed.reads).toContain("package/shared.payload");
     packed.members.delete("package/helper.cjs");
-    await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
-      "helper.cjs",
-    );
+    await expectRejection(assertPackedRuntimeImports(packed.options), {
+      expected: "helper.cjs",
+    });
   }
 });
 
@@ -988,12 +1014,13 @@ test("inline module factories and unsupported namespace references fail closed",
       'import * as moduleApi from "node:module"; const {createRequire: {call: factory}} = moduleApi; factory(null, import.meta.url);',
     ],
   ] as const)
-    await expect(
+    await expectRejection(
       assertPackedRuntimeImports(
         fixture({ [entry]: source, "helper.cjs": "module.exports = 1;" })
           .options,
       ),
-    ).rejects.toThrow("Unresolvable dynamic loader");
+      { expected: "Unresolvable dynamic loader" },
+    );
 });
 
 test("ambiguous CommonJS wrapper and inherited loader bindings fail closed", async () => {
@@ -1014,12 +1041,13 @@ test("ambiguous CommonJS wrapper and inherited loader bindings fail closed", asy
     'const loader = require; function use({custom: loader}) { loader("./helper.cjs"); }',
     'const loader = require; function use() { const {loader} = custom; loader("./helper.cjs"); }',
   ])
-    await expect(
+    await expectRejection(
       assertPackedRuntimeImports(
         fixture({ "entry.cjs": source, "helper.cjs": "module.exports = 1;" })
           .options,
       ),
-    ).rejects.toThrow("Unresolvable dynamic loader");
+      { expected: "Unresolvable dynamic loader" },
+    );
 });
 
 test("every supported node module import form preserves its local closure", async () => {
@@ -1046,9 +1074,9 @@ test("every supported node module import form preserves its local closure", asyn
       );
       await assertPackedRuntimeImports(packed.options);
       packed.members.delete("package/helper.cjs");
-      await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
-        "helper.cjs",
-      );
+      await expectRejection(assertPackedRuntimeImports(packed.options), {
+        expected: "helper.cjs",
+      });
       exercised.add(name);
     }
     expect(exercised).toEqual(new Set(Object.keys(forms)));
@@ -1073,7 +1101,7 @@ test("unsupported node module import and re-export categories fail closed", asyn
   for (const moduleName of ["node:module", "module"]) {
     const exercised = new Set<string>();
     for (const [name, declaration] of Object.entries(forms)) {
-      await expect(
+      await expectRejection(
         assertPackedRuntimeImports(
           fixture(
             {
@@ -1085,7 +1113,8 @@ test("unsupported node module import and re-export categories fail closed", asyn
             { type: "module" },
           ).options,
         ),
-      ).rejects.toThrow("Unresolvable dynamic loader");
+        { expected: "Unresolvable dynamic loader" },
+      );
       exercised.add(name);
     }
     expect(exercised).toEqual(new Set(Object.keys(forms)));
@@ -1109,7 +1138,7 @@ test("module-derived ESM aliases cannot be shadowed by parameters or local bindi
   };
   const exercised = new Set<string>();
   for (const [name, body] of Object.entries(shadows)) {
-    await expect(
+    await expectRejection(
       assertPackedRuntimeImports(
         fixture(
           {
@@ -1119,7 +1148,8 @@ test("module-derived ESM aliases cannot be shadowed by parameters or local bindi
           { type: "module" },
         ).options,
       ),
-    ).rejects.toThrow("Unresolvable dynamic loader");
+      { expected: "Unresolvable dynamic loader" },
+    );
     exercised.add(name);
   }
   expect(exercised).toEqual(new Set(Object.keys(shadows)));
@@ -1147,18 +1177,19 @@ test("createRequire filename bases must resolve to the actual CommonJS wrapper",
   };
   const exercised = new Set<string>();
   for (const [name, body] of Object.entries(bases)) {
-    await expect(
+    await expectRejection(
       assertPackedRuntimeImports(
         fixture({
           "entry.cjs": `const {createRequire: factory} = require("node:module"); ${body}`,
           "helper.cjs": "module.exports = 1;",
         }).options,
       ),
-    ).rejects.toThrow("Unresolvable dynamic loader");
+      { expected: "Unresolvable dynamic loader" },
+    );
     exercised.add(name);
   }
   expect(exercised).toEqual(new Set(Object.keys(bases)));
-  await expect(
+  await expectRejection(
     assertPackedRuntimeImports(
       fixture(
         {
@@ -1169,7 +1200,8 @@ test("createRequire filename bases must resolve to the actual CommonJS wrapper",
         { type: "module" },
       ).options,
     ),
-  ).rejects.toThrow("Unresolvable dynamic loader");
+    { expected: "Unresolvable dynamic loader" },
+  );
 });
 
 test("package self references cannot bypass exports in either module format", async () => {
@@ -1184,9 +1216,9 @@ test("package self references cannot bypass exports in either module format", as
       },
       { name: "self-fixture", exports: { ".": `./${entry}` } },
     );
-    await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
-      /export|ERR_PACKAGE_PATH_NOT_EXPORTED/iu,
-    );
+    await expectRejection(assertPackedRuntimeImports(packed.options), {
+      expected: /export|ERR_PACKAGE_PATH_NOT_EXPORTED/iu,
+    });
   }
 });
 
@@ -1220,7 +1252,7 @@ test("conditional self references select the Node import and require targets", a
   expect(packed.checks).toContain("package/unused-default.mjs");
   for (const target of ["imported.mjs", "required.cjs"]) {
     packed.members.delete(`package/${target}`);
-    await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow();
+    await expectRejection(assertPackedRuntimeImports(packed.options));
     packed.members.add(`package/${target}`);
   }
 });
@@ -1232,9 +1264,9 @@ test("a package main directory does not recursively apply its child's package ma
     "helper/child/package.json": JSON.stringify({ main: "./actual.cjs" }),
     "helper/child/actual.cjs": 'throw new Error("must not execute child");',
   });
-  await expect(assertPackedRuntimeImports(packed.options)).rejects.toThrow(
-    /helper|MODULE_NOT_FOUND/iu,
-  );
+  await expectRejection(assertPackedRuntimeImports(packed.options), {
+    expected: /helper|MODULE_NOT_FOUND/iu,
+  });
 });
 
 test("Node-selected external import mappings remain external dependencies", async () => {
@@ -1304,9 +1336,10 @@ test("exported classified loader kinds cannot escape through ESM or CommonJS exp
   } as const;
   const exercised = new Set<string>();
   for (const [name, [entry, source]] of Object.entries(exports)) {
-    await expect(
+    await expectRejection(
       assertPackedRuntimeImports(fixture({ [entry]: source }).options),
-    ).rejects.toThrow("unsupported loader propagation");
+      { expected: "unsupported loader propagation" },
+    );
     exercised.add(name);
   }
   expect(exercised).toEqual(new Set(Object.keys(exports)));
@@ -1327,9 +1360,10 @@ test("a second module cannot invoke an exported loader outside its declaring mod
     },
   };
   for (const entries of Object.values(callers))
-    await expect(
+    await expectRejection(
       assertPackedRuntimeImports(fixture(entries).options),
-    ).rejects.toThrow("unsupported loader propagation");
+      { expected: "unsupported loader propagation" },
+    );
 });
 
 test("CommonJS wrapper arguments and dynamic execution cannot recover untracked loaders", async () => {
@@ -1368,15 +1402,15 @@ test("CommonJS wrapper arguments and dynamic execution cannot recover untracked 
   };
   const exercised = new Set<string>();
   for (const [name, source] of Object.entries(escapes)) {
-    await expect(
+    await expectRejection(
       assertPackedRuntimeImports(
         fixture({
           "entry.cjs": source,
           "helper.cjs": "module.exports = 1;",
         }).options,
       ),
-      name,
-    ).rejects.toThrow("Unresolvable dynamic loader");
+      { expected: "Unresolvable dynamic loader", message: name },
+    );
     exercised.add(name);
   }
   expect(exercised).toEqual(new Set(Object.keys(escapes)));
@@ -1389,7 +1423,7 @@ test("ESM module factory aliases cannot expose loader metadata or constructors",
     'import * as moduleApi from "node:module"; moduleApi.Module._load("./helper.cjs");',
     'import * as moduleApi from "node:module"; const alias = moduleApi; alias.Module._load("./helper.cjs");',
   ]) {
-    await expect(
+    await expectRejection(
       assertPackedRuntimeImports(
         fixture(
           {
@@ -1399,7 +1433,8 @@ test("ESM module factory aliases cannot expose loader metadata or constructors",
           { type: "module" },
         ).options,
       ),
-    ).rejects.toThrow("Unresolvable dynamic loader");
+      { expected: "Unresolvable dynamic loader" },
+    );
   }
 });
 

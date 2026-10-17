@@ -10,7 +10,7 @@ const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 const javascript = /\.(?:js|mjs|cjs)$/iu;
 const opaque = /\.(?:json|node)$/u;
-const declaration = /\.d\.[cm]?ts$/iu;
+const declarationFile = /\.d\.[cm]?ts$/iu;
 
 type PackedRuntimeImportsOptions = {
   members: ReadonlySet<string>;
@@ -354,18 +354,18 @@ const staticImports = (
       }
       const nested = [...scopes, local];
       let changed = true;
+      const assign = (name: string, value: Binding) => {
+        const owner = bindingScope(nested, name);
+        if (owner === undefined)
+          throw unresolvable("loader declaration has no owning scope");
+        if (owner.get(name) === value) return;
+        if (owner.get(name) !== "other")
+          throw unresolvable("conflicting loader binding declarations");
+        owner.set(name, value);
+        changed = true;
+      };
       while (changed) {
         changed = false;
-        const assign = (name: string, value: Binding) => {
-          const owner = bindingScope(nested, name);
-          if (owner === undefined)
-            throw unresolvable("loader declaration has no owning scope");
-          if (owner.get(name) === value) return;
-          if (owner.get(name) !== "other")
-            throw unresolvable("conflicting loader binding declarations");
-          owner.set(name, value);
-          changed = true;
-        };
         for (const entry of declarations) {
           const name = identifier(entry["id"]);
           const initial = entry["init"];
@@ -808,15 +808,11 @@ export const assertPackedRuntimeImports = async ({
     const pending = [...members].filter((file) => javascript.test(file));
     const scripts = new Set(pending);
     const bin = root["bin"];
-    const bins =
-      bin === undefined
-        ? []
-        : typeof bin === "string"
-          ? [bin]
-          : record(bin)
-            ? Object.values(bin)
-            : undefined;
-    if (bins === undefined) throw new Error("Invalid packed bin declaration");
+    const bins: unknown[] = [];
+    if (typeof bin === "string") bins.push(bin);
+    else if (record(bin)) bins.push(...Object.values(bin));
+    else if (bin !== undefined)
+      throw new Error("Invalid packed bin declaration");
     for (const entry of bins) {
       if (
         typeof entry !== "string" ||
@@ -830,7 +826,7 @@ export const assertPackedRuntimeImports = async ({
       pending.push(file);
     }
     const addEntry = (entry: string, mode: "file" | "url") => {
-      if (declaration.test(entry)) return;
+      if (declarationFile.test(entry)) return;
       if (path.posix.isAbsolute(entry) || entry.includes("\\"))
         throw new Error(`Runtime entry escapes the packed package: ${entry}`);
       if (mode === "url" && /%2f|%5c/iu.test(entry))
@@ -878,7 +874,7 @@ export const assertPackedRuntimeImports = async ({
         entry.includes("\\")
       )
         throw new Error("Invalid packed main entry");
-      if (!declaration.test(entry)) {
+      if (!declarationFile.test(entry)) {
         const resolved = (
           await resolveImport({
             specifier: "./package",
@@ -906,11 +902,10 @@ export const assertPackedRuntimeImports = async ({
       if (!scripts.has(file) || traversed.has(file)) continue;
       traversed.add(file);
       const source = await read(file);
-      const mode = /\.mjs$/iu.test(file)
-        ? "module"
-        : /\.cjs$/iu.test(file)
-          ? "script"
-          : packageMode(files, file);
+      let mode: ReturnType<typeof packageMode>;
+      if (/\.mjs$/iu.test(file)) mode = "module";
+      else if (/\.cjs$/iu.test(file)) mode = "script";
+      else mode = packageMode(files, file);
       const parse = (sourceType: "script" | "module") => {
         const tree = parseArtifactSource(source, {
           ecmaVersion: "latest",
