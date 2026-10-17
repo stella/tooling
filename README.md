@@ -314,10 +314,13 @@ compiler overrides, or config import side effects are needed.
 
 `stll-toolchain-check` enforces this ownership with `type-aware-projects` when the
 root manifest declares `oxlint-tsgolint`. It compares the files selected by the
-root lint command with files owned by discoverable `tsconfig.json` projects and
-their tracked references. Only tracked JavaScript and TypeScript files selected
-by lint are checked; lint exclusions stay excluded. An unrelated, unreferenced
-config does not establish ownership. Oxlint supplies its file inventory and the
+root lint command with files owned by each file's nearest discoverable
+`tsconfig.json` and that project's tracked reference graph. A broader ancestor or
+sibling project cannot claim a file excluded by its nearest project. Oxlint's
+`--tsconfig` flag changes import resolution; it does not select a type-aware
+ownership project. Only tracked JavaScript and TypeScript files selected by lint
+are checked; lint exclusions stay excluded. An unrelated, unreferenced config
+does not establish ownership. Oxlint supplies its file inventory and the
 TypeScript compiler expands inherited config, JSONC, includes and excludes; this
 check does not run lint rules or type checking. Unsupported lint launchers or
 unreadable project configurations produce diagnostics rather than bypassing the

@@ -253,16 +253,31 @@ test("workspace inventories preserve package cwd and ignore validation-only task
   });
 });
 
-test("explicitly selected tracked configs establish ownership without a default project", () => {
+test("import-resolution tsconfig flags cannot claim files excluded by the nearest project", () => {
   withInventoryFixture((root, trackedFiles) => {
-    const source = "scripts/selected.ts";
+    const source = "scripts/orphan.ts";
     const selected = "tsconfig.lint.json";
     writeFileSync(path.join(root, source), "export const value = 1;\n");
+    writeFileSync(
+      path.join(root, "scripts/owned.ts"),
+      "export const value = 1;\n",
+    );
+    writeFileSync(
+      path.join(root, "tsconfig.json"),
+      JSON.stringify({ files: ["scripts/owned.ts"] }),
+    );
     writeFileSync(
       path.join(root, selected),
       JSON.stringify({ files: [source] }),
     );
-    for (const file of ["package.json", ".oxlintrc.json", source, selected])
+    for (const file of [
+      "package.json",
+      ".oxlintrc.json",
+      source,
+      selected,
+      "tsconfig.json",
+      "scripts/owned.ts",
+    ])
       trackedFiles.add(file);
     for (const argument of [
       "--tsconfig tsconfig.lint.json",
@@ -275,10 +290,10 @@ test("explicitly selected tracked configs establish ownership without a default 
         },
       };
       writeFileSync(path.join(root, "package.json"), JSON.stringify(manifest));
-      expect(checkNodeProjects({ root, manifest, trackedFiles })).toEqual([]);
+      const diagnostics = checkNodeProjects({ root, manifest, trackedFiles });
+      expect(diagnostics.map(({ path: file }) => file)).toEqual([source]);
     }
 
-    // A workspace selector resolves against that package's cwd, not the root.
     const manifest = {
       ...fixtureManifest,
       workspaces: ["packages/*"],
@@ -296,20 +311,83 @@ test("explicitly selected tracked configs establish ownership without a default 
         },
       }),
     );
+    const workspaceOrphan = "packages/a/src/orphan.ts";
     writeFileSync(
-      path.join(root, "packages/a/src/selected.ts"),
+      path.join(root, workspaceOrphan),
       "export const value = 1;\n",
     );
     writeFileSync(
+      path.join(root, "packages/a/src/owned.ts"),
+      "export const value = 1;\n",
+    );
+    writeFileSync(
+      path.join(root, "packages/a/tsconfig.json"),
+      JSON.stringify({ files: ["src/owned.ts"] }),
+    );
+    writeFileSync(
       path.join(root, "packages/a/config/tsconfig.lint.json"),
-      JSON.stringify({ files: ["../src/selected.ts"] }),
+      JSON.stringify({ files: ["../src/orphan.ts"] }),
     );
     for (const file of [
       "packages/a/package.json",
-      "packages/a/src/selected.ts",
+      workspaceOrphan,
+      "packages/a/src/owned.ts",
+      "packages/a/tsconfig.json",
       "packages/a/config/tsconfig.lint.json",
     ])
       trackedFiles.add(file);
-    expect(checkNodeProjects({ root, manifest, trackedFiles })).toEqual([]);
+    expect(
+      checkNodeProjects({ root, manifest, trackedFiles }).map(
+        ({ path: file }) => file,
+      ),
+    ).toEqual([workspaceOrphan]);
+  });
+});
+
+test("ancestor and sibling projects cannot override the nearest exclusion without an explicit reference", () => {
+  withInventoryFixture((root, trackedFiles) => {
+    mkdirSync(path.join(root, "scripts/nested"));
+    mkdirSync(path.join(root, "scripts/sibling"));
+    const orphan = "scripts/nested/orphan.ts";
+    const owned = "scripts/nested/owned.ts";
+    for (const file of [orphan, owned]) {
+      writeFileSync(path.join(root, file), "export const value = 1;\n");
+      trackedFiles.add(file);
+    }
+    writeFileSync(
+      path.join(root, "tsconfig.json"),
+      JSON.stringify({ files: [orphan, owned] }),
+    );
+    const nearest = "scripts/nested/tsconfig.json";
+    writeFileSync(
+      path.join(root, nearest),
+      JSON.stringify({ files: ["owned.ts"] }),
+    );
+    writeFileSync(
+      path.join(root, "scripts/sibling/tsconfig.json"),
+      JSON.stringify({ files: ["../nested/orphan.ts"] }),
+    );
+    for (const config of [
+      "tsconfig.json",
+      nearest,
+      "scripts/sibling/tsconfig.json",
+    ])
+      trackedFiles.add(config);
+    expect(
+      checkNodeProjects({ root, manifest: fixtureManifest, trackedFiles }).map(
+        ({ path: file }) => file,
+      ),
+    ).toEqual([orphan]);
+
+    writeFileSync(
+      path.join(root, nearest),
+      JSON.stringify({
+        files: ["owned.ts"],
+        references: [{ path: "../sibling" }],
+      }),
+    );
+    expect(
+      checkNodeProjects({ root, manifest: fixtureManifest, trackedFiles }),
+    ).toEqual([]);
   });
 });
