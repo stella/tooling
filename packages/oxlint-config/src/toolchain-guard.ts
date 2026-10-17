@@ -34,6 +34,7 @@ import {
   type ResolvedEngineFloor,
 } from "./toolchain-engine-floors";
 import { toolchainInputKind } from "./toolchain-inputs";
+import { checkNodeProjects, nodeProjectRule } from "./toolchain-node-projects";
 import { checkPackageFiles, packageRules } from "./toolchain-packages";
 import {
   checkRuntimeFile,
@@ -48,6 +49,7 @@ export const toolchainRules = [
     ...packageRules,
     ...runtimeRules,
     ...dependabotRules,
+    nodeProjectRule,
     "cloud-setup-drift",
   ] as const),
 ] as const;
@@ -114,6 +116,10 @@ export const parseToolchainConfiguration = (input: unknown) => {
     if (entry["rule"] === "cloud-setup-drift")
       throw new Error(
         "cloud-setup-drift cannot be opted out; generated setup must match shared policy",
+      );
+    if (entry["rule"] === nodeProjectRule)
+      throw new Error(
+        "type-aware-projects cannot be opted out; linted files require declared TypeScript projects",
       );
     disabled.add(entry["rule"]);
   }
@@ -320,6 +326,15 @@ export const checkToolchain = ({
     }),
   );
   diagnostics.push(...checkPackageFiles({ files, policy }));
+  if (files["package.json"] !== undefined) {
+    let manifest: unknown;
+    try {
+      manifest = JSON.parse(files["package.json"]);
+    } catch {
+      // The package manifest guard reports invalid JSON.
+    }
+    diagnostics.push(...checkNodeProjects({ root, manifest, trackedFiles }));
+  }
   for (const [file, text] of Object.entries(files))
     diagnostics.push(
       ...checkRuntimeFile({

@@ -287,6 +287,73 @@ Use the library TypeScript preset:
 }
 ```
 
+Node scripts need an explicit TypeScript project when the library project's
+`include` does not cover them. Install `@types/node` as a direct development
+dependency of the consumer, then add `scripts/tsconfig.json`:
+
+```json
+{
+  "extends": "@stll/typescript-config/node.json",
+  "include": [
+    "**/*.js",
+    "**/*.jsx",
+    "**/*.mjs",
+    "**/*.cjs",
+    "**/*.ts",
+    "**/*.tsx",
+    "**/*.mts",
+    "**/*.cts"
+  ]
+}
+```
+
+The existing Node preset selects Node ambient types; the local `include` assigns
+ownership of scripts to that project. Keep the library project unchanged. For
+scripts in `.github/tools`, add `.github/tools/tsconfig.json` with the same
+`extends` and all local `include` patterns shown above. A sibling
+`scripts/tsconfig.json` that includes `../.github/tools` does not own those files:
+Oxlint discovers the nearest `tsconfig.json`; run the ordinary type-aware lint
+command from the repository root. Missing Node ambient types can otherwise appear
+as `TS2591` on `node:fs` or `require`, followed by misleading `any` diagnostics on
+Node API results. Adding casts or changing conditionals does not repair resolution.
+Use the existing `bun.json` preset for Bun tests and benchmarks. Include root
+configuration files in their declared project as well. No additional preset,
+compiler overrides, or config import side effects are needed.
+
+`stll-toolchain-check` enforces this ownership with `type-aware-projects` when the
+root manifest declares `oxlint-tsgolint`. It compares the files selected by the
+root lint command with configured root files. The search starts at the nearest
+discoverable `tsconfig.json` and its tracked reference graph, then searches ancestor
+configs and their references for unmatched files. An unreferenced sibling cannot
+claim ownership. Imported files do not become configured roots merely because the
+compiler loads them into a program; the
+[pinned backend resolver](https://github.com/oxc-project/tsgolint/blob/eb9339115edde6811ca94c3433adf69ea9852880/internal/utils/find_tsconfig.go#L99-L157)
+checks root membership. Oxlint's
+`--tsconfig` flag changes import resolution; it does not select a type-aware
+ownership project. Only tracked JavaScript and TypeScript files selected by lint
+are checked; lint exclusions stay excluded. An unrelated, unreferenced config
+does not establish ownership. Oxlint supplies its file inventory and the
+TypeScript compiler expands inherited config, JSONC, includes and excludes; this
+check does not run lint rules or type checking. Unsupported lint launchers or
+unreadable project configurations produce diagnostics rather than bypassing the
+check. Add the appropriate shared project declaration instead of suppressing the
+rule.
+
+Script inventory includes automatic pre/post stages of literal package-manager
+`run` aliases and the root lint script. Declare the root `packageManager` when
+root hooks exist; workspace lint tasks inherit it. npm and Bun run those hooks;
+tracked project `.npmrc` `ignore-scripts=true` suppresses npm hooks. Pinned pnpm
+12.9.1 defaults to running them and reads the boolean `enablePrePostScripts` from
+tracked `pnpm-workspace.yaml`; it skips a hook whose name already occurs in the
+main script body, matching that version's behavior. Yarn Berry (declared major
+2, 3 or 4) does not run arbitrary pre/post hooks. Unknown manager flavors,
+unreadable configuration, nested workspace overrides, custom Yarn executables or
+plugins, and dynamic lifecycle settings produce diagnostics.
+Automatic hook bodies do not recursively invent further pre/post stages.
+Filtered Bun build preparation requires one exact workspace package name and no
+prebuild/postbuild hooks; unsupported hook scopes must be made explicit instead
+of being omitted from inventory.
+
 Use the oxlint preset with local exceptions:
 
 ```ts

@@ -927,3 +927,14 @@ another exact stable release. Each record contains exactly `pin`, `reason`,
 `tracking` (a GitHub issue URL) and `expires` (a future `YYYY-MM-DD` date).
 Channels, expired records and `rust-version` rule opt-outs fail validation.
 See the [root policy guide](../../README.md) for a complete declaration.
+
+`stll-toolchain-check` requires tracked JavaScript and TypeScript files selected by type-aware lint to belong to declared TypeScript projects. See the [Node scripts project recipe](https://github.com/stella/tooling/blob/main/README.md) for scripts outside the library project. The check inventories Oxlint-selected files and expands compiler configurations; it does not run lint or type checking.
+
+The project-ownership guard models declared package-manager scripts, including
+literal filtered Bun build bodies and their script aliases with the selected
+workspace as the working directory. It inventories supported linter invocations;
+it never executes build bodies. Unrecognized linter launchers and script forms
+fail closed. This is an ownership check for ordinary authored package scripts,
+not a security boundary against deliberately obfuscated code or lint invocations
+hidden inside arbitrary program bodies. Unsupported forms require an explicit
+supported script invocation or a separately tested extension to the model.
