@@ -54,6 +54,29 @@ export const getPropertyName = (node: unknown): string | null => {
   return null;
 };
 
+export const staticStringValue = (node: unknown): string | null => {
+  const expression = unwrapExpression(node);
+  if (expression === null) return null;
+  node = expression;
+  if (isStringLiteral(node)) return node.value;
+  if (
+    !isAstNode(node) ||
+    node.type !== "TemplateLiteral" ||
+    !Array.isArray(node.expressions) ||
+    node.expressions.length !== 0 ||
+    !Array.isArray(node.quasis)
+  )
+    return null;
+  const quasi = node.quasis.at(0);
+  if (!isAstNode(quasi)) return null;
+  const value = quasi.value;
+  const cooked =
+    typeof value === "object" && value !== null
+      ? Reflect.get(value, "cooked")
+      : undefined;
+  return typeof cooked === "string" ? cooked : null;
+};
+
 export const memberPropertyName = (node: unknown): string | null => {
   if (!isAstNode(node) || node.type !== "MemberExpression") {
     return null;
@@ -61,29 +84,7 @@ export const memberPropertyName = (node: unknown): string | null => {
   if (node.computed !== true) {
     return getPropertyName(node.property);
   }
-  if (isStringLiteral(node.property)) {
-    return node.property.value;
-  }
-  const property = node.property;
-  if (
-    !isAstNode(property) ||
-    property.type !== "TemplateLiteral" ||
-    !Array.isArray(property.expressions) ||
-    property.expressions.length !== 0 ||
-    !Array.isArray(property.quasis)
-  ) {
-    return null;
-  }
-  const quasi = property.quasis.at(0);
-  if (!isAstNode(quasi)) {
-    return null;
-  }
-  const value = quasi.value;
-  const cooked =
-    typeof value === "object" && value !== null
-      ? Reflect.get(value, "cooked")
-      : undefined;
-  return typeof cooked === "string" ? cooked : null;
+  return staticStringValue(node.property);
 };
 
 export const invokedCallee = (node: unknown): AstNode | null => {

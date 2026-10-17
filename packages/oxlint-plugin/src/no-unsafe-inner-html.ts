@@ -44,6 +44,7 @@ import {
   isMemberAccess,
   isStringLiteral,
   memberPropertyName,
+  staticStringValue,
   unwrapExpression,
 } from "./utils.ts";
 
@@ -215,29 +216,7 @@ const objectPropertyKey = (property: unknown): string | null => {
     return null;
   }
   if (property.computed === true) {
-    if (isStringLiteral(property.key)) {
-      return property.key.value;
-    }
-    const key = property.key;
-    if (
-      !isAstNode(key) ||
-      key.type !== "TemplateLiteral" ||
-      !Array.isArray(key.expressions) ||
-      key.expressions.length !== 0 ||
-      !Array.isArray(key.quasis)
-    ) {
-      return null;
-    }
-    const quasi = key.quasis.at(0);
-    if (!isAstNode(quasi)) {
-      return null;
-    }
-    const value = quasi.value;
-    const cooked =
-      typeof value === "object" && value !== null
-        ? Reflect.get(value, "cooked")
-        : undefined;
-    return typeof cooked === "string" ? cooked : null;
+    return staticStringValue(property.key);
   }
   return getPropertyName(property.key);
 };
@@ -358,7 +337,7 @@ const isKnownDomTarget = (node: unknown): boolean => {
     const callee = invokedCallee(target);
     return (
       callee?.type === "MemberExpression" &&
-      isIdentifier(callee.object, "document") &&
+      isDocumentReceiver(callee.object) &&
       [
         "createElement",
         "createElementNS",
@@ -578,11 +557,10 @@ export default eslintCompatPlugin({
                 reportIfUnsafe(node);
                 return;
               }
-              const attribute = unwrapExpression(sinkArguments.args.at(0));
-              if (
-                isStringLiteral(attribute) &&
-                attribute.value.toLowerCase() === "srcdoc"
-              ) {
+              const attribute = staticStringValue(
+                sinkArguments.args.at(0),
+              );
+              if (attribute?.toLowerCase() === "srcdoc") {
                 reportIfUnsafe(sinkArguments.args.at(1));
               }
               return;

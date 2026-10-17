@@ -150,7 +150,7 @@ export const UnsafeCallSpreadInsertAdjacentHtml = () => {
   Element.prototype.insertAdjacentHTML.call(...opaqueInsertArguments);
 };
 
-export const UnsafeApplySpreadInsertAdjacentHtml = () => {
+export const UnsafeApplyOpaqueCallSpreadInsertAdjacentHtml = () => {
   // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- opaque apply spread hides the forwarded argument list
   Element.prototype.insertAdjacentHTML.apply(...opaqueApplyArguments);
 };
@@ -164,6 +164,32 @@ export const UnsafeSpreadSetAttribute = () => {
   // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- opaque spread may name srcdoc
   document.createElement("iframe").setAttribute(...opaqueAttributeArguments);
 };
+
+export const UnsafeStaticTemplateSrcdocAttribute = () => {
+  const frame = document.createElement("iframe");
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- static template selects the srcdoc sink
+  frame.setAttribute(`srcdoc`, rawHtml);
+  return frame;
+};
+
+export const UnsafeWrappedStaticSrcdocAttribute = () => {
+  const frame = document.createElement("iframe");
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- TypeScript wrapper preserves the static srcdoc name
+  frame.setAttribute(("srcdoc" as const), rawHtml);
+  return frame;
+};
+
+declare const dynamicAttributeName: string;
+export const DynamicSetAttributeNameIsNotAStaticSrcdocSink = (
+  frame: HTMLIFrameElement,
+) => {
+  // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
+  frame.setAttribute(dynamicAttributeName, rawHtml);
+};
+
+export const UnsafeWindowDocumentObjectAssignOpaqueSource = () =>
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- window.document creates a known DOM target
+  Object.assign(window.document.createElement("div"), unsafeDomProperties);
 
 export const UnsafeDocumentWrite = () => {
   // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html
