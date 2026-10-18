@@ -78,9 +78,9 @@
     },
     "packages/test-kit": {
       "name": "@stll/test-kit",
-      "version": "0.1.1",
+      "version": "0.1.0",
       "dependencies": {
-        "@stll/time": "0.4.1",
+        "@stll/time": "0.3.0",
         "better-result": "3.0.1",
       },
       "devDependencies": {
@@ -97,7 +97,7 @@
     },
     "packages/time": {
       "name": "@stll/time",
-      "version": "0.4.1",
+      "version": "0.4.0",
       "dependencies": {
         "better-result": "3.0.1",
         "temporal-polyfill": "1.0.5",
