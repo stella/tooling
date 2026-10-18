@@ -4,11 +4,17 @@ import {
   portableSafetyRules,
   routeQueryPluginSpecifiers,
   routeQueryRules,
+  testReliabilityPluginSpecifiers,
+  testReliabilityRules,
 } from "./packages/oxlint-plugin/src/index";
 
 export default library({
   ignorePatterns: ["packages/oxlint-config/dist/"],
-  jsPlugins: [...portableSafetyPluginSpecifiers, ...routeQueryPluginSpecifiers],
+  jsPlugins: [
+    ...portableSafetyPluginSpecifiers,
+    ...routeQueryPluginSpecifiers,
+    ...testReliabilityPluginSpecifiers,
+  ],
   overrides: [
     {
       // Oxlint presents plugin AST nodes as intentionally untyped values.
@@ -32,6 +38,7 @@ export default library({
       rules: {
         ...portableSafetyRules,
         ...routeQueryRules,
+        ...testReliabilityRules,
         "unicorn/no-useless-spread": "off",
         "no-sparse-arrays": "off",
       },
