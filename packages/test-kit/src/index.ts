@@ -28,3 +28,11 @@ export {
   waitForAbort,
   waitForEvent,
 } from "./wait.ts";
+export {
+  type FakeTimers,
+  FakeTimerLimitError,
+  type FakeTimersOptions,
+  DEFAULT_FAKE_TIMER_LIMIT,
+  createFakeTimers,
+} from "./fake-timers.ts";
+export { type TestRandom, createTestRandom, testSeed } from "./random.ts";
