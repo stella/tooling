@@ -365,9 +365,9 @@ export default eslintCompatPlugin({
             "Function names outside the allowlist are not proof because a " +
             "local identity function can shadow them.",
           unsafeInnerHtmlSpread:
-            "Do not spread an object into dangerouslySetInnerHTML. Keep " +
-            "`__html` inline so this rule can prove the HTML value is " +
-            "sanitized or escaped.",
+            "Do not spread an object or use an unresolved computed key in " +
+            "dangerouslySetInnerHTML. Keep `__html` inline so this rule can " +
+            "prove the HTML value is sanitized or escaped.",
         },
       },
       createOnce(context) {

@@ -578,3 +578,46 @@ test("Object.assign checks opaque sources only for known DOM targets", () => {
     ),
   ).toHaveLength(0);
 });
+
+test("opaque React payload diagnostics explain spreads and unresolved computed keys", () => {
+  const rule = getRule();
+  if (!("createOnce" in rule) || typeof rule.createOnce !== "function") {
+    throw new Error("expected an Oxlint createOnce rule");
+  }
+  expect(rule.meta?.messages?.unsafeInnerHtmlSpread).toBe(
+    "Do not spread an object or use an unresolved computed key in " +
+      "dangerouslySetInnerHTML. Keep `__html` inline so this rule can " +
+      "prove the HTML value is sanitized or escaped.",
+  );
+  for (const property of [
+    spread({ argument: identifier("payload") }),
+    objectProperty({
+      key: identifier("key"),
+      value: identifier("rawHtml"),
+      computed: true,
+    }),
+  ]) {
+    const diagnostics: unknown[] = [];
+    const context = Object.create(null);
+    Object.defineProperties(context, {
+      options: { value: [] },
+      report: { value: (diagnostic: unknown) => diagnostics.push(diagnostic) },
+    });
+    const visitor = rule.createOnce(context);
+    visitor.before?.();
+    const onProperty = Reflect.get(visitor, "Property");
+    if (typeof onProperty !== "function") {
+      throw new Error("expected a Property visitor");
+    }
+    const payloadProp = objectProperty({
+      key: identifier("dangerouslySetInnerHTML"),
+      value: objectLiteral({ properties: [property] }),
+      computed: false,
+    });
+    objectLiteral({ properties: [payloadProp] });
+    onProperty(payloadProp);
+    flushProgram(visitor, fixtureProgram());
+    expect(diagnostics).toMatchObject([{ messageId: "unsafeInnerHtmlSpread" }]);
+    expect(diagnostics).toHaveLength(1);
+  }
+});
