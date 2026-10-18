@@ -282,6 +282,7 @@ export const SafeObjectAssignCyclicAliases = () => {
 
 export const SafeObjectAssignReassignedTarget = () => {
   let element: object = document.createElement("div");
+  Object.assign(element, { textContent: "initial" });
   element = config;
   // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
   Object.assign(element, unsafeDomProperties);
@@ -402,9 +403,10 @@ export const SafeObjectAssignUnknownTargetSpread = () => {
   Object.assign(...opaqueObjectAssignArguments);
 };
 
-export const UnsafeBracketObjectAssign = () => {
-  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- static bracket access identifies the same Object.assign sink
-  Object["assign"](document["createElement"]("div"), unsafeDomProperties);
+// The equivalence corpus also derives static bracket access for both members.
+export const UnsafeStaticMemberObjectAssign = () => {
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- opaque HTML-bearing properties require a proven-safe source
+  Object.assign(document.createElement("div"), unsafeDomProperties);
 };
 
 export const UnsafeOpaqueComputedHtmlPayload = (key: string) => (
