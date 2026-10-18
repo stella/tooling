@@ -54,6 +54,75 @@ export const memberName = (value: unknown): string | null => {
   return object !== null && property !== null ? `${object}.${property}` : null;
 };
 
+export type Binding =
+  | { type: "global"; name: string }
+  | { type: "import"; module: string; imported: string }
+  | { type: "const"; initializer: Node }
+  | { type: "unknown" };
+
+const unknownBinding = { type: "unknown" } as const;
+const maximumBindingDepth = 32;
+
+export const createBindingResolver = (getScope: (node: Node) => Scope) => {
+  const resolve = (
+    node: Node,
+    visited: ReadonlySet<object>,
+    depth: number,
+  ): Binding => {
+    const name = identifierName(node);
+    if (name === null || depth >= maximumBindingDepth || visited.has(node))
+      return unknownBinding;
+
+    const nextVisited = new Set(visited);
+    nextVisited.add(node);
+    let scope: Scope | null = getScope(node);
+    while (scope !== null) {
+      const variable = scope.set.get(name);
+      if (variable === undefined) {
+        scope = scope.upper;
+        continue;
+      }
+      const definition = variable.defs.at(0);
+      if (definition === undefined) return { type: "global", name };
+      if (definition.type === "ImportBinding") {
+        const specifier = definition.node as unknown;
+        if (!isNode(specifier) || !isNode(specifier.parent))
+          return unknownBinding;
+        const declaration = specifier.parent;
+        if (
+          declaration.type !== "ImportDeclaration" ||
+          !isNode(declaration.source) ||
+          typeof declaration.source.value !== "string"
+        )
+          return unknownBinding;
+        let imported = propertyName(specifier.imported);
+        if (specifier.type === "ImportDefaultSpecifier") imported = "default";
+        if (specifier.type === "ImportNamespaceSpecifier") imported = "*";
+        return imported === null
+          ? unknownBinding
+          : { type: "import", module: declaration.source.value, imported };
+      }
+      if (definition.type !== "Variable") return unknownBinding;
+      const declarator = definition.node as unknown;
+      if (
+        !isNode(declarator) ||
+        declarator.type !== "VariableDeclarator" ||
+        !isNode(declarator.parent) ||
+        declarator.parent.type !== "VariableDeclaration" ||
+        declarator.parent.kind !== "const" ||
+        !isNode(declarator.init)
+      )
+        return unknownBinding;
+      if (declarator.init.type === "Identifier")
+        return resolve(declarator.init, nextVisited, depth + 1);
+      return { type: "const", initializer: declarator.init };
+    }
+    return { type: "global", name };
+  };
+
+  return (node: Node): Binding => resolve(node, new Set(), 0);
+};
+
 export const isTestFile = (context: object): boolean => {
   const filename = filenameForContext(context);
   return /(?:^|\/)(?:__tests__\/.*|[^/]+\.(?:test|spec)\.[^/]+)$/u.test(

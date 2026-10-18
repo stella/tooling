@@ -17,3 +17,18 @@ fakeTimers.advanceBy(10);
 queueMicrotask(() => {});
 // expect-clean: no-real-timer-waits-in-tests/no-real-timer-waits-in-tests
 await Promise.resolve();
+
+import { setTimeout as unprefixedDelay } from "timers/promises";
+// oxlint-disable-next-line no-real-timer-waits-in-tests/no-real-timer-waits-in-tests -- fixture
+await unprefixedDelay(10);
+const nestedDelay = delay;
+const waitLater = () => {
+  // oxlint-disable-next-line no-real-timer-waits-in-tests/no-real-timer-waits-in-tests -- fixture
+  void nestedDelay(10);
+};
+void waitLater;
+{
+  const setTimeout = () => undefined;
+  // expect-clean: no-real-timer-waits-in-tests/no-real-timer-waits-in-tests
+  setTimeout();
+}

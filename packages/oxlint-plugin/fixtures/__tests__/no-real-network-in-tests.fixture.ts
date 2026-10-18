@@ -40,3 +40,17 @@ void withFakeServer(() => fetch("/data"));
   // expect-clean: no-real-network-in-tests/no-real-network-in-tests
   void fetch("https://example.com/data");
 }
+
+const cyclicUrlA = cyclicUrlB;
+const cyclicUrlB = cyclicUrlA;
+// expect-clean: no-real-network-in-tests/no-real-network-in-tests
+void fetch(cyclicUrlA);
+const selfUrl = selfUrl;
+// expect-clean: no-real-network-in-tests/no-real-network-in-tests
+void fetch(selfUrl);
+const scopedExternalUrl = "https://scoped.example.com/data";
+const requestScopedUrl = () => {
+  // oxlint-disable-next-line no-real-network-in-tests/no-real-network-in-tests -- fixture
+  void fetch(scopedExternalUrl);
+};
+void requestScopedUrl;

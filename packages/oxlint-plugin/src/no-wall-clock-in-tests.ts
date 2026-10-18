@@ -1,50 +1,54 @@
 import {
+  createBindingResolver,
   identifierName,
   isNode,
-  memberName,
+  propertyName,
   testOnlyPlugin,
 } from "./test-rule-utils";
-
-const aliases = new Set<string>();
 
 export default testOnlyPlugin(
   "no-wall-clock-in-tests",
   "noWallClock",
   "Use the @stll/test-kit clock instead of reading the wall clock in tests.",
-  (report) => ({
-    Program() {
-      aliases.clear();
-    },
-    VariableDeclarator(node) {
-      const name = identifierName(node.id);
-      if (
-        name !== null &&
-        (memberName(node.init) === "Date.now" ||
-          memberName(node.init) === "performance.now")
-      )
-        aliases.add(name);
-    },
-    CallExpression(node) {
-      const callee = isNode(node.callee) ? node.callee : null;
-      const name = callee === null ? null : identifierName(callee);
-      if (
-        callee !== null &&
-        (memberName(callee) === "Date.now" ||
-          memberName(callee) === "performance.now" ||
-          (name !== null && aliases.has(name)) ||
-          (name === "Date" &&
+  (report, getScope) => {
+    const resolveBinding = createBindingResolver(getScope);
+    const isGlobal = (value: unknown, name: string): boolean =>
+      isNode(value) &&
+      resolveBinding(value).type === "global" &&
+      identifierName(value) === name;
+    const isClockMember = (value: unknown): boolean => {
+      if (!isNode(value)) return false;
+      if (value.type === "Identifier") {
+        const binding = resolveBinding(value);
+        return binding.type === "const" && isClockMember(binding.initializer);
+      }
+      return (
+        value.type === "MemberExpression" &&
+        propertyName(value.property) === "now" &&
+        (isGlobal(value.object, "Date") ||
+          isGlobal(value.object, "performance"))
+      );
+    };
+    return {
+      CallExpression(node) {
+        if (
+          isClockMember(node.callee) ||
+          (isNode(node.callee) &&
+            isGlobal(node.callee, "Date") &&
             Array.isArray(node.arguments) &&
-            node.arguments.length === 0))
-      )
-        report(node);
-    },
-    NewExpression(node) {
-      if (
-        identifierName(node.callee) === "Date" &&
-        Array.isArray(node.arguments) &&
-        node.arguments.length === 0
-      )
-        report(node);
-    },
-  }),
+            node.arguments.length === 0)
+        )
+          report(node);
+      },
+      NewExpression(node) {
+        if (
+          isNode(node.callee) &&
+          isGlobal(node.callee, "Date") &&
+          Array.isArray(node.arguments) &&
+          node.arguments.length === 0
+        )
+          report(node);
+      },
+    };
+  },
 );

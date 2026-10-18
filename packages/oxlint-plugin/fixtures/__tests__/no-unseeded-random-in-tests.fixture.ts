@@ -18,3 +18,15 @@ export const v2 = 0.5;
 export const v3 = crypto.randomUUID();
 // expect-clean: no-unseeded-random-in-tests/no-unseeded-random-in-tests
 export const v4 = new Uint8Array([1, 2]);
+
+const nestedRandom = random;
+const randomLater = () => {
+  // oxlint-disable-next-line no-unseeded-random-in-tests/no-unseeded-random-in-tests -- fixture
+  nestedRandom();
+};
+void randomLater;
+{
+  const Math = { random: () => 0.5 };
+  // expect-clean: no-unseeded-random-in-tests/no-unseeded-random-in-tests
+  Math.random();
+}

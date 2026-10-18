@@ -1,38 +1,39 @@
 import {
+  createBindingResolver,
   identifierName,
   isNode,
-  memberName,
+  propertyName,
   testOnlyPlugin,
 } from "./test-rule-utils";
 
-const aliases = new Set<string>();
 export default testOnlyPlugin(
   "no-unseeded-random-in-tests",
   "noUnseededRandom",
   "Use @stll/test-kit's createSeededRandom or testSeed for test input.",
-  (report) => ({
-    Program() {
-      aliases.clear();
-    },
-    VariableDeclarator(node) {
-      const name = identifierName(node.id);
-      if (
-        name !== null &&
-        (memberName(node.init) === "Math.random" ||
-          memberName(node.init) === "crypto.getRandomValues")
-      )
-        aliases.add(name);
-    },
-    CallExpression(node) {
-      const callee = isNode(node.callee) ? node.callee : null;
-      if (callee === null) return;
-      const name = identifierName(callee);
-      if (
-        memberName(callee) === "Math.random" ||
-        memberName(callee) === "crypto.getRandomValues" ||
-        (name !== null && aliases.has(name))
-      )
-        report(node);
-    },
-  }),
+  (report, getScope) => {
+    const resolveBinding = createBindingResolver(getScope);
+    const isGlobal = (value: unknown, name: string): boolean =>
+      isNode(value) &&
+      resolveBinding(value).type === "global" &&
+      identifierName(value) === name;
+    const isRandomMember = (value: unknown): boolean => {
+      if (!isNode(value)) return false;
+      if (value.type === "Identifier") {
+        const binding = resolveBinding(value);
+        return binding.type === "const" && isRandomMember(binding.initializer);
+      }
+      return (
+        value.type === "MemberExpression" &&
+        ((propertyName(value.property) === "random" &&
+          isGlobal(value.object, "Math")) ||
+          (propertyName(value.property) === "getRandomValues" &&
+            isGlobal(value.object, "crypto")))
+      );
+    };
+    return {
+      CallExpression(node) {
+        if (isRandomMember(node.callee)) report(node);
+      },
+    };
+  },
 );

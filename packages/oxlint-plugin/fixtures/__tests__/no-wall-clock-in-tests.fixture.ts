@@ -20,3 +20,15 @@ export const calledDateWithArgument = Date(0);
 export const v3 = Date.parse("2020-01-01T00:00:00Z");
 // expect-clean: no-wall-clock-in-tests/no-wall-clock-in-tests
 export const v4 = performance.timeOrigin;
+
+const nestedNow = now;
+const readLater = () => {
+  // oxlint-disable-next-line no-wall-clock-in-tests/no-wall-clock-in-tests -- fixture
+  nestedNow();
+};
+void readLater;
+{
+  const Date = { now: () => 0 };
+  // expect-clean: no-wall-clock-in-tests/no-wall-clock-in-tests
+  Date.now();
+}
