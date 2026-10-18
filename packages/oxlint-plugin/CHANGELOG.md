@@ -1,5 +1,11 @@
 # @stll/oxlint-plugin
 
+## 0.3.0
+
+### Minor Changes
+
+- [#161](https://github.com/stella/tooling/pull/161) [`8cc7be4`](https://github.com/stella/tooling/commit/8cc7be4b1c721fdf7edddd64630ea95cd7b0cf79) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Extend shared HTML-sink and colocated-route prefetch coverage.
+
 ## 0.2.2
 
 ### Patch Changes
