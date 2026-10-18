@@ -70,12 +70,10 @@ function NoLoaderComponent() {
   // expect-clean: require-loader-prefetch/require-loader-prefetch
   useSuspenseQuery(...[...opaqueArguments, membersOptions]);
   // expect-clean: require-loader-prefetch/require-loader-prefetch
-  // oxlint-disable-next-line no-sparse-arrays, unicorn/no-useless-spread -- fixture: literal spread expansion must preserve the empty first argument slot
   useSuspenseQuery(...[, membersOptions]);
 
   // Literal spread expansion does not make an opaque member-call factory attributable.
   // expect-clean: require-loader-prefetch/require-loader-prefetch
-  // oxlint-disable-next-line unicorn/no-useless-spread -- fixture: literal spread expansion must keep an opaque member-call factory unattributable
   useSuspenseQuery(...[opaqueOptions.items("id")]);
 
   return `${entity.data}${members.data}${other.data}${opaque.data}`;
