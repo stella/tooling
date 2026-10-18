@@ -1,5 +1,13 @@
 # @stll/test-kit
 
+## 0.1.1
+
+### Patch Changes
+
+- [#179](https://github.com/stella/tooling/pull/179) [`f1fffad`](https://github.com/stella/tooling/commit/f1fffadfbe1931e853776cf3005d25d4ef8e71f0) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Publish `@stll/test-kit` through the release workflow with provenance.
+- Updated dependencies [[`f1fffad`](https://github.com/stella/tooling/commit/f1fffadfbe1931e853776cf3005d25d4ef8e71f0)]:
+  - @stll/time@0.4.1
+
 ## 0.1.0
 
 ### Minor Changes
