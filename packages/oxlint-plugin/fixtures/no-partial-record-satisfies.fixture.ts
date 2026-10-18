@@ -8,8 +8,8 @@
 
 type Union = "a" | "b" | "c";
 
-// `as const satisfies Partial<Record<...>>` — an easy source of
-// classification-table drift.
+// `as const satisfies Partial<Record<...>>` allows members to go
+// unclassified silently.
 // oxlint-disable-next-line no-partial-record-satisfies/no-partial-record-satisfies
 const asConstPartial = {
   a: 1,
@@ -34,6 +34,7 @@ const readonlyInner = {
 // --- Cases the rule MUST NOT flag ---
 
 // Total `Record`, no `Partial` — the required fix.
+// expect-clean: no-partial-record-satisfies/no-partial-record-satisfies
 const totalRecord = {
   a: 1,
   b: 2,
