@@ -9,9 +9,7 @@
   },
   "target": {
     "type": "javascript",
-    "targets": [
-      "node20.19.0"
-    ]
+    "targets": ["node20.19.0"]
   },
   "entryPoints": {
     "type": "module",
@@ -82,6 +80,17 @@
           "default": "./dist/dependabot.cjs"
         },
         "default": "./dist/dependabot.mjs"
+      },
+      "./quarantine": {
+        "import": {
+          "types": "./dist/quarantine-policy.d.mts",
+          "default": "./dist/quarantine-policy.mjs"
+        },
+        "require": {
+          "types": "./dist/quarantine-policy.d.cts",
+          "default": "./dist/quarantine-policy.cjs"
+        },
+        "default": "./dist/quarantine-policy.mjs"
       }
     },
     "main": "dist/index.mjs",
@@ -94,7 +103,8 @@
       "stll-toolchain-changed": "./dist/toolchain-changed-cli.mjs",
       "stll-toolchain-check": "./dist/toolchain-check-cli.mjs",
       "stll-typecheck-parity": "./dist/typecheck-parity-cli.mjs",
-      "stll-typecheck-probe": "./dist/typecheck-probe-cli.mjs"
+      "stll-typecheck-probe": "./dist/typecheck-probe-cli.mjs",
+      "stll-quarantine": "./dist/quarantine-cli.mjs"
     }
   }
 }

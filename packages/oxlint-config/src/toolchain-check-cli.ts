@@ -21,6 +21,8 @@ try {
   const diagnostics = checkToolchain({
     root: process.cwd(),
     policy,
+    onWarning: ({ path, line, rule, message }) =>
+      process.stderr.write(`${path}:${line}: [${rule}] warning: ${message}\n`),
     onDelegated: ({ path, line, tool, selector, ref }) =>
       process.stdout.write(
         `${path}:${line}: [runtime-delegated] setup-${tool} ${selector} delegates its version to checkout ref ${ref}\n`,

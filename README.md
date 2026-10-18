@@ -219,6 +219,49 @@ synchronizes pins through `bun scripts/check-lockfile-workspace-versions.ts
 --write`, which also refreshes cached workspace versions without regenerating
 the dependency graph.
 
+## Package quarantine
+
+Before installing dependencies, run the CLI from the exact published
+`@stll/oxlint-config` release that includes `stll-quarantine`. Replace `X.Y.Z`
+with that release's exact version; `bunx` installs the pinned package when it is
+not already available:
+
+```sh
+bunx --bun --package @stll/oxlint-config@X.Y.Z stll-quarantine --sync
+bun install
+```
+
+`stll-quarantine --sync` creates or updates the Bun quarantine preset. The
+preset keeps the five-day release-age gate for third-party packages and writes
+permanent exemptions for exact registry-backed `@stll/` package names from declarations and the lockfile, including native platform
+packages. Wildcards and version selectors are rejected. Creation timestamps
+record audit history; they never expire.
+
+Third-party exceptions require an inline exact UTC expiry:
+
+```toml
+[install]
+minimumReleaseAge = 432_000
+minimumReleaseAgeExcludes = [
+  "@stll/oxlint-config", # quarantine-excluded-since: 2026-10-17T00:00:00.000Z
+  "third-party-package", # quarantine-expires: 2026-10-20T00:00:00.000Z
+]
+```
+
+`stll-toolchain-check` validates tracked root `bunfig.toml` and warns starting
+48 hours before a temporary exception expires. Expired exceptions warn during
+the existing 24-hour removal grace period, then fail validation. The standalone
+`stll-quarantine --check` command performs the same policy check without writes;
+`--prune` removes expired third-party entries and retains first-party entries.
+Only `--sync` changes the generated first-party set. Unrelated Bun settings and
+temporary third-party entries remain repository inputs.
+
+The shared scheduled quarantine workflow runs the same tooling-owned core from
+an immutable source checkout, before installing consumer dependencies. It opens
+or refreshes the existing removal branch, so each repository has one removal
+PR. Consumers retain the pinned `stella/.github` policy and scheduled-prune
+callers; adopt the workflow revision that delegates to this core.
+
 ## Usage
 
 Install the shared TypeScript and oxlint packages:
