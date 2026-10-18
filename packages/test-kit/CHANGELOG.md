@@ -1,5 +1,13 @@
 # @stll/test-kit
 
+## 0.1.1
+
+### Patch Changes
+
+- Publish from this repository's release workflow.
+- Updated dependencies:
+  - @stll/time@0.4.1
+
 ## 0.1.0
 
 ### Minor Changes

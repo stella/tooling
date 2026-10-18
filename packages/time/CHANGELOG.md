@@ -1,5 +1,11 @@
 # @stll/time
 
+## 0.4.1
+
+### Patch Changes
+
+- Release the 0.4.0 contents to npm as 0.4.1.
+
 ## 0.4.0
 
 ### Minor Changes
