@@ -348,8 +348,27 @@ export const checkToolchain = ({
     }),
   );
   diagnostics.push(...checkPackageFiles({ files, policy }));
-  if (files["bunfig.toml"] !== undefined) {
+  const usesBun = Object.entries(files).some(([file, text]) => {
+    if (path.posix.basename(file) === "bun.lock") return true;
+    if (path.posix.basename(file) !== "package.json") return false;
     try {
+      const manifest: unknown = JSON.parse(text);
+      return (
+        record(manifest) &&
+        typeof manifest["packageManager"] === "string" &&
+        /^bun(?:@|$)/u.test(manifest["packageManager"])
+      );
+    } catch {
+      // Package diagnostics already reject malformed manifests.
+      return false;
+    }
+  });
+  if (usesBun || files["bunfig.toml"] !== undefined) {
+    try {
+      if (files["bunfig.toml"] === undefined)
+        throw new Error(
+          "Bun repositories require a tracked root bunfig.toml with the five-day quarantine policy; use the documented pinned bunx stll-quarantine --sync bootstrap, then commit bunfig.toml",
+        );
       const result = checkRepositoryQuarantine({
         files,
         now,

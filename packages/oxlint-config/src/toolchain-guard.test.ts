@@ -22,6 +22,7 @@ import {
 } from "./cloud-setup-claude";
 import type { parseCloudSetup } from "./cloud-setup-schema";
 import { readGitTrackedOutput } from "./git-tracked-output";
+import { REQUIRED_RELEASE_AGE_SECONDS } from "./quarantine-policy";
 import {
   consumerCheckWorkflow,
   consumerRunnerVersion,
@@ -36,6 +37,10 @@ import { toolchainInputKind } from "./toolchain-inputs";
 import { packagePinKeys, parseToolchainPolicy } from "./toolchain-schema";
 
 const policy = parseToolchainPolicy(toolchain);
+const validBunQuarantine = `[install]
+minimumReleaseAge = ${REQUIRED_RELEASE_AGE_SECONDS}
+minimumReleaseAgeExcludes = []
+`;
 
 test("large tracked file lists preserve all paths and toolchain diagnostics", () => {
   const root = mkdtempSync(path.join(tmpdir(), "stll-large-file-list-"));
@@ -262,7 +267,77 @@ test("configuration discovery shares lockfile presence without parsing lock cont
         ],
       }),
     }),
-  ).toEqual([]);
+  ).toEqual([
+    expect.objectContaining({
+      rule: "quarantine-policy",
+      path: "bunfig.toml",
+      message: expect.stringContaining("tracked root bunfig.toml"),
+    }),
+  ]);
+});
+
+test("Bun markers require a tracked quarantine policy while non-Bun repositories remain unaffected", () => {
+  const configuration = {
+    "stll-toolchain.json": JSON.stringify({
+      optOuts: [{ rule: "dependabot-policy", reason: "Quarantine fixture" }],
+    }),
+  };
+  const manifest = JSON.stringify({ packageManager: `bun@${policy.bun}` });
+  const lockfile = JSON.stringify({ lockfileVersion: 1, packages: {} });
+  const bunInputs = [
+    { "bun.lock": lockfile },
+    { "tools/bun.lock": lockfile },
+    { "package.json": manifest },
+    { "tools/package.json": manifest },
+  ] as const satisfies readonly Record<string, string>[];
+  for (const files of bunInputs) {
+    const input = { ...configuration, ...files };
+    expect(
+      fixture(input).filter(({ rule }) => rule === "quarantine-policy"),
+    ).toEqual([
+      expect.objectContaining({
+        path: "bunfig.toml",
+        message: expect.stringContaining("stll-quarantine --sync"),
+      }),
+    ]);
+    expect(
+      fixture({ ...input, "bunfig.toml": validBunQuarantine }).filter(
+        ({ rule }) => rule === "quarantine-policy",
+      ),
+    ).toEqual([]);
+    expect(
+      fixture({
+        ...input,
+        "bunfig.toml":
+          "[install]\nminimumReleaseAge = 0\nminimumReleaseAgeExcludes = []\n",
+      }).filter(({ rule }) => rule === "quarantine-policy"),
+    ).toContainEqual(
+      expect.objectContaining({
+        message: expect.stringContaining(
+          `minimumReleaseAge = ${REQUIRED_RELEASE_AGE_SECONDS}`,
+        ),
+      }),
+    );
+  }
+  expect(
+    fixture(
+      { ...configuration, "bun.lock": lockfile },
+      { "bunfig.toml": validBunQuarantine },
+    ).filter(({ rule }) => rule === "quarantine-policy"),
+  ).toHaveLength(1);
+  for (const files of [
+    {},
+    { "package.json": JSON.stringify({ name: "plain-package" }) },
+    { "package.json": JSON.stringify({ packageManager: "npm@10.0.0" }) },
+    { "package-lock.json": "{}" },
+    { "examples/bun.lock.txt": "example" },
+  ] as const) {
+    expect(
+      fixture({ ...configuration, ...files }).filter(
+        ({ rule }) => rule === "quarantine-policy",
+      ),
+    ).toEqual([]);
+  }
 });
 
 test("Docker action policy opt-outs require a tracked explicit reason", () => {
@@ -404,6 +479,7 @@ test("all package and runtime diagnostics survive orchestration and only named r
       devDependencies: { oxlint: "latest" },
       packageManager: `bun@${policy.bun}`,
     }),
+    "bunfig.toml": validBunQuarantine,
     ".node-version": "0.0.0",
     "stll-toolchain.json": JSON.stringify({
       optOuts: [{ rule: "dependabot-policy", reason: "Dependency fixture" }],
