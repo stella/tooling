@@ -28,3 +28,19 @@ export {
   waitForAbort,
   waitForEvent,
 } from "./wait.ts";
+export {
+  type Seed,
+  type SeededRandom,
+  createSeededRandom,
+  testSeed,
+} from "./random.ts";
+export {
+  type FakeTimers,
+  createFakeTimers,
+  withFakeTimers,
+} from "./fake-timers.ts";
+export {
+  type FakeServer,
+  type RecordedRequest,
+  withFakeServer,
+} from "./fake-server.ts";

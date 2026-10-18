@@ -1,7 +1,7 @@
 {
   "name": "@stll/test-kit",
   "version": "0.1.1",
-  "description": "Hermetic, deterministic test primitives for Bun: a controllable clock, event-based waits, per-test temp directories and an outbound network guard.",
+  "description": "Hermetic, deterministic test primitives for Bun: controlled time and randomness, local HTTP, isolated files, bounded waits, and a network guard.",
   "keywords": [
     "bun",
     "clock",
