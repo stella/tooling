@@ -27,7 +27,14 @@ export default library({
     },
     {
       files: ["packages/oxlint-plugin/fixtures/**/*.{ts,tsx}"],
-      rules: { ...portableSafetyRules, ...routeQueryRules },
+      // Fixtures preserve literal spreads and array holes as AST inputs for the
+      // plugin rules; generic syntax-style fixes would erase those test cases.
+      rules: {
+        ...portableSafetyRules,
+        ...routeQueryRules,
+        "unicorn/no-useless-spread": "off",
+        "no-sparse-arrays": "off",
+      },
     },
     {
       files: [

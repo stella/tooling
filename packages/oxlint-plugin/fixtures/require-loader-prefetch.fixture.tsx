@@ -70,7 +70,6 @@ function NoLoaderComponent() {
   // expect-clean: require-loader-prefetch/require-loader-prefetch
   useSuspenseQuery(...[...opaqueArguments, membersOptions]);
   // expect-clean: require-loader-prefetch/require-loader-prefetch
-  // oxlint-disable-next-line no-sparse-arrays -- fixture: the empty first slot must preserve query argument positions
   useSuspenseQuery(...[, membersOptions]);
 
   // Literal spread expansion does not make an opaque member-call factory attributable.
