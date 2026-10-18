@@ -1133,6 +1133,20 @@ const producerCorpus = (): {
   };
 };
 
+const ATTRIBUTE_NAMESPACE_CASES = [
+  { expression: "null", kind: "invalid" },
+  { expression: '""', kind: "invalid" },
+  { expression: "``", kind: "invalid" },
+  { expression: "undefined", kind: "invalid" },
+  { expression: "unknownNamespace", kind: "invalid" },
+  { expression: '"urn:example"', kind: "clean" },
+  { expression: "`urn:example`", kind: "clean" },
+  { expression: "namespaceAlias", kind: "clean" },
+  { expression: "42", kind: "clean" },
+  { expression: "false", kind: "clean" },
+  { expression: "42n", kind: "clean" },
+] as const;
+
 const generatedHtmlSinkCorpus = (): {
   source: string;
   invalidCount: number;
@@ -1148,6 +1162,8 @@ const generatedHtmlSinkCorpus = (): {
     'declare function jsxs(type: string, props: object): unknown;',
     'declare function jsxDEV(type: string, props: object): unknown;',
     'declare const React: { createElement: typeof createElement };',
+    'declare const unknownNamespace: string | null;',
+    'const namespaceAlias = "urn:example";',
     '',
   ];
   let invalidCount = 0;
@@ -1250,6 +1266,7 @@ const generatedHtmlSinkCorpus = (): {
         { length: Math.max(sink.nameIndex, sink.valueIndex) + 1 },
         () => '"unused"',
       );
+      if (sink.namespaceIndex !== null) args[sink.namespaceIndex] = "null";
       args[sink.nameIndex] = JSON.stringify(name);
       args[sink.valueIndex] = value;
       return args;
@@ -1265,6 +1282,17 @@ const generatedHtmlSinkCorpus = (): {
         label: `${sink.name} allows a static ${name}`,
         code: `document.createElement("div").${sink.name}(${argsFor({ name, value: '"<p>static</p>"' }).join(", ")});`,
       });
+    }
+    if (sink.namespaceIndex !== null) {
+      for (const namespaceCase of ATTRIBUTE_NAMESPACE_CASES) {
+        const args = argsFor({ name: "srcdoc", value: "rawHtml" });
+        args[sink.namespaceIndex] = namespaceCase.expression;
+        addCase({
+          kind: namespaceCase.kind,
+          label: `${sink.name} namespace ${namespaceCase.expression}`,
+          code: `document.createElement("iframe").${sink.name}(${args.join(", ")});`,
+        });
+      }
     }
     addCase({
       kind: "clean",
@@ -1304,7 +1332,9 @@ test(
     const expectedHtmlSinkInvalidCount =
       REACT_HTML_PROPS.length * htmlSinkFactories.length +
       DOCUMENT_WRITE_METHODS.size * 3 +
-      HTML_ATTRIBUTE_SINKS.length * 2;
+      HTML_ATTRIBUTE_SINKS.length * 2 +
+      HTML_ATTRIBUTE_SINKS.filter((sink) => sink.namespaceIndex !== null).length *
+        ATTRIBUTE_NAMESPACE_CASES.filter((entry) => entry.kind === "invalid").length;
     expect(htmlSinkInvalidCount).toBe(expectedHtmlSinkInvalidCount);
     expect([...new Set(reactPropIds)].sort()).toEqual(
       [...new Set(expectedReactPropIds)].sort(),

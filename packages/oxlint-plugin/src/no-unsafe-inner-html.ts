@@ -114,8 +114,8 @@ export const DOCUMENT_WRITE_METHODS: ReadonlySet<string> = new Set([
   "writeln",
 ]);
 export const HTML_ATTRIBUTE_SINKS = [
-  { name: "setAttribute", nameIndex: 0, valueIndex: 1 },
-  { name: "setAttributeNS", nameIndex: 1, valueIndex: 2 },
+  { name: "setAttribute", namespaceIndex: null, nameIndex: 0, valueIndex: 1 },
+  { name: "setAttributeNS", namespaceIndex: 0, nameIndex: 1, valueIndex: 2 },
 ] as const;
 const DOCUMENT_MEMBERS: ReadonlySet<string> = new Set([
   "contentDocument",
@@ -433,6 +433,28 @@ export default eslintCompatPlugin({
           }
           return { kind: "expression", node: target, scope };
         };
+        const isKnownNonEmptyNamespace = (
+          namespace: unknown,
+          scope: Scope,
+        ): boolean => {
+          const source = resolveStableBinding({
+            node: namespace,
+            scope,
+            seen: new Set<Variable>(),
+          });
+          if (source?.kind !== "expression") return false;
+          const text = staticStringValue(source.node);
+          // DOM normalizes the empty namespace to null. Unknowns stay checked.
+          if (text !== null) return text !== "";
+          if (source.node?.type !== "Literal") return false;
+          const { value } = source.node;
+          return (
+            typeof value === "number" ||
+            typeof value === "boolean" ||
+            typeof value === "bigint"
+          );
+        };
+
         const isDocumentReceiver = (node: unknown, scope: Scope): boolean => {
           const source = resolveStableBinding({
             node,
@@ -753,6 +775,15 @@ export default eslintCompatPlugin({
               (entry) => entry.name === method,
             );
             if (attributeSink !== undefined) {
+              if (
+                attributeSink.namespaceIndex !== null &&
+                isKnownNonEmptyNamespace(
+                  invoked.args.at(attributeSink.namespaceIndex),
+                  context.sourceCode.getScope(node),
+                )
+              ) {
+                return;
+              }
               if (invoked.status === "opaque") {
                 reportIfUnsafe(node);
                 return;
