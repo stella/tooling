@@ -13,10 +13,12 @@ const writeNames = new Set([
   "rm",
   "appendFile",
 ]);
+const fsModules = new Set(["node:fs", "fs", "node:fs/promises", "fs/promises"]);
+const absolutePath = /^(?:\/|[A-Za-z]:[\\/]|\\\\)/u;
 const rootedInCheckout = (value: unknown): boolean => {
   if (!isNode(value)) return false;
   if (value.type === "Literal" && typeof value.value === "string")
-    return !value.value.startsWith("/");
+    return !absolutePath.test(value.value);
   if (
     identifierName(value) === "__dirname" ||
     memberName(value) === "process.cwd"
@@ -53,24 +55,65 @@ const rootedInCheckout = (value: unknown): boolean => {
     return true;
   return false;
 };
+const memberParts = (value: unknown): string[] | null => {
+  if (!isNode(value)) return null;
+  const identifier = identifierName(value);
+  if (identifier !== null) return [identifier];
+  if (value.type !== "MemberExpression") return null;
+  const object = memberParts(value.object);
+  const property = propertyName(value.property);
+  return object === null || property === null ? null : [...object, property];
+};
 export default testOnlyPlugin(
   "no-checkout-writes-in-tests",
   "noCheckoutWrite",
   "Use @stll/test-kit's withTestTmpDir instead of writing inside the checkout.",
-  (report) => ({
-    CallExpression(node) {
-      const callee = isNode(node.callee) ? node.callee : null;
-      if (callee === null || !Array.isArray(node.arguments)) return;
-      const name = identifierName(callee);
-      const member = memberName(callee);
-      if (
-        (name !== null && writeNames.has(name)) ||
-        (member !== null &&
-          (writeNames.has(member.split(".").at(-1) ?? "") ||
-            member === "Bun.write"))
-      ) {
-        if (rootedInCheckout(node.arguments.at(0))) report(node);
-      }
-    },
-  }),
+  (report) => {
+    const namedWrites = new Set<string>();
+    const fsNamespaces = new Set<string>();
+    return {
+      ImportDeclaration(node) {
+        if (
+          !isNode(node.source) ||
+          typeof node.source.value !== "string" ||
+          !fsModules.has(node.source.value) ||
+          !Array.isArray(node.specifiers)
+        )
+          return;
+        for (const specifier of node.specifiers) {
+          if (!isNode(specifier)) continue;
+          const local = identifierName(specifier.local);
+          if (local === null) continue;
+          if (specifier.type === "ImportNamespaceSpecifier") {
+            fsNamespaces.add(local);
+            continue;
+          }
+          const imported = propertyName(specifier.imported);
+          if (imported !== null && writeNames.has(imported))
+            namedWrites.add(local);
+        }
+      },
+      CallExpression(node) {
+        const callee = isNode(node.callee) ? node.callee : null;
+        if (callee === null || !Array.isArray(node.arguments)) return;
+        const name = identifierName(callee);
+        const parts = memberParts(callee);
+        const isFsMember =
+          parts !== null &&
+          fsNamespaces.has(parts.at(0) ?? "") &&
+          writeNames.has(parts.at(-1) ?? "") &&
+          (parts.length === 2 ||
+            (parts.length === 3 && parts.at(1) === "promises"));
+        const isBunWrite =
+          parts?.length === 2 && parts.join(".") === "Bun.write";
+        if (
+          (name !== null && namedWrites.has(name)) ||
+          isFsMember ||
+          isBunWrite
+        ) {
+          if (rootedInCheckout(node.arguments.at(0))) report(node);
+        }
+      },
+    };
+  },
 );

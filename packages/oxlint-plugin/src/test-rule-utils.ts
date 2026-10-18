@@ -12,6 +12,7 @@ export type Node = {
   id?: unknown;
   imported?: unknown;
   init?: unknown;
+  kind?: unknown;
   left?: unknown;
   local?: unknown;
   meta?: unknown;
@@ -22,6 +23,7 @@ export type Node = {
   quasis?: unknown;
   right?: unknown;
   source?: unknown;
+  specifiers?: unknown;
   value?: unknown;
 };
 
