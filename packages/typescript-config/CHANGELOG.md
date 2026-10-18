@@ -1,5 +1,11 @@
 # @stll/typescript-config
 
+## 0.9.0
+
+### Minor Changes
+
+- [#160](https://github.com/stella/tooling/pull/160) [`dea4254`](https://github.com/stella/tooling/commit/dea4254f39eb76f76444674e5f7d3a5494909b4d) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Add published-library, React-library, and opt-in native single-checker profiles. Report unreachable code and unused labels in the shared base.
+
 ## 0.8.0
 
 ### Minor Changes

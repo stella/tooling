@@ -144,18 +144,29 @@ jobs:
       - name: Check built publish target CLI on Node floor
         run: node scripts/check-publish-target-node-floor.mjs
 
-  checks:
+  ci-result:
     if: always()
-    needs: [build-checks, engine-floor, rust-lints, hawk-compatibility]
+    needs: [changeset, build-checks, engine-floor, rust-lints, hawk-compatibility]
     runs-on: ubuntu-latest
     steps:
       - name: Require every validation job to succeed
         env:
+          EVENT_NAME: ${{ github.event_name }}
+          CHANGESET_RESULT: ${{ needs.changeset.result }}
           BUILD_RESULT: ${{ needs.build-checks.result }}
           FLOOR_RESULT: ${{ needs.engine-floor.result }}
           RUST_RESULT: ${{ needs.rust-lints.result }}
           HAWK_RESULT: ${{ needs.hawk-compatibility.result }}
-        run: test "$BUILD_RESULT" = success && test "$FLOOR_RESULT" = success && test "$RUST_RESULT" = success && test "$HAWK_RESULT" = success
+        run: |
+          if [ "$EVENT_NAME" = pull_request ]; then
+            test "$CHANGESET_RESULT" = success
+          else
+            test "$CHANGESET_RESULT" = skipped
+          fi
+          test "$BUILD_RESULT" = success
+          test "$FLOOR_RESULT" = success
+          test "$RUST_RESULT" = success
+          test "$HAWK_RESULT" = success
 
   rust-lints:
     runs-on: ubuntu-latest

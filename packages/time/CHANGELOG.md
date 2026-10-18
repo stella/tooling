@@ -1,5 +1,11 @@
 # @stll/time
 
+## 0.4.1
+
+### Patch Changes
+
+- [#179](https://github.com/stella/tooling/pull/179) [`f1fffad`](https://github.com/stella/tooling/commit/f1fffadfbe1931e853776cf3005d25d4ef8e71f0) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Release the current `@stll/time` sources through the release workflow.
+
 ## 0.4.0
 
 ### Minor Changes

@@ -1,5 +1,21 @@
 # @stll/oxlint-config
 
+## 1.5.0
+
+### Minor Changes
+
+- [#168](https://github.com/stella/tooling/pull/168) [`032dba0`](https://github.com/stella/tooling/commit/032dba0bd54308dad723abe21fa942526c93a6d2) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Expose managed PostgreSQL component variables alongside `DATABASE_URL` in generated cloud environments and persist the verified service environment into remote Claude sessions.
+
+- [#162](https://github.com/stella/tooling/pull/162) [`e332ed0`](https://github.com/stella/tooling/commit/e332ed0df999e819ff91e7a0c82d1132a3fd8274) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Add read-only Dependabot drift checking and validated ecosystem/directory input while retaining centrally owned update policy.
+
+- [#167](https://github.com/stella/tooling/pull/167) [`46ede5f`](https://github.com/stella/tooling/commit/46ede5f0ab5b6c3c834c8b3ac1f18b94c1c4e151) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Centralize quarantine policy with exact permanent first-party exemptions, expiring third-party exclusions, advance toolchain warnings, and synchronization/pruning commands.
+
+### Patch Changes
+
+- [#170](https://github.com/stella/tooling/pull/170) [`38e29e1`](https://github.com/stella/tooling/commit/38e29e11930dafe712d2e75543295c6a6c36fe7c) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Attribute diagnostics from Bun filtered workspace scripts to their source files when checking parity and seeded typecheck probes.
+
+- [#164](https://github.com/stella/tooling/pull/164) [`ec94cf7`](https://github.com/stella/tooling/commit/ec94cf7af1f37718752a4cdc8acc15a8db3ced9b) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Read workspace lint membership from the package manager's workspace declaration, including pnpm-workspace.yaml and exclusion patterns, and let a project that owns no roots defer to its ancestor project.
+
 ## 1.4.0
 
 ### Minor Changes
