@@ -84,12 +84,18 @@ export default testOnlyPlugin(
           if (!isNode(specifier)) continue;
           const local = identifierName(specifier.local);
           if (local === null) continue;
-          if (specifier.type === "ImportNamespaceSpecifier") {
+          // `import * as fs`, `import fs` and `import { promises as fsp }`
+          // all bind an object whose members are the filesystem writes.
+          if (
+            specifier.type === "ImportNamespaceSpecifier" ||
+            specifier.type === "ImportDefaultSpecifier"
+          ) {
             fsNamespaces.add(local);
             continue;
           }
           const imported = propertyName(specifier.imported);
-          if (imported !== null && writeNames.has(imported))
+          if (imported === "promises") fsNamespaces.add(local);
+          else if (imported !== null && writeNames.has(imported))
             namedWrites.add(local);
         }
       },

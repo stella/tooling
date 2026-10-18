@@ -1,7 +1,20 @@
-import { appendFile, mkdir, rm, writeFile, writeFileSync } from "node:fs";
+import fs, {
+  appendFile,
+  mkdir,
+  promises as fsp,
+  rm,
+  writeFile,
+  writeFileSync,
+} from "node:fs";
 import { writeFile as save } from "node:fs/promises";
 
 import { withTestTmpDir } from "@stll/test-kit";
+// oxlint-disable-next-line no-checkout-writes-in-tests/no-checkout-writes-in-tests -- fixture
+fs.writeFileSync("fixture.txt", "x");
+// oxlint-disable-next-line no-checkout-writes-in-tests/no-checkout-writes-in-tests -- fixture
+await fsp.writeFile(`${import.meta.dir}/fixture.txt`, "x");
+// expect-clean: no-checkout-writes-in-tests/no-checkout-writes-in-tests
+fs.writeFileSync("/tmp/stll-fixture", "x");
 // oxlint-disable-next-line no-checkout-writes-in-tests/no-checkout-writes-in-tests -- fixture
 writeFileSync("fixture.txt", "x");
 // oxlint-disable-next-line no-checkout-writes-in-tests/no-checkout-writes-in-tests -- fixture
