@@ -13,7 +13,7 @@ type ParseToml = (text: string) => unknown;
 type FirstPartyPackages = ReadonlySet<string> | readonly string[];
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
-const fail = (message: string): never => {
+const fail: (message: string) => never = (message) => {
   throw new Error(message);
 };
 const ownPackage = (name: string) => name.startsWith("@stll/");
