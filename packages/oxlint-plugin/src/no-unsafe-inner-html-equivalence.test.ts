@@ -850,7 +850,14 @@ const runOxlint = async ({
   }
 };
 
-const memberEdits = (source: string, edits: readonly MemberEdit[]) => {
+const BRACKET_SPELLINGS = ["quoted", "template"] as const;
+
+type MemberEditOptions = {
+  edits: readonly MemberEdit[];
+  spelling: (typeof BRACKET_SPELLINGS)[number];
+};
+
+const memberEdits = (source: string, { edits, spelling }: MemberEditOptions) => {
   const replacements: Array<{ start: number; end: number; text: string }> = [];
   for (const edit of edits) {
     const gapEnd = edit.propertyStart;
@@ -858,10 +865,16 @@ const memberEdits = (source: string, edits: readonly MemberEdit[]) => {
     const operator = edit.optional ? "?." : ".";
     const operatorIndex = gap.lastIndexOf(operator);
     if (operatorIndex < 0) throw new Error("Missing member operator");
+    // MemberEdit property names come from Identifier nodes, so they contain no
+    // template delimiters or interpolation braces.
+    const property =
+      spelling === "quoted"
+        ? JSON.stringify(edit.propertyName)
+        : `\`${edit.propertyName}\``;
     replacements.push({
       start: edit.objectEnd + operatorIndex,
       end: edit.propertyEnd,
-      text: `${edit.optional ? "?." : ""}[${JSON.stringify(edit.propertyName)}]`,
+      text: `${edit.optional ? "?." : ""}[${property}]`,
     });
   }
   return replacements;
@@ -1450,13 +1463,13 @@ test(
           fileJsxRoots.reduce((count, edit) => count + edit.elementCount, 0),
         ).toBe(inventory.elementCount);
         const variants = [
-          {
-            name: "bracket",
+          ...BRACKET_SPELLINGS.map((spelling) => ({
+            name: `bracket-${spelling}`,
             source: applyEdits(
               original.source,
-              memberEdits(original.source, fileMembers),
+              memberEdits(original.source, { edits: fileMembers, spelling }),
             ),
-          },
+          })),
           {
             name: "alias",
             source: aliasEdits(original.source, fileAliases),
@@ -1519,7 +1532,7 @@ test(
       expect(aliases.length).toBeGreaterThan(0);
       expect(spreads.length).toBeGreaterThan(0);
       expect(jsxRoots.length).toBeGreaterThan(0);
-      expect(generatedPaths).toHaveLength(originals.length * 5);
+      expect(generatedSources.size).toBe(generatedPaths.length);
       await Promise.all(
         [...generatedSources].map(([path, source]) => writeFile(path, source)),
       );

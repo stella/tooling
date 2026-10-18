@@ -94,10 +94,11 @@ export const UnsafeShadowedSanitizer = () => (
   />
 );
 
+// The equivalence corpus generates quoted and template bracket spellings.
 export const UnsafeComputedInnerHtml = () => {
   const element = document.createElement("div");
   // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- fixture: computed HTML sink
-  element["innerHTML"] = rawHtml;
+  element.innerHTML = rawHtml;
   return element;
 };
 
@@ -113,7 +114,7 @@ export const DynamicComputedPropertyNamedInnerHtmlIsNotAStaticSink = () => {
 export const UnsafeStaticTemplateComputedInnerHtml = () => {
   const element = document.createElement("div");
   // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html
-  element[`innerHTML`] = rawHtml;
+  element.innerHTML = rawHtml;
   return element;
 };
 
@@ -128,7 +129,7 @@ export const UnsafeInsertAdjacentHtml = () => {
   // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html
   element.insertAdjacentHTML("beforeend", rawHtml);
   // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html
-  element[`insertAdjacentHTML`](`beforeend`, rawHtml);
+  element.insertAdjacentHTML(`beforeend`, rawHtml);
   // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- call form
   element.insertAdjacentHTML.call(element, "beforeend", rawHtml);
   // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html
@@ -315,6 +316,7 @@ export const SafeForOfOrdinaryCollection = () => {
 
 export const SafeReassignedForOfBinding = () => {
   for (let element of document.querySelectorAll("div")) {
+    Object.assign(element, { textContent: "initial" });
     element = document.createElement("div");
     // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
     Object.assign(element, unsafeDomProperties);
