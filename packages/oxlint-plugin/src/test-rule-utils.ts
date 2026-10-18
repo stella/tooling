@@ -1,4 +1,4 @@
-import type { Scope } from "@oxlint/plugins";
+import type { ESTree, Scope } from "@oxlint/plugins";
 import { eslintCompatPlugin } from "@oxlint/plugins";
 
 import { filenameForContext } from "./utils";
@@ -32,6 +32,11 @@ export const isNode = (value: unknown): value is Node =>
   typeof value === "object" &&
   value !== null &&
   typeof Reflect.get(value, "type") === "string";
+
+/** `Node` is a loose view of oxlint's AST objects; every one of them carries its source span. */
+const isScopeNode = (value: Node): value is Node & ESTree.Node =>
+  typeof Reflect.get(value, "start") === "number" &&
+  typeof Reflect.get(value, "end") === "number";
 
 export const identifierName = (value: unknown): string | null =>
   isNode(value) && value.type === "Identifier" && typeof value.name === "string"
@@ -148,7 +153,11 @@ export const testOnlyPlugin = (
           if (!isTestFile(context)) return {};
           return makeVisitors(
             (node) => context.report({ node, messageId }),
-            (node) => context.sourceCode.getScope(node),
+            (node) => {
+              if (!isScopeNode(node))
+                throw new Error(`Expected an oxlint AST node, got ${node.type}`);
+              return context.sourceCode.getScope(node);
+            },
           );
         },
       },
