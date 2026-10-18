@@ -30,8 +30,17 @@ export default testOnlyPlugin(
       }
       if (value.type !== "MemberExpression") return false;
       const object = isNode(value.object) ? resolveBinding(value.object) : null;
+      const property = propertyName(value.property);
+      if (
+        (property === "setTimeout" || property === "setInterval") &&
+        object?.type === "global" &&
+        (object.name === "globalThis" ||
+          object.name === "window" ||
+          object.name === "self")
+      )
+        return true;
       return (
-        propertyName(value.property) === "sleep" &&
+        property === "sleep" &&
         object?.type === "global" &&
         object.name === "Bun"
       );

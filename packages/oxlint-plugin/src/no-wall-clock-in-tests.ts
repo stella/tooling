@@ -1,6 +1,5 @@
 import {
   createBindingResolver,
-  identifierName,
   isNode,
   propertyName,
   testOnlyPlugin,
@@ -12,14 +11,19 @@ export default testOnlyPlugin(
   "Use the @stll/test-kit clock instead of reading the wall clock in tests.",
   (report, getScope) => {
     const resolveBinding = createBindingResolver(getScope);
-    const isGlobal = (value: unknown, name: string): boolean =>
-      isNode(value) &&
-      resolveBinding(value).type === "global" &&
-      identifierName(value) === name;
+    const isGlobal = (value: unknown, name: string): boolean => {
+      if (!isNode(value)) return false;
+      const binding = resolveBinding(value);
+      return binding.type === "global" && binding.name === name;
+    };
     const isClockMember = (value: unknown): boolean => {
       if (!isNode(value)) return false;
       if (value.type === "Identifier") {
         const binding = resolveBinding(value);
+        if (binding.type === "global")
+          return (
+            binding.name === "Date.now" || binding.name === "performance.now"
+          );
         return binding.type === "const" && isClockMember(binding.initializer);
       }
       return (

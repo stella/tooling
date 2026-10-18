@@ -36,10 +36,11 @@ export default testOnlyPlugin(
   "Use @stll/test-kit's withTestTmpDir instead of writing inside the checkout.",
   (report, getScope) => {
     const resolveBinding = createBindingResolver(getScope);
-    const isGlobal = (value: unknown, name: string): boolean =>
-      isNode(value) &&
-      identifierName(value) === name &&
-      resolveBinding(value).type === "global";
+    const isGlobal = (value: unknown, name: string): boolean => {
+      if (!isNode(value)) return false;
+      const binding = resolveBinding(value);
+      return binding.type === "global" && binding.name === name;
+    };
     const isPathBuilder = (value: unknown): boolean => {
       if (!isNode(value)) return false;
       if (value.type === "Identifier") {
@@ -76,13 +77,13 @@ export default testOnlyPlugin(
         Array.isArray(value.expressions) &&
         Array.isArray(value.quasis)
       ) {
-        if (value.expressions.length > 0)
-          return rootedInCheckout(value.expressions.at(0));
         const quasi = value.quasis.at(0);
         const raw = isNode(quasi)
           ? Reflect.get(quasi.value ?? {}, "raw")
           : null;
-        return typeof raw === "string" && !absolutePath.test(raw);
+        if (typeof raw !== "string") return false;
+        if (raw.length > 0) return !absolutePath.test(raw);
+        return rootedInCheckout(value.expressions.at(0));
       }
       if (
         value.type === "MemberExpression" &&

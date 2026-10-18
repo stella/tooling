@@ -32,12 +32,22 @@ fs.writeFileSync("/tmp/stll-fixture", "x");
 writeFileSync("fixture.txt", "x");
 // oxlint-disable-next-line no-checkout-writes-in-tests/no-checkout-writes-in-tests -- fixture
 writeFileSync(`fixture.txt`, "x");
+const fixtureId = "fixture";
+// oxlint-disable-next-line no-checkout-writes-in-tests/no-checkout-writes-in-tests -- fixture
+writeFileSync(`fixtures/${fixtureId}.txt`, "x");
+// expect-clean: no-checkout-writes-in-tests/no-checkout-writes-in-tests
+writeFileSync(`/tmp/${fixtureId}`, "x");
+// oxlint-disable-next-line no-checkout-writes-in-tests/no-checkout-writes-in-tests -- fixture
+writeFileSync(`${import.meta.dir}/x`, "x");
 // oxlint-disable-next-line no-checkout-writes-in-tests/no-checkout-writes-in-tests -- fixture
 writeFile(`${import.meta.dir}/fixture.txt`, "x", () => {});
 // oxlint-disable-next-line no-checkout-writes-in-tests/no-checkout-writes-in-tests -- fixture
 mkdir(`${process.cwd()}/fixture`);
 // oxlint-disable-next-line no-checkout-writes-in-tests/no-checkout-writes-in-tests -- fixture
 await Bun.write(`${__dirname}/fixture.txt`, "x");
+const checkoutRoot = __dirname;
+// oxlint-disable-next-line no-checkout-writes-in-tests/no-checkout-writes-in-tests -- fixture
+writeFileSync(path.join(checkoutRoot, "x"), "x");
 // oxlint-disable-next-line no-checkout-writes-in-tests/no-checkout-writes-in-tests -- fixture
 await save(`${import.meta.dir}/saved.txt`, "x");
 // expect-clean: no-checkout-writes-in-tests/no-checkout-writes-in-tests
@@ -104,4 +114,10 @@ await withTestTmpDir((dir) => {
   };
   // expect-clean: no-checkout-writes-in-tests/no-checkout-writes-in-tests
   shadowFs.writeFileSync("fixture.txt", "x");
+}
+{
+  const __dirname = "/tmp";
+  const outsideRoot = __dirname;
+  // expect-clean: no-checkout-writes-in-tests/no-checkout-writes-in-tests
+  writeFileSync(path.join(outsideRoot, "x"), "x");
 }

@@ -1,6 +1,6 @@
 import { clock } from "@stll/test-kit";
 // oxlint-disable-next-line no-wall-clock-in-tests/no-wall-clock-in-tests -- fixture
-export const a = Date.now();
+export const dateNow = Date.now();
 // oxlint-disable-next-line no-wall-clock-in-tests/no-wall-clock-in-tests -- fixture
 export const b = new Date();
 // oxlint-disable-next-line no-wall-clock-in-tests/no-wall-clock-in-tests -- fixture
@@ -10,6 +10,15 @@ export const c = performance.now();
 const now = Date.now;
 // oxlint-disable-next-line no-wall-clock-in-tests/no-wall-clock-in-tests -- fixture
 export const d = now();
+const { now: destructuredNow } = Date;
+// oxlint-disable-next-line no-wall-clock-in-tests/no-wall-clock-in-tests -- fixture
+export const destructured = destructuredNow();
+{
+  const makeThing = () => ({ a: () => undefined });
+  const { a } = makeThing();
+  // expect-clean: no-wall-clock-in-tests/no-wall-clock-in-tests
+  a();
+}
 // expect-clean: no-wall-clock-in-tests/no-wall-clock-in-tests
 export const v1 = clock.now();
 // expect-clean: no-wall-clock-in-tests/no-wall-clock-in-tests

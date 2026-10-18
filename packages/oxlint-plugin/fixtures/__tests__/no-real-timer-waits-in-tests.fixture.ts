@@ -6,6 +6,12 @@ setTimeout(() => {}, 10);
 // oxlint-disable-next-line no-real-timer-waits-in-tests/no-real-timer-waits-in-tests -- fixture
 setInterval(() => {}, 10);
 // oxlint-disable-next-line no-real-timer-waits-in-tests/no-real-timer-waits-in-tests -- fixture
+globalThis.setTimeout(() => {}, 10);
+// oxlint-disable-next-line no-real-timer-waits-in-tests/no-real-timer-waits-in-tests -- fixture
+window.setInterval(() => {}, 10);
+// oxlint-disable-next-line no-real-timer-waits-in-tests/no-real-timer-waits-in-tests -- fixture
+self.setTimeout(() => {}, 10);
+// oxlint-disable-next-line no-real-timer-waits-in-tests/no-real-timer-waits-in-tests -- fixture
 await Bun.sleep(10);
 // oxlint-disable-next-line no-real-timer-waits-in-tests/no-real-timer-waits-in-tests -- fixture
 await delay(10);
@@ -32,3 +38,6 @@ void waitLater;
   // expect-clean: no-real-timer-waits-in-tests/no-real-timer-waits-in-tests
   setTimeout();
 }
+const timerHost = { setTimeout: () => undefined };
+// expect-clean: no-real-timer-waits-in-tests/no-real-timer-waits-in-tests
+timerHost.setTimeout();

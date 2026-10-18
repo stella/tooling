@@ -13,6 +13,7 @@ export type Node = {
   id?: unknown;
   imported?: unknown;
   init?: unknown;
+  key?: unknown;
   kind?: unknown;
   left?: unknown;
   local?: unknown;
@@ -118,9 +119,37 @@ export const createBindingResolver = (getScope: (node: Node) => Scope) => {
         !isNode(declarator.init)
       )
         return unknownBinding;
-      if (declarator.init.type === "Identifier")
+      if (identifierName(declarator.id) !== null) {
+        if (declarator.init.type !== "Identifier")
+          return { type: "const", initializer: declarator.init };
         return resolve(declarator.init, nextVisited, depth + 1);
-      return { type: "const", initializer: declarator.init };
+      }
+      if (!isNode(declarator.id) || declarator.id.type !== "ObjectPattern")
+        return unknownBinding;
+      const properties = Reflect.get(declarator.id, "properties");
+      if (!Array.isArray(properties)) return unknownBinding;
+      const property = properties.find(
+        (candidate) =>
+          isNode(candidate) &&
+          candidate.type === "Property" &&
+          candidate.computed !== true &&
+          identifierName(candidate.value) === name,
+      );
+      if (!isNode(property)) return unknownBinding;
+      const member = propertyName(property.key);
+      if (member === null || declarator.init.type !== "Identifier")
+        return unknownBinding;
+      const source = resolve(declarator.init, nextVisited, depth + 1);
+      if (source.type === "import")
+        return { type: "import", module: source.module, imported: member };
+      if (source.type !== "global") return unknownBinding;
+      if (
+        source.name === "globalThis" ||
+        source.name === "window" ||
+        source.name === "self"
+      )
+        return { type: "global", name: member };
+      return { type: "global", name: `${source.name}.${member}` };
     }
     return { type: "global", name };
   };
