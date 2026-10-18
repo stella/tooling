@@ -607,11 +607,10 @@ export const SafeObjectAssignComputedTemplate = () =>
     [`innerHTML`]: "<b>Static</b>",
   });
 
-export const SafeBracketSanitizerResult = () => (
+// The equivalence corpus derives the static bracket spelling from this case.
+export const SafeSanitizerResultAccess = () => (
   // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
-  <div
-    dangerouslySetInnerHTML={{ __html: DOMPurify["sanitize"](rawHtml)["value"] }}
-  />
+  <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(rawHtml).value }} />
 );
 
 export const SafeApplyStaticDocumentWrite = () =>
