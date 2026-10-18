@@ -57,14 +57,12 @@ test("the aggregate awaits every validation job and rejects every failed or canc
       env: {
         EVENT_NAME: event,
         ...Object.fromEntries(
-          variables.map(({ name, job }) => [
-            name,
-            job === changedJob
-              ? result
-              : job === "changeset" && event !== "pull_request"
-                ? "skipped"
-                : "success",
-          ]),
+          variables.map(({ name, job }) => {
+            if (job === changedJob) return [name, result];
+            const defaultResult =
+              job === "changeset" && event !== "pull_request" ? "skipped" : "success";
+            return [name, defaultResult];
+          }),
         ),
       },
       stdout: "pipe",
