@@ -488,8 +488,8 @@ export default eslintCompatPlugin({
               isKnownDomTarget({ node: receiver, scope, seen })
             );
           };
-          const isElementCollection = (node: unknown): boolean =>
-            isKnownDomTarget({ node, scope, seen, kind: "collection" });
+          const isElementCollection = (collection: unknown): boolean =>
+            isKnownDomTarget({ node: collection, scope, seen, kind: "collection" });
           if (target?.type === "MemberExpression") {
             const property = memberPropertyName(target);
             const producer = DOM_ELEMENT_PRODUCERS.find(
