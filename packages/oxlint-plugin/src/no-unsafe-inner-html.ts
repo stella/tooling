@@ -540,7 +540,7 @@ export default eslintCompatPlugin({
               return;
             default: {
               const exhaustive: never = prop;
-              throw new Error(`Unknown React HTML prop: ${exhaustive}`);
+              throw new Error(`Unknown React HTML prop: ${String(exhaustive)}`);
             }
           }
         };

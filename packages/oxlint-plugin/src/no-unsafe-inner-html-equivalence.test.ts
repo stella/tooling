@@ -577,7 +577,7 @@ const producerReceivers = (
       ];
     default: {
       const exhaustive: never = receiver;
-      throw new Error(`Unknown DOM producer receiver: ${exhaustive}`);
+      throw new Error(`Unknown DOM producer receiver: ${String(exhaustive)}`);
     }
   }
 };
@@ -617,7 +617,7 @@ const producerExpressions = (entry: DomElementProducer): string[] => {
       }
       default: {
         const exhaustive: never = entry;
-        throw new Error(`Unknown DOM producer kind: ${exhaustive}`);
+        throw new Error(`Unknown DOM producer kind: ${String(exhaustive)}`);
       }
     }
   }
