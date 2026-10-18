@@ -384,6 +384,18 @@ repository-relative path; its existing parent must be safe at runtime. Track an 
 bunx --no-install stll-cloud-setup
 ```
 
+When PostgreSQL is enabled, the selected environment file contains `DATABASE_URL`
+and `POSTGRES_HOST`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB_NAME`,
+and `POSTGRES_ADDITIONAL_CONNECTION_DATA`. `DATABASE_URL` retains the
+`postgresql://` spelling; the component values assemble the same endpoint with
+`postgres://`. Additional connection data is empty by default.
+Remote Claude sessions receive these generated values as quoted `export`
+assignments after service startup succeeds. SessionStart does not source the
+selected environment file, and it preserves the configured `envFile` path for
+tools that load that file directly. Settings generation migrates only exact
+SessionStart hooks from releases 1.1.0 and 1.3.1 and the prior main-branch form
+at 783bc97; edited or unknown hook forms fail with the canonical repair.
+
 Rust is optional. A tracked root `rust-toolchain.toml` enables it automatically;
 otherwise declare `cloud.rust` to enable it. `cloud.rust.toolchain`, when given,
 must be an exact stable Rust patch. The root toolchain file supplies the pin when
@@ -434,21 +446,26 @@ binary DEBs for the declared release and architecture, verifies the policy's
 SHA256 pins, and installs those local files with apt. It does not resolve Valkey
 from a mutable package index.
 The command writes `.agents/cloud-setup.sh` with executable permissions and
-merges a `SessionStart` hook into `.claude/settings.json`. The hook runs
-`bash "$CLAUDE_PROJECT_DIR/.agents/cloud-setup.sh" start` only when
-`CLAUDE_CODE_REMOTE=true`, including sessions that reuse cached filesystems and
-sessions started from a repository subdirectory. Generation replaces the exact hooks written by 1.1.0 and 1.3.1 in place.
-After successful startup, it appends the
-managed shell profile's literal exports to `CLAUDE_ENV_FILE` when available, so
-subsequent Claude commands select pinned runtimes and tools before preinstalled
-versions while retaining their inherited `PATH`. The settings also set
+merges a `SessionStart` hook into `.claude/settings.json`. Only when
+`CLAUDE_CODE_REMOTE=true`, the hook runs
+`bash "$CLAUDE_PROJECT_DIR/.agents/cloud-setup.sh" session` if `CLAUDE_ENV_FILE`
+is nonempty, and `start` otherwise. This includes sessions that reuse cached
+filesystems and sessions started from a repository subdirectory. Generation
+replaces the exact hooks written by 1.1.0 and 1.3.1 and the prior main-branch
+form in place.
+After successful startup, the hook copies existing `CLAUDE_ENV_FILE` content
+into a temporary file in the same directory, adds the generated service exports
+and managed shell profile's literal exports, then renames it over the destination.
+The resulting file has mode `0600`; an existing destination must be a regular,
+non-symlink file. Subsequent Claude commands select pinned runtimes and tools
+before preinstalled versions while retaining their inherited `PATH`. The settings also set
 `"attribution": {"commit": "", "pr": ""}`, so cloud sessions add no tool
 attribution to commits or pull requests. Existing environment-file
 content, unrelated settings, and hooks are preserved. Invalid JSON, disabled
 hooks, conflicting cloud startup entries, or a different `attribution` value stop
 generation with a repair instruction. Startup or environment persistence failures
 produce actionable session context and a stderr reason; SessionStart cannot block
-a session. Successful startup is silent on stdout. Commit both generated files.
+a session. Successful hook execution is silent on stdout. Commit both generated files.
 Generation refuses symlink parents or destinations and hard-linked destinations.
 Generation recreates its deleted tracked output files and requires unrelated
 tracked inputs to remain readable.
@@ -460,21 +477,26 @@ prints usage without reading repository configuration.
 
 | Environment phase       | Command                               |
 | ----------------------- | ------------------------------------- |
-| Networked install       | `bash .agents/cloud-setup.sh install` |
-| Offline session startup | `bash .agents/cloud-setup.sh start`   |
+| Networked install       | `bash .agents/cloud-setup.sh install`   |
+| Offline session startup | `bash .agents/cloud-setup.sh start`     |
+| Startup with exports    | `bash .agents/cloud-setup.sh session`   |
 
 Runtime installation repairs and verifies a missing or empty system CA bundle
 offline before any apt refresh or download, including when the certificate package
 is already current. If the certificate updater is unavailable or cannot restore
 trust, restore the base image offline before rerunning installation.
 
-Both commands can be rerun. Missing or unknown subcommands print usage and
+All three commands can be rerun. Passwordless sudo rules limited to specific
+script arguments must authorize `install`, `start`, and `session`.
+Missing or unknown subcommands print usage and
 exit 2; there is no implicit lifecycle mode. The script supports Ubuntu 24.04
 with root access or passwordless sudo and fails when required capabilities
 or pinned installations are unavailable. `install` provisions runtimes,
 dependencies, and declared services; `start` refreshes the managed shell environment
 and restores local services after
-cached environments lose running processes. Services bind only to localhost.
+cached environments lose running processes. `session` performs the same offline
+startup, sends startup output to stderr, and emits the declared service environment
+exports on stdout for the hook to capture. Services bind only to localhost.
 System provisioning runs as root; frozen dependencies run as the invoking user
 with that user's home and a private, user-owned Bun cache. Package installation
 does not permit automatic downgrades.
@@ -963,3 +985,32 @@ fail closed. This is an ownership check for ordinary authored package scripts,
 not a security boundary against deliberately obfuscated code or lint invocations
 hidden inside arbitrary program bodies. Unsupported forms require an explicit
 supported script invocation or a separately tested extension to the model.
+
+## Quarantine preset and expiry checks
+
+Run `bunx --no-install stll-quarantine --sync` before installation to create the
+five-day Bun preset and synchronize permanent exact-name `@stll/` exemptions.
+The command derives registry identities from dependency declarations and the
+root Bun lockfile, including transitive platform packages. Existing first-party
+creation timestamps remain stable across runs; they are not expiries.
+
+Third-party entries require `# quarantine-expires: YYYY-MM-DDTHH:mm:ss.sssZ`.
+`stll-toolchain-check` warns 48 hours before expiry; warnings continue through
+the existing 24-hour removal grace, after which expired entries fail. The
+quarantine rule cannot be opted out. `stll-quarantine --check` is read-only;
+`--prune` removes expired third-party entries without removing first-party ones.
+`--help` lists modes. Linked output files are rejected.
+
+`@stll/oxlint-config/quarantine` exports the Node-compatible repository helpers
+`checkRepositoryQuarantine`, `synchronizeRepositoryQuarantine`, and
+`pruneRepositoryQuarantine`, accepting a tracked `files` snapshot and optional
+`now`. The toolchain API reports advisory expiry messages through `onWarning`;
+its returned diagnostics remain failures. Snapshot readers keep lockfiles
+opaque by default; `{ bunLock: "content" }` explicitly requests the root graph
+when quarantine identity checks need it.
+
+The shared scheduled workflow imports the same dependency-free policy core
+from an exact tooling commit; it does not install consumer dependencies to
+perform enforcement or pruning. Its stable removal branch updates one PR per
+repository. See the [root guide](../../README.md#package-quarantine) for the
+inline annotation format and adoption boundary.

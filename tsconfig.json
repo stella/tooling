@@ -3,6 +3,7 @@
   "include": [
     "oxlint.config.ts",
     "packages/oxlint-config/src/**/*.ts",
+    "packages/typescript-config/**/*.ts",
     "scripts/**/*.ts",
     "scripts/**/*.js",
     "scripts/**/*.mjs",

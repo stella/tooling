@@ -3,6 +3,8 @@ import { defineConfig } from "tsdown";
 export default defineConfig({
   entry: [
     "src/index.ts",
+    "src/quarantine-cli.ts",
+    "src/quarantine-policy.ts",
     "src/plugin.ts",
     "src/no-raw-colors.ts",
     "src/toolchain-check-cli.ts",
