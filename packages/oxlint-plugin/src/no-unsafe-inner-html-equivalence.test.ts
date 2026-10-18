@@ -1,6 +1,7 @@
 /// <reference types="bun-types" />
 
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { basename, join, relative, resolve } from "node:path";
 import { expect, test } from "bun:test";
 import { DOM_ELEMENT_PRODUCERS } from "./no-unsafe-inner-html.ts";
@@ -465,26 +466,38 @@ const runOxlint = async ({
   filePaths,
   extraArgs = [],
 }: RunOxlintOptions): Promise<{ exitCode: number; stdout: string; stderr: string }> => {
-  const child = Bun.spawn(
-    [
-      process.execPath,
-      "--bun",
-      "oxlint",
-      "-c",
-      configPath,
-      "--format",
-      "json",
-      ...extraArgs,
-      ...filePaths,
-    ],
-    { cwd: repositoryRoot, stderr: "pipe", stdout: "pipe" },
-  );
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-    child.exited,
-  ]);
-  return { exitCode, stdout, stderr };
+  const outputDirectory = await mkdtemp(join(tmpdir(), "html-equivalence-output-"));
+  const stdoutPath = join(outputDirectory, "stdout.json");
+  const stderrPath = join(outputDirectory, "stderr.txt");
+  try {
+    // Regular files retain complete native CLI output even when it exceeds pipe capacity.
+    const child = Bun.spawn(
+      [
+        process.execPath,
+        "--bun",
+        "oxlint",
+        "-c",
+        configPath,
+        "--format",
+        "json",
+        ...extraArgs,
+        ...filePaths,
+      ],
+      {
+        cwd: repositoryRoot,
+        stdout: Bun.file(stdoutPath),
+        stderr: Bun.file(stderrPath),
+      },
+    );
+    const exitCode = await child.exited;
+    const [stdout, stderr] = await Promise.all([
+      readFile(stdoutPath, "utf8"),
+      readFile(stderrPath, "utf8"),
+    ]);
+    return { exitCode, stdout, stderr };
+  } finally {
+    await rm(outputDirectory, { recursive: true, force: true });
+  }
 };
 
 const memberEdits = (source: string, edits: readonly MemberEdit[]) => {
