@@ -189,6 +189,30 @@ test("cloud generation rejects every nonexact or out-of-series Node selector", (
     );
 });
 
+test("cloud generation requires exact Node and packageManager Bun archive pins", () => {
+  const cloud = parseCloudSetup(declaration);
+  if (cloud === undefined) throw new Error("Missing cloud declaration");
+  expect(() =>
+    generateCloudSetup({
+      policy: { ...policy, nodeArchiveSha256: {} },
+      cloud,
+      nodeVersion: "26.10.0",
+    }),
+  ).toThrow("cloud Node 26.10.0 has no archive SHA256 pins");
+  expect(() =>
+    generateCloudSetup({
+      policy,
+      cloud,
+      nodeVersion: "26.10.0",
+      files: {
+        "package.json": JSON.stringify({ packageManager: "bun@1.4.2" }),
+      },
+    }),
+  ).toThrow(
+    "cloud packageManager Bun 1.4.2 has no archive SHA256 pins; policy Bun is 1.4.3",
+  );
+});
+
 test("shell quoting preserves canonical literal metacharacters through single-pass replacement", () => {
   withRepository((root) => {
     const envFile = ".env'\"$`@SERVICE_INSTALL@";
@@ -534,7 +558,9 @@ test("the declared install command is rendered verbatim into the pinned install"
 
 test("every lifecycle phase runs through the timed step logger", () => {
   const generated = generate(declaration);
-  const body = generated.slice(generated.indexOf('if [[ "$MODE" == install ]]'));
+  const body = generated.slice(
+    generated.indexOf('if [[ "$MODE" == install ]]'),
+  );
   const start = generated.indexOf("start_environment() {");
   const end = generated.indexOf(
     '\n}\nif [[ "$MODE" == session ]]; then',
@@ -563,9 +589,7 @@ test("every lifecycle phase runs through the timed step logger", () => {
     "prepare_state",
     "start_services",
   ])
-    expect(startFunction).toMatch(
-      new RegExp(`^ *step [a-z-]+ ${phase}$`, "m"),
-    );
+    expect(startFunction).toMatch(new RegExp(`^ *step [a-z-]+ ${phase}$`, "m"));
   expect(generated).toContain(
     'if [[ "$MODE" == session ]]; then\n  start_environment >&2\nelse\n  start_environment\nfi',
   );
@@ -682,7 +706,9 @@ test("a prepare script must be a root package script", () => {
   ]) {
     expect(() =>
       generatePrepared({ "package.json": JSON.stringify({ scripts }) }),
-    ).toThrow("cloud.prepare.script generate:cloud is not a root package script");
+    ).toThrow(
+      "cloud.prepare.script generate:cloud is not a root package script",
+    );
   }
 });
 
@@ -747,7 +773,10 @@ test.skipIf(Bun.which("timeout") === null)(
       // Reaping can lag the kill by a moment; poll briefly.
       let alive = true;
       for (let attempt = 0; attempt < 50 && alive; attempt += 1) {
-        alive = Bun.spawnSync(["kill", "-0", String(pid)]).exitCode === 0;
+        const process = Bun.spawnSync(["ps", "-o", "stat=", "-p", String(pid)]);
+        alive =
+          process.exitCode === 0 &&
+          !process.stdout.toString().trimStart().startsWith("Z");
         if (alive) Bun.sleepSync(100);
       }
       expect(alive).toBe(false);

@@ -128,6 +128,19 @@ test("package installation refuses symlink policies before invoking apt", () => 
   }
 });
 
+test("local package installation runs only the unbounded offline apt step", () => {
+  const directory = mkdtempSync(join(tmpdir(), "cloud-apt-test-"));
+  try {
+    const result = runInstall(directory, 0, 0, ["/tmp/fixture.deb"]);
+    expect(result.exitCode).toBe(0);
+    expect(readFileSync(join(directory, "apt.calls"), "utf8")).toBe(
+      "offline:install -y --no-install-recommends --no-download /tmp/fixture.deb\n",
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 const pgdgFragment = renderCloudServiceInstall({
   ...parseToolchainPolicy(policy),
   services: ["postgres"],
@@ -142,18 +155,20 @@ test("service installation uses shared bounded network helpers for every downloa
       ...parseToolchainPolicy(policy),
       services,
     });
-    // The only raw apt-get is the offline install, which cannot download.
+    // Both package paths converge on the raw offline install; neither can download.
     const offline =
       '  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --no-download "$@"\n';
-    expect(rendered.split(offline)).toHaveLength(2);
-    expect(rendered.replace(offline, "")).not.toMatch(
+    expect(rendered.split(offline)).toHaveLength(3);
+    expect(rendered.replaceAll(offline, "")).not.toMatch(
       /\b(?:curl|wget|apt-get)\b/,
     );
     expect(rendered).toContain(
       'DEBIAN_FRONTEND=noninteractive apt_network install -y --no-install-recommends --download-only "$@"\n  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --no-download "$@"\n)',
     );
     expect(rendered).not.toContain("apt_network update");
-    const refreshes = [...rendered.matchAll(/^ *apt_refresh_for (.+)\n *apt_install (.+)$/gm)];
+    const refreshes = [
+      ...rendered.matchAll(/^ *apt_refresh_for (.+)\n *apt_install (.+)$/gm),
+    ];
     expect(refreshes.length).toBe(services.length);
     for (const [, refreshed, installed] of refreshes)
       expect(refreshed).toBe(installed);
@@ -547,14 +562,14 @@ test("offline package configuration failures propagate and still restore the pol
   }
 });
 
-test("local package archives install in one bounded step because apt cannot pre-download them", () => {
+test("local package archives install without a deadline because they are already downloaded", () => {
   const directory = mkdtempSync(join(tmpdir(), "cloud-apt-test-"));
   try {
     const result = runInstall(directory, 0, 0, ["/tmp/a.deb", "/tmp/b.deb"]);
     expect(result.stderr.toString()).toBe("");
     expect(result.exitCode).toBe(0);
     expect(readFileSync(join(directory, "apt.calls"), "utf8")).toBe(
-      "network@600:install -y --no-install-recommends /tmp/a.deb /tmp/b.deb\n",
+      "offline:install -y --no-install-recommends --no-download /tmp/a.deb /tmp/b.deb\n",
     );
     expect(existsSync(join(directory, "policy-rc.d"))).toBe(false);
   } finally {

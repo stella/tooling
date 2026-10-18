@@ -20,6 +20,30 @@ export const valkeyArtifactPackages = {
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+const parseArchiveSha256 = (input: unknown, label: string) => {
+  if (input === undefined) return {};
+  if (!record(input)) throw new Error(`${label} must be a version map`);
+  const releases: Record<string, { amd64: string; arm64: string }> = {};
+  for (const [version, value] of Object.entries(input)) {
+    if (valid(version) !== version || !record(value))
+      throw new Error(`${label} requires exact release keys`);
+    const keys = Object.keys(value);
+    if (keys.length !== 2 || !keys.includes("amd64") || !keys.includes("arm64"))
+      throw new Error(`${label} ${version} requires amd64 and arm64 pins`);
+    const amd64 = value["amd64"];
+    const arm64 = value["arm64"];
+    if (
+      typeof amd64 !== "string" ||
+      typeof arm64 !== "string" ||
+      !/^[a-f0-9]{64}$/.test(amd64) ||
+      !/^[a-f0-9]{64}$/.test(arm64)
+    )
+      throw new Error(`${label} ${version} requires lowercase SHA256 pins`);
+    releases[version] = { amd64, arm64 };
+  }
+  return releases;
+};
+
 const artifactRecord = (value: unknown, keys: readonly string[]) => {
   if (
     !record(value) ||
@@ -85,8 +109,16 @@ export const parseToolchainPolicy = (input: unknown) => {
   const packages: Record<string, string> = {};
   for (const key of packagePinKeys) packages[key] = string(input, key);
   const bun = string(input, "bun");
+  const bunArchiveSha256 = parseArchiveSha256(
+    input["bunArchiveSha256"],
+    "bunArchiveSha256",
+  );
   const typescript = string(input, "typescript");
   const node = string(input, "node");
+  const nodeArchiveSha256 = parseArchiveSha256(
+    input["nodeArchiveSha256"],
+    "nodeArchiveSha256",
+  );
   const consumerNode = string(input, "consumerNode");
   const consumerNpm = string(input, "consumerNpm");
   const consumerPnpm = string(input, "consumerPnpm");
@@ -240,8 +272,10 @@ export const parseToolchainPolicy = (input: unknown) => {
   }
   return {
     bun,
+    bunArchiveSha256,
     typescript,
     node,
+    nodeArchiveSha256,
     postgres,
     valkey,
     valkeyArtifacts,
