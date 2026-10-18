@@ -2,6 +2,7 @@ import { withFakeServer } from "@stll/test-kit";
 
 const externalUrl = "https://static.example.com/data";
 const loopbackUrl = `http://localhost:3000/data`;
+const host = "localhost";
 // oxlint-disable-next-line no-real-network-in-tests/no-real-network-in-tests -- fixture
 void fetch("https://example.com/data");
 // oxlint-disable-next-line no-real-network-in-tests/no-real-network-in-tests -- fixture
@@ -20,6 +21,16 @@ new EventSource("https://example.com/events");
 void fetch("http://localhost:3000/data");
 // expect-clean: no-real-network-in-tests/no-real-network-in-tests
 void fetch("http://127.0.0.1/data");
+// expect-clean: no-real-network-in-tests/no-real-network-in-tests
+void fetch("http://127.10.0.3");
+// expect-clean: no-real-network-in-tests/no-real-network-in-tests
+void fetch("http://[::1]:8080");
+// expect-clean: no-real-network-in-tests/no-real-network-in-tests
+void fetch(`http://${host}/`);
+// expect-clean: no-real-network-in-tests/no-real-network-in-tests
+void fetch(`http://${anything}/`);
+// oxlint-disable-next-line no-real-network-in-tests/no-real-network-in-tests -- fixture
+void fetch(`https://${"api.example.com"}/`);
 // expect-clean: no-real-network-in-tests/no-real-network-in-tests
 void fetch("data:text/plain,fixture");
 // expect-clean: no-real-network-in-tests/no-real-network-in-tests

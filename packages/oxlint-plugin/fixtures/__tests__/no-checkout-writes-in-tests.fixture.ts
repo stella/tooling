@@ -3,6 +3,7 @@ import fs, {
   appendFileSync,
   copyFile,
   copyFileSync,
+  createWriteStream,
   cp,
   cpSync,
   mkdir,
@@ -16,10 +17,14 @@ import fs, {
   rmdirSync,
   symlink,
   symlinkSync,
+  unlink,
+  unlinkSync,
   writeFile,
   writeFileSync,
 } from "node:fs";
-import { writeFile as save } from "node:fs/promises";
+import { unlink as unlinkPromise, writeFile as save } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 
 import { withTestTmpDir } from "@stll/test-kit";
 // oxlint-disable-next-line no-checkout-writes-in-tests/no-checkout-writes-in-tests -- fixture
@@ -80,6 +85,10 @@ appendFileSync("fixture", "target");
 // oxlint-disable-next-line no-checkout-writes-in-tests/no-checkout-writes-in-tests -- fixture
 copyFile("fixture", "target");
 // oxlint-disable-next-line no-checkout-writes-in-tests/no-checkout-writes-in-tests -- fixture
+copyFile("/tmp/a", "fixture.txt");
+// expect-clean: no-checkout-writes-in-tests/no-checkout-writes-in-tests
+copyFile("fixture.txt", "/tmp/b");
+// oxlint-disable-next-line no-checkout-writes-in-tests/no-checkout-writes-in-tests -- fixture
 copyFileSync("fixture", "target");
 // oxlint-disable-next-line no-checkout-writes-in-tests/no-checkout-writes-in-tests -- fixture
 cp("fixture", "target");
@@ -101,6 +110,14 @@ rmdirSync("fixture", "target");
 symlink("fixture", "target");
 // oxlint-disable-next-line no-checkout-writes-in-tests/no-checkout-writes-in-tests -- fixture
 symlinkSync("fixture", "target");
+// oxlint-disable-next-line no-checkout-writes-in-tests/no-checkout-writes-in-tests -- fixture
+createWriteStream("out.log");
+// expect-clean: no-checkout-writes-in-tests/no-checkout-writes-in-tests
+unlink("/tmp/x");
+// oxlint-disable-next-line no-checkout-writes-in-tests/no-checkout-writes-in-tests -- fixture
+unlinkSync("fixture.txt");
+// oxlint-disable-next-line no-checkout-writes-in-tests/no-checkout-writes-in-tests -- fixture
+await unlinkPromise("fixture.txt");
 import path from "node:path";
 // oxlint-disable-next-line no-checkout-writes-in-tests/no-checkout-writes-in-tests -- fixture
 writeFileSync(path.join("fixture", crypto.randomUUID()), "x");
@@ -108,6 +125,10 @@ await withTestTmpDir((dir) => {
   // expect-clean: no-checkout-writes-in-tests/no-checkout-writes-in-tests
   writeFileSync(path.join(dir, "fixture.txt"), "x");
 });
+// expect-clean: no-checkout-writes-in-tests/no-checkout-writes-in-tests
+writeFileSync(join(tmpdir(), "x"), "x");
+// expect-clean: no-checkout-writes-in-tests/no-checkout-writes-in-tests
+writeFileSync(resolve("/tmp", "x"), "x");
 {
   const shadowFs = {
     writeFileSync: (_path: string, _data: string) => undefined,

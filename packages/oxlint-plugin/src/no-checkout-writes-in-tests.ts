@@ -11,6 +11,7 @@ const writeNames = new Set([
   "appendFileSync",
   "copyFile",
   "copyFileSync",
+  "createWriteStream",
   "cp",
   "cpSync",
   "mkdir",
@@ -23,12 +24,24 @@ const writeNames = new Set([
   "rmdirSync",
   "symlink",
   "symlinkSync",
+  "unlink",
+  "unlinkSync",
   "writeFile",
   "writeFileSync",
 ]);
 const fsModules = new Set(["fs", "node:fs", "fs/promises", "node:fs/promises"]);
 const pathModules = new Set(["path", "node:path"]);
 const absolutePath = /^(?:\/|[A-Za-z]:[\\/]|\\\\)/u;
+const destinationWriteNames = new Set([
+  "copyFile",
+  "copyFileSync",
+  "cp",
+  "cpSync",
+  "rename",
+  "renameSync",
+  "symlink",
+  "symlinkSync",
+]);
 
 export default testOnlyPlugin(
   "no-checkout-writes-in-tests",
@@ -113,20 +126,20 @@ export default testOnlyPlugin(
         return rootedInCheckout(value.left);
       return false;
     };
-    const fsWrite = (value: unknown): boolean => {
-      if (!isNode(value)) return false;
+    const fsWriteName = (value: unknown): string | null => {
+      if (!isNode(value)) return null;
       if (value.type === "Identifier") {
         const binding = resolveBinding(value);
-        if (binding.type === "const") return fsWrite(binding.initializer);
-        return (
-          binding.type === "import" &&
+        if (binding.type === "const") return fsWriteName(binding.initializer);
+        return binding.type === "import" &&
           fsModules.has(binding.module) &&
           writeNames.has(binding.imported)
-        );
+          ? binding.imported
+          : null;
       }
-      if (value.type !== "MemberExpression") return false;
+      if (value.type !== "MemberExpression") return null;
       const method = propertyName(value.property);
-      if (method === null || !writeNames.has(method)) return false;
+      if (method === null || !writeNames.has(method)) return null;
       if (isNode(value.object)) {
         const object = resolveBinding(value.object);
         if (
@@ -136,21 +149,21 @@ export default testOnlyPlugin(
             object.imported === "default" ||
             object.imported === "promises")
         )
-          return true;
+          return method;
         if (
           value.object.type === "MemberExpression" &&
           propertyName(value.object.property) === "promises" &&
           isNode(value.object.object)
         ) {
           const namespace = resolveBinding(value.object.object);
-          return (
-            namespace.type === "import" &&
+          return namespace.type === "import" &&
             fsModules.has(namespace.module) &&
             (namespace.imported === "*" || namespace.imported === "default")
-          );
+            ? method
+            : null;
         }
       }
-      return false;
+      return null;
     };
     const bunWrite = (value: unknown): boolean =>
       isNode(value) &&
@@ -159,10 +172,17 @@ export default testOnlyPlugin(
       isGlobal(value.object, "Bun");
     return {
       CallExpression(node) {
+        const writeName = fsWriteName(node.callee);
         if (
-          (fsWrite(node.callee) || bunWrite(node.callee)) &&
+          (writeName !== null || bunWrite(node.callee)) &&
           Array.isArray(node.arguments) &&
-          rootedInCheckout(node.arguments.at(0))
+          rootedInCheckout(
+            node.arguments.at(
+              writeName !== null && destinationWriteNames.has(writeName)
+                ? 1
+                : 0,
+            ),
+          )
         )
           report(node);
       },

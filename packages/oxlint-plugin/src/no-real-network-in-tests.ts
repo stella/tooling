@@ -6,6 +6,8 @@ import {
   testOnlyPlugin,
 } from "./test-rule-utils";
 
+const ipv4Loopback = /^127(?:\.\d{1,3}){3}$/u;
+
 const urlText = (
   value: unknown,
   resolveBinding: ReturnType<typeof createBindingResolver>,
@@ -13,14 +15,23 @@ const urlText = (
   if (!isNode(value)) return null;
   if (value.type === "Literal" && typeof value.value === "string")
     return value.value;
-  if (value.type === "TemplateLiteral" && Array.isArray(value.quasis)) {
-    return value.quasis
-      .map((part) =>
-        isNode(part) && typeof Reflect.get(part.value ?? {}, "raw") === "string"
-          ? Reflect.get(part.value ?? {}, "raw")
-          : "",
-      )
-      .join("x");
+  if (
+    value.type === "TemplateLiteral" &&
+    Array.isArray(value.quasis) &&
+    Array.isArray(value.expressions)
+  ) {
+    let text = "";
+    for (const [index, part] of value.quasis.entries()) {
+      const raw = isNode(part) ? Reflect.get(part.value ?? {}, "raw") : null;
+      if (typeof raw !== "string") return null;
+      text += raw;
+      const expression = value.expressions.at(index);
+      if (expression === undefined) continue;
+      const resolved = urlText(expression, resolveBinding);
+      if (resolved === null) return null;
+      text += resolved;
+    }
+    return text;
   }
   if (value.type === "Identifier") {
     const binding = resolveBinding(value);
@@ -50,7 +61,7 @@ const external = (
       return false;
     return (
       host !== "localhost" &&
-      host !== "127.0.0.1" &&
+      !ipv4Loopback.test(host) &&
       host !== "::1" &&
       host !== "[::1]" &&
       !host.endsWith(".localhost")

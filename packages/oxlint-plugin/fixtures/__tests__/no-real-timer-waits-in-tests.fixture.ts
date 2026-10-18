@@ -1,4 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
+import * as timers from "node:timers/promises";
 
 import { fakeTimers, wait } from "@stll/test-kit";
 // oxlint-disable-next-line no-real-timer-waits-in-tests/no-real-timer-waits-in-tests -- fixture
@@ -15,6 +16,8 @@ self.setTimeout(() => {}, 10);
 await Bun.sleep(10);
 // oxlint-disable-next-line no-real-timer-waits-in-tests/no-real-timer-waits-in-tests -- fixture
 await delay(10);
+// oxlint-disable-next-line no-real-timer-waits-in-tests/no-real-timer-waits-in-tests -- fixture
+await timers.setTimeout(100);
 // expect-clean: no-real-timer-waits-in-tests/no-real-timer-waits-in-tests
 await wait(() => true, { timeout: 100 });
 // expect-clean: no-real-timer-waits-in-tests/no-real-timer-waits-in-tests

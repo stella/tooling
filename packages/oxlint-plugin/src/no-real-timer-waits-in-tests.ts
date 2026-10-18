@@ -32,6 +32,13 @@ export default testOnlyPlugin(
       const object = isNode(value.object) ? resolveBinding(value.object) : null;
       const property = propertyName(value.property);
       if (
+        property === "setTimeout" &&
+        object?.type === "import" &&
+        object.imported === "*" &&
+        timerModules.has(object.module)
+      )
+        return true;
+      if (
         (property === "setTimeout" || property === "setInterval") &&
         object?.type === "global" &&
         (object.name === "globalThis" ||
