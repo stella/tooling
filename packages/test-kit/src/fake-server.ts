@@ -16,12 +16,14 @@ export const withFakeServer = async <T>(
     port: 0,
     fetch: async (request) => {
       const copy = request.clone();
-      requests.push({
-        body: new Uint8Array(await copy.arrayBuffer()),
+      const recordedRequest = {
+        body: new Uint8Array(),
         headers: Array.from(copy.headers.entries()),
         method: copy.method,
         url: copy.url,
-      });
+      };
+      requests.push(recordedRequest);
+      recordedRequest.body = new Uint8Array(await copy.arrayBuffer());
       return await handler(request);
     },
   });

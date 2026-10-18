@@ -29,7 +29,11 @@ export type FakeTimers = {
   pendingTimers: () => number;
 };
 
-const MAX_RUN_ALL_TIMERS = 10_000;
+const MAX_TIMER_CALLBACKS = 10_000;
+let fakeTimersScopeActive = false;
+
+const normalizeDelay = (delay: number) =>
+  Number.isFinite(delay) && delay > 0 ? delay : 0;
 
 export const createFakeTimers = ({
   clock = createTestClock(),
@@ -43,12 +47,11 @@ export const createFakeTimers = ({
     interval?: number,
     args: unknown[] = [],
   ) => {
-    if (!Number.isFinite(delay) || delay < 0)
-      throw new RangeError("timer delay must be finite and non-negative");
+    const normalizedDelay = normalizeDelay(delay);
     const timer = {
       args,
       callback,
-      dueAt: clock.monotonic() + delay,
+      dueAt: clock.monotonic() + normalizedDelay,
       id: ++id,
       interval,
       sequence: sequence++,
@@ -62,15 +65,20 @@ export const createFakeTimers = ({
       .sort(
         (left, right) =>
           left.dueAt - right.dueAt || left.sequence - right.sequence,
-      )[0];
-  const advance = async (milliseconds: number) => {
-    if (!Number.isFinite(milliseconds) || milliseconds < 0)
-      throw new RangeError("advance must be finite and non-negative");
-    const target = clock.monotonic() + milliseconds;
+      )
+      .at(0);
+  const drain = async (target: number) => {
+    let callbackCount = 0;
     for (;;) {
       const timer = nextDue(target);
       if (timer === undefined) break;
-      await clock.advance(timer.dueAt - clock.monotonic());
+      if (++callbackCount > MAX_TIMER_CALLBACKS) {
+        throw new Error(
+          `timer run exceeded ${String(MAX_TIMER_CALLBACKS)} callbacks; clear self-rescheduling timers first`,
+        );
+      }
+      const timeUntilDue = timer.dueAt - clock.monotonic();
+      if (timeUntilDue > 0) await clock.advance(timeUntilDue);
       if (!timers.delete(timer.id)) continue;
       if (timer.interval !== undefined) {
         timer.dueAt += timer.interval;
@@ -80,14 +88,28 @@ export const createFakeTimers = ({
       timer.callback(...timer.args);
       await Promise.resolve();
     }
-    await clock.advance(target - clock.monotonic());
+  };
+  const advance = async (milliseconds: number) => {
+    if (!Number.isFinite(milliseconds) || milliseconds < 0)
+      throw new RangeError("advance must be finite and non-negative");
+    const target = clock.monotonic() + milliseconds;
+    await drain(target);
+    const remaining = target - clock.monotonic();
+    if (remaining > 0) await clock.advance(remaining);
   };
   return {
     clock,
     setTimeout: (callback, delay, ...args) =>
       schedule(callback, delay, undefined, args),
-    setInterval: (callback, delay = 0, ...args) =>
-      schedule(callback, delay, Math.max(delay, 1), args),
+    setInterval: (callback, delay = 0, ...args) => {
+      const normalizedDelay = normalizeDelay(delay);
+      return schedule(
+        callback,
+        normalizedDelay,
+        Math.max(normalizedDelay, 1),
+        args,
+      );
+    },
     clearTimeout: (timerId) => {
       timers.delete(timerId);
     },
@@ -96,16 +118,7 @@ export const createFakeTimers = ({
     },
     advance,
     runAll: async () => {
-      let count = 0;
-      while (timers.size > 0) {
-        const timer = nextDue();
-        if (timer === undefined) return;
-        if (++count > MAX_RUN_ALL_TIMERS)
-          throw new Error(
-            `runAll exceeded ${String(MAX_RUN_ALL_TIMERS)} timers; clear recurring intervals first`,
-          );
-        await advance(timer.dueAt - clock.monotonic());
-      }
+      await drain(Number.POSITIVE_INFINITY);
     },
     pendingTimers: () => timers.size,
   };
@@ -114,6 +127,10 @@ export const createFakeTimers = ({
 export const withFakeTimers = async <T>(
   fn: (timers: FakeTimers) => T | Promise<T>,
 ): Promise<T> => {
+  if (fakeTimersScopeActive) {
+    throw new Error("withFakeTimers scopes must not overlap");
+  }
+  fakeTimersScopeActive = true;
   const timers = createFakeTimers();
   const originals = { clearInterval, clearTimeout, setInterval, setTimeout };
   Reflect.set(globalThis, "setTimeout", timers.setTimeout);
@@ -127,5 +144,6 @@ export const withFakeTimers = async <T>(
     Reflect.set(globalThis, "setInterval", originals.setInterval);
     Reflect.set(globalThis, "clearTimeout", originals.clearTimeout);
     Reflect.set(globalThis, "clearInterval", originals.clearInterval);
+    fakeTimersScopeActive = false;
   }
 };

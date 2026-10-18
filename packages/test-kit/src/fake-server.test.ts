@@ -26,7 +26,7 @@ test("records requests and works through the network guard", async () => {
 
 test("stops the server after a thrown test body", async () => {
   let url = "";
-  await expect(
+  expect(
     withFakeServer(
       () => new Response(),
       ({ baseUrl }) => {
@@ -35,5 +35,37 @@ test("stops the server after a thrown test body", async () => {
       },
     ),
   ).rejects.toThrow("boom");
-  await expect(fetch(url)).rejects.toThrow();
+  expect(fetch(url)).rejects.toThrow();
+});
+
+test("records concurrent requests in arrival order", async () => {
+  await withFakeServer(
+    () => new Response("ok"),
+    async ({ baseUrl, requests }) => {
+      let closeFirstBody: (() => void) | undefined;
+      const firstBody = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("first"));
+          closeFirstBody = () => controller.close();
+        },
+      });
+      const first = fetch(`${baseUrl}/first`, {
+        body: firstBody,
+        method: "POST",
+      });
+      while (requests.length === 0)
+        await new Promise((resolve) => setImmediate(resolve));
+      const second = fetch(`${baseUrl}/second`, {
+        body: "second",
+        method: "POST",
+      });
+      await second;
+      closeFirstBody?.();
+      await first;
+      expect(requests.map(({ url }) => new URL(url).pathname)).toEqual([
+        "/first",
+        "/second",
+      ]);
+    },
+  );
 });
