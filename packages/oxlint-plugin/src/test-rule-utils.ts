@@ -1,3 +1,4 @@
+import type { Scope } from "@oxlint/plugins";
 import { eslintCompatPlugin } from "@oxlint/plugins";
 
 import { filenameForContext } from "./utils";
@@ -66,6 +67,7 @@ export const testOnlyPlugin = (
   message: string,
   makeVisitors: (
     report: (node: Node) => void,
+    getScope: (node: Node) => Scope,
   ) => Record<string, (node: Node) => void>,
 ) =>
   eslintCompatPlugin({
@@ -75,7 +77,10 @@ export const testOnlyPlugin = (
         meta: { type: "problem", messages: { [messageId]: message } },
         create(context) {
           if (!isTestFile(context)) return {};
-          return makeVisitors((node) => context.report({ node, messageId }));
+          return makeVisitors(
+            (node) => context.report({ node, messageId }),
+            (node) => context.sourceCode.getScope(node),
+          );
         },
       },
     },

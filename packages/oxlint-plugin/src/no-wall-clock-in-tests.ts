@@ -31,7 +31,10 @@ export default testOnlyPlugin(
         callee !== null &&
         (memberName(callee) === "Date.now" ||
           memberName(callee) === "performance.now" ||
-          (name !== null && aliases.has(name)))
+          (name !== null && aliases.has(name)) ||
+          (name === "Date" &&
+            Array.isArray(node.arguments) &&
+            node.arguments.length === 0))
       )
         report(node);
     },

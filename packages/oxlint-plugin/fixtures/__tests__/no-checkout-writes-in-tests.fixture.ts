@@ -18,6 +18,8 @@ fs.writeFileSync("/tmp/stll-fixture", "x");
 // oxlint-disable-next-line no-checkout-writes-in-tests/no-checkout-writes-in-tests -- fixture
 writeFileSync("fixture.txt", "x");
 // oxlint-disable-next-line no-checkout-writes-in-tests/no-checkout-writes-in-tests -- fixture
+writeFileSync(`fixture.txt`, "x");
+// oxlint-disable-next-line no-checkout-writes-in-tests/no-checkout-writes-in-tests -- fixture
 writeFile(`${import.meta.dir}/fixture.txt`, "x", () => {});
 // oxlint-disable-next-line no-checkout-writes-in-tests/no-checkout-writes-in-tests -- fixture
 mkdir(`${process.cwd()}/fixture`);
@@ -43,3 +45,9 @@ writeFileSync("C:\\temp\\fixture.txt", "x");
 writeFileSync("C:/temp/fixture.txt", "x");
 // expect-clean: no-checkout-writes-in-tests/no-checkout-writes-in-tests
 writeFileSync("\\\\server\\share\\fixture.txt", "x");
+// expect-clean: no-checkout-writes-in-tests/no-checkout-writes-in-tests
+writeFileSync(`/tmp/stll-template-fixture`, "x");
+// expect-clean: no-checkout-writes-in-tests/no-checkout-writes-in-tests
+writeFileSync(`C:\\temp\\fixture.txt`, "x");
+// expect-clean: no-checkout-writes-in-tests/no-checkout-writes-in-tests
+writeFileSync(`\\\\server\\share\\fixture.txt`, "x");

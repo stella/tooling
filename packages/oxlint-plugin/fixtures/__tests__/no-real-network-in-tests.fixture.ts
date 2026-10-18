@@ -5,6 +5,8 @@ const loopbackUrl = `http://localhost:3000/data`;
 // oxlint-disable-next-line no-real-network-in-tests/no-real-network-in-tests -- fixture
 void fetch("https://example.com/data");
 // oxlint-disable-next-line no-real-network-in-tests/no-real-network-in-tests -- fixture
+void globalThis.fetch("https://example.com/data");
+// oxlint-disable-next-line no-real-network-in-tests/no-real-network-in-tests -- fixture
 void fetch(`https://api.example.com/items`);
 // oxlint-disable-next-line no-real-network-in-tests/no-real-network-in-tests -- fixture
 void fetch(externalUrl);
@@ -19,6 +21,12 @@ void fetch("http://localhost:3000/data");
 // expect-clean: no-real-network-in-tests/no-real-network-in-tests
 void fetch("http://127.0.0.1/data");
 // expect-clean: no-real-network-in-tests/no-real-network-in-tests
+void fetch("data:text/plain,fixture");
+// expect-clean: no-real-network-in-tests/no-real-network-in-tests
+void fetch("blob:https://example.com/fixture-id");
+// expect-clean: no-real-network-in-tests/no-real-network-in-tests
+void fetch("file:///tmp/fixture");
+// expect-clean: no-real-network-in-tests/no-real-network-in-tests
 void fetch(loopbackUrl);
 // expect-clean: no-real-network-in-tests/no-real-network-in-tests
 const _fetchTarget = (target: string) => fetch(target);
@@ -26,3 +34,9 @@ const _fetchTarget = (target: string) => fetch(target);
 new WebSocket("ws://[::1]/socket");
 // expect-clean: no-real-network-in-tests/no-real-network-in-tests
 void withFakeServer(() => fetch("/data"));
+
+{
+  const fetch = (_url: string) => Promise.resolve(new Response());
+  // expect-clean: no-real-network-in-tests/no-real-network-in-tests
+  void fetch("https://example.com/data");
+}

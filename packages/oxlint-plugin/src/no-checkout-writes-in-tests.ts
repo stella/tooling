@@ -20,6 +20,16 @@ const rootedInCheckout = (value: unknown): boolean => {
   if (value.type === "Literal" && typeof value.value === "string")
     return !absolutePath.test(value.value);
   if (
+    value.type === "TemplateLiteral" &&
+    Array.isArray(value.expressions) &&
+    value.expressions.length === 0 &&
+    Array.isArray(value.quasis)
+  ) {
+    const quasi = value.quasis.at(0);
+    const raw = isNode(quasi) ? Reflect.get(quasi.value ?? {}, "raw") : null;
+    return typeof raw === "string" && !absolutePath.test(raw);
+  }
+  if (
     identifierName(value) === "__dirname" ||
     memberName(value) === "process.cwd"
   )
