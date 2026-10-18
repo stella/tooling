@@ -5,9 +5,9 @@
 # Supported platform: Ubuntu 24.04 (noble), amd64/arm64, root or passwordless sudo.
 set -euo pipefail
 
-usage() { echo 'Usage: cloud-setup.sh install|start' >&2; exit 2; }
+usage() { echo 'Usage: cloud-setup.sh install|start|session' >&2; exit 2; }
 [[ "$#" == 1 ]] || usage
-case "$1" in install|start) MODE="$1" ;; *) usage ;; esac
+case "$1" in install|start|session) MODE="$1" ;; *) usage ;; esac
 fail() { echo "cloud-setup: $*" >&2; exit 1; }
 trap 'echo "cloud-setup: command failed at line $LINENO" >&2' ERR
 # Each phase logs its start and duration so a stalled phase is visible in the task log.
@@ -453,6 +453,8 @@ verify_shell_environment() {
 
 
 
+
+
 if [[ "$MODE" == install ]]; then
   step runtimes install_runtimes
   step services install_services
@@ -462,10 +464,19 @@ if [[ "$MODE" == install ]]; then
 
   exit 0
 fi
-step runtime-check runtime_ready
-step tool-check verify_tools
-step shell install_shell_environment
-step shell-check verify_shell_environment
 
-step state prepare_state
-step service-start start_services
+start_environment() {
+  step runtime-check runtime_ready
+  step tool-check verify_tools
+  step shell install_shell_environment
+  step shell-check verify_shell_environment
+
+  step state prepare_state
+  step service-start start_services
+
+}
+if [[ "$MODE" == session ]]; then
+  start_environment >&2
+else
+  start_environment
+fi
