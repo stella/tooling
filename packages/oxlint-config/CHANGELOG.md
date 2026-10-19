@@ -1,5 +1,11 @@
 # @stll/oxlint-config
 
+## 1.5.2
+
+### Patch Changes
+
+- [#186](https://github.com/stella/tooling/pull/186) [`202e322`](https://github.com/stella/tooling/commit/202e322e82806b265ef4c8db56d059dc9f279ad0) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Replace image-provided Bun executables with links to the pinned cloud runtime and verify common child-process resolution paths.
+
 ## 1.5.1
 
 ### Patch Changes
