@@ -555,6 +555,19 @@ performs no downloads.
 
 ## Published package contracts
 
+### Engine support releases
+
+Run `stll-engine-support --base <git ref>` in pull request CI to require a major
+changeset when an existing published package narrows its `engines.node` range.
+The check matches packages by name, so moving a package does not hide a support
+change; packages that are new by name are skipped. A missing range means
+unrestricted Node support.
+
+Changesets-managed packages release themselves. For derived napi platform
+packages outside the workspace, the releasing package is the published owner
+that lists the platform package in `optionalDependencies`; a pending major
+changeset for that owner covers the platform package's support change.
+
 Run `stll-publish-contract` in PR CI. Every published root or declared workspace
 package commits `publish-contract.json`, recording engines, peer support ranges,
 resolved JavaScript targets, and entry points. `stll-publish-contract --write`
