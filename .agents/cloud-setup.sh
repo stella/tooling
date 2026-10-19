@@ -143,13 +143,20 @@ bun_route() {
   [[ "$version" == "$BUN_VERSION" ]] || fail "Bun at $resolved resolves version $version through $label; expected $BUN_VERSION"
 }
 verify_bun_routes() {
-  local configured_mise mise_root shims
+  local configured_mise login_shell minimal_path mise_root root_mise shims
+  # Test-only overrides keep route executables and image locations inside fixtures.
+  login_shell="$(printenv STLL_CLOUD_TEST_LOGIN_SHELL || true)"
+  [[ -n "$login_shell" ]] || login_shell=bash
+  minimal_path="$(printenv STLL_CLOUD_TEST_MINIMAL_PATH || true)"
+  [[ -n "$minimal_path" ]] || minimal_path=/usr/local/bin:/usr/bin:/bin
+  root_mise="$(printenv STLL_CLOUD_TEST_ROOT_MISE || true)"
+  [[ -n "$root_mise" ]] || root_mise=/root/.local/share/mise
   bun_route 'the setup PATH' env PATH="$PATH" sh
   bun_route 'sh -c' sh
-  bun_route 'bash -lc' bash -l
-  bun_route 'the minimal system PATH' env -i PATH=/usr/local/bin:/usr/bin:/bin sh
+  bun_route 'bash -lc' "$login_shell" -l
+  bun_route 'the minimal system PATH' env -i PATH="$minimal_path" sh
   configured_mise="$(printenv MISE_DATA_DIR || true)"
-  for mise_root in "$configured_mise" "$OUTPUT_HOME/.local/share/mise" /root/.local/share/mise; do
+  for mise_root in "$configured_mise" "$OUTPUT_HOME/.local/share/mise" "$root_mise"; do
     [[ -n "$mise_root" ]] || continue
     shims="$mise_root/shims"
     [[ -d "$shims" ]] || continue
@@ -157,9 +164,11 @@ verify_bun_routes() {
   done
 }
 replace_image_buns() {
-  local candidate configured_mise directory mise_root
+  local candidate configured_mise directory mise_root root_mise
   configured_mise="$(printenv MISE_DATA_DIR || true)"
-  for mise_root in "$configured_mise" "$OUTPUT_HOME/.local/share/mise" /root/.local/share/mise; do
+  root_mise="$(printenv STLL_CLOUD_TEST_ROOT_MISE || true)"
+  [[ -n "$root_mise" ]] || root_mise=/root/.local/share/mise
+  for mise_root in "$configured_mise" "$OUTPUT_HOME/.local/share/mise" "$root_mise"; do
     [[ -n "$mise_root" ]] || continue
     if [[ -d "$mise_root/installs/bun" ]]; then
       while IFS= read -r -d '' candidate; do
