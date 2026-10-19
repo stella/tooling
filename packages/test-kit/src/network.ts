@@ -324,13 +324,20 @@ export const installNetworkGuard = ({
     allowed.has(host.toLowerCase())
       ? undefined
       : new NetworkAccessError(host, via);
-  const proxyEnvironment = PROXY_ENVIRONMENT_KEYS.map((key) => ({
-    key,
-    present: Object.hasOwn(environment, key),
-    value: environment[key],
-  }));
-  for (const { key } of proxyEnvironment) {
-    delete environment[key];
+  const proxyEnvironments = [...new Set([environment, process.env])].map(
+    (target) => ({
+      target,
+      values: PROXY_ENVIRONMENT_KEYS.map((key) => ({
+        key,
+        present: Object.hasOwn(target, key),
+        value: target[key],
+      })),
+    }),
+  );
+  for (const { target, values } of proxyEnvironments) {
+    for (const { key } of values) {
+      Reflect.deleteProperty(target, key);
+    }
   }
   const refuseSocket =
     (via: string): Refusal =>
@@ -363,11 +370,13 @@ export const installNetworkGuard = ({
     for (const restore of restores.toReversed()) {
       restore();
     }
-    for (const { key, present, value } of proxyEnvironment) {
-      if (present) {
-        environment[key] = value;
-      } else {
-        delete environment[key];
+    for (const { target, values } of proxyEnvironments) {
+      for (const { key, present, value } of values) {
+        if (present) {
+          target[key] = value;
+        } else {
+          Reflect.deleteProperty(target, key);
+        }
       }
     }
     installed = undefined;

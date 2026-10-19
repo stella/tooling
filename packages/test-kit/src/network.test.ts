@@ -344,6 +344,34 @@ describe("network guard", () => {
     expect(environment).not.toHaveProperty("ALL_PROXY");
   });
 
+  test("a separate environment also neutralizes the process proxy", async () => {
+    const hadHttpProxy = Object.hasOwn(process.env, "HTTP_PROXY");
+    const originalHttpProxy = process.env.HTTP_PROXY;
+    process.env.HTTP_PROXY = "http://proxy.example:3128";
+    using server = Bun.serve({ fetch: () => new Response("direct"), port: 0 });
+
+    try {
+      uninstall = installNetworkGuard({ environment: {} });
+      expect(process.env).not.toHaveProperty("HTTP_PROXY");
+      const response = await fetch(
+        `http://127.0.0.1:${String(server.port)}/`,
+      );
+      expect(await response.text()).toBe("direct");
+
+      uninstall();
+      uninstall = undefined;
+      expect(process.env.HTTP_PROXY).toBe("http://proxy.example:3128");
+    } finally {
+      uninstall?.();
+      uninstall = undefined;
+      if (hadHttpProxy) {
+        process.env.HTTP_PROXY = originalHttpProxy;
+      } else {
+        Reflect.deleteProperty(process.env, "HTTP_PROXY");
+      }
+    }
+  });
+
   test("fetch.preconnect is refused for a remote host before it connects", () => {
     const realFetch = globalThis.fetch;
     const preconnected: string[] = [];
