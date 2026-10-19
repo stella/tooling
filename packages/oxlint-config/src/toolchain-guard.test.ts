@@ -380,7 +380,8 @@ test("permitted named rules have reasoned opt-outs; mandatory and malformed choi
       rule === "cloud-setup-drift" ||
       rule === "type-aware-projects" ||
       rule === "workflow-trust" ||
-      rule === "quarantine-policy"
+      rule === "quarantine-policy" ||
+      rule === "lockfile-overrides"
     ) {
       expect(() =>
         parseToolchainConfiguration({
@@ -411,6 +412,50 @@ test("permitted named rules have reasoned opt-outs; mandatory and malformed choi
     },
   ])
     expect(() => parseToolchainConfiguration(input)).toThrow();
+});
+
+test("root package overrides must match bun.lock values", () => {
+  const diagnostics = (manifest: object, lockfile?: string) =>
+    fixture({
+      "package.json": JSON.stringify(manifest),
+      ...(lockfile === undefined ? {} : { "bun.lock": lockfile }),
+    }).filter(({ rule }) => rule === "lockfile-overrides");
+
+  expect(
+    diagnostics(
+      { overrides: { alpha: "1.0.0" }, resolutions: { beta: "2.0.0" } },
+      `{
+        // Bun records package overrides and resolutions together.
+        "overrides": { "alpha": "1.0.0", "beta": "2.0.0", },
+      }`,
+    ),
+  ).toEqual([]);
+  for (const [manifest, lockfile, key] of [
+    [
+      { overrides: { alpha: "1.0.0", added: "2.0.0" } },
+      '{"overrides":{"alpha":"1.0.0"}}',
+      "added",
+    ],
+    [
+      { overrides: { alpha: "1.0.0" } },
+      '{"overrides":{"alpha":"1.0.0","removed":"2.0.0"}}',
+      "removed",
+    ],
+    [
+      { overrides: { changed: "2.0.0" } },
+      '{"overrides":{"changed":"1.0.0"}}',
+      "changed",
+    ],
+  ] as const) {
+    expect(diagnostics(manifest, lockfile)).toEqual([
+      expect.objectContaining({
+        path: "bun.lock",
+        message: expect.stringContaining(key),
+      }),
+    ]);
+  }
+  expect(diagnostics({ overrides: { alpha: "1.0.0" } })).toEqual([]);
+  expect(diagnostics({}, '{"overrides":{"stale":"1.0.0"}}')).toEqual([]);
 });
 
 test("untracked and invalid opt-outs cannot conceal a failing runtime", () => {

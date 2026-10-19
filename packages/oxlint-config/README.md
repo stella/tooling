@@ -357,6 +357,7 @@ Add an explicit declaration to tracked root `stll-toolchain.json`:
   "cloud": {
     "services": ["postgres", "valkey"],
     "install": "bun install --frozen-lockfile",
+    "submodules": true,
     "envFile": ".env.cloud",
     "rust": {
       "components": ["clippy", "rustfmt"],
@@ -378,7 +379,13 @@ only. No `cloud` declaration means no cloud setup script. `envFile` is required
 with services and rejected without services; runtime-only scripts emit no
 environment file code. With services, `envFile` must be a canonical
 repository-relative path; its existing parent must be safe at runtime. Track an exact stable Node patch in root
-`.node-version` within the shared Node series. Generate and commit the script:
+`.node-version` within the shared Node series.
+
+Set `cloud.submodules` to `true` when workspace inputs are held in Git
+submodules. The networked install phase synchronizes and shallow-initializes
+submodules recursively before dependency installation; startup remains offline.
+
+Generate and commit the script:
 
 ```sh
 bunx --no-install stll-cloud-setup
@@ -477,9 +484,9 @@ prints usage without reading repository configuration.
 
 | Environment phase       | Command                               |
 | ----------------------- | ------------------------------------- |
-| Networked install       | `bash .agents/cloud-setup.sh install`   |
-| Offline session startup | `bash .agents/cloud-setup.sh start`     |
-| Startup with exports    | `bash .agents/cloud-setup.sh session`   |
+| Networked install       | `bash .agents/cloud-setup.sh install` |
+| Offline session startup | `bash .agents/cloud-setup.sh start`   |
+| Startup with exports    | `bash .agents/cloud-setup.sh session` |
 
 Runtime installation repairs and verifies a missing or empty system CA bundle
 offline before any apt refresh or download, including when the certificate package

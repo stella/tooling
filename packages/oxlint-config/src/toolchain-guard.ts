@@ -8,6 +8,7 @@ import {
   realpathSync,
 } from "node:fs";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 
 import { cloudSetupPath, generateCloudSetup } from "./cloud-setup";
 import {
@@ -19,6 +20,7 @@ import {
 } from "./cloud-setup-claude";
 import { parseCloudSetup } from "./cloud-setup-schema";
 import { readGitTrackedOutput } from "./git-tracked-output";
+import { parseJsonc } from "./jsonc";
 import { checkRepositoryQuarantine } from "./quarantine-policy";
 import {
   checkConsumerChecks,
@@ -53,6 +55,7 @@ export const toolchainRules = [
     nodeProjectRule,
     "cloud-setup-drift",
     "quarantine-policy",
+    "lockfile-overrides",
   ] as const),
 ] as const;
 export type ToolchainRule = (typeof toolchainRules)[number];
@@ -106,6 +109,10 @@ export const parseToolchainConfiguration = (input: unknown) => {
     if (entry["rule"] === "quarantine-policy")
       throw new Error(
         "quarantine-policy cannot be opted out; temporary third-party exclusions require expiry",
+      );
+    if (entry["rule"] === "lockfile-overrides")
+      throw new Error(
+        "lockfile-overrides cannot be opted out; bun.lock must reflect root package overrides",
       );
     if (entry["rule"] === "rust-version")
       throw new Error(
@@ -228,6 +235,51 @@ export const readToolchainInputs = (
   return { files, trackedFiles, diagnostics };
 };
 
+const checkLockfileOverrides = (
+  manifestText: string | undefined,
+  lockfileText: string | undefined,
+): SharedToolchainDiagnostic[] => {
+  if (manifestText === undefined || lockfileText === undefined) return [];
+  try {
+    const manifest = JSON.parse(manifestText);
+    if (!record(manifest)) return [];
+    const packageOverrides = record(manifest["overrides"])
+      ? manifest["overrides"]
+      : undefined;
+    const packageResolutions = record(manifest["resolutions"])
+      ? manifest["resolutions"]
+      : undefined;
+    if (packageOverrides === undefined && packageResolutions === undefined)
+      return [];
+    const expected = { ...packageResolutions, ...packageOverrides };
+    const lockfile = parseJsonc(lockfileText);
+    if (!record(lockfile)) return [];
+    const actual = record(lockfile["overrides"]) ? lockfile["overrides"] : {};
+    const differing = [
+      ...new Set([...Object.keys(expected), ...Object.keys(actual)]),
+    ]
+      .filter(
+        (key) =>
+          !Object.hasOwn(expected, key) ||
+          !Object.hasOwn(actual, key) ||
+          !isDeepStrictEqual(expected[key], actual[key]),
+      )
+      .sort();
+    if (differing.length === 0) return [];
+    return [
+      {
+        rule: "lockfile-overrides",
+        path: "bun.lock",
+        line: 1,
+        message: `bun.lock overrides differ from package.json for: ${differing.join(", ")}; run bun install to regenerate bun.lock and commit it`,
+      },
+    ];
+  } catch {
+    // Existing package and lockfile checks own malformed input diagnostics.
+    return [];
+  }
+};
+
 type CheckSharedToolchainOptions = {
   root: string;
   policy: ReturnType<typeof parseToolchainPolicy>;
@@ -348,6 +400,9 @@ export const checkToolchain = ({
     }),
   );
   diagnostics.push(...checkPackageFiles({ files, policy }));
+  diagnostics.push(
+    ...checkLockfileOverrides(files["package.json"], files["bun.lock"]),
+  );
   const usesBun = Object.entries(files).some(([file, text]) => {
     if (path.posix.basename(file) === "bun.lock") return true;
     if (path.posix.basename(file) !== "package.json") return false;

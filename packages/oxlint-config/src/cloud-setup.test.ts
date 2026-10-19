@@ -48,6 +48,39 @@ test("generated lifecycle comments describe the portable phase contract", () => 
   expect(generated).not.toMatch(/^#.*https?:\/\//m);
 });
 
+test("submodules are fetched only when enabled and before dependencies", () => {
+  const disabled = generate(declaration);
+  expect(disabled).not.toContain("step submodules install_submodules");
+
+  const generated = generate({ ...declaration, submodules: true });
+  expect(generated).toContain(
+    'network_run github.com 240 runuser -u "$OUTPUT_USER" -- env HOME="$OUTPUT_HOME" git submodule sync --recursive',
+  );
+  expect(generated).toContain(
+    'network_run github.com 240 runuser -u "$OUTPUT_USER" -- env HOME="$OUTPUT_HOME" git submodule update --init --recursive --depth 1',
+  );
+  const install = generated.slice(
+    generated.indexOf('if [[ "$MODE" == install ]]; then'),
+    generated.indexOf("exit 0"),
+  );
+  expect(install.indexOf("step submodules install_submodules")).toBeGreaterThan(
+    install.indexOf("step shell install_shell_environment"),
+  );
+  expect(
+    install.indexOf("step dependencies dependency_install"),
+  ).toBeGreaterThan(install.indexOf("step submodules install_submodules"));
+  expect(
+    generated.slice(generated.indexOf("start_environment()")),
+  ).not.toContain("install_submodules");
+});
+
+test("cloud.submodules accepts only booleans", () => {
+  for (const submodules of [null, 0, "true", [], {}])
+    expect(() => parseCloudSetup({ ...declaration, submodules })).toThrow(
+      "cloud.submodules must be a boolean when provided",
+    );
+});
+
 test("generated script rejects missing or unknown modes before platform checks", () => {
   const generated = generate(declaration);
   for (const args of [[], ["unknown"], ["--help"], ["install", "start"]]) {
@@ -534,7 +567,9 @@ test("the declared install command is rendered verbatim into the pinned install"
 
 test("every lifecycle phase runs through the timed step logger", () => {
   const generated = generate(declaration);
-  const body = generated.slice(generated.indexOf('if [[ "$MODE" == install ]]'));
+  const body = generated.slice(
+    generated.indexOf('if [[ "$MODE" == install ]]'),
+  );
   const start = generated.indexOf("start_environment() {");
   const end = generated.indexOf(
     '\n}\nif [[ "$MODE" == session ]]; then',
@@ -563,9 +598,7 @@ test("every lifecycle phase runs through the timed step logger", () => {
     "prepare_state",
     "start_services",
   ])
-    expect(startFunction).toMatch(
-      new RegExp(`^ *step [a-z-]+ ${phase}$`, "m"),
-    );
+    expect(startFunction).toMatch(new RegExp(`^ *step [a-z-]+ ${phase}$`, "m"));
   expect(generated).toContain(
     'if [[ "$MODE" == session ]]; then\n  start_environment >&2\nelse\n  start_environment\nfi',
   );
@@ -682,7 +715,9 @@ test("a prepare script must be a root package script", () => {
   ]) {
     expect(() =>
       generatePrepared({ "package.json": JSON.stringify({ scripts }) }),
-    ).toThrow("cloud.prepare.script generate:cloud is not a root package script");
+    ).toThrow(
+      "cloud.prepare.script generate:cloud is not a root package script",
+    );
   }
 });
 
@@ -747,7 +782,10 @@ test.skipIf(Bun.which("timeout") === null)(
       // Reaping can lag the kill by a moment; poll briefly.
       let alive = true;
       for (let attempt = 0; attempt < 50 && alive; attempt += 1) {
-        alive = Bun.spawnSync(["kill", "-0", String(pid)]).exitCode === 0;
+        const state = Bun.spawnSync(["ps", "-o", "stat=", "-p", String(pid)])
+          .stdout.toString()
+          .trim();
+        alive = state !== "" && !state.startsWith("Z");
         if (alive) Bun.sleepSync(100);
       }
       expect(alive).toBe(false);

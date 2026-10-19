@@ -178,7 +178,7 @@ process.stdout.write([...hosts].sort().join(","));
   network_run "$download_hosts" 240 runuser -u "$OUTPUT_USER" -- env HOME="$OUTPUT_HOME" BUN_INSTALL_CACHE_DIR="$BUN_CACHE" PATH="$PATH" BUN_CONFIG_HTTP_IDLE_TIMEOUT=20 "$BUN_DIR/bun" @INSTALL_ARGS@
 }
 
-@SERVICE_INSTALL@
+@SUBMODULE_FUNCTION@@SERVICE_INSTALL@
 @SERVICE_START@
 
 @TOOL_INSTALL@
@@ -196,7 +196,7 @@ if [[ "$MODE" == install ]]; then
   step services install_services
   step tools install_tools
   step shell install_shell_environment
-  step dependencies dependency_install
+@SUBMODULE_STEP@  step dependencies dependency_install
 @PREPARE_STEP@
   exit 0
 fi
@@ -409,6 +409,19 @@ export const generateCloudSetup = ({
     ],
     ["@ENV_WRITE@", selected.envFile === undefined ? "" : "write_environment"],
     ["@PREPARE_FUNCTION@", renderPrepare(selected.prepare, files)],
+    [
+      "@SUBMODULE_FUNCTION@",
+      selected.submodules
+        ? String.raw`install_submodules() {
+  network_run github.com 240 runuser -u "$OUTPUT_USER" -- env HOME="$OUTPUT_HOME" git submodule sync --recursive
+  network_run github.com 240 runuser -u "$OUTPUT_USER" -- env HOME="$OUTPUT_HOME" git submodule update --init --recursive --depth 1
+}`.concat("\n\n")
+        : "",
+    ],
+    [
+      "@SUBMODULE_STEP@",
+      selected.submodules ? "  step submodules install_submodules\n" : "",
+    ],
     [
       "@PREPARE_STEP@",
       selected.prepare === undefined ? "" : "  step prepare prepare_sources",
