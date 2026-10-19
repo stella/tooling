@@ -103,6 +103,60 @@ runtime_ready() {
   node_ready || fail 'Pinned Node, npm or npx is unavailable; run install'
   [[ -x "$BUN_DIR/bun" && "$($BUN_DIR/bun --version)" == "$BUN_VERSION" ]] || fail 'Pinned Bun is unavailable; run install'
 }
+bun_route() {
+  local label="$1" resolved version
+  shift
+  resolved="$("$@" -c 'command -v bun')" || fail "Bun is unavailable through $label"
+  version="$("$@" -c 'bun --version')" || fail "Bun at $resolved failed through $label"
+  [[ "$version" == "$BUN_VERSION" ]] || fail "Bun at $resolved resolves version $version through $label; expected $BUN_VERSION"
+}
+verify_bun_routes() {
+  local configured_mise login_shell minimal_path mise_root root_mise shims
+  # Test-only overrides keep route executables and image locations inside fixtures.
+  login_shell="$(printenv STLL_CLOUD_TEST_LOGIN_SHELL || true)"
+  [[ -n "$login_shell" ]] || login_shell=bash
+  minimal_path="$(printenv STLL_CLOUD_TEST_MINIMAL_PATH || true)"
+  [[ -n "$minimal_path" ]] || minimal_path=/usr/local/bin:/usr/bin:/bin
+  root_mise="$(printenv STLL_CLOUD_TEST_ROOT_MISE || true)"
+  [[ -n "$root_mise" ]] || root_mise=/root/.local/share/mise
+  bun_route 'the setup PATH' env PATH="$PATH" sh
+  bun_route 'sh -c' sh
+  bun_route 'bash -lc' "$login_shell" -l
+  bun_route 'the minimal system PATH' env -i PATH="$minimal_path" sh
+  configured_mise="$(printenv MISE_DATA_DIR || true)"
+  for mise_root in "$configured_mise" "$OUTPUT_HOME/.local/share/mise" "$root_mise"; do
+    [[ -n "$mise_root" ]] || continue
+    shims="$mise_root/shims"
+    [[ -d "$shims" ]] || continue
+    bun_route "mise shims PATH $shims" env PATH="$shims:$PATH" sh
+  done
+}
+replace_image_buns() {
+  local candidate configured_mise directory mise_root root_mise
+  configured_mise="$(printenv MISE_DATA_DIR || true)"
+  root_mise="$(printenv STLL_CLOUD_TEST_ROOT_MISE || true)"
+  [[ -n "$root_mise" ]] || root_mise=/root/.local/share/mise
+  for mise_root in "$configured_mise" "$OUTPUT_HOME/.local/share/mise" "$root_mise"; do
+    [[ -n "$mise_root" ]] || continue
+    if [[ -d "$mise_root/installs/bun" ]]; then
+      while IFS= read -r -d '' candidate; do
+        [[ -d "$candidate" ]] || ln -sfnT -- "$BUN_DIR/bun" "$candidate"
+      done < <(find "$mise_root/installs/bun" \( -type f -o -type l \) \( -name bun -o -name bunx \) -print0)
+    fi
+    for candidate in "$mise_root/shims/bun" "$mise_root/shims/bunx"; do
+      [[ -e "$candidate" || -L "$candidate" ]] || continue
+      [[ -d "$candidate" ]] || ln -sfnT -- "$BUN_DIR/bun" "$candidate"
+    done
+  done
+  while IFS= read -r directory; do
+    [[ -n "$directory" ]] || directory=.
+    for candidate in "$directory/bun" "$directory/bunx"; do
+      [[ -e "$candidate" || -L "$candidate" ]] || continue
+      [[ -d "$candidate" ]] && continue
+      [[ "$(readlink -f -- "$candidate")" == "$(readlink -f -- "$BUN_DIR/bun")" ]] || ln -sfnT -- "$BUN_DIR/bun" "$candidate"
+    done
+  done < <(printf '%s' "$PATH" | tr : '\n')
+}
 install_runtimes() (
   if [[ ! -s /etc/ssl/certs/ca-certificates.crt ]]; then
     command -v update-ca-certificates >/dev/null || fail 'System CA certificate bundle is missing; restore ca-certificates in the base image offline before install'
@@ -140,6 +194,8 @@ install_runtimes() (
   ln -sfnT -- "$NODE_DIR/bin/npm" /usr/local/bin/npm
   ln -sfnT -- "$NODE_DIR/bin/npx" /usr/local/bin/npx
   ln -sfnT -- "$BUN_DIR/bun" /usr/local/bin/bun
+  replace_image_buns
+  verify_bun_routes
 )
 
 dependency_install() {
