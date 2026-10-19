@@ -35,7 +35,7 @@ permissions:
 jobs:
   release-metadata:
     name: Discover publishable packages
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       package-directories: ${{ steps.release-packages.outputs.package-directories }}
     steps:
@@ -53,7 +53,7 @@ jobs:
 
   verify:
     name: Verify release source
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
@@ -76,7 +76,7 @@ jobs:
   pack:
     name: Build and pack ${{ matrix.package }}
     needs: [release-metadata, verify]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       matrix:
         package: ${{ fromJSON(needs.release-metadata.outputs.package-directories) }}
