@@ -346,8 +346,8 @@ describe("network guard", () => {
 
   test("a separate environment also neutralizes the process proxy", async () => {
     const hadHttpProxy = Object.hasOwn(process.env, "HTTP_PROXY");
-    const originalHttpProxy = process.env.HTTP_PROXY;
-    process.env.HTTP_PROXY = "http://proxy.example:3128";
+    const originalHttpProxy = process.env["HTTP_PROXY"];
+    process.env["HTTP_PROXY"] = "http://proxy.example:3128";
     using server = Bun.serve({ fetch: () => new Response("direct"), port: 0 });
 
     try {
@@ -360,12 +360,12 @@ describe("network guard", () => {
 
       uninstall();
       uninstall = undefined;
-      expect(process.env.HTTP_PROXY).toBe("http://proxy.example:3128");
+      expect(process.env["HTTP_PROXY"]).toBe("http://proxy.example:3128");
     } finally {
       uninstall?.();
       uninstall = undefined;
       if (hadHttpProxy) {
-        process.env.HTTP_PROXY = originalHttpProxy;
+        process.env["HTTP_PROXY"] = originalHttpProxy;
       } else {
         Reflect.deleteProperty(process.env, "HTTP_PROXY");
       }
