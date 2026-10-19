@@ -34,7 +34,7 @@
       "dependency-cruiser"
     ]
   },
-  "@stll/oxlint-plugin": "0.3.0",
+  "@stll/oxlint-plugin": "0.4.0",
   "lefthook": "2.1.16",
   "node": "26.x",
   "postgres": "18",

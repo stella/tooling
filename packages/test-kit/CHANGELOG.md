@@ -1,5 +1,15 @@
 # @stll/test-kit
 
+## 0.2.0
+
+### Minor Changes
+
+- [#177](https://github.com/stella/tooling/pull/177) [`118453b`](https://github.com/stella/tooling/commit/118453bcd2827cdef80c2ddb04a4fda5afb4474f) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Add seeded randomness, fake timers, and a loopback fake HTTP server.
+
+### Patch Changes
+
+- [#185](https://github.com/stella/tooling/pull/185) [`fa51adb`](https://github.com/stella/tooling/commit/fa51adb978853052ad5d668bccb80ea558ee762c) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Neutralize inherited process proxy variables while the network guard is installed.
+
 ## 0.1.1
 
 ### Patch Changes
