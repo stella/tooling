@@ -92,15 +92,10 @@ const measureSynchronousSample = (
     const started = clock.now();
     for (let call = 0; call < calls; call += 1) {
       const result = run(size);
-      if (result !== undefined && isThenable(result))
-        return Promise.resolve(result).then(
-          () => {
-            throw measurementModeError("synchronous", size);
-          },
-          () => {
-            throw measurementModeError("synchronous", size);
-          },
-        );
+      if (result !== undefined && isThenable(result)) {
+        void Promise.resolve(result).catch(() => {});
+        throw measurementModeError("synchronous", size);
+      }
     }
     const elapsed = clock.now() - started;
     if (elapsed >= clock.minimumSampleDurationMs) return elapsed / calls;
@@ -158,7 +153,7 @@ const expectLinearScalingWithClock = async (
     for (let repeat = 0; repeat < repeats; repeat += 1) {
       const sample = asynchronous
         ? await measureAsynchronousSample(run, size, clock)
-        : await measureSynchronousSample(run, size, clock);
+        : measureSynchronousSample(run, size, clock);
       samples.push(sample);
     }
     const currentMedian = median(samples);

@@ -110,6 +110,32 @@ describe("expectLinearScaling", () => {
     expect(String(error)).toMatch(/size 2.*clock did not advance/u);
   });
 
+  test("rejects a pending callback switch without awaiting the callback", async () => {
+    let calls = 0;
+    let rejection: unknown;
+    const scaling = linearScalingTestInternals.expectLinearScalingWithClock(
+      {
+        run: () => {
+          calls += 1;
+          if (calls === 1) return undefined;
+          return new Promise(() => {});
+        },
+        sizes: [2, 8],
+      },
+      { minimumSampleDurationMs: 5, now: () => calls * 5 },
+    );
+    void rejectionOf(scaling).then((error) => {
+      rejection = error;
+      return error;
+    });
+    await Bun.sleep(0);
+
+    expect(rejection).toBeInstanceOf(TypeError);
+    expect(String(rejection)).toContain(
+      "switched from synchronous to asynchronous at size 2",
+    );
+  });
+
   test("rejects an asynchronous run when the clock does not advance", async () => {
     const error = await rejectionOf(
       linearScalingTestInternals.expectLinearScalingWithClock(
