@@ -49,6 +49,8 @@ export const noRealNetworkInTestsPluginSpecifier =
   "@stll/oxlint-plugin/no-real-network-in-tests";
 export const noCheckoutWritesInTestsPluginSpecifier =
   "@stll/oxlint-plugin/no-checkout-writes-in-tests";
+export const noWallClockBoundPluginSpecifier =
+  "@stll/oxlint-plugin/no-wall-clock-bound";
 
 // Intentionally separate from every preset: consumers adopt these with a
 // shrink-only test baseline.
@@ -58,6 +60,7 @@ export const testReliabilityPluginSpecifiers = [
   noUnseededRandomInTestsPluginSpecifier,
   noRealNetworkInTestsPluginSpecifier,
   noCheckoutWritesInTestsPluginSpecifier,
+  noWallClockBoundPluginSpecifier,
 ] satisfies JsPlugins;
 
 export const testReliabilityRules = {
@@ -66,4 +69,5 @@ export const testReliabilityRules = {
   "no-unseeded-random-in-tests/no-unseeded-random-in-tests": "error",
   "no-real-network-in-tests/no-real-network-in-tests": "error",
   "no-checkout-writes-in-tests/no-checkout-writes-in-tests": "error",
+  "no-wall-clock-bound/no-wall-clock-bound": "error",
 } satisfies Rules;

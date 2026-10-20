@@ -146,6 +146,17 @@
         "default": "./dist/no-checkout-writes-in-tests.cjs"
       },
       "default": "./dist/no-checkout-writes-in-tests.mjs"
+    },
+    "./no-wall-clock-bound": {
+      "import": {
+        "types": "./dist/no-wall-clock-bound.d.mts",
+        "default": "./dist/no-wall-clock-bound.mjs"
+      },
+      "require": {
+        "types": "./dist/no-wall-clock-bound.d.cts",
+        "default": "./dist/no-wall-clock-bound.cjs"
+      },
+      "default": "./dist/no-wall-clock-bound.mjs"
     }
   },
   "publishConfig": {

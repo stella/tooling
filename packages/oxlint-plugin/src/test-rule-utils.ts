@@ -13,7 +13,10 @@ export type Node = {
   id?: unknown;
   imported?: unknown;
   init?: unknown;
+  elements?: unknown;
+  operator?: unknown;
   key?: unknown;
+  label?: unknown;
   kind?: unknown;
   left?: unknown;
   local?: unknown;
@@ -24,6 +27,7 @@ export type Node = {
   property?: unknown;
   quasis?: unknown;
   right?: unknown;
+  body?: unknown;
   source?: unknown;
   specifiers?: unknown;
   value?: unknown;
@@ -184,7 +188,9 @@ export const testOnlyPlugin = (
             (node) => context.report({ node, messageId }),
             (node) => {
               if (!isScopeNode(node))
-                throw new Error(`Expected an oxlint AST node, got ${node.type}`);
+                throw new Error(
+                  `Expected an oxlint AST node, got ${node.type}`,
+                );
               return context.sourceCode.getScope(node);
             },
           );
