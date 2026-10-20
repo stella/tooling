@@ -212,6 +212,17 @@ export const parseDependabotIgnores = (
   return result;
 };
 
+/**
+ * Read only `dependabotIgnores` from stll-toolchain.json text: stll-dependabot must not
+ * fail on unrelated declarations, which stll-toolchain-check validates.
+ */
+export const readDependabotIgnores = (toolchain: string | undefined) => {
+  if (toolchain === undefined) return [];
+  const parsed: unknown = JSON.parse(toolchain);
+  if (!record(parsed)) throw new Error("stll-toolchain.json must be an object");
+  return parseDependabotIgnores(parsed["dependabotIgnores"]);
+};
+
 const dependencyPattern = (dependency: string) =>
   new RegExp(
     `^${dependency

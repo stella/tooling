@@ -409,11 +409,29 @@ test("the CLI generates and checks tracked stll-toolchain.json Dependabot ignore
     const drifted = invoke(root, ["--check"]);
     expect(drifted.status).toBe(1);
     expect(drifted.stderr).toContain("has drifted");
-    await declare({
-      dependabotIgnores: [{ ...graphql, dependency: "oxlint" }],
-    });
-    const conflict = invoke(root);
-    expect(conflict.status).toBe(1);
-    expect(conflict.stderr).toContain("shared pin oxlint");
+    // stll-toolchain-check owns unrelated declarations; they must not block generation.
+    const unrelated = {
+      optOuts: [{ rule: "unknown-rule", reason: "" }],
+      futureDeclaration: true,
+    };
+    await declare({ ...unrelated, dependabotIgnores: [graphql] });
+    const scoped = invoke(root);
+    expect(scoped.status, scoped.stderr).toBe(0);
+    expect(invoke(root, ["--check"]).status).toBe(0);
+    for (const { dependabotIgnores, message } of [
+      {
+        dependabotIgnores: [{ ...graphql, dependency: "oxlint" }],
+        message: "shared pin oxlint",
+      },
+      {
+        dependabotIgnores: [{ ...graphql, reason: " " }],
+        message: "nonempty reason",
+      },
+    ]) {
+      await declare({ ...unrelated, dependabotIgnores });
+      const rejected = invoke(root);
+      expect(rejected.status).toBe(1);
+      expect(rejected.stderr).toContain(message);
+    }
   });
 }, 15_000);
