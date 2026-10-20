@@ -1019,9 +1019,9 @@ inline annotation format and adoption boundary.
 
 Run `stll-normalize-wasi-loaders <browser-loader> <commonjs-loader>` after
 `@napi-rs/cli` generates the two WASI loaders. The command preserves the
-generator's scheduling and pacing while adding the shared worker-crash and
-retryable-cleanup guards. It retains napi-rs artifact metadata on line 1 and the
-generated-file typecheck header immediately after it.
+generator's cleanup path, scheduling, and pacing while adding shared worker-crash
+detection. It retains napi-rs artifact metadata on line 1 and the generated-file
+typecheck header immediately after it.
 
 Use `stll-normalize-wasi-loaders --check <browser-loader> <commonjs-loader>` in
 CI. Check mode does not write files and exits non-zero if either loader differs

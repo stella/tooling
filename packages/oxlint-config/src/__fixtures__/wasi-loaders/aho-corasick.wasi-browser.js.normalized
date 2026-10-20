@@ -698,13 +698,7 @@ function __prepareWasmEnvCleanupWithTurns() {
         return
       }
     }
-  })().then(
-    finishCleanup,
-    (error) => {
-      __emnapiWasmEnvCleanupPreparing = false
-      throw error
-    },
-  )
+  })().then(finishCleanup, finishCleanup)
 }
 
 // Turns to wait for while the addon still reports queued settlements. Reaching

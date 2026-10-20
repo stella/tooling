@@ -66,7 +66,7 @@ test("every normalized Worker construction uses identifier-backed workerData", a
   }
 });
 
-test("scheduler throws reject and reset cleanup so a retry can run", async () => {
+test("normalized cleanup keeps the upstream rejection handler", async () => {
   const source = await readFile(
     join(fixtures, "aho-corasick.wasi.cjs.normalized"),
     "utf8",
@@ -75,8 +75,28 @@ test("scheduler throws reject and reset cleanup so a retry can run", async () =>
     "try {\n    schedule(finish)\n  } catch (error) {\n    reject(error)",
   );
   expect(source).toContain(
-    "(error) => {\n      __emnapiWasmEnvCleanupPreparing = false\n      throw error",
+    "})().then(finishCleanupUnlessCrashed, finishCleanupUnlessCrashed)",
   );
+});
+
+test("a rejected cleanup poll clears the parked closer after a crash", async () => {
+  let finishParkedWasmEnvCleanup: (() => void) | undefined;
+  let joinedCrashedWorker = false;
+  const createFinishCleanupUnlessCrashed = (crashed: boolean) => () => {
+    finishParkedWasmEnvCleanup = undefined;
+    if (crashed) return;
+    joinedCrashedWorker = true;
+  };
+  const finishCleanupUnlessCrashed = createFinishCleanupUnlessCrashed(true);
+  finishParkedWasmEnvCleanup = finishCleanupUnlessCrashed;
+
+  await Promise.reject(new Error("poll rejected")).then(
+    finishCleanupUnlessCrashed,
+    finishCleanupUnlessCrashed,
+  );
+
+  expect(finishParkedWasmEnvCleanup).toBeUndefined();
+  expect(joinedCrashedWorker).toBe(false);
 });
 
 test("CLI writes both loaders and check mode detects drift", async () => {
@@ -104,6 +124,33 @@ test("CLI writes both loaders and check mode detects drift", async () => {
           "utf8",
         ),
       );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("write mode leaves both loaders untouched when the second is rejected", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wasi-normalizer-atomic-"));
+  try {
+    const paths = loaderNames.map((name) => join(root, basename(name)));
+    const first = await readFile(join(fixtures, loaderNames[0]), "utf8");
+    const second = await readFile(join(fixtures, loaderNames[1]), "utf8");
+    const rejectedSecond = second.replace(
+      UNSAFE_CLEANUP_HANDSHAKE_FOR_TEST,
+      "",
+    );
+    expect(rejectedSecond).not.toBe(second);
+    await Promise.all([
+      writeFile(paths[0]!, first),
+      writeFile(paths[1]!, rejectedSecond),
+    ]);
+
+    await assert.rejects(
+      runWasiLoaderNormalizer(paths),
+      /cleanup handshake.*aho-corasick\.wasi\.cjs/u,
+    );
+    expect(await readFile(paths[0]!, "utf8")).toBe(first);
+    expect(await readFile(paths[1]!, "utf8")).toBe(rejectedSecond);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -156,13 +156,6 @@ const SAFE_ASYNC_WORK_POLL = `await new Promise((resolve, reject) => {
             reject,
           )
         })`;
-const retryableRuntimeCleanup = (finishCleanup: string) => `})().then(
-    ${finishCleanup},
-    (error) => {
-      __emnapiWasmEnvCleanupPreparing = false
-      throw error
-    },
-  )`;
 type Transformation = {
   name: string;
   anchor: string;
@@ -195,11 +188,6 @@ export const WASI_LOADER_TRANSFORMATIONS = [
     anchor: UNSAFE_ASYNC_WORK_POLL,
     replacement: SAFE_ASYNC_WORK_POLL,
   },
-  ...["finishCleanup", "finishCleanupUnlessCrashed"].map((finishCleanup) => ({
-    name: "retryable runtime cleanup",
-    anchor: `})().then(${finishCleanup}, ${finishCleanup})`,
-    replacement: retryableRuntimeCleanup(finishCleanup),
-  })),
   {
     name: "worker construction",
     anchor: GENERATED_WASI_WORKER_FACTORY,
@@ -250,7 +238,7 @@ const addTypecheckHeader = (source: string) => {
   }
   return `${source.slice(0, lineEnd + 1)}${GENERATED_TYPECHECK_OPT_OUT}\n${source.slice(lineEnd + 1)}`;
 };
-/** Preserve generated scheduling and add only retry and crash-reporting guards. */
+/** Preserve generated scheduling and add only targeted safety guards. */
 export const normalizeGeneratedLoader = (
   source: string,
   {
@@ -285,13 +273,19 @@ export const runWasiLoaderNormalizer = async (args: string[]) => {
   if (paths.length !== 2 || paths.some((path) => path.startsWith("--")))
     throw new Error(usage);
 
+  const loaders = await Promise.all(
+    paths.map(async (path) => {
+      const source = await readFile(path, "utf8");
+      const normalized = normalizeGeneratedLoader(source, {
+        keepGeneratedTypecheckOptOut: true,
+        file: path,
+      });
+      return { normalized, path, source };
+    }),
+  );
+
   let drifted = false;
-  for (const path of paths) {
-    const source = await readFile(path, "utf8");
-    const normalized = normalizeGeneratedLoader(source, {
-      keepGeneratedTypecheckOptOut: true,
-      file: path,
-    });
+  for (const { normalized, path, source } of loaders) {
     if (source === normalized) continue;
     if (check) {
       process.stderr.write(`${path} is not normalized\n`);
