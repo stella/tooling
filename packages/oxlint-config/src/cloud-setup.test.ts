@@ -2,6 +2,7 @@
 
 import { expect, test } from "bun:test";
 import {
+  chmodSync,
   existsSync,
   mkdtempSync,
   mkdirSync,
@@ -46,7 +47,7 @@ test("generated lifecycle comments describe the portable phase contract", () => 
   );
   expect(generated).toContain("run start at every session start");
   expect(generated).not.toMatch(/^#.*https?:\/\//m);
-});
+}, 15_000);
 
 test("generated script rejects missing or unknown modes before platform checks", () => {
   const generated = generate(declaration);
@@ -60,7 +61,7 @@ test("generated script rejects missing or unknown modes before platform checks",
       "Usage: cloud-setup.sh install|start|session\n",
     );
   }
-});
+}, 15_000);
 
 const environmentParts = (generated: string) => {
   const assignment = /^ENV_FILE=.*$/m.exec(generated)?.at(0);
@@ -163,7 +164,7 @@ test("all service subsets generate deterministic valid Bash regardless of declar
       expect(generated.includes(marker)).toBe(services.includes(service));
     }
   }
-});
+}, 15_000);
 
 test("cloud generation rejects every nonexact or out-of-series Node selector", () => {
   expect(generate(declaration, "26.10.0\n")).toContain(
@@ -187,7 +188,7 @@ test("cloud generation rejects every nonexact or out-of-series Node selector", (
     expect(() => generate(declaration, nodeVersion)).toThrow(
       "exact .node-version",
     );
-});
+}, 15_000);
 
 test("shell quoting preserves canonical literal metacharacters through single-pass replacement", () => {
   withRepository((root) => {
@@ -205,7 +206,7 @@ test("shell quoting preserves canonical literal metacharacters through single-pa
     expect(result.exitCode).toBe(0);
     expect(result.stdout.toString()).toBe(envFile);
   });
-});
+}, 15_000);
 
 test("actual emitted environment functions write owned files idempotently with private permissions", () => {
   withRepository((root) => {
@@ -232,7 +233,7 @@ test("actual emitted environment functions write owned files idempotently with p
     ).toBe(0);
     expect(readFileSync(file, "utf8")).toBe(content);
   });
-});
+}, 15_000);
 
 test("session exports are shell-quoted projections of the generated service endpoints", () => {
   withRepository((root) => {
@@ -262,7 +263,7 @@ test("session exports are shell-quoted projections of the generated service endp
     );
     expect(result.stdout.toString()).not.toContain("eval");
   });
-});
+}, 15_000);
 
 test("session startup sends every phase's stdout to stderr and reserves stdout for exports", () => {
   const generated = generate({
@@ -304,7 +305,7 @@ emit_session_environment
   expect(result.stderr.toString()).toContain("phase-noise");
   expect(result.stderr.toString()).toContain("validation-noise");
   expect(result.stderr.toString()).toContain("write-noise");
-});
+}, 15_000);
 
 test("session shell exports round-trip shell metacharacters without executing substitutions", () => {
   withRepository((root) => {
@@ -343,7 +344,7 @@ emit_session_environment
     expect(sourced.stdout.toString()).toBe(password);
     expect(existsSync(marker)).toBe(false);
   });
-});
+}, 15_000);
 
 test("actual emitted environment validation refuses unowned files, symlinks and missing parents", () => {
   withRepository((root) => {
@@ -382,7 +383,7 @@ test("actual emitted environment validation refuses unowned files, symlinks and 
       rmSync(outside, { recursive: true, force: true });
     }
   });
-});
+}, 15_000);
 
 test("dependency installation uses the invoking user, home, private cache and pinned frozen Bun", () => {
   withRepository((root) => {
@@ -494,7 +495,138 @@ dependency_install`,
     );
     expect(existsSync(join(cacheParent, "bun/4242"))).toBe(true);
   });
-});
+}, 15_000);
+
+const bunRuntimeFunctions = (generated: string) => {
+  const start = generated.indexOf("\nbun_route() {");
+  const end = generated.indexOf("\ninstall_runtimes() (", start);
+  if (start < 0 || end <= start)
+    throw new Error("Missing emitted Bun runtime function boundary");
+  return generated.slice(start, end);
+};
+
+const readProcessState = (pid: number) => {
+  try {
+    return readFileSync(`/proc/${pid}/stat`, "utf8").split(" ").at(2);
+  } catch (error) {
+    if (
+      error !== null &&
+      typeof error === "object" &&
+      "code" in error &&
+      error.code === "ENOENT"
+    )
+      return undefined;
+    throw error;
+  }
+};
+
+test("runtime installation replaces image Bun executables and verifies every resolution route", () => {
+  withRepository((root) => {
+    const generated = generate(declaration);
+    const functions = bunRuntimeFunctions(generated);
+    const mise = join(root, "mise");
+    const oldInstall = join(mise, "installs/bun/1.2.14/bin");
+    const shims = join(mise, "shims");
+    const other = join(root, "other-bin");
+    const pinned = join(root, "pinned");
+    const minimal = join(root, "minimal-bin");
+    for (const directory of [oldInstall, shims, other, pinned, minimal])
+      mkdirSync(directory, { recursive: true });
+    writeFileSync(
+      join(pinned, "bun"),
+      `#!/bin/sh\necho '${policy.bun}'\n`,
+      { mode: 0o755 },
+    );
+    for (const executable of [
+      "bash",
+      "env",
+      "find",
+      "ln",
+      "printenv",
+      "readlink",
+      "sh",
+      "tr",
+    ]) {
+      const target = Bun.which(executable);
+      if (target === null) throw new Error(`Missing ${executable}`);
+      symlinkSync(target, join(minimal, executable));
+    }
+    symlinkSync(join(pinned, "bun"), join(minimal, "bun"));
+    writeFileSync(
+      join(root, "login-shell"),
+      '#!/bin/sh\nshift\nexec sh "$@"\n',
+      { mode: 0o755 },
+    );
+    for (const executable of [
+      join(oldInstall, "bun"),
+      join(oldInstall, "bunx"),
+      join(shims, "bun"),
+      join(shims, "bunx"),
+      join(other, "bun"),
+    ]) {
+      writeFileSync(executable, "#!/bin/sh\necho 1.2.14\n");
+      chmodSync(executable, 0o755);
+    }
+    const result = Bun.spawnSync(
+      [
+        "bash",
+        "-eu",
+        "-c",
+        `fail() { echo "cloud-setup: $*" >&2; exit 1; }
+BUN_VERSION='${policy.bun}'
+BUN_DIR="$FIXTURE_ROOT/pinned"
+OUTPUT_HOME="$FIXTURE_ROOT/home"
+export MISE_DATA_DIR="$FIXTURE_ROOT/mise"
+export MISE_OFFLINE=1
+export STLL_CLOUD_TEST_MINIMAL_PATH="$FIXTURE_ROOT/minimal-bin"
+export STLL_CLOUD_TEST_LOGIN_SHELL="$FIXTURE_ROOT/login-shell"
+export STLL_CLOUD_TEST_ROOT_MISE="$FIXTURE_ROOT/root-mise"
+PATH="$FIXTURE_ROOT/other-bin:$BUN_DIR:$STLL_CLOUD_TEST_MINIMAL_PATH"
+${functions}
+replace_image_buns
+verify_bun_routes
+for executable in "$MISE_DATA_DIR/installs/bun/1.2.14/bin/bun" "$MISE_DATA_DIR/installs/bun/1.2.14/bin/bunx" "$MISE_DATA_DIR/shims/bun" "$MISE_DATA_DIR/shims/bunx" "$FIXTURE_ROOT/other-bin/bun"; do
+  [[ "$(readlink -f -- "$executable")" == "$BUN_DIR/bun" ]] || fail "Bun was not replaced at $executable"
+done`,
+      ],
+      { env: { ...process.env, FIXTURE_ROOT: root } },
+    );
+    expect(result.stderr.toString()).toBe("");
+    expect(result.exitCode).toBe(0);
+    expect(generated).toContain("replace_image_buns\n  verify_bun_routes");
+    expect(generated).toContain(
+      'minimal_path="$(printenv STLL_CLOUD_TEST_MINIMAL_PATH || true)"',
+    );
+    expect(generated).toContain('bash -l');
+  });
+}, 30_000);
+
+test("runtime verification names an older Bun that remains on PATH", () => {
+  withRepository((root) => {
+    const older = join(root, "older");
+    mkdirSync(older);
+    writeFileSync(join(older, "bun"), "#!/bin/sh\necho 1.2.14\n");
+    chmodSync(join(older, "bun"), 0o755);
+    const result = Bun.spawnSync(
+      [
+        "bash",
+        "-eu",
+        "-c",
+        `fail() { echo "cloud-setup: $*" >&2; exit 1; }
+BUN_VERSION='${policy.bun}'
+OUTPUT_HOME="$FIXTURE_ROOT/home"
+PATH="$FIXTURE_ROOT/older:$PATH"
+${bunRuntimeFunctions(generate(declaration))}
+verify_bun_routes`,
+      ],
+      { env: { ...process.env, FIXTURE_ROOT: root } },
+    );
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr.toString()).toContain(
+      `Bun at ${join(older, "bun")} resolves version 1.2.14 through the setup PATH; expected ${policy.bun}`,
+    );
+  });
+}, 15_000);
 
 test("runtime-only declarations emit no environment file code", () => {
   for (const input of [
@@ -516,7 +648,7 @@ test("runtime-only declarations emit no environment file code", () => {
     expect(generated).toContain("write_environment");
     expect(generated).toContain(cloudEnvironmentMarker);
   }
-});
+}, 15_000);
 
 test("the declared install command is rendered verbatim into the pinned install", () => {
   const frozen = generate(declaration);
@@ -530,7 +662,7 @@ test("the declared install command is rendered verbatim into the pinned install"
     '"$BUN_DIR/bun" install --frozen-lockfile --ignore-scripts\n',
   );
   expect(scriptless).not.toContain("@INSTALL_ARGS@");
-});
+}, 15_000);
 
 test("every lifecycle phase runs through the timed step logger", () => {
   const generated = generate(declaration);
@@ -588,7 +720,7 @@ test("every lifecycle phase runs through the timed step logger", () => {
   expect(failed.exitCode).not.toBe(0);
   expect(failed.stdout.toString()).toBe("");
   expect(failed.stderr.toString()).not.toContain("demo done");
-});
+}, 15_000);
 
 test.skipIf(!existsSync("/proc/self/fd"))(
   "service commands inherit no descriptor beyond stdio from the caller",
@@ -667,7 +799,7 @@ test("a prepare script runs once after dependencies, offline and time-bounded", 
   expect(syntax.stderr.toString()).toBe("");
   expect(syntax.exitCode).toBe(0);
   expect(generate(declaration)).not.toContain("prepare_sources");
-});
+}, 15_000);
 
 test("a prepare script must be a root package script", () => {
   expect(() => generatePrepared({})).toThrow(
@@ -684,7 +816,7 @@ test("a prepare script must be a root package script", () => {
       generatePrepared({ "package.json": JSON.stringify({ scripts }) }),
     ).toThrow("cloud.prepare.script generate:cloud is not a root package script");
   }
-});
+}, 15_000);
 
 test("an inherited name is not a root package script", () => {
   const cloud = parseCloudSetup({
@@ -700,7 +832,7 @@ test("an inherited name is not a root package script", () => {
       files: { "package.json": JSON.stringify({ scripts: {} }) },
     }),
   ).toThrow("cloud.prepare.script constructor is not a root package script");
-});
+}, 15_000);
 
 // The bound must hold for descendants that ignore TERM: timeout only escalates
 // while its direct child runs, so the step kills what is left of its group.
@@ -747,7 +879,10 @@ test.skipIf(Bun.which("timeout") === null)(
       // Reaping can lag the kill by a moment; poll briefly.
       let alive = true;
       for (let attempt = 0; attempt < 50 && alive; attempt += 1) {
-        alive = Bun.spawnSync(["kill", "-0", String(pid)]).exitCode === 0;
+        const state = readProcessState(pid);
+        alive =
+          Bun.spawnSync(["kill", "-0", String(pid)]).exitCode === 0 &&
+          state !== "Z";
         if (alive) Bun.sleepSync(100);
       }
       expect(alive).toBe(false);

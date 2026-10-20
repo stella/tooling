@@ -1,5 +1,33 @@
 # @stll/oxlint-config
 
+## 1.6.1
+
+### Patch Changes
+
+- Synchronize shared tool pins with workspace releases.
+
+## 1.6.0
+
+### Minor Changes
+
+- [#188](https://github.com/stella/tooling/pull/188) [`27ac1bb`](https://github.com/stella/tooling/commit/27ac1bb2692a209d8bdaa75ef81442c33f984dc4) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Add a shared release check for published packages that narrow Node engine support.
+
+- [#190](https://github.com/stella/tooling/pull/190) [`dc21d44`](https://github.com/stella/tooling/commit/dc21d4480058936b75e1ac6de3c223c2c4b6ef58) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Add the `stll-normalize-wasi-loaders` CLI for shared worker crash detection, artifact metadata, and generated-file headers while preserving napi-rs cleanup behavior.
+
+- [#195](https://github.com/stella/tooling/pull/195) [`836e964`](https://github.com/stella/tooling/commit/836e96417f48c6eaba4d34b83440c6ba9b84193d) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Accept reviewed repository Dependabot ignores in `stll-toolchain.json` `dependabotIgnores`. `stll-dependabot` appends them after the shared-pin ignores, and `stll-toolchain-check` accepts exactly the shared pins plus the declarations. Declarations need a reason and cannot name or match a shared pin.
+
+## 1.5.2
+
+### Patch Changes
+
+- [#186](https://github.com/stella/tooling/pull/186) [`202e322`](https://github.com/stella/tooling/commit/202e322e82806b265ef4c8db56d059dc9f279ad0) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Replace image-provided Bun executables with links to the pinned cloud runtime and verify common child-process resolution paths.
+
+## 1.5.1
+
+### Patch Changes
+
+- Synchronize shared tool pins with workspace releases.
+
 ## 1.5.0
 
 ### Minor Changes

@@ -24,7 +24,12 @@ import {
   checkConsumerChecks,
   parseConsumerChecks,
 } from "./toolchain-consumer-checks";
-import { checkDependabot, dependabotRules } from "./toolchain-dependabot";
+import {
+  checkDependabot,
+  declaredIgnoreConflicts,
+  dependabotRules,
+  parseDependabotIgnores,
+} from "./toolchain-dependabot";
 import {
   parseDynamicSelectors,
   type DynamicSelector,
@@ -80,12 +85,13 @@ export const parseToolchainConfiguration = (input: unknown) => {
         key !== "engineFloors" &&
         key !== "dynamicSelectors" &&
         key !== "consumerChecks" &&
-        key !== "rustExceptions",
+        key !== "rustExceptions" &&
+        key !== "dependabotIgnores",
     ) ||
     (input["optOuts"] !== undefined && !array(input["optOuts"]))
   )
     throw new Error(
-      "stll-toolchain.json accepts only optOuts, cloud, engineFloors, dynamicSelectors consumerChecks and rustExceptions declarations",
+      "stll-toolchain.json accepts only optOuts, cloud, engineFloors, dynamicSelectors, consumerChecks, rustExceptions and dependabotIgnores declarations",
     );
   const disabled = new Set<string>();
   const optOuts = input["optOuts"] ?? [];
@@ -136,6 +142,7 @@ export const parseToolchainConfiguration = (input: unknown) => {
     engineFloors: parseEngineFloors(input["engineFloors"]),
     dynamicSelectors: parseDynamicSelectors(input["dynamicSelectors"]),
     consumerChecks: parseConsumerChecks(input["consumerChecks"]),
+    dependabotIgnores: parseDependabotIgnores(input["dependabotIgnores"]),
   };
 };
 
@@ -448,7 +455,24 @@ export const checkToolchain = ({
         line: 1,
         message: `dynamic selector ${entry.path}:${entry.at ?? entry.line} must match exactly one unresolved ${entry.kind} selector`,
       });
-  diagnostics.push(...checkDependabot({ files, policy: policy.dependabot }));
+  const dependabotIgnores = configuration.dependabotIgnores;
+  for (const message of declaredIgnoreConflicts({
+    ignores: dependabotIgnores,
+    policy: policy.dependabot,
+  }))
+    diagnostics.push({
+      rule: "configuration",
+      path: "stll-toolchain.json",
+      line: 1,
+      message,
+    });
+  diagnostics.push(
+    ...checkDependabot({
+      files,
+      policy: policy.dependabot,
+      ignores: dependabotIgnores,
+    }),
+  );
   return diagnostics.filter(
     (diagnostic) => !configuration.disabled.has(diagnostic.rule),
   );

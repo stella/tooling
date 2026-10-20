@@ -4,7 +4,7 @@
 // `unknown` so rule files can call them without per-call type ceremony or
 // shared type-import boilerplate.
 
-import type { ESTree, Ranged } from "@oxlint/plugins";
+import type { ESTree, Ranged, Scope, Variable } from "@oxlint/plugins";
 
 export type AstNode = Ranged & { type: string } & Record<string, unknown>;
 
@@ -241,4 +241,119 @@ export const getImportLocalName = (specifier: unknown): string | null => {
     return null;
   }
   return isIdentifier(specifier.local) ? specifier.local.name : null;
+};
+
+// An Identifier the parser emitted as a value reference (it carries a range,
+// which synthetic name nodes do not).
+export const isIdentifierReference = (
+  node: unknown,
+): node is ESTree.IdentifierReference =>
+  isIdentifier(node) && Array.isArray(node.range);
+
+export type ScopeContext = {
+  sourceCode: { getScope: (node: ESTree.Node) => Scope };
+};
+
+const resolveVariable = (
+  context: ScopeContext,
+  identifier: ESTree.IdentifierReference,
+): Variable | null => {
+  let scope: Scope | null = context.sourceCode.getScope(identifier);
+  while (scope !== null) {
+    const variable = scope.set.get(identifier.name);
+    if (variable !== undefined) {
+      return variable;
+    }
+    scope = scope.upper;
+  }
+  return null;
+};
+
+const isSingleAssignment = (variable: Variable): boolean =>
+  variable.references.every(
+    (reference) => !reference.isWrite() || reference.init,
+  );
+
+type ImportedBinding = { source: string; imported: string };
+const NAMESPACE_IMPORT = "*";
+
+const memberOfNamespace = (
+  base: ImportedBinding | null,
+  property: string | null,
+): ImportedBinding | null =>
+  base?.imported === NAMESPACE_IMPORT && property !== null
+    ? { source: base.source, imported: property }
+    : null;
+
+const bindingFromVariable = (
+  context: ScopeContext,
+  variable: Variable,
+  seen: Set<unknown>,
+): ImportedBinding | null => {
+  const definition = variable.defs.at(0);
+  if (variable.defs.length !== 1 || definition === undefined) {
+    return null;
+  }
+  const node: unknown = definition.node;
+  if (definition.type === "ImportBinding") {
+    const declaration: unknown = definition.parent;
+    if (
+      !isAstNode(node) ||
+      node.importKind === "type" ||
+      !isAstNode(declaration) ||
+      declaration.type !== "ImportDeclaration" ||
+      declaration.importKind === "type" ||
+      !isStringLiteral(declaration.source)
+    ) {
+      return null;
+    }
+    const source = declaration.source.value;
+    if (node.type === "ImportNamespaceSpecifier") {
+      return { source, imported: NAMESPACE_IMPORT };
+    }
+    if (node.type === "ImportDefaultSpecifier") {
+      return { source, imported: "default" };
+    }
+    const imported = getImportedName(node);
+    return imported === null ? null : { source, imported };
+  }
+  if (
+    definition.type !== "Variable" ||
+    !isAstNode(node) ||
+    node.type !== "VariableDeclarator" ||
+    !isSingleAssignment(variable) ||
+    !isIdentifier(node.id)
+  ) {
+    return null;
+  }
+  return resolveImportedExpressionForEnforcement(context, node.init, seen);
+};
+
+// The module export an expression evaluates to, or null for a local,
+// parameter, call result, or unresolved global.
+export const resolveImportedExpressionForEnforcement = (
+  context: ScopeContext,
+  node: unknown,
+  seen = new Set<unknown>(),
+): ImportedBinding | null => {
+  const expression = unwrapExpression(node);
+  if (!isAstNode(expression) || seen.has(expression)) {
+    return null;
+  }
+  seen.add(expression);
+  if (isIdentifierReference(expression)) {
+    const variable = resolveVariable(context, expression);
+    return variable === null
+      ? null
+      : bindingFromVariable(context, variable, seen);
+  }
+  if (expression.type === "MemberExpression") {
+    const base = resolveImportedExpressionForEnforcement(
+      context,
+      expression.object,
+      seen,
+    );
+    return memberOfNamespace(base, memberPropertyName(expression));
+  }
+  return null;
 };

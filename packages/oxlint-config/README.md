@@ -323,10 +323,47 @@ Shared `toolchain.json` owns the schedule, cooldown, groups, and tooling-owned
 package/action/image ignores. The input rejects policy overrides. Without
 `--config`, the tracked manifest inventory supplies ecosystem roots.
 
+A repository that deliberately holds a dependency declares the decision in
+tracked root `stll-toolchain.json`:
+
+```json
+{
+  "dependabotIgnores": [
+    {
+      "ecosystem": "bun",
+      "dependency": "graphql",
+      "updateTypes": ["version-update:semver-major"],
+      "reason": "Payload 3 requires graphql ^16."
+    },
+    {
+      "ecosystem": "github-actions",
+      "dependency": "owner/repo/.github/workflows/reusable.yml",
+      "updateTypes": [
+        "version-update:semver-major",
+        "version-update:semver-minor",
+        "version-update:semver-patch"
+      ],
+      "reason": "Newer commits no longer ship this reusable workflow."
+    }
+  ]
+}
+```
+
+`dependency` is Dependabot's `dependency-name`; `*` is the only wildcard
+(`@babel/*`). `updateTypes` is a nonempty set of version-update types, so
+security updates stay enabled. Each declaration needs a supported ecosystem with
+a generated update entry and a nonempty reason; duplicates fail. A declaration
+that names or matches a shared pin fails configuration validation: the shared
+policy owns those ignores. The generator appends declarations after the shared
+pins in code-unit order with canonical update types, so output stays
+byte-stable. `stll-toolchain-check` accepts exactly the shared pins plus these
+declarations; any other ignore fails.
+
 For programmatic generation, the `@stll/oxlint-config/dependabot` subpath exports
-`generateDependabotConfig({ files, policy, updates? })`, `parseDependabotInput`,
-and `parseToolchainPolicy`. `parseDependabotInput` validates the JSON shape above
-and returns the `updates` array:
+`generateDependabotConfig({ files, policy, updates?, ignores? })`,
+`parseDependabotInput`, `parseDependabotIgnores` and `parseToolchainPolicy`.
+`parseDependabotInput` validates the JSON shape above and returns the `updates`
+array; `parseDependabotIgnores` validates `dependabotIgnores` for `ignores`:
 
 ```ts
 import {
@@ -477,9 +514,9 @@ prints usage without reading repository configuration.
 
 | Environment phase       | Command                               |
 | ----------------------- | ------------------------------------- |
-| Networked install       | `bash .agents/cloud-setup.sh install`   |
-| Offline session startup | `bash .agents/cloud-setup.sh start`     |
-| Startup with exports    | `bash .agents/cloud-setup.sh session`   |
+| Networked install       | `bash .agents/cloud-setup.sh install` |
+| Offline session startup | `bash .agents/cloud-setup.sh start`   |
+| Startup with exports    | `bash .agents/cloud-setup.sh session` |
 
 Runtime installation repairs and verifies a missing or empty system CA bundle
 offline before any apt refresh or download, including when the certificate package
@@ -554,6 +591,19 @@ Those repository-specific hosts are not chosen by this generator. `start`
 performs no downloads.
 
 ## Published package contracts
+
+### Engine support releases
+
+Run `stll-engine-support --base <git ref>` in pull request CI to require a major
+changeset when an existing published package narrows its `engines.node` range.
+Base engine ranges are read from the manifest at each HEAD package directory.
+Packages moved or renamed between the base and HEAD are therefore treated as new
+packages and skipped. A missing range means unrestricted Node support.
+
+Only published workspace packages managed by Changesets and absent from its
+`ignore` list are checked. Derived platform packages and ignored packages are
+not checked separately; their owner package carries the engine range users
+install against.
 
 Run `stll-publish-contract` in PR CI. Every published root or declared workspace
 package commits `publish-contract.json`, recording engines, peer support ranges,
@@ -1014,3 +1064,36 @@ from an exact tooling commit; it does not install consumer dependencies to
 perform enforcement or pruning. Its stable removal branch updates one PR per
 repository. See the [root guide](../../README.md#package-quarantine) for the
 inline annotation format and adoption boundary.
+
+## Normalize generated WASI loaders
+
+Run `stll-normalize-wasi-loaders <loader-1> <loader-2>` after `@napi-rs/cli`
+generates the two WASI loaders. Arguments may appear in either order: the
+`.wasi-browser.js` and `.wasi.cjs` suffixes select the loader kind, and any other
+suffix produces an unsupported-file error.
+
+The normalizer applies these exact transformations:
+
+- **cleanup handshake:** wraps the cleanup macrotask scheduler so synchronous
+  completion settles safely and thrown scheduler errors reject the promise.
+- **runtime poll promise:** adds the rejection path used by the scheduler wrapper.
+- **runtime poll timer:** runs the paced runtime timer through the scheduler wrapper.
+- **runtime poll macrotask:** runs the early runtime macrotask through the scheduler
+  wrapper.
+- **async work poll:** runs the async-work timer through the scheduler wrapper.
+- **worker construction:** builds named worker data and options objects; the browser
+  loader receives the add-on crash flag, while the CommonJS loader keeps its crash
+  data and retries invalid `execArgv` by updating the shared options.
+- **scheduler helper:** adds the wrapper that handles synchronous completion and
+  converts thrown scheduler errors into promise rejections.
+- **artifact metadata:** keeps napi-rs artifact metadata on line 1 when present.
+- **generated-file header:** removes leading generator directives and writes the
+  standard `@ts-nocheck` header immediately after metadata, or first when metadata
+  is absent.
+
+Each named transformation must have its exact expected count. The command fails
+closed and writes nothing unless both inputs normalize successfully.
+
+Use `stll-normalize-wasi-loaders --check <loader-1> <loader-2>` in CI. Check mode
+does not write files and exits non-zero if either loader differs from the normalized
+output.

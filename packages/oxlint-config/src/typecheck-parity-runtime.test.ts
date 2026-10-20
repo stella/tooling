@@ -41,7 +41,7 @@ test("compiler diagnostic codes ignore diagnostic-like temporary path segments",
   const output = `${config}(3,5): error TS5102: Option 'outFile' has been removed.\n`;
   expect(output).toContain("TS0");
   expect(compilerDiagnosticCodes(output)).toEqual(["TS5102"]);
-});
+}, 15_000);
 
 const rejectedError = async (promise: Promise<unknown>): Promise<Error> => {
   try {

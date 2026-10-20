@@ -35,7 +35,7 @@ permissions:
 jobs:
   release-metadata:
     name: Discover publishable packages
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       package-directories: ${{ steps.release-packages.outputs.package-directories }}
     steps:
@@ -53,7 +53,7 @@ jobs:
 
   verify:
     name: Verify release source
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
@@ -76,7 +76,7 @@ jobs:
   pack:
     name: Build and pack ${{ matrix.package }}
     needs: [release-metadata, verify]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       matrix:
         package: ${{ fromJSON(needs.release-metadata.outputs.package-directories) }}
@@ -134,7 +134,7 @@ jobs:
       contents: write
       id-token: write
     # Keep this caller filename stable: npm trusted publishing authorizes it.
-    uses: stella/.github/.github/workflows/npm-independent-release.yml@5764ab66e4df84cfd2e642c7d7e4678261e668f8
+    uses: stella/.github/.github/workflows/npm-independent-release.yml@caa3ee1c2d02ef807994fdd3907c55ba104aff00
     with:
       artifact-run-id: ${{ inputs.artifact_run_id || '' }}
       artifact-pattern: npm-tarball-*

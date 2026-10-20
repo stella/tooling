@@ -14,7 +14,7 @@ jobs:
   changeset:
     name: Changeset present for published package changes
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
@@ -42,7 +42,7 @@ jobs:
 
   build-checks:
     name: Shared tooling checks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       TOOLCHAIN_BASE: ${{ (github.event_name == 'pull_request' && github.event.pull_request.base.sha) || (github.event_name == 'merge_group' && github.event.merge_group.base_sha) || (github.event_name == 'push' && github.event.before) || 'unavailable-toolchain-base' }}
     steps:
@@ -115,7 +115,7 @@ jobs:
   engine-floor:
     name: Published package Node floor
     needs: build-checks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -147,7 +147,7 @@ jobs:
   ci-result:
     if: always()
     needs: [changeset, build-checks, engine-floor, rust-lints, hawk-compatibility]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Require every validation job to succeed
         env:
@@ -169,7 +169,7 @@ jobs:
           test "$HAWK_RESULT" = success
 
   rust-lints:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -186,7 +186,7 @@ jobs:
 
   hawk-compatibility:
     name: Hawk compiler compatibility
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - name: Check out consumer crate

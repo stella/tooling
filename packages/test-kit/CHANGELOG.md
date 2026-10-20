@@ -1,5 +1,21 @@
 # @stll/test-kit
 
+## 0.3.0
+
+### Minor Changes
+
+- [#194](https://github.com/stella/tooling/pull/194) [`26c494f`](https://github.com/stella/tooling/commit/26c494f29b3f5ca54c8f5e61285f16f9b607ece6) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Hide inherited proxy variables while the network guard is installed, and add opt-in checked-in artifact regeneration.
+
+## 0.2.0
+
+### Minor Changes
+
+- [#177](https://github.com/stella/tooling/pull/177) [`118453b`](https://github.com/stella/tooling/commit/118453bcd2827cdef80c2ddb04a4fda5afb4474f) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Add seeded randomness, fake timers, and a loopback fake HTTP server.
+
+### Patch Changes
+
+- [#185](https://github.com/stella/tooling/pull/185) [`fa51adb`](https://github.com/stella/tooling/commit/fa51adb978853052ad5d668bccb80ea558ee762c) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Neutralize inherited process proxy variables while the network guard is installed.
+
 ## 0.1.1
 
 ### Patch Changes

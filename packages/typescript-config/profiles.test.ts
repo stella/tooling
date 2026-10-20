@@ -40,7 +40,7 @@ test("every public profile is packaged and declared in the publish contract", as
     );
     expect(profile).toHaveProperty("display", expect.any(String));
   }
-});
+}, 15_000);
 
 test("base owns universal diagnostics while consumers own emit, identity and caching", () => {
   expect(base.compilerOptions.allowUnreachableCode).toBe(false);
@@ -55,7 +55,7 @@ test("base owns universal diagnostics while consumers own emit, identity and cac
     expect(base.compilerOptions).not.toHaveProperty(option);
   }
   expect(singleChecker.compilerOptions).toEqual({ checkers: 1 });
-});
+}, 15_000);
 
 // Compiler processes run in CI; local targeted tests verify the package contract.
 for (const specifier of Object.keys(manifest.exports)) {

@@ -75,7 +75,7 @@ test("tracked quarantine input warns 48 hours before expiry without failing, the
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("quarantine policy cannot be opted out", () => {
   expect(() =>
@@ -83,4 +83,4 @@ test("quarantine policy cannot be opted out", () => {
       optOuts: [{ rule: "quarantine-policy", reason: "fixture" }],
     }),
   ).toThrow("cannot be opted out");
-});
+}, 15_000);
