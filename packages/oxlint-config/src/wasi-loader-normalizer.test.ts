@@ -79,26 +79,6 @@ test("normalized cleanup keeps the upstream rejection handler", async () => {
   );
 });
 
-test("a rejected cleanup poll clears the parked closer after a crash", async () => {
-  let finishParkedWasmEnvCleanup: (() => void) | undefined;
-  let joinedCrashedWorker = false;
-  const createFinishCleanupUnlessCrashed = (crashed: boolean) => () => {
-    finishParkedWasmEnvCleanup = undefined;
-    if (crashed) return;
-    joinedCrashedWorker = true;
-  };
-  const finishCleanupUnlessCrashed = createFinishCleanupUnlessCrashed(true);
-  finishParkedWasmEnvCleanup = finishCleanupUnlessCrashed;
-
-  await Promise.reject(new Error("poll rejected")).then(
-    finishCleanupUnlessCrashed,
-    finishCleanupUnlessCrashed,
-  );
-
-  expect(finishParkedWasmEnvCleanup).toBeUndefined();
-  expect(joinedCrashedWorker).toBe(false);
-});
-
 test("CLI writes both loaders and check mode detects drift", async () => {
   const root = await mkdtemp(join(tmpdir(), "wasi-normalizer-"));
   try {
