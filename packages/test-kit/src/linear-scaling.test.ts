@@ -6,53 +6,64 @@ import {
 } from "./linear-scaling.ts";
 import { rejectionOf } from "./rejection-support.ts";
 
-let sink = 0;
+const createWorkClock = (
+  cost: (size: number) => number,
+  minimumSampleDurationMs = 5,
+) => {
+  let elapsed = 0;
+  return {
+    clock: { minimumSampleDurationMs, now: () => elapsed },
+    run: (size: number) => {
+      elapsed += cost(size);
+    },
+  };
+};
+
+const createSeededNoise = (initialSeed: number) => {
+  let seed = initialSeed;
+  return () => {
+    seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0;
+    return seed / 2 ** 32;
+  };
+};
 
 describe("expectLinearScaling", () => {
   test("accepts linear work", async () => {
-    await expectLinearScaling({
-      sizes: [50_000, 200_000, 800_000],
-      repeats: 5,
-      run: (size) => {
-        let total = 0;
-        for (let index = 0; index < size; index += 1) total += index;
-        sink = total;
-      },
-    });
+    const { clock, run } = createWorkClock((size) => size / 1_000);
+    await linearScalingTestInternals.expectLinearScalingWithClock(
+      { sizes: [50, 200, 800], repeats: 5, run },
+      clock,
+    );
   });
 
   test("rejects quadratic work before running the next size", async () => {
     const calls = new Map<number, number>();
+    const { clock, run } = createWorkClock((size) => size * size);
     const error = await rejectionOf(
-      expectLinearScaling({
-        sizes: [250, 1_000, 4_000],
-        repeats: 5,
-        run: (size) => {
-          calls.set(size, (calls.get(size) ?? 0) + 1);
-          let total = 0;
-          for (let outer = 0; outer < size; outer += 1) {
-            for (let inner = 0; inner < size; inner += 1)
-              total += outer + inner;
-          }
-          sink = total;
+      linearScalingTestInternals.expectLinearScalingWithClock(
+        {
+          sizes: [1, 4, 16],
+          repeats: 5,
+          run: (size) => {
+            calls.set(size, (calls.get(size) ?? 0) + 1);
+            run(size);
+          },
         },
-      }),
+        clock,
+      ),
     );
     expect(error).toBeInstanceOf(Error);
-    expect(String(error)).toMatch(/size 250 .*size 1000.*median/u);
-    expect(calls.has(4_000)).toBeFalse();
+    expect(String(error)).toMatch(/size 1 .*size 4.*median/u);
+    expect(calls.has(16)).toBeFalse();
   });
 
   test("accepts constant timing noise", async () => {
-    await expectLinearScaling({
-      sizes: [1, 4, 16],
-      repeats: 5,
-      run: () => {
-        let total = 0;
-        for (let index = 0; index < 200_000; index += 1) total += index;
-        sink = total;
-      },
-    });
+    const noise = createSeededNoise(0x5eed);
+    const { clock, run } = createWorkClock(() => 10 + noise());
+    await linearScalingTestInternals.expectLinearScalingWithClock(
+      { sizes: [1, 4, 16], repeats: 5, run },
+      clock,
+    );
   });
 
   test("validates measurement options", async () => {
@@ -88,16 +99,14 @@ describe("expectLinearScaling", () => {
   });
 
   test("calibrates sub-microsecond linear work without flaking", async () => {
-    const runLinearWork = (size: number) => {
-      for (let index = 0; index < size; index += 1) sink += index;
-    };
     for (let trial = 0; trial < 20; trial += 1) {
-      await expectLinearScaling({
-        sizes: [1, 4, 16],
-        run: runLinearWork,
-      });
+      const { clock, run } = createWorkClock((size) => size / 10_000);
+      await linearScalingTestInternals.expectLinearScalingWithClock(
+        { sizes: [1, 4, 16], run },
+        clock,
+      );
     }
-  }, 10_000);
+  });
 
   test("rejects a synchronous run when the clock does not advance", async () => {
     const error = await rejectionOf(
@@ -264,5 +273,3 @@ describe("expectLinearScaling", () => {
     expect(calls.has(4)).toBeFalse();
   });
 });
-
-void sink;
