@@ -122,6 +122,12 @@ const DOCUMENT_MEMBERS: ReadonlySet<string> = new Set([
   "document",
   "ownerDocument",
 ]);
+const FILE_SYSTEM_MODULES: ReadonlySet<string> = new Set([
+  "fs",
+  "fs/promises",
+  "node:fs",
+  "node:fs/promises",
+]);
 const HTML_SANITIZER_LEAF_RE =
   /^(?:escape(?:html|xml)|sanitize(?:html|dom)|purify(?:html|dom)|dompurify)$/iu;
 const SANITIZER_RESULT_MEMBERS = new Set(["value", "data", "html"]);
@@ -459,7 +465,52 @@ export default eslintCompatPlugin({
           );
         };
 
+        const variableFor = (
+          identifier: { name: string },
+          initialScope: Scope,
+        ): Variable | undefined => {
+          let current: Scope | null = initialScope;
+          while (current !== null) {
+            const variable = current.set.get(identifier.name);
+            if (variable !== undefined) return variable;
+            current = current.upper;
+          }
+          return undefined;
+        };
+        const isKnownNonDocumentReceiver = (
+          node: unknown,
+          scope: Scope,
+        ): boolean => {
+          const isUnshadowedGlobal = (
+            identifier: unknown,
+            name: string,
+          ): boolean =>
+            isIdentifier(identifier, name) &&
+            variableFor(identifier, scope) === undefined;
+          const isFileSystemImport = (identifier: unknown): boolean => {
+            if (!isIdentifier(identifier)) return false;
+            const variable = variableFor(identifier, scope);
+            if (variable?.defs.length !== 1) return false;
+            const definition = variable.defs.at(0);
+            return (
+              definition?.type === "ImportBinding" &&
+              definition.parent?.type === "ImportDeclaration" &&
+              FILE_SYSTEM_MODULES.has(definition.parent.source.value)
+            );
+          };
+          const root = unwrapExpression(node);
+          if (isUnshadowedGlobal(root, "Bun") || isFileSystemImport(root)) {
+            return true;
+          }
+          return (
+            root?.type === "MemberExpression" &&
+            (memberPropertyName(root) === "stdout" ||
+              memberPropertyName(root) === "stderr") &&
+            isUnshadowedGlobal(unwrapExpression(root.object), "process")
+          );
+        };
         const isDocumentReceiver = (node: unknown, scope: Scope): boolean => {
+          if (isKnownNonDocumentReceiver(node, scope)) return false;
           const source = resolveStableBinding({
             node,
             scope,
@@ -474,6 +525,7 @@ export default eslintCompatPlugin({
         };
 
         const isDocumentSinkReceiver = (node: unknown, scope: Scope): boolean => {
+          if (isKnownNonDocumentReceiver(node, scope)) return false;
           const receiver = unwrapExpression(node);
           if (!isIdentifier(receiver)) return true;
           let current: Scope | null = scope;

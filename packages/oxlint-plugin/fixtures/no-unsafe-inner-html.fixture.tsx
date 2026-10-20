@@ -5,7 +5,12 @@
 // rule MUST flag. If the rule regresses, the matching disable becomes unused
 // and `--report-unused-disable-directives-severity=error` fails CI.
 
+import fs from "node:fs";
+import otherWriter from "other-writer";
+
 const rawHtml = "<img src=x onerror=alert(1)>";
+declare const fd: number;
+declare const path: string;
 declare const opaqueInsertArguments: [
   Element,
   "beforebegin" | "afterbegin" | "beforeend" | "afterend",
@@ -633,6 +638,31 @@ export const SafeApplyStaticInsertAdjacentHtml = (element: Element) =>
 const stream = { write(_chunk: string) {} };
 // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
 stream.write(rawHtml);
+
+// expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
+await Bun.write(path, rawHtml);
+// expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
+process.stdout.write(rawHtml);
+// expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
+process.stderr.write(rawHtml);
+// expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
+fs.write(fd, rawHtml, () => {});
+
+{
+  const Bun = document;
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html
+  Bun.write(rawHtml);
+}
+
+export const UnsafeShadowedProcess = (
+  process: { stdout: Document },
+): void => {
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html
+  process.stdout.write(rawHtml);
+};
+
+// oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html
+otherWriter.write(rawHtml);
 
 // A plain object with a `__html` property is data, not a DOM sink until it is
 // passed to `dangerouslySetInnerHTML`.

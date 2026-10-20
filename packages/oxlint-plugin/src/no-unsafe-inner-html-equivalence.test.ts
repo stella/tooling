@@ -1156,6 +1156,11 @@ const generatedHtmlSinkCorpus = (): {
 } => {
   const lines = [
     'import { document as importedDocument } from "./document";',
+    'import fsDefault from "node:fs";',
+    'import * as fsNamespace from "fs";',
+    'import { promises as fsPromises } from "node:fs";',
+    'import fsPromisesDefault from "fs/promises";',
+    'import otherWriter from "other-writer";',
     'declare const rawHtml: string;',
     'const config = { write(..._values: string[]) {}, writeln(..._values: string[]) {} };',
     'declare function createElement(type: string, props: object): unknown;',
@@ -1278,6 +1283,45 @@ const generatedHtmlSinkCorpus = (): {
       code: `importedDocument.${method}(rawHtml);`,
     });
     addCase({
+      kind: "invalid",
+      label: `${method} treats a shadowed Bun receiver as a document`,
+      code: `{ const Bun = document; Bun.${method}(rawHtml); }`,
+    });
+    addCase({
+      kind: "invalid",
+      label: `${method} treats a shadowed process stream as a document`,
+      code: `{ ((process: { stdout: Document }) => process.stdout.${method}(rawHtml))({ stdout: document }); }`,
+    });
+    addCase({
+      kind: "invalid",
+      label: `${method} treats another module's imported receiver as a document`,
+      code: `otherWriter.${method}(rawHtml);`,
+    });
+    addCase({
+      kind: "clean",
+      label: `${method} ignores the global Bun receiver`,
+      code: `Bun.${method}(rawHtml);`,
+    });
+    for (const stream of ["stdout", "stderr"]) {
+      addCase({
+        kind: "clean",
+        label: `${method} ignores the global process ${stream} stream`,
+        code: `process.${stream}.${method}(rawHtml);`,
+      });
+    }
+    for (const binding of [
+      "fsDefault",
+      "fsNamespace",
+      "fsPromises",
+      "fsPromisesDefault",
+    ]) {
+      addCase({
+        kind: "clean",
+        label: `${method} ignores the ${binding} file-system import`,
+        code: `${binding}.${method}(rawHtml);`,
+      });
+    }
+    addCase({
       kind: "clean",
       label: `${method} allows static content through a document alias`,
       code: `{ const doc = document; doc.${method}("<p>static</p>"); }`,
@@ -1377,7 +1421,7 @@ test(
     );
     const expectedHtmlSinkInvalidCount =
       REACT_HTML_PROPS.length * htmlSinkFactories.length +
-      DOCUMENT_WRITE_METHODS.size * 13 +
+      DOCUMENT_WRITE_METHODS.size * 16 +
       HTML_ATTRIBUTE_SINKS.length * 2 +
       HTML_ATTRIBUTE_SINKS.filter((sink) => sink.namespaceIndex !== null).length *
         ATTRIBUTE_NAMESPACE_CASES.filter((entry) => entry.kind === "invalid").length;
