@@ -156,12 +156,7 @@ const SAFE_ASYNC_WORK_POLL = `await new Promise((resolve, reject) => {
             reject,
           )
         })`;
-const RETRYABLE_RUNTIME_CLEANUP =
-  /\}\)\(\)\.then\((finishCleanup(?:UnlessCrashed)?), \1\)/gu;
-const makeRuntimeCleanupRetryable = (
-  _match: string,
-  finishCleanup: string,
-) => `})().then(
+const retryableRuntimeCleanup = (finishCleanup: string) => `})().then(
     ${finishCleanup},
     (error) => {
       __emnapiWasmEnvCleanupPreparing = false
@@ -170,19 +165,80 @@ const makeRuntimeCleanupRetryable = (
   )`;
 type Transformation = {
   name: string;
-  generated: string;
-  normalized: string;
+  anchor: string;
+  replacement: string;
 };
 
-const applyTransformation = (
-  source: string,
-  { name, generated, normalized }: Transformation,
-  file: string,
-) => {
-  if (source.includes(generated))
-    return source.replaceAll(generated, normalized);
-  if (source.includes(normalized)) return source;
-  throw new Error(`WASI loader transformation "${name}" did not match ${file}`);
+export const WASI_LOADER_TRANSFORMATIONS = [
+  {
+    name: "cleanup handshake",
+    anchor: UNSAFE_CLEANUP_HANDSHAKE,
+    replacement: SAFE_CLEANUP_HANDSHAKE,
+  },
+  {
+    name: "runtime poll promise",
+    anchor: UNSAFE_RUNTIME_POLL_PROMISE,
+    replacement: SAFE_RUNTIME_POLL_PROMISE,
+  },
+  {
+    name: "runtime poll timer",
+    anchor: UNSAFE_RUNTIME_POLL_TIMER,
+    replacement: SAFE_RUNTIME_POLL_TIMER,
+  },
+  {
+    name: "runtime poll macrotask",
+    anchor: UNSAFE_RUNTIME_POLL_MACROTASK,
+    replacement: SAFE_RUNTIME_POLL_MACROTASK,
+  },
+  {
+    name: "async work poll",
+    anchor: UNSAFE_ASYNC_WORK_POLL,
+    replacement: SAFE_ASYNC_WORK_POLL,
+  },
+  ...["finishCleanup", "finishCleanupUnlessCrashed"].map((finishCleanup) => ({
+    name: "retryable runtime cleanup",
+    anchor: `})().then(${finishCleanup}, ${finishCleanup})`,
+    replacement: retryableRuntimeCleanup(finishCleanup),
+  })),
+  {
+    name: "worker construction",
+    anchor: GENERATED_WASI_WORKER_FACTORY,
+    replacement: NORMALIZED_WASI_WORKER_FACTORY,
+  },
+  {
+    name: "worker construction",
+    anchor: GENERATED_BROWSER_WORKER,
+    replacement: NORMALIZED_BROWSER_WORKER,
+  },
+  {
+    name: "scheduler helper",
+    anchor: RUNTIME_POLL_MARKER,
+    replacement: `${SAFE_SCHEDULER_HELPER}${RUNTIME_POLL_MARKER}`,
+  },
+] satisfies Transformation[];
+
+const applyTransformations = (source: string, file: string) => {
+  let result = source;
+  const names = new Set(WASI_LOADER_TRANSFORMATIONS.map(({ name }) => name));
+  for (const name of names) {
+    let alreadyApplied = false;
+    let applicable: Transformation | undefined;
+    for (const transformation of WASI_LOADER_TRANSFORMATIONS) {
+      if (transformation.name !== name) continue;
+      if (result.includes(transformation.replacement)) {
+        alreadyApplied = true;
+        break;
+      }
+      if (result.includes(transformation.anchor)) applicable = transformation;
+    }
+    if (alreadyApplied) continue;
+    if (!applicable)
+      throw new Error(
+        `WASI loader transformation "${name}" did not match ${file}`,
+      );
+    result = result.replaceAll(applicable.anchor, applicable.replacement);
+  }
+  return result;
 };
 const addTypecheckHeader = (source: string) => {
   if (!source.startsWith(ARTIFACT_METADATA_PREFIX)) {
@@ -210,86 +266,14 @@ export const normalizeGeneratedLoader = (
       `WASI loader transformation "LF line endings" did not match ${file}`,
     );
 
-  let normalized = source.replace(GENERATOR_DIRECTIVE, "");
-  const transformations = [
-    {
-      name: "cleanup handshake",
-      generated: UNSAFE_CLEANUP_HANDSHAKE,
-      normalized: SAFE_CLEANUP_HANDSHAKE,
-    },
-    {
-      name: "runtime poll promise",
-      generated: UNSAFE_RUNTIME_POLL_PROMISE,
-      normalized: SAFE_RUNTIME_POLL_PROMISE,
-    },
-    {
-      name: "runtime poll timer",
-      generated: UNSAFE_RUNTIME_POLL_TIMER,
-      normalized: SAFE_RUNTIME_POLL_TIMER,
-    },
-    {
-      name: "runtime poll macrotask",
-      generated: UNSAFE_RUNTIME_POLL_MACROTASK,
-      normalized: SAFE_RUNTIME_POLL_MACROTASK,
-    },
-    {
-      name: "async work poll",
-      generated: UNSAFE_ASYNC_WORK_POLL,
-      normalized: SAFE_ASYNC_WORK_POLL,
-    },
-  ] satisfies Transformation[];
-  for (const transformation of transformations)
-    normalized = applyTransformation(normalized, transformation, file);
-
-  if (normalized.match(RETRYABLE_RUNTIME_CLEANUP)) {
-    normalized = normalized.replace(
-      RETRYABLE_RUNTIME_CLEANUP,
-      makeRuntimeCleanupRetryable,
-    );
-  } else if (!normalized.includes("__emnapiWasmEnvCleanupPreparing = false")) {
-    throw new Error(
-      `WASI loader transformation "retryable runtime cleanup" did not match ${file}`,
-    );
-  }
-
-  const workerTransformations = [
-    {
-      name: "WASI worker factory",
-      generated: GENERATED_WASI_WORKER_FACTORY,
-      normalized: NORMALIZED_WASI_WORKER_FACTORY,
-    },
-    {
-      name: "browser worker",
-      generated: GENERATED_BROWSER_WORKER,
-      normalized: NORMALIZED_BROWSER_WORKER,
-    },
-  ] satisfies Transformation[];
-  const workerTransformation = workerTransformations.find(
-    ({ generated, normalized: output }) =>
-      normalized.includes(generated) || normalized.includes(output),
-  );
-  if (!workerTransformation)
-    throw new Error(
-      `WASI loader transformation "worker construction" did not match ${file}`,
-    );
-  normalized = applyTransformation(normalized, workerTransformation, file);
-
-  normalized = normalized.replace(/[ \t]+$/gmu, "");
-  const withSchedulerHelper = normalized.includes(SAFE_SCHEDULER_HELPER)
-    ? normalized
-    : applyTransformation(
-        normalized,
-        {
-          name: "scheduler helper",
-          generated: RUNTIME_POLL_MARKER,
-          normalized: `${SAFE_SCHEDULER_HELPER}${RUNTIME_POLL_MARKER}`,
-        },
-        file,
-      );
+  const normalized = applyTransformations(
+    source.replace(GENERATOR_DIRECTIVE, ""),
+    file,
+  ).replace(/[ \t]+$/gmu, "");
 
   return keepGeneratedTypecheckOptOut
-    ? addTypecheckHeader(withSchedulerHelper)
-    : withSchedulerHelper;
+    ? addTypecheckHeader(normalized)
+    : normalized;
 };
 
 const usage =

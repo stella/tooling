@@ -6,6 +6,7 @@ import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  WASI_LOADER_TRANSFORMATIONS,
   normalizeGeneratedLoader,
   runWasiLoaderNormalizer,
 } from "./wasi-loader-normalizer";
@@ -146,3 +147,34 @@ test("a missing generated anchor is rejected with the transformation and file na
 const UNSAFE_CLEANUP_HANDSHAKE_FOR_TEST = `await new Promise((resolve) => {
         __scheduleMacrotask(resolve)
       })`;
+
+test("every changed transformation anchor is rejected in write and check modes", async () => {
+  for (const transformation of WASI_LOADER_TRANSFORMATIONS) {
+    for (const name of loaderNames) {
+      const generated = await readFile(join(fixtures, name), "utf8");
+      if (!generated.includes(transformation.anchor)) continue;
+
+      for (const mode of ["write", "check"] as const) {
+        const root = await mkdtemp(join(tmpdir(), "wasi-normalizer-anchor-"));
+        const path = join(root, basename(name));
+        try {
+          const changed = generated.replace(
+            transformation.anchor,
+            `${transformation.anchor.slice(0, -1)} changed`,
+          );
+          expect(changed).not.toBe(generated);
+          await writeFile(path, changed);
+          const args =
+            mode === "check" ? ["--check", path, path] : [path, path];
+          await assert.rejects(
+            runWasiLoaderNormalizer(args),
+            new RegExp(`${transformation.name}.*${basename(name)}`, "u"),
+          );
+          expect(await readFile(path, "utf8")).toBe(changed);
+        } finally {
+          await rm(root, { recursive: true, force: true });
+        }
+      }
+    }
+  }
+});
