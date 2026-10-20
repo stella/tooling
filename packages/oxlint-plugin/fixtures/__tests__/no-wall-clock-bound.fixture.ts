@@ -188,8 +188,35 @@ const races = async () => {
   await Promise.race([closed.promise, sleep(200)]);
   // oxlint-disable-next-line no-wall-clock-bound/no-wall-clock-bound -- fixture
   await Promise.race([closed.promise, delay(200)]);
+  // oxlint-disable-next-line no-real-timer-waits-in-tests/no-real-timer-waits-in-tests -- fixture
+  const timeout = Bun.sleep(200);
+  // oxlint-disable-next-line no-wall-clock-bound/no-wall-clock-bound -- fixture
+  await Promise.race([closed.promise, timeout]);
+  // oxlint-disable-next-line no-real-timer-waits-in-tests/no-real-timer-waits-in-tests -- fixture
+  const setTimeoutPromise = new Promise((resolve) => setTimeout(resolve, 200));
+  // oxlint-disable-next-line no-wall-clock-bound/no-wall-clock-bound -- fixture
+  await Promise.race([closed.promise, setTimeoutPromise]);
+  const nonTimerPromise = closed.promise;
   // expect-clean: no-wall-clock-bound/no-wall-clock-bound
-  await Promise.race([sleeping.promise, reservation]);
+  await Promise.race([sleeping.promise, reservation, nonTimerPromise]);
+};
+
+const matcherArguments = () => {
+  // oxlint-disable-next-line no-wall-clock-in-tests/no-wall-clock-in-tests -- fixture
+  const start = Date.now();
+  // oxlint-disable-next-line no-wall-clock-in-tests/no-wall-clock-in-tests -- fixture
+  const elapsed = Date.now() - start;
+  const limit = 1000;
+  // oxlint-disable-next-line no-wall-clock-bound/no-wall-clock-bound -- fixture
+  expect(1000).toBeGreaterThan(elapsed);
+  // oxlint-disable-next-line no-wall-clock-bound/no-wall-clock-bound, no-wall-clock-in-tests/no-wall-clock-in-tests -- fixture
+  expect(limit).not.toBeLessThan(Date.now() - start);
+  // oxlint-disable-next-line no-wall-clock-bound/no-wall-clock-bound -- fixture
+  expect(Promise.resolve(1000)).resolves.toBeGreaterThan(elapsed);
+  // oxlint-disable-next-line no-wall-clock-bound/no-wall-clock-bound -- fixture
+  expect(Promise.reject(1000)).rejects.toBeGreaterThan(elapsed);
+  // expect-clean: no-wall-clock-bound/no-wall-clock-bound
+  expect(limit).toBeGreaterThan(500);
 };
 
 void directMeasurement;
@@ -200,3 +227,4 @@ void relativeMeasurements;
 void otherClocks;
 void nonReferenceIdentifierCollisions;
 void races;
+void matcherArguments;

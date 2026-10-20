@@ -221,6 +221,13 @@ export default testOnlyPlugin(
       );
     };
 
+    const isTimerOrBoundTimer = (value: unknown, use: Node): boolean => {
+      if (isTimer(value)) return true;
+      if (!isNode(value) || value.type !== "Identifier") return false;
+      const initializer = constInitializerInSameFunction(value, use);
+      return initializer !== null && isTimer(initializer);
+    };
+
     return {
       CallExpression(node) {
         if (!isNode(node.callee) || node.callee.type !== "MemberExpression")
@@ -236,7 +243,9 @@ export default testOnlyPlugin(
               isNode(firstArgument) &&
               firstArgument.type === "ArrayExpression" &&
               Array.isArray(firstArgument.elements) &&
-              firstArgument.elements.some(isTimer)
+              firstArgument.elements.some((element) =>
+                isTimerOrBoundTimer(element, node),
+              )
             )
               report(node);
             return;
@@ -252,10 +261,8 @@ export default testOnlyPlugin(
             calleeBinding.imported === "expect" &&
             testModules.has(calleeBinding.module));
         if (!isExpect) return;
-        const measured = Array.isArray(expectCall.arguments)
-          ? expectCall.arguments.at(0)
-          : null;
-        if (containsClockRead(measured, node, true)) report(node);
+        const assertionValues = [expectCall.arguments, node.arguments];
+        if (containsClockRead(assertionValues, node, true)) report(node);
       },
     };
   },
