@@ -5,7 +5,12 @@
 // rule MUST flag. If the rule regresses, the matching disable becomes unused
 // and `--report-unused-disable-directives-severity=error` fails CI.
 
+import fs from "node:fs";
+import otherWriter from "other-writer";
+
 const rawHtml = "<img src=x onerror=alert(1)>";
+declare const fd: number;
+declare const path: string;
 declare const opaqueInsertArguments: [
   Element,
   "beforebegin" | "afterbegin" | "beforeend" | "afterend",
@@ -94,10 +99,11 @@ export const UnsafeShadowedSanitizer = () => (
   />
 );
 
+// The equivalence corpus generates quoted and template bracket spellings.
 export const UnsafeComputedInnerHtml = () => {
   const element = document.createElement("div");
   // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- fixture: computed HTML sink
-  element["innerHTML"] = rawHtml;
+  element.innerHTML = rawHtml;
   return element;
 };
 
@@ -113,7 +119,7 @@ export const DynamicComputedPropertyNamedInnerHtmlIsNotAStaticSink = () => {
 export const UnsafeStaticTemplateComputedInnerHtml = () => {
   const element = document.createElement("div");
   // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html
-  element[`innerHTML`] = rawHtml;
+  element.innerHTML = rawHtml;
   return element;
 };
 
@@ -128,7 +134,7 @@ export const UnsafeInsertAdjacentHtml = () => {
   // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html
   element.insertAdjacentHTML("beforeend", rawHtml);
   // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html
-  element[`insertAdjacentHTML`](`beforeend`, rawHtml);
+  element.insertAdjacentHTML(`beforeend`, rawHtml);
   // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- call form
   element.insertAdjacentHTML.call(element, "beforeend", rawHtml);
   // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html
@@ -273,19 +279,53 @@ export const UnsafeObjectAssignDomAliasChain = () => {
   Object.assign(secondAlias, unsafeDomProperties);
 };
 
-export const SafeObjectAssignCyclicAliases = () => {
+export const UnsafeObjectAssignCyclicAliases = () => {
   const first = second;
   const second = first;
-  // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- cyclic aliases cannot prove a stable non-DOM target
   Object.assign(first, unsafeDomProperties);
 };
 
-export const SafeObjectAssignReassignedTarget = () => {
+export const UnsafeConservativeObjectAssignReassignedTarget = () => {
   let element: object = document.createElement("div");
   Object.assign(element, { textContent: "initial" });
   element = config;
-  // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- reassigned bindings conservatively remain possible DOM targets
   Object.assign(element, unsafeDomProperties);
+};
+
+export const UnsafeForOfDomCollection = () => {
+  for (const element of document.querySelectorAll("div")) {
+    // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- for-of bindings inherit their collection's DOM element provenance
+    Object.assign(element, unsafeDomProperties);
+  }
+};
+
+export const UnsafeForOfAliasedChildren = () => {
+  const parent = document.createElement("div");
+  const elements = parent.children;
+  const collection = elements;
+  for (const element of collection) {
+    const alias = element;
+    // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- collection and element aliases share the same stable-binding resolver
+    Object.assign(alias, unsafeDomProperties);
+  }
+};
+
+export const SafeForOfOrdinaryCollection = () => {
+  for (const options of [{}, {}]) {
+    // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
+    Object.assign(options, unsafeDomProperties);
+  }
+};
+
+export const UnsafeReassignedForOfBinding = () => {
+  for (let element of document.querySelectorAll("div")) {
+    Object.assign(element, { textContent: "initial" });
+    element = document.createElement("div");
+    // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- reassigned iteration bindings remain possible DOM targets
+    Object.assign(element, unsafeDomProperties);
+  }
 };
 
 export const SafeObjectAssignNonDomConstTarget = () => {
@@ -355,8 +395,13 @@ export const UnsafeObjectAssignKnownTailAfterOpaqueSource = () => {
 };
 
 export const UnsafeObjectAssignLiteralSpreadTailAfterOpaqueSource = () => {
-  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- literal source spread after an opaque source remains detectable
-  Object.assign(config, ...opaqueObjectAssignSources, ...[{ innerHTML: rawHtml }]);
+  Object.assign(
+    config,
+    // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- opaque source through a possible DOM target fails closed
+    ...opaqueObjectAssignSources,
+    // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- literal source spread after an opaque source remains detectable
+    ...[{ innerHTML: rawHtml }],
+  );
 };
 
 export const SafeObjectAssignStaticHtmlSpread = () => {
@@ -397,8 +442,8 @@ export const UnsafeObjectAssignComputedKey = (key: string) =>
   Object.assign(document.createElement("div"), { [key]: rawHtml });
 
 declare const config: Record<string, unknown>;
-export const SafeObjectAssignHoistedConfig = () => {
-  // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
+export const UnsafeConservativeObjectAssignHoistedConfig = () => {
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- an external binding cannot prove a stable non-DOM target
   Object.assign(config, unsafeDomProperties);
 };
 
@@ -590,9 +635,34 @@ export const SafeApplyStaticInsertAdjacentHtml = (element: Element) =>
   // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
   element.insertAdjacentHTML.apply(element, ["beforeend", "<b>Static</b>"]);
 
-declare const stream: { write: (chunk: string) => void };
+const stream = { write(_chunk: string) {} };
 // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
 stream.write(rawHtml);
+
+// expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
+await Bun.write(path, rawHtml);
+// expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
+process.stdout.write(rawHtml);
+// expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
+process.stderr.write(rawHtml);
+// expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
+fs.write(fd, rawHtml, () => {});
+
+{
+  const Bun = document;
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html
+  Bun.write(rawHtml);
+}
+
+export const UnsafeShadowedProcess = (
+  process: { stdout: Document },
+): void => {
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html
+  process.stdout.write(rawHtml);
+};
+
+// oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html
+otherWriter.write(rawHtml);
 
 // A plain object with a `__html` property is data, not a DOM sink until it is
 // passed to `dangerouslySetInnerHTML`.
