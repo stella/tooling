@@ -13,6 +13,27 @@ declare const extract: (text: string) => void;
 declare const text: string;
 declare const run: () => void;
 
+const inheritedMatcherNames = () => {
+  // expect-clean: no-wall-clock-bound/no-wall-clock-bound
+  expect(text).toString();
+  // expect-clean: no-wall-clock-bound/no-wall-clock-bound
+  // oxlint-disable-next-line no-unused-expressions -- fixture
+  expect(text).constructor;
+  // expect-clean: no-wall-clock-bound/no-wall-clock-bound
+  expect(text).hasOwnProperty("x");
+
+  // oxlint-disable-next-line no-wall-clock-in-tests/no-wall-clock-in-tests -- fixture
+  const started = performance.now();
+  // oxlint-disable-next-line no-wall-clock-in-tests/no-wall-clock-in-tests -- fixture
+  const elapsed = performance.now() - started;
+  // oxlint-disable-next-line no-wall-clock-bound/no-wall-clock-bound -- fixture
+  expect(elapsed).toString();
+  // oxlint-disable-next-line no-wall-clock-bound/no-wall-clock-bound -- fixture
+  expect(elapsed).constructor();
+  // oxlint-disable-next-line no-wall-clock-bound/no-wall-clock-bound -- fixture
+  expect(elapsed).hasOwnProperty("x");
+};
+
 const directMeasurement = () => {
   // oxlint-disable-next-line no-wall-clock-in-tests/no-wall-clock-in-tests -- fixture
   const started = performance.now();
@@ -130,6 +151,7 @@ const races = async () => {
 };
 
 void directMeasurement;
+void inheritedMatcherNames;
 void boundMeasurement;
 void twoTimestampMeasurement;
 void relativeMeasurements;
