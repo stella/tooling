@@ -334,7 +334,7 @@ test("committed quoted Yarn Classic compiler selectors bind unchanged and change
     const artifact = variant === "source" ? "changed" : "original";
     return `# yarn lockfile v1\n\n"@types/bun@>=1.1.0 <2":\n  version "${version}"\n  resolved "https://example.test/bun-${artifact}.tgz"\n  integrity sha512-${digest}\n\n"typescript@>=7 <8":\n  version "7.0.2"\n  resolved "https://example.test/typescript.tgz"\n  integrity sha512-${digest}\n`;
   };
-  write("yarn.lock", lock("original"), 15_000);
+  write("yarn.lock", lock("original"));
   const since = commit();
   for (const variant of ["original", "source", "version"]) {
     const changed = variant !== "original";
