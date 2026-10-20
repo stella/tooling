@@ -66,6 +66,8 @@ const twoTimestampMeasurement = () => {
   const end = performance.now();
   // oxlint-disable-next-line no-wall-clock-bound/no-wall-clock-bound -- fixture
   expect(end - start).toBeLessThan(20_000);
+  // oxlint-disable-next-line no-wall-clock-bound/no-wall-clock-bound -- fixture
+  expect((end - start) * 1e-3).toBeLessThan(2);
 
   // oxlint-disable-next-line no-wall-clock-in-tests/no-wall-clock-in-tests -- fixture
   const dateStart = Date.now();
@@ -90,6 +92,17 @@ const relativeMeasurements = () => {
   // expect-clean: no-wall-clock-bound/no-wall-clock-bound
   expect(elapsed).toBeLessThan(baselineElapsed * 2);
   // oxlint-disable-next-line no-wall-clock-bound/no-wall-clock-bound -- fixture
+  expect(elapsed / 1000).toBeLessThan(1);
+  // oxlint-disable-next-line no-wall-clock-bound/no-wall-clock-bound -- fixture
+  expect(Math.round(elapsed)).toBeLessThan(5);
+  // oxlint-disable-next-line no-wall-clock-bound/no-wall-clock-bound -- fixture
+  expect(elapsed).toBeLessThan(Math.min(baselineElapsed * 2, 1000));
+  // oxlint-disable-next-line no-wall-clock-bound/no-wall-clock-bound -- fixture
+  expect(elapsed).toBeLessThan(baselineElapsed + 1000);
+  const BASELINE_FACTOR = 3;
+  // expect-clean: no-wall-clock-bound/no-wall-clock-bound
+  expect(elapsed).toBeLessThan(BASELINE_FACTOR * baselineElapsed);
+  // oxlint-disable-next-line no-wall-clock-bound/no-wall-clock-bound -- fixture
   expect(elapsed).toBeWithin(baselineElapsed, 1000);
   // expect-clean: no-wall-clock-bound/no-wall-clock-bound
   expect(elapsed).toBeWithin(baselineElapsed, elapsed);
@@ -112,6 +125,8 @@ const relativeMeasurements = () => {
   // oxlint-disable-next-line no-wall-clock-in-tests/no-wall-clock-in-tests -- fixture
   const large = performance.now();
   const largeElapsed = large - largeStart;
+  // expect-clean: no-wall-clock-bound/no-wall-clock-bound
+  expect(large).toBeLessThan(small * 10);
   // expect-clean: no-wall-clock-bound/no-wall-clock-bound
   expect(largeElapsed).toBeLessThan(smallElapsed * 10);
   // expect-clean: no-wall-clock-bound/no-wall-clock-bound

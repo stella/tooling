@@ -108,33 +108,74 @@ export default testOnlyPlugin(
       return null;
     };
 
-    const isClockOperand = (value: unknown, use: Node): boolean => {
-      if (isClockRead(value)) return true;
-      if (!isNode(value) || value.type !== "Identifier") return false;
-      const initializer = constInitializerInSameFunction(value, use);
-      return initializer !== null && isClockRead(initializer);
-    };
-
-    const isClockDifference = (value: unknown, use: Node): boolean =>
-      isNode(value) &&
-      value.type === "BinaryExpression" &&
-      value.operator === "-" &&
-      (isClockOperand(value.left, use) || isClockOperand(value.right, use));
-
-    const isMeasuredDuration = (value: unknown, use: Node): boolean => {
-      if (isClockDifference(value, use)) return true;
-      if (!isNode(value) || value.type !== "Identifier") return false;
-      const initializer = constInitializerInSameFunction(value, use);
-      return initializer !== null && isClockDifference(initializer, use);
-    };
-
-    const containsMeasuredDuration = (value: unknown, use: Node): boolean => {
+    const containsClockRead = (
+      value: unknown,
+      use: Node,
+      followIdentifier: boolean,
+      visitedIdentifiers = new Set<Node>(),
+    ): boolean => {
       if (Array.isArray(value))
-        return value.some((child) => containsMeasuredDuration(child, use));
+        return value.some((child) =>
+          containsClockRead(child, use, followIdentifier, visitedIdentifiers),
+        );
       if (!isNode(value)) return false;
-      if (isMeasuredDuration(value, use)) return true;
+      if (isClockRead(value)) return true;
+      if (followIdentifier && value.type === "Identifier") {
+        if (visitedIdentifiers.has(value)) return false;
+        visitedIdentifiers.add(value);
+        const initializer = constInitializerInSameFunction(value, use);
+        if (
+          initializer !== null &&
+          containsClockRead(initializer, use, true, visitedIdentifiers)
+        )
+          return true;
+      }
       return Object.values(value).some(
-        (child) => child !== value.parent && containsMeasuredDuration(child, use),
+        (child) =>
+          child !== value.parent &&
+          containsClockRead(child, use, followIdentifier, visitedIdentifiers),
+      );
+    };
+
+    const isDurationValue = (value: unknown, use: Node): boolean => {
+      if (!isNode(value)) return false;
+      if (value.type === "Identifier") {
+        const initializer = constInitializerInSameFunction(value, use);
+        return (
+          initializer !== null && containsClockRead(initializer, use, true)
+        );
+      }
+      return (
+        value.type === "BinaryExpression" &&
+        value.operator === "-" &&
+        containsClockRead(value, use, true)
+      );
+    };
+
+    const isNumericConstant = (value: unknown, use: Node): boolean => {
+      if (!isNode(value)) return false;
+      if (value.type === "Literal" && typeof value.value === "number") return true;
+      if (value.type !== "Identifier") return false;
+      const initializer = constInitializerInSameFunction(value, use);
+      return (
+        initializer?.type === "Literal" && typeof initializer.value === "number"
+      );
+    };
+
+    const isRelativeBound = (value: unknown, use: Node): boolean => {
+      if (isDurationValue(value, use)) return true;
+      if (!isNode(value) || value.type !== "BinaryExpression") return false;
+      if (value.operator === "/")
+        return (
+          isDurationValue(value.left, use) &&
+          isNumericConstant(value.right, use)
+        );
+      if (value.operator !== "*") return false;
+      return (
+        (isDurationValue(value.left, use) &&
+          isNumericConstant(value.right, use)) ||
+        (isNumericConstant(value.left, use) &&
+          isDurationValue(value.right, use))
       );
     };
 
@@ -224,7 +265,7 @@ export default testOnlyPlugin(
         const measured = Array.isArray(expectCall.arguments)
           ? expectCall.arguments.at(0)
           : null;
-        if (!isMeasuredDuration(measured, node)) return;
+        if (!containsClockRead(measured, node, true)) return;
         const boundPositions =
           member === null
             ? undefined
@@ -233,7 +274,7 @@ export default testOnlyPlugin(
           boundPositions !== undefined &&
           Array.isArray(node.arguments) &&
           boundPositions.every((position) =>
-            containsMeasuredDuration(node.arguments?.[position], node),
+            isRelativeBound(node.arguments?.[position], node),
           );
         if (!boundIsMeasured) report(node);
       },
