@@ -121,20 +121,20 @@ const withIgnore = (
     throw new Error("generated Dependabot configuration has no updates");
   const { updates } = parsed;
   if (!Array.isArray(updates)) throw new Error("updates must be an array");
-  return stringify({
-    version: 2,
-    updates: updates.map((update: unknown) => {
-      if (
-        typeof update !== "object" ||
-        update === null ||
-        !("package-ecosystem" in update) ||
-        update["package-ecosystem"] !== ecosystem
-      )
-        return update;
-      const ignore = "ignore" in update ? update.ignore : [];
-      return { ...update, ignore: change(Array.isArray(ignore) ? ignore : []) };
-    }),
-  });
+  for (const update of updates) {
+    if (
+      typeof update !== "object" ||
+      update === null ||
+      !("package-ecosystem" in update) ||
+      update["package-ecosystem"] !== ecosystem
+    )
+      continue;
+    const ignore = "ignore" in update ? update.ignore : [];
+    Object.assign(update, {
+      ignore: change(Array.isArray(ignore) ? ignore : []),
+    });
+  }
+  return stringify({ version: 2, updates });
 };
 
 describe("repository Dependabot ignores", () => {
@@ -143,9 +143,11 @@ describe("repository Dependabot ignores", () => {
     expect(check(expected)).toEqual([]);
     for (const order of permutations(declarations)) {
       const reordered = parseDependabotIgnores(
-        order.map((entry) => ({
-          ...entry,
-          updateTypes: [...entry.updateTypes].reverse(),
+        order.map(({ ecosystem, dependency, updateTypes, reason }) => ({
+          ecosystem,
+          dependency,
+          updateTypes: [...updateTypes].reverse(),
+          reason,
         })),
       );
       expect(generate(reordered)).toBe(expected);
