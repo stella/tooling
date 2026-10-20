@@ -24,12 +24,6 @@ const parseBase = (args: string[]) => {
   throw new Error("Usage: stll-engine-support --base <git ref>");
 };
 
-const allPackages = ({
-  packages,
-  rootPackage,
-}: ReturnType<typeof getPackagesSync>) =>
-  rootPackage === undefined ? packages : [rootPackage, ...packages];
-
 const packageNodeRange = ({ packageJson }: Package) => {
   const engines = "engines" in packageJson ? packageJson.engines : undefined;
   return typeof engines === "object" &&
@@ -86,7 +80,7 @@ const main = async () => {
   const root = process.cwd();
   git(root, ["cat-file", "-e", `${base}^{commit}`]);
   const workspace = getPackagesSync(root);
-  const discovered = allPackages(workspace);
+  const discovered = workspace.packages;
   const configResult = await readConfig(root, workspace);
   if (configResult.errors !== undefined)
     throw new Error(configResult.errors.join("\n"));

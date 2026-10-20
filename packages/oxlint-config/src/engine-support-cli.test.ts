@@ -67,6 +67,37 @@ test("a workspace without a lockfile is checked", async () => {
   );
 });
 
+test("a monorepo root is not checked separately", async () => {
+  await withRepository(
+    {
+      "package.json": manifest("workspace", ">=18", {
+        workspaces: ["packages/*"],
+      }),
+      "packages/library/package.json": manifest("library", ">=18"),
+    },
+    async (root, run) => {
+      await writeJson(
+        root,
+        "package.json",
+        manifest("workspace", ">=20", { workspaces: ["packages/*"] }),
+      );
+      expect(run().exitCode).toBe(0);
+    },
+  );
+});
+
+test("a single-package narrowing requires a major changeset", async () => {
+  await withRepository(
+    { "package.json": manifest("library", ">=18") },
+    async (root, run) => {
+      await writeJson(root, "package.json", manifest("library", ">=20"));
+      expect(run().exitCode).toBe(1);
+      await writeChangeset(root, "major");
+      expect(run().exitCode).toBe(0);
+    },
+  );
+});
+
 const writeJson = async (root: string, file: string, value: unknown) => {
   await mkdir(path.dirname(path.join(root, file)), { recursive: true });
   await writeFile(path.join(root, file), `${JSON.stringify(value)}\n`);
