@@ -27,6 +27,7 @@ import {
   consumerCheckWorkflow,
   consumerRunnerVersion,
 } from "./toolchain-consumer-checks";
+import type { DependabotIgnoreDeclaration } from "./toolchain-dependabot";
 import {
   checkToolchain,
   parseToolchainConfiguration,
@@ -1196,7 +1197,7 @@ test("stll-toolchain.json Dependabot ignores cannot claim shared pins", () => {
     dependency: "graphql",
     updateTypes: ["version-update:semver-major"],
     reason: "Payload 3 requires graphql ^16.",
-  };
+  } satisfies DependabotIgnoreDeclaration;
   expect(
     parseToolchainConfiguration({ dependabotIgnores: [declaration] })
       .dependabotIgnores,
