@@ -72,11 +72,16 @@ const workspacePatterns = (manifest: Manifest) => {
 };
 
 const collectPackages = (root: string, base?: string) => {
-  const files = manifestFiles(root, base);
-  const rootManifest = files.includes("package.json")
+  const manifestCandidates = manifestFiles(root, base);
+  const rootManifest = manifestCandidates.includes("package.json")
     ? readManifest(root, "package.json", base)
     : {};
   const patterns = workspacePatterns(rootManifest);
+  const matchesWorkspace = picomatch(patterns);
+  const files = manifestCandidates.filter((file) => {
+    if (file === "package.json") return true;
+    return matchesWorkspace(path.posix.dirname(file));
+  });
   const ignored = new Set<string>();
   const configFile = ".changeset/config.json";
   if (base === undefined) {
@@ -108,7 +113,7 @@ const collectPackages = (root: string, base?: string) => {
       ...(node === undefined ? {} : { node }),
       changesetsManaged:
         !ignored.has(manifest.name) &&
-        (directory === "." || picomatch(patterns)(directory)),
+        (directory === "." || matchesWorkspace(directory)),
     });
   }
   return packages;

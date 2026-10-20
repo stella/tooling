@@ -133,6 +133,30 @@ test("new packages are skipped and moved packages are matched by name", async ()
   );
 });
 
+test("manifests outside the workspace do not conflict with workspace packages", async () => {
+  await withRepository(
+    {
+      "packages/library/package.json": manifest("library", ">=18"),
+      "fixtures/library/package.json": manifest("library", ">=18"),
+    },
+    async (root, run) => {
+      await writeJson(
+        root,
+        "packages/library/package.json",
+        manifest("library", ">=20"),
+      );
+      const result = run();
+      expect(result.exitCode).toBe(1);
+      expect(stderrText(result)).toContain(
+        "library narrows Node support from >=18 to >=20",
+      );
+      expect(stderrText(result)).not.toContain("Duplicate published package name");
+      await writeChangeset(root, "major");
+      expect(run().exitCode).toBe(0);
+    },
+  );
+});
+
 test("a derived platform package is not checked separately", async () => {
   await withRepository(
     {
