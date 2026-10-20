@@ -466,7 +466,9 @@ export default eslintCompatPlugin({
             scope,
             seen: new Set<Variable>(),
           });
-          if (source === null || source.kind !== "expression") return false;
+          // An unstable binding could still refer to a document. Only exclude a
+          // receiver when its stable value proves that it is not a document.
+          if (source === null || source.kind !== "expression") return true;
           const receiver = source.node;
           if (isIdentifier(receiver, "document")) return true;
           if (receiver?.type !== "MemberExpression") return false;

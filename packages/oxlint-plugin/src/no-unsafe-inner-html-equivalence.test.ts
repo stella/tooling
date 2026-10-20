@@ -1155,8 +1155,9 @@ const generatedHtmlSinkCorpus = (): {
   documentMethodIds: string[];
 } => {
   const lines = [
+    'import { document as importedDocument } from "./document";',
     'declare const rawHtml: string;',
-    'declare const config: { write(...values: string[]): void; writeln(...values: string[]): void };',
+    'const config = { write(..._values: string[]) {}, writeln(..._values: string[]) {} };',
     'declare function createElement(type: string, props: object): unknown;',
     'declare function jsx(type: string, props: object): unknown;',
     'declare function jsxs(type: string, props: object): unknown;',
@@ -1237,23 +1238,48 @@ const generatedHtmlSinkCorpus = (): {
       code: `{ let doc = document; doc.${method}(rawHtml); }`,
     });
     addCase({
+      kind: "invalid",
+      label: `${method} treats an unresolved parameter as a document`,
+      code: `{ function render(document: Document) { document.${method}(rawHtml); } }`,
+    });
+    addCase({
+      kind: "invalid",
+      label: `${method} treats an unresolved destructured binding as a document`,
+      code: `{ (({ document }: { document: Document }) => document.${method}(rawHtml))({ document }); }`,
+    });
+    addCase({
+      kind: "invalid",
+      label: `${method} resolves a globalThis document alias`,
+      code: `{ const doc = globalThis.document; doc.${method}(rawHtml); }`,
+    });
+    addCase({
+      kind: "invalid",
+      label: `${method} treats an imported receiver as a document`,
+      code: `importedDocument.${method}(rawHtml);`,
+    });
+    addCase({
       kind: "clean",
       label: `${method} allows static content through a document alias`,
       code: `{ const doc = document; doc.${method}("<p>static</p>"); }`,
     });
     addCase({
-      kind: "clean",
-      label: `${method} leaves a cyclic alias unresolved`,
+      kind: "invalid",
+      label: `${method} treats a cyclic alias as a document`,
       code: `{ const first = second; const second = first; first.${method}(rawHtml); }`,
     });
     addCase({
-      kind: "clean",
-      label: `${method} leaves a reassigned document alias unresolved`,
+      kind: "invalid",
+      label: `${method} treats a reassigned document alias as a document`,
       code: `{ let doc = document; doc = config; doc.${method}(rawHtml); }`,
     });
     addCase({
       kind: "clean",
-      label: `${method} ignores a non-document receiver`,
+      label: `${method} ignores a const plain-object receiver`,
+      code: `{ const logger = { ${method}() {} }; logger.${method}(rawHtml); }`,
+    });
+    addCase({
+      kind: "clean",
+      label: `${method} ignores a stable non-document receiver`,
       code: `config.${method}(rawHtml);`,
     });
   }
@@ -1331,7 +1357,7 @@ test(
     );
     const expectedHtmlSinkInvalidCount =
       REACT_HTML_PROPS.length * htmlSinkFactories.length +
-      DOCUMENT_WRITE_METHODS.size * 3 +
+      DOCUMENT_WRITE_METHODS.size * 9 +
       HTML_ATTRIBUTE_SINKS.length * 2 +
       HTML_ATTRIBUTE_SINKS.filter((sink) => sink.namespaceIndex !== null).length *
         ATTRIBUTE_NAMESPACE_CASES.filter((entry) => entry.kind === "invalid").length;

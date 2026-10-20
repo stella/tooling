@@ -630,7 +630,7 @@ export const SafeApplyStaticInsertAdjacentHtml = (element: Element) =>
   // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
   element.insertAdjacentHTML.apply(element, ["beforeend", "<b>Static</b>"]);
 
-declare const stream: { write: (chunk: string) => void };
+const stream = { write(_chunk: string) {} };
 // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
 stream.write(rawHtml);
 
