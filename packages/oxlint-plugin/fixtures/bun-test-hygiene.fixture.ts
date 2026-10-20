@@ -20,6 +20,7 @@ import {
 
 declare const local: { only: (title: string, fn: () => void) => void };
 declare const config: { only: boolean };
+declare const obj: { only: unknown };
 declare const flag: string | undefined;
 const noop = () => undefined;
 const table = [[1], [2]];
@@ -47,6 +48,10 @@ bt.test.only("namespace focus", noop);
 // chained after a modifier call, and before `.each`
 // oxlint-disable-next-line bun-test-hygiene/no-focused-tests
 test.if(true).only("conditional focus", noop);
+// focus reference retained after a modifier call
+const enabled = test.if(true);
+// oxlint-disable-next-line bun-test-hygiene/no-focused-tests
+enabled.only("aliased conditional focus", noop);
 // oxlint-disable-next-line bun-test-hygiene/no-focused-tests
 test.only.each(table)("focused table %d", noop);
 // oxlint-disable-next-line bun-test-hygiene/no-focused-tests
@@ -58,11 +63,13 @@ focused("aliased focus reference", noop);
 // focus reference passed through another expression
 // oxlint-disable-next-line bun-test-hygiene/no-focused-tests
 [test.only][0]("array focus reference", noop);
-// a local object that is not a test function
-// expect-clean: bun-test-hygiene/no-focused-tests
+// conservative detection rejects every `.only` in a Bun test file
+// oxlint-disable-next-line bun-test-hygiene/no-focused-tests
 local.only("not a test function", noop);
-// expect-clean: bun-test-hygiene/no-focused-tests
+// oxlint-disable-next-line bun-test-hygiene/no-focused-tests
 if (config.only) noop();
+// oxlint-disable-next-line bun-test-hygiene/no-focused-tests, typescript/dot-notation -- the computed form is the case under test
+void obj["only"];
 // expect-clean: bun-test-hygiene/no-focused-tests
 test("plain test", noop);
 

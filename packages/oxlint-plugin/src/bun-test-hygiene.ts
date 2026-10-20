@@ -4,7 +4,9 @@
 // globals, not `bun:test`, so a committed `test.only` or an unexplained
 // `test.skip` in a Bun suite passes lint. These rules resolve each test
 // function through its import (named, aliased, or a namespace member such as
-// `bt.test`) and only consider calls that reach a `bun:test` export.
+// `bt.test`) and only consider calls that reach a `bun:test` export. Focus
+// detection deliberately fails closed: in a Bun test file, every `.only`
+// property access is rejected regardless of the object it belongs to.
 //
 // no-focused-tests
 //   Flagged wherever referenced: test.only, it.only, describe.only,
@@ -502,17 +504,10 @@ export default eslintCompatPlugin({
             ) {
               return;
             }
-            const registration = testFunctionReference(context, node);
-            if (
-              registration === null ||
-              !registration.modifiers.includes(FOCUS_MODIFIER)
-            ) {
-              return;
-            }
             context.report({
               node,
               messageId: "focused",
-              data: { call: describeRegistration(registration) },
+              data: { call: ".only" },
             });
           },
         };
