@@ -19,6 +19,7 @@ import {
 } from "bun:test";
 
 declare const local: { only: (title: string, fn: () => void) => void };
+declare const config: { only: boolean };
 declare const flag: string | undefined;
 const noop = () => undefined;
 const table = [[1], [2]];
@@ -50,9 +51,18 @@ test.if(true).only("conditional focus", noop);
 test.only.each(table)("focused table %d", noop);
 // oxlint-disable-next-line bun-test-hygiene/no-focused-tests
 test.concurrent.only("concurrent focus", noop);
+// focus reference assigned for later use
+// oxlint-disable-next-line bun-test-hygiene/no-focused-tests
+const focused = test.only;
+focused("aliased focus reference", noop);
+// focus reference passed through another expression
+// oxlint-disable-next-line bun-test-hygiene/no-focused-tests
+[test.only][0]("array focus reference", noop);
 // a local object that is not a test function
 // expect-clean: bun-test-hygiene/no-focused-tests
 local.only("not a test function", noop);
+// expect-clean: bun-test-hygiene/no-focused-tests
+if (config.only) noop();
 // expect-clean: bun-test-hygiene/no-focused-tests
 test("plain test", noop);
 

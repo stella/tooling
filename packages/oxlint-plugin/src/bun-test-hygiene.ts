@@ -7,8 +7,8 @@
 // `bt.test`) and only consider calls that reach a `bun:test` export.
 //
 // no-focused-tests
-//   Flagged: test.only(...), it.only(...), describe.only(...), test["only"],
-//            test.only.each(table)(...), test.if(condition).only(...)
+//   Flagged wherever referenced: test.only, it.only, describe.only,
+//            test["only"], test.only.each(table), test.if(condition).only
 //
 // no-disabled-tests
 //   Flagged without a reason comment on the same line or directly above:
@@ -241,6 +241,8 @@ type TestRegistration = {
   modifiers: string[];
 };
 
+type TestFunctionReference = Omit<TestRegistration, "call">;
+
 // A call is the registering one when nothing further chains off it:
 // `test.if(condition)` inside `test.if(condition)("title", fn)` only selects
 // a modifier, and reporting both would count the same test twice.
@@ -258,19 +260,12 @@ const isOutermostCall = (call: AstNode): boolean => {
 // The `bun:test` registration a call performs, following the callee chain
 // through member modifiers (`.only`, `["skip"]`) and modifier calls
 // (`.if(condition)`, `.each(table)`) down to the imported test function.
-const testRegistration = (
+const testFunctionReference = (
   context: ScopeContext,
-  call: unknown,
-): TestRegistration | null => {
-  if (
-    !isAstNode(call) ||
-    call.type !== "CallExpression" ||
-    !isOutermostCall(call)
-  ) {
-    return null;
-  }
+  expression: unknown,
+): TestFunctionReference | null => {
   const modifiers: string[] = [];
-  let current = unwrapExpression(call.callee);
+  let current = unwrapExpression(expression);
   while (current !== null) {
     const binding = resolveImportedExpressionForEnforcement(context, current);
     const kind =
@@ -278,7 +273,7 @@ const testRegistration = (
         ? TEST_FUNCTIONS.get(binding.imported)
         : undefined;
     if (binding !== null && kind !== undefined) {
-      return { call, exportName: binding.imported, kind, modifiers };
+      return { exportName: binding.imported, kind, modifiers };
     }
     if (current.type === "MemberExpression") {
       const modifier = memberPropertyName(current);
@@ -297,10 +292,25 @@ const testRegistration = (
   return null;
 };
 
+const testRegistration = (
+  context: ScopeContext,
+  call: unknown,
+): TestRegistration | null => {
+  if (
+    !isAstNode(call) ||
+    call.type !== "CallExpression" ||
+    !isOutermostCall(call)
+  ) {
+    return null;
+  }
+  const reference = testFunctionReference(context, call.callee);
+  return reference === null ? null : { call, ...reference };
+};
+
 const describeRegistration = ({
   exportName,
   modifiers,
-}: TestRegistration): string => [exportName, ...modifiers].join(".");
+}: TestFunctionReference): string => [exportName, ...modifiers].join(".");
 
 type SourceComment = { range: [number, number]; value: string };
 
@@ -485,8 +495,14 @@ export default eslintCompatPlugin({
           before() {
             return mentionsBunTest(context.sourceCode.text);
           },
-          CallExpression(node) {
-            const registration = testRegistration(context, node);
+          MemberExpression(node) {
+            if (
+              !isAstNode(node) ||
+              memberPropertyName(node) !== FOCUS_MODIFIER
+            ) {
+              return;
+            }
+            const registration = testFunctionReference(context, node);
             if (
               registration === null ||
               !registration.modifiers.includes(FOCUS_MODIFIER)
