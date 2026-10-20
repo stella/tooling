@@ -228,19 +228,19 @@ export default testOnlyPlugin(
         const member = propertyName(node.callee.property);
         if (member === "race" && isNode(node.callee.object)) {
           const binding = resolveBinding(node.callee.object);
-          const firstArgument = Array.isArray(node.arguments)
-            ? node.arguments.at(0)
-            : null;
-          if (
-            binding.type === "global" &&
-            binding.name === "Promise" &&
-            isNode(firstArgument) &&
-            firstArgument.type === "ArrayExpression" &&
-            Array.isArray(firstArgument.elements) &&
-            firstArgument.elements.some(isTimer)
-          )
-            report(node);
-          return;
+          if (binding.type === "global" && binding.name === "Promise") {
+            const firstArgument = Array.isArray(node.arguments)
+              ? node.arguments.at(0)
+              : null;
+            if (
+              isNode(firstArgument) &&
+              firstArgument.type === "ArrayExpression" &&
+              Array.isArray(firstArgument.elements) &&
+              firstArgument.elements.some(isTimer)
+            )
+              report(node);
+            return;
+          }
         }
         const expectCall = matcherExpectCall(node.callee.object);
         if (expectCall === null || !isNode(expectCall.callee)) return;

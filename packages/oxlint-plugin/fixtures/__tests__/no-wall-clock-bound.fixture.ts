@@ -170,6 +170,10 @@ expect(statementTimeoutMs).toBeLessThanOrEqual((idleTimeoutS * 1000) / 2);
 expect(lockTimeoutMs).toBeLessThanOrEqual(statementTimeoutMs);
 
 const races = async () => {
+  // oxlint-disable-next-line no-wall-clock-in-tests/no-wall-clock-in-tests -- fixture
+  const elapsed = Date.now();
+  // oxlint-disable-next-line no-wall-clock-bound/no-wall-clock-bound -- fixture
+  expect(elapsed).race(1);
   // oxlint-disable-next-line no-wall-clock-bound/no-wall-clock-bound, no-real-timer-waits-in-tests/no-real-timer-waits-in-tests -- fixture
   await Promise.race([closed.promise, Bun.sleep(200)]);
   // oxlint-disable-next-line no-wall-clock-bound/no-wall-clock-bound -- fixture
