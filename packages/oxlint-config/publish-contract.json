@@ -9,7 +9,9 @@
   },
   "target": {
     "type": "javascript",
-    "targets": ["node20.19.0"]
+    "targets": [
+      "node20.19.0"
+    ]
   },
   "entryPoints": {
     "type": "module",
@@ -100,11 +102,12 @@
       "stll-consumer-compat": "./dist/consumer-compat-cli.mjs",
       "stll-dependabot": "./dist/dependabot-cli.mjs",
       "stll-publish-contract": "./dist/publish-contract-cli.mjs",
+      "stll-quarantine": "./dist/quarantine-cli.mjs",
       "stll-toolchain-changed": "./dist/toolchain-changed-cli.mjs",
       "stll-toolchain-check": "./dist/toolchain-check-cli.mjs",
       "stll-typecheck-parity": "./dist/typecheck-parity-cli.mjs",
       "stll-typecheck-probe": "./dist/typecheck-probe-cli.mjs",
-      "stll-quarantine": "./dist/quarantine-cli.mjs"
+      "stll-normalize-wasi-loaders": "./dist/wasi-loader-normalizer-cli.mjs"
     }
   }
 }

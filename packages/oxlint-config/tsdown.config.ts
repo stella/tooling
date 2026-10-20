@@ -18,6 +18,7 @@ export default defineConfig({
     "src/typecheck-parity-cli.ts",
     "src/toolchain-changed-cli.ts",
     "src/typecheck-probe-cli.ts",
+    "src/wasi-loader-normalizer-cli.ts",
   ],
   format: ["esm", "cjs"],
   dts: true,

@@ -9,7 +9,11 @@ import {
 } from "./packages/oxlint-plugin/src/index";
 
 export default library({
-  ignorePatterns: ["packages/oxlint-config/dist/"],
+  ignorePatterns: [
+    "packages/oxlint-config/dist/",
+    // Generated loader fixtures preserve upstream source as normalization data.
+    "packages/oxlint-config/src/__fixtures__/wasi-loaders/",
+  ],
   jsPlugins: [
     ...portableSafetyPluginSpecifiers,
     ...routeQueryPluginSpecifiers,
