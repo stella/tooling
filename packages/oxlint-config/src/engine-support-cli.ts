@@ -133,7 +133,12 @@ const pendingMajorReleases = (root: string) => {
     ".changeset/*.md",
   ])
     .split("\n")
-    .filter((file) => file !== "" && file !== ".changeset/README.md");
+    .filter(
+      (file) =>
+        file !== "" &&
+        file !== ".changeset/README.md" &&
+        existsSync(path.join(root, file)),
+    );
   for (const file of files) {
     const source = readFileSync(path.join(root, file), "utf8");
     for (const { name, type } of parseChangeset(source).releases)

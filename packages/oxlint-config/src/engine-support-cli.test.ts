@@ -164,7 +164,13 @@ test("a derived platform package is released by its owner", async () => {
 test("consumed changesets without an engine change pass and git errors fail", async () => {
   await withRepository(
     { "packages/library/package.json": manifest("library", ">=18") },
-    async (_root, run) => {
+    async (root, run) => {
+      await writeChangeset(root, "major");
+      execFileSync("git", ["add", ".changeset/engine.md"], { cwd: root });
+      execFileSync("git", ["commit", "--quiet", "-m", "add changeset"], {
+        cwd: root,
+      });
+      await rm(path.join(root, ".changeset/engine.md"));
       expect(run().exitCode).toBe(0);
       const failure = run("missing-ref");
       expect(failure.exitCode).toBe(1);
