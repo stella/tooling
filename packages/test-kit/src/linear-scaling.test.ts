@@ -101,6 +101,30 @@ describe("expectLinearScaling", () => {
     await assertion.catch(() => {});
     expect(calls.has(4)).toBeFalse();
   });
+
+  test("batches synchronous calls so constant measurement overhead cannot hide quadratic growth", async () => {
+    let work = 0;
+    let clockReads = 0;
+    const calls = new Map<number, number>();
+    const assertion = linearScalingTestInternals.expectLinearScalingWithClock(
+      {
+        sizes: [1, 2, 4],
+        repeats: 3,
+        maxGrowthFactor: 1.5,
+        run: (size) => {
+          calls.set(size, (calls.get(size) ?? 0) + 1);
+          work += size * size;
+        },
+      },
+      {
+        minimumSampleDurationMs: 1_000,
+        now: () => work + clockReads++ * 100,
+      },
+    );
+    expect(assertion).rejects.toThrow(/size 1 .*size 2/u);
+    await assertion.catch(() => {});
+    expect(calls.has(4)).toBeFalse();
+  });
 });
 
 void sink;

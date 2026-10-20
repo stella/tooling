@@ -29,6 +29,7 @@ const functionTypes = new Set([
   "FunctionDeclaration",
   "FunctionExpression",
 ]);
+const matcherModifiers = new Set(["not", "rejects", "resolves"]);
 
 const enclosingFunction = (node: Node): Node | null => {
   let current = node.parent;
@@ -119,6 +120,19 @@ export default testOnlyPlugin(
       return initializer !== null && isClockDifference(initializer);
     };
 
+    const matcherExpectCall = (value: unknown): Node | null => {
+      let current = value;
+      while (
+        isNode(current) &&
+        current.type === "MemberExpression" &&
+        matcherModifiers.has(propertyName(current.property) ?? "")
+      )
+        current = current.object;
+      return isNode(current) && current.type === "CallExpression"
+        ? current
+        : null;
+    };
+
     const containsSetTimeout = (value: unknown): boolean => {
       if (Array.isArray(value)) return value.some(containsSetTimeout);
       if (!isNode(value)) return false;
@@ -180,13 +194,8 @@ export default testOnlyPlugin(
           return;
         }
         if (!comparisonMatchers.has(member ?? "")) return;
-        const expectCall = node.callee.object;
-        if (
-          !isNode(expectCall) ||
-          expectCall.type !== "CallExpression" ||
-          !isNode(expectCall.callee)
-        )
-          return;
+        const expectCall = matcherExpectCall(node.callee.object);
+        if (expectCall === null || !isNode(expectCall.callee)) return;
         const calleeBinding = resolveBinding(expectCall.callee);
         const isExpect =
           (calleeBinding.type === "global" &&

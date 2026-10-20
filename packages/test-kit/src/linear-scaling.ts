@@ -55,7 +55,28 @@ type MeasurementClock = {
   now: () => number;
 };
 
-const measureSample = async (
+const isThenable = (value: unknown): value is PromiseLike<unknown> =>
+  (typeof value === "object" || typeof value === "function") &&
+  value !== null &&
+  "then" in value &&
+  typeof value.then === "function";
+
+const measureSynchronousSample = (
+  run: (size: number) => unknown,
+  size: number,
+  clock: MeasurementClock,
+) => {
+  let calls = 1;
+  for (;;) {
+    const started = clock.now();
+    for (let call = 0; call < calls; call += 1) run(size);
+    const elapsed = clock.now() - started;
+    if (elapsed >= clock.minimumSampleDurationMs) return elapsed / calls;
+    calls *= 2;
+  }
+};
+
+const measureAsynchronousSample = async (
   run: (size: number) => unknown,
   size: number,
   clock: MeasurementClock,
@@ -85,10 +106,16 @@ const expectLinearScalingWithClock = async (
   let previousMedian: number | undefined;
 
   for (const size of sizes) {
-    await run(size);
+    const probe = run(size);
+    const asynchronous = isThenable(probe);
+    if (asynchronous) await probe;
     const samples: number[] = [];
-    for (let repeat = 0; repeat < repeats; repeat += 1)
-      samples.push(await measureSample(run, size, clock));
+    for (let repeat = 0; repeat < repeats; repeat += 1) {
+      const sample = asynchronous
+        ? await measureAsynchronousSample(run, size, clock)
+        : measureSynchronousSample(run, size, clock);
+      samples.push(sample);
+    }
     const currentMedian = median(samples);
     if (!Number.isFinite(currentMedian) || currentMedian <= 0)
       throw new TypeError(
@@ -109,7 +136,11 @@ const expectLinearScalingWithClock = async (
   }
 };
 
-/** Assert relative run-time growth without imposing a machine-speed budget. */
+/**
+ * Assert relative run-time growth without imposing a machine-speed budget.
+ * Async callbacks include per-call await overhead; batch async work inside `run`
+ * when that overhead could obscure the work being measured.
+ */
 export const expectLinearScaling = (
   options: ExpectLinearScalingOptions,
 ): Promise<void> =>

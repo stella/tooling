@@ -20,6 +20,8 @@ const directMeasurement = () => {
   // oxlint-disable-next-line no-wall-clock-bound/no-wall-clock-bound, no-wall-clock-in-tests/no-wall-clock-in-tests -- fixture
   expect(performance.now() - started).toBeLessThan(2000);
   // oxlint-disable-next-line no-wall-clock-bound/no-wall-clock-bound, no-wall-clock-in-tests/no-wall-clock-in-tests -- fixture
+  expect(performance.now() - started).not.toBeGreaterThan(2000);
+  // oxlint-disable-next-line no-wall-clock-bound/no-wall-clock-bound, no-wall-clock-in-tests/no-wall-clock-in-tests -- fixture
   assert(performance.now() - started).toBeCloseTo(10);
 };
 
@@ -31,6 +33,8 @@ const boundMeasurement = () => {
   const elapsed = Date.now() - t0;
   // oxlint-disable-next-line no-wall-clock-bound/no-wall-clock-bound -- fixture
   expect(elapsed).toBeLessThan(20_000);
+  // oxlint-disable-next-line no-wall-clock-bound/no-wall-clock-bound -- fixture
+  expect(elapsed).not.toBeGreaterThanOrEqual(1000);
 };
 
 const otherClocks = () => {
