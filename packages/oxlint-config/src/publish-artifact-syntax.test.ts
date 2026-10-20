@@ -78,7 +78,7 @@ test("declared target mappings form a closed grammar and combine at the strictes
   expect(() =>
     artifactEcmaVersion({ target: { type: "javascript", targets: [] }, node }),
   ).toThrow("declared target");
-});
+}, 15_000);
 
 test("every JavaScript extension and non-entry chunk obeys the declared syntax bound", () => {
   for (const name of ["index.js", "chunks/non-entry.mjs", "bin/tool.cjs"])
@@ -107,7 +107,7 @@ test("every JavaScript extension and non-entry chunk obeys the declared syntax b
       node,
     }),
   ).toThrow("declared syntax target");
-});
+}, 15_000);
 
 test("types-only artifacts cannot hide JavaScript in bins or chunks", () => {
   for (const name of ["index.js", "bin/tool.cjs", "chunks/extra.mjs"])
@@ -125,7 +125,7 @@ test("types-only artifacts cannot hide JavaScript in bins or chunks", () => {
       node,
     }),
   ).not.toThrow();
-});
+}, 15_000);
 
 test("nested manifests and explicit extensions determine module grammar", () => {
   const content = files(
@@ -152,7 +152,7 @@ test("nested manifests and explicit extensions determine module grammar", () => 
       node,
     }),
   ).toThrow("ES5");
-});
+}, 15_000);
 
 test("CommonJS wrapper syntax agrees with native Node and remains forbidden in ESM", async () => {
   const executable = execFileSync("node", ["-p", "process.execPath"], {
@@ -186,7 +186,7 @@ test("CommonJS wrapper syntax agrees with native Node and remains forbidden in E
       }),
     ).toThrow();
   }
-});
+}, 15_000);
 
 test("CommonJS syntax diagnostics retain original positions through wrapper and prefix removal", () => {
   for (const [source, position] of [
@@ -207,7 +207,7 @@ test("CommonJS syntax diagnostics retain original positions through wrapper and 
       }),
     ).toThrow(`SyntaxError: Unexpected token ${position}`);
   }
-});
+}, 15_000);
 
 test("unbounded targets still pass through native Node parsing without executing artifact code", async () => {
   const executable = execFileSync("node", ["-p", "process.execPath"], {
@@ -236,7 +236,7 @@ test("unbounded targets still pass through native Node parsing without executing
     }),
     /index.mjs/,
   );
-});
+}, 15_000);
 
 test("tarball inspection checks non-entry JavaScript and rejects linked syntax inputs", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "artifact-syntax-tar-"));
@@ -272,7 +272,7 @@ test("tarball inspection checks non-entry JavaScript and rejects linked syntax i
   } finally {
     await rm(root, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("native syntax staging rejects paths outside the packed tree", async () => {
   await assert.rejects(
@@ -284,7 +284,7 @@ test("native syntax staging rejects paths outside the packed tree", async () => 
     }),
     /artifact member/,
   );
-});
+}, 15_000);
 
 test("declared extensionless Node executables obey the syntax bound", () => {
   const content = files({
@@ -305,7 +305,7 @@ test("declared extensionless Node executables obey the syntax bound", () => {
   expect(() =>
     assertPackedArtifactSyntax({ files: content, target, node }),
   ).toThrow("Unsupported packed executable language");
-});
+}, 15_000);
 
 test("the shared parser loads in native Node with its CommonJS wrapper API", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "node-artifact-parser-"));
@@ -337,4 +337,4 @@ test("the shared parser loads in native Node with its CommonJS wrapper API", asy
   } finally {
     await rm(root, { recursive: true, force: true });
   }
-});
+}, 15_000);

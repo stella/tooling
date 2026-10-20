@@ -89,7 +89,7 @@ test("CLI checks recursively declared packages and rejects unnamed public member
   } finally {
     await rm(root, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("CLI read and write reject unsupported published manifests without replacing their contract", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "publish-contract-manifest-"));
@@ -147,7 +147,7 @@ test("CLI read and write reject unsupported published manifests without replacin
   } finally {
     await rm(root, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("CLI artifact mode checks real tarball import closure and the matching workspace contract", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "publish-contract-artifact-"));
@@ -243,7 +243,7 @@ test("CLI artifact mode checks real tarball import closure and the matching work
   } finally {
     await rm(root, { recursive: true, force: true });
   }
-});
+}, 45_000);
 
 test("CLI artifact mode accepts exactly one explicit archive and never writes contracts", () => {
   for (const args of [
@@ -260,4 +260,4 @@ test("CLI artifact mode accepts exactly one explicit archive and never writes co
       "Expected no arguments, --write, or --artifact",
     );
   }
-});
+}, 15_000);

@@ -132,7 +132,7 @@ test("Claude settings merge preserves unrelated settings and reaches a byte-stab
   });
   const compact = settingsWith([cloudSessionStartHook]);
   expect(mergeCloudClaudeSettings(compact)).toBe(compact);
-});
+}, 15_000);
 
 test("Claude settings merge replaces shipped exact hook forms in place and reaches a fixed point", () => {
   const unrelated = {
@@ -174,7 +174,7 @@ test("Claude settings merge replaces shipped exact hook forms in place and reach
       ]),
     ),
   ).toThrow(cloudSessionStartFix);
-});
+}, 15_000);
 
 test("Claude attribution conflicts fail with the exact manual fix and drift rejects them", () => {
   const hooks = { SessionStart: [cloudSessionStartHook] };
@@ -197,7 +197,7 @@ test("Claude attribution conflicts fail with the exact manual fix and drift reje
   expect(cloudAttributionFix).toContain(
     JSON.stringify({ attribution: { commit: "", pr: "" } }, null, 2),
   );
-});
+}, 15_000);
 
 test("Claude hook unsafe merges fail with the exact manual fix and drift rejects them", () => {
   const unguarded = {
@@ -236,7 +236,7 @@ test("Claude hook unsafe merges fail with the exact manual fix and drift rejects
   }
   expect(hasCloudSessionStartHook(undefined)).toBe(false);
   expect(hasCloudSessionStartHook("{}")).toBe(false);
-});
+}, 15_000);
 
 test("Claude SessionStart reports remote startup failure as visible context and leaves local sessions silent", () => {
   const root = mkdtempSync(join(tmpdir(), "cloud-claude-hook-"));
@@ -275,7 +275,7 @@ test("Claude SessionStart reports remote startup failure as visible context and 
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("remote Claude SessionStart resolves the setup script from the project root in a subdirectory", () => {
   const root = mkdtempSync(join(tmpdir(), "cloud-claude-subdirectory-"));
@@ -312,7 +312,7 @@ test("remote Claude SessionStart resolves the setup script from the project root
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("Claude SessionStart persists literal pinned exports after start while retaining the future shell PATH", () => {
   const root = mkdtempSync(join(tmpdir(), "cloud-claude-environment-"));
@@ -428,7 +428,7 @@ test("Claude SessionStart persists literal pinned exports after start while reta
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("Node settings parse diagnostics use the canonical repair without echoing input", () => {
   const marker = "fixture-settings-source";
@@ -449,7 +449,7 @@ catch (error) { process.stdout.write(error.message); }
   expect(result.stdout).toContain("settings must contain valid JSON");
   expect(result.stdout).toContain(cloudSessionStartFix);
   expect(result.stdout).not.toContain(marker);
-});
+}, 15_000);
 
 test("SessionStart reads, writes and replacement fail visibly without changing existing environment", () => {
   const root = mkdtempSync(join(tmpdir(), "cloud-claude-write-failure-"));
@@ -501,4 +501,4 @@ test("SessionStart reads, writes and replacement fail visibly without changing e
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, 15_000);

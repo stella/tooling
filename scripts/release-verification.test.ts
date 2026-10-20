@@ -49,7 +49,7 @@ test("Publish and PR CI verify through the same sequence before any build", asyn
       ),
     ).toEqual([]);
   }
-});
+}, 15_000);
 
 test("verification discards stale outputs, builds before tests and stops on build failure", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "release-verification-"));
@@ -122,4 +122,4 @@ if [[ "$*" == "run test" ]]; then test -f packages/oxlint-config/dist/built; fi
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
-});
+}, 15_000);

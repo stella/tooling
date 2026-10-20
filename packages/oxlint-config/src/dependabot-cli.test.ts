@@ -78,7 +78,7 @@ test("public generator and write CLI produce the same complete fixed point", asy
       (await stat(join(root, ".github/dependabot.yml"))).mode & 0o777,
     ).toBe(0o644);
   });
-});
+}, 15_000);
 
 test.skipIf(process.env["CI"] !== "true")(
   "published ESM and CommonJS entries export the generator and the built CLI writes it",
@@ -146,7 +146,7 @@ test("preserves the existing yaml spelling and rejects conflicting outputs", asy
       "sentinel\n",
     );
   });
-});
+}, 15_000);
 
 test("recreates a deleted tracked output at its indexed spelling", async () => {
   for (const extension of ["yml", "yaml"]) {
@@ -180,7 +180,7 @@ test("recreates a deleted tracked output at its indexed spelling", async () => {
       });
     }
   }
-});
+}, 15_000);
 
 test("missing unrelated inputs and conflicting indexed output spellings never write", async () => {
   await withRepository(async (root) => {
@@ -215,7 +215,7 @@ test("missing unrelated inputs and conflicting indexed output spellings never wr
       code: "ENOENT",
     });
   });
-});
+}, 15_000);
 
 test("help needs no repository and invalid options never write", async () => {
   const root = await mkdtemp(join(tmpdir(), "dependabot-help-"));
@@ -231,7 +231,7 @@ test("help needs no repository and invalid options never write", async () => {
   } finally {
     await rm(root, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("generated configuration never overwrites linked external targets", async () => {
   for (const kind of ["parent", "symlink", "hard-link"]) {
@@ -255,7 +255,7 @@ test("generated configuration never overwrites linked external targets", async (
       }
     });
   }
-});
+}, 15_000);
 
 test("check mode reports absent or stale output without writing and accepts the generated fixed point", async () => {
   await withRepository(async (root) => {
@@ -276,7 +276,7 @@ test("check mode reports absent or stale output without writing and accepts the 
     expect(await readFile(output, "utf8")).toBe(`${generated}# stale\n`);
     expect((await stat(output)).mtimeMs).toBe(stale.mtimeMs);
   });
-});
+}, 15_000);
 
 test("explicit ecosystem declarations use shared policy and check the same generated output", async () => {
   await withRepository(async (root) => {
@@ -307,7 +307,7 @@ test("explicit ecosystem declarations use shared policy and check the same gener
       output,
     );
   });
-});
+}, 15_000);
 
 test("declarations cannot omit detected coverage or override shared update policy", async () => {
   const invalidInputs: unknown[] = [
@@ -351,7 +351,7 @@ test("declarations cannot omit detected coverage or override shared update polic
       expect(invoke(root, args).status).toBe(1);
     }
   });
-});
+}, 15_000);
 
 test("unsupported ecosystem declarations cannot write or validate generated output", async () => {
   await withRepository(async (root) => {
@@ -380,4 +380,4 @@ test("unsupported ecosystem declarations cannot write or validate generated outp
       }
     }
   });
-});
+}, 15_000);

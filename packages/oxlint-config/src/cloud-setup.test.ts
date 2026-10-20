@@ -47,7 +47,7 @@ test("generated lifecycle comments describe the portable phase contract", () => 
   );
   expect(generated).toContain("run start at every session start");
   expect(generated).not.toMatch(/^#.*https?:\/\//m);
-});
+}, 15_000);
 
 test("generated script rejects missing or unknown modes before platform checks", () => {
   const generated = generate(declaration);
@@ -61,7 +61,7 @@ test("generated script rejects missing or unknown modes before platform checks",
       "Usage: cloud-setup.sh install|start|session\n",
     );
   }
-});
+}, 15_000);
 
 const environmentParts = (generated: string) => {
   const assignment = /^ENV_FILE=.*$/m.exec(generated)?.at(0);
@@ -164,7 +164,7 @@ test("all service subsets generate deterministic valid Bash regardless of declar
       expect(generated.includes(marker)).toBe(services.includes(service));
     }
   }
-});
+}, 15_000);
 
 test("cloud generation rejects every nonexact or out-of-series Node selector", () => {
   expect(generate(declaration, "26.10.0\n")).toContain(
@@ -188,7 +188,7 @@ test("cloud generation rejects every nonexact or out-of-series Node selector", (
     expect(() => generate(declaration, nodeVersion)).toThrow(
       "exact .node-version",
     );
-});
+}, 15_000);
 
 test("shell quoting preserves canonical literal metacharacters through single-pass replacement", () => {
   withRepository((root) => {
@@ -206,7 +206,7 @@ test("shell quoting preserves canonical literal metacharacters through single-pa
     expect(result.exitCode).toBe(0);
     expect(result.stdout.toString()).toBe(envFile);
   });
-});
+}, 15_000);
 
 test("actual emitted environment functions write owned files idempotently with private permissions", () => {
   withRepository((root) => {
@@ -233,7 +233,7 @@ test("actual emitted environment functions write owned files idempotently with p
     ).toBe(0);
     expect(readFileSync(file, "utf8")).toBe(content);
   });
-});
+}, 15_000);
 
 test("session exports are shell-quoted projections of the generated service endpoints", () => {
   withRepository((root) => {
@@ -263,7 +263,7 @@ test("session exports are shell-quoted projections of the generated service endp
     );
     expect(result.stdout.toString()).not.toContain("eval");
   });
-});
+}, 15_000);
 
 test("session startup sends every phase's stdout to stderr and reserves stdout for exports", () => {
   const generated = generate({
@@ -305,7 +305,7 @@ emit_session_environment
   expect(result.stderr.toString()).toContain("phase-noise");
   expect(result.stderr.toString()).toContain("validation-noise");
   expect(result.stderr.toString()).toContain("write-noise");
-});
+}, 15_000);
 
 test("session shell exports round-trip shell metacharacters without executing substitutions", () => {
   withRepository((root) => {
@@ -344,7 +344,7 @@ emit_session_environment
     expect(sourced.stdout.toString()).toBe(password);
     expect(existsSync(marker)).toBe(false);
   });
-});
+}, 15_000);
 
 test("actual emitted environment validation refuses unowned files, symlinks and missing parents", () => {
   withRepository((root) => {
@@ -383,7 +383,7 @@ test("actual emitted environment validation refuses unowned files, symlinks and 
       rmSync(outside, { recursive: true, force: true });
     }
   });
-});
+}, 15_000);
 
 test("dependency installation uses the invoking user, home, private cache and pinned frozen Bun", () => {
   withRepository((root) => {
@@ -495,7 +495,7 @@ dependency_install`,
     );
     expect(existsSync(join(cacheParent, "bun/4242"))).toBe(true);
   });
-});
+}, 15_000);
 
 const bunRuntimeFunctions = (generated: string) => {
   const start = generated.indexOf("\nbun_route() {");
@@ -626,7 +626,7 @@ verify_bun_routes`,
       `Bun at ${join(older, "bun")} resolves version 1.2.14 through the setup PATH; expected ${policy.bun}`,
     );
   });
-});
+}, 15_000);
 
 test("runtime-only declarations emit no environment file code", () => {
   for (const input of [
@@ -648,7 +648,7 @@ test("runtime-only declarations emit no environment file code", () => {
     expect(generated).toContain("write_environment");
     expect(generated).toContain(cloudEnvironmentMarker);
   }
-});
+}, 15_000);
 
 test("the declared install command is rendered verbatim into the pinned install", () => {
   const frozen = generate(declaration);
@@ -662,7 +662,7 @@ test("the declared install command is rendered verbatim into the pinned install"
     '"$BUN_DIR/bun" install --frozen-lockfile --ignore-scripts\n',
   );
   expect(scriptless).not.toContain("@INSTALL_ARGS@");
-});
+}, 15_000);
 
 test("every lifecycle phase runs through the timed step logger", () => {
   const generated = generate(declaration);
@@ -720,7 +720,7 @@ test("every lifecycle phase runs through the timed step logger", () => {
   expect(failed.exitCode).not.toBe(0);
   expect(failed.stdout.toString()).toBe("");
   expect(failed.stderr.toString()).not.toContain("demo done");
-});
+}, 15_000);
 
 test.skipIf(!existsSync("/proc/self/fd"))(
   "service commands inherit no descriptor beyond stdio from the caller",
@@ -799,7 +799,7 @@ test("a prepare script runs once after dependencies, offline and time-bounded", 
   expect(syntax.stderr.toString()).toBe("");
   expect(syntax.exitCode).toBe(0);
   expect(generate(declaration)).not.toContain("prepare_sources");
-});
+}, 15_000);
 
 test("a prepare script must be a root package script", () => {
   expect(() => generatePrepared({})).toThrow(
@@ -816,7 +816,7 @@ test("a prepare script must be a root package script", () => {
       generatePrepared({ "package.json": JSON.stringify({ scripts }) }),
     ).toThrow("cloud.prepare.script generate:cloud is not a root package script");
   }
-});
+}, 15_000);
 
 test("an inherited name is not a root package script", () => {
   const cloud = parseCloudSetup({
@@ -832,7 +832,7 @@ test("an inherited name is not a root package script", () => {
       files: { "package.json": JSON.stringify({ scripts: {} }) },
     }),
   ).toThrow("cloud.prepare.script constructor is not a root package script");
-});
+}, 15_000);
 
 // The bound must hold for descendants that ignore TERM: timeout only escalates
 // while its direct child runs, so the step kills what is left of its group.

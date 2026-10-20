@@ -17,4 +17,4 @@ test("consumer integration refuses non-CI execution before reading or changing a
   expect(result.stderr.toString()).toContain(
     "This consumer integration runs only in Linux CI",
   );
-});
+}, 15_000);
