@@ -1,5 +1,11 @@
 # @stll/test-kit
 
+## 0.3.0
+
+### Minor Changes
+
+- [#194](https://github.com/stella/tooling/pull/194) [`26c494f`](https://github.com/stella/tooling/commit/26c494f29b3f5ca54c8f5e61285f16f9b607ece6) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Hide inherited proxy variables while the network guard is installed, and add opt-in checked-in artifact regeneration.
+
 ## 0.2.0
 
 ### Minor Changes
