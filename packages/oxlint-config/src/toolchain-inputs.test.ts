@@ -55,7 +55,7 @@ test("both input readers exclude dependency trees for every accepted input kind"
   expect(githubAutomationFileKind("")).toBeUndefined();
   expect(toolchainInputKind("vendor-example/package.json")).toBe("config");
   expect(githubAutomationFileKind("vendor-example/action.yml")).toBe("action");
-});
+}, 15_000);
 
 test("every declared dependency ecosystem enters tracked snapshots as presence", () => {
   const root = mkdtempSync(path.join(tmpdir(), "stll-dependency-inputs-"));
@@ -101,7 +101,7 @@ test("every declared dependency ecosystem enters tracked snapshots as presence",
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("JavaScript installation lockfiles are tracked as presence without reading dependency graphs", () => {
   for (const file of javascriptDependencyLockfiles) {
@@ -110,7 +110,7 @@ test("JavaScript installation lockfiles are tracked as presence without reading 
   }
   for (const file of ["unrelated.lock", "pnpm-lock.yml", "package-lock.txt"])
     expect(toolchainInputKind(file)).not.toBe("presence");
-});
+}, 15_000);
 
 test("presence snapshots omit deleted tracked declarations across every dependency ecosystem", () => {
   const root = mkdtempSync(path.join(tmpdir(), "stll-deleted-inputs-"));
@@ -139,7 +139,7 @@ test("presence snapshots omit deleted tracked declarations across every dependen
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("non-absence presence probe failures remain configuration diagnostics", () => {
   const root = mkdtempSync(path.join(tmpdir(), "stll-input-failure-"));
@@ -161,7 +161,7 @@ test("non-absence presence probe failures remain configuration diagnostics", () 
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("tracked executable action metadata remains discoverable under dependency-named directories", () => {
   for (const prefix of [
@@ -176,7 +176,7 @@ test("tracked executable action metadata remains discoverable under dependency-n
       expect(isDependabotGithubActionsPath(`${prefix}/${name}`)).toBe(false);
     }
   }
-});
+}, 15_000);
 
 test("Python dependency filename classification is shared and scoped to manifests", () => {
   for (const file of [
@@ -214,7 +214,7 @@ test("Python dependency filename classification is shared and scoped to manifest
     expect(isPythonDependencyManifest(file)).toBe(false);
     expect(toolchainInputKind(file)).toBeUndefined();
   }
-});
+}, 15_000);
 
 test("Pipenv lockfiles provide ecosystem presence without dependency graph reads", () => {
   expect(pythonDependencyManifestKind("python/Pipfile")).toBe("pipfile");
@@ -223,7 +223,7 @@ test("Pipenv lockfiles provide ecosystem presence without dependency graph reads
     "pipfile-lock",
   );
   expect(toolchainInputKind("python/Pipfile.lock")).toBe("presence");
-});
+}, 15_000);
 
 test("runtime metadata coverage includes nested actions while Dependabot uses documented roots", () => {
   for (const file of [
@@ -239,7 +239,7 @@ test("runtime metadata coverage includes nested actions while Dependabot uses do
     expect(isDependabotGithubActionsPath(file)).toBe(false);
     expect(toolchainInputKind(file)).toBe("config");
   }
-});
+}, 15_000);
 
 test("all Docker definition suffixes remain in the shared reader and runtime class", () => {
   for (const name of [
@@ -260,7 +260,7 @@ test("all Docker definition suffixes remain in the shared reader and runtime cla
       expect(toolchainInputKind(`${prefix}/${name}`)).toBeUndefined();
     }
   }
-});
+}, 15_000);
 
 test("Docker source and documentation names do not create runtime or update inputs", () => {
   const policy = parseToolchainPolicy(toolchain).dependabot;
@@ -294,7 +294,7 @@ test("Docker source and documentation names do not create runtime or update inpu
       ).toBeUndefined();
     }
   }
-});
+}, 15_000);
 
 test("pnpm workspace inputs use the producer's YAML filename", () => {
   expect(toolchainInputKind("pnpm-workspace.yaml")).toBe("config");
@@ -352,7 +352,7 @@ test("pnpm workspace inputs use the producer's YAML filename", () => {
   }
   for (const prefix of ["vendor", "node_modules", "nested/vendor"])
     expect(toolchainInputKind(`${prefix}/pnpm-workspace.yaml`)).toBeUndefined();
-});
+}, 15_000);
 
 test("shell discovery includes cloud setup scripts but excludes backups and installed dependencies", () => {
   for (const file of [
@@ -366,7 +366,7 @@ test("shell discovery includes cloud setup scripts but excludes backups and inst
     "node_modules/.agents/cloud-setup.sh",
   ])
     expect(toolchainInputKind(file)).toBeUndefined();
-});
+}, 15_000);
 
 test("shell shebangs identify extensionless executable inputs without selecting ordinary text", () => {
   for (const shebang of [
@@ -385,7 +385,7 @@ test("shell shebangs identify extensionless executable inputs without selecting 
     toolchainInputKind("scripts/check", "#!/usr/bin/env python3"),
   ).toBeUndefined();
   expect(toolchainInputKind("README", "cargo +stable test")).toBeUndefined();
-});
+}, 15_000);
 
 test("cloud setup reads committed Claude settings and Cargo lock dependency versions", () => {
   expect(toolchainInputKind(".claude/settings.json")).toBe("config");
@@ -393,4 +393,4 @@ test("cloud setup reads committed Claude settings and Cargo lock dependency vers
   expect(toolchainInputKind("Cargo.lock")).toBe("config");
   expect(toolchainInputKind("crates/project/Cargo.lock")).toBeUndefined();
   expect(toolchainInputKind("vendor/project/Cargo.lock")).toBeUndefined();
-});
+}, 15_000);

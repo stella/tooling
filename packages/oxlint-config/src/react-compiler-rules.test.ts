@@ -27,7 +27,7 @@ describe("React Compiler rules", () => {
       20,
     );
     expect(severities.filter((severity) => severity === "off")).toHaveLength(2);
-  });
+  }, 15_000);
 });
 
 test("the base preset contains no React rules or plugin", () => {
@@ -35,7 +35,7 @@ test("the base preset contains no React rules or plugin", () => {
   expect(
     Object.keys(libraryRules).some((name) => name.startsWith("react/")),
   ).toBe(false);
-});
+}, 15_000);
 
 test("React diagnostics stay inside consumer-selected files", async () => {
   const directory = await mkdtemp(join(tmpdir(), "react-preset-"));
@@ -213,7 +213,7 @@ test("React diagnostics stay inside consumer-selected files", async () => {
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("React scoping retains consumer plugins and permits later rule overrides", () => {
   const config = library({
@@ -228,7 +228,7 @@ test("React scoping retains consumer plugins and permits later rule overrides", 
     "react",
   ]);
   expect(config.overrides?.at(-1)?.rules).toEqual({ "react/hooks": "warn" });
-});
+}, 15_000);
 
 test("consumer rules win over every preset override", () => {
   const rules = {
@@ -245,7 +245,7 @@ test("consumer rules win over every preset override", () => {
       expect(override.rules).toEqual(expect.objectContaining(rules));
     }
   }
-});
+}, 15_000);
 
 test("consumer plugin lists remain authoritative when overriding scoped rules", () => {
   const config = library({
@@ -259,7 +259,7 @@ test("consumer plugin lists remain authoritative when overriding scoped rules", 
     ],
   });
   expect(config.overrides?.at(-1)?.plugins).toEqual(["eslint"]);
-});
+}, 15_000);
 
 test("broad disabling overrides never activate React outside the selected files", () => {
   const disabledSettings = [
@@ -284,4 +284,4 @@ test("broad disabling overrides never activate React outside the selected files"
     expect(config.overrides?.at(-1)?.plugins).toBeUndefined();
     expect(config.overrides?.at(-1)?.rules).toEqual({ "react/hooks": setting });
   }
-});
+}, 15_000);

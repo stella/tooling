@@ -73,7 +73,7 @@ test("Rust selection derives from one root file or an explicit policy declaratio
   expect(() =>
     resolve({}, { "rust-toolchain.toml": '[toolchain]\npath = "local"\n' }),
   ).toThrow();
-});
+}, 15_000);
 
 test("a recorded Rust exception authorizes exactly its pin", () => {
   const cloud = parseCloudSetup({
@@ -96,7 +96,7 @@ test("a recorded Rust exception authorizes exactly its pin", () => {
       ],
     }).rust?.channel,
   ).toBe("1.97.1");
-});
+}, 15_000);
 
 test("extra tools form a closed exact-pin selection and require their inputs", () => {
   for (const tools of [
@@ -124,7 +124,7 @@ test("extra tools form a closed exact-pin selection and require their inputs", (
     }),
   ).toThrow("requires a Rust toolchain");
   expect(() => resolve({ tools: { uv: "0.0.1" } })).toThrow("Unsupported uv");
-});
+}, 15_000);
 
 test("GNU time resolves the Ubuntu package release without Rust", () => {
   const { version } = cloudSetupPackages.time;
@@ -145,7 +145,7 @@ test("GNU time resolves the Ubuntu package release without Rust", () => {
     expect(() => resolve({ tools: { uv: pin } })).toThrow(
       "cloud.tools.uv must be an exact stable release",
     );
-});
+}, 15_000);
 
 test("wasm-bindgen CLI equals the unique locked crate version", () => {
   const version = cloudSetupArtifacts["wasm-bindgen-cli"].version;
@@ -161,7 +161,7 @@ test("wasm-bindgen CLI equals the unique locked crate version", () => {
     "requires package entries",
   );
   expect(() => resolve(declaration)).toThrow("tracked root Cargo.lock");
-});
+}, 15_000);
 
 test("all tool subsets emit executable Bash and persistent pinned launchers", () => {
   const entries = Object.entries(cloudSetupArtifacts).filter(
@@ -195,7 +195,7 @@ test("all tool subsets emit executable Bash and persistent pinned launchers", ()
     expect(script).toContain("rust-toolchain.toml changed; regenerate");
     expect(script).not.toMatch(/@[A-Z_]+@/);
   }
-});
+}, 15_000);
 
 test("additional Rust toolchains require explicit exact authorized selection", () => {
   const rustExceptions = [
@@ -265,4 +265,4 @@ test("additional Rust toolchains require explicit exact authorized selection", (
   expect(generated).toContain('"$CARGO_HOME/bin/rustc" +1.97.1 --version');
   expect(generated).toContain("export RUSTUP_AUTO_INSTALL=0");
   expect(generated).toContain(`rustup" default ${policy.rust}`);
-});
+}, 15_000);

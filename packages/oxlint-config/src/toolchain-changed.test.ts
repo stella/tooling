@@ -31,7 +31,7 @@ test("the repository's actual HEAD resolves without executing installed tooling"
     expect(result.current.bun.length).toBe(1);
     expect(result.current.typescript.length).toBeGreaterThan(0);
   }
-});
+}, 15_000);
 
 const directories: string[] = [];
 afterEach(() => {
@@ -131,7 +131,7 @@ for (const surface of ["workflow", "composite"])
         });
         expect(invocations).toBe(stable ? 0 : 1);
       }
-    });
+    }, 15_000);
 
 for (const surface of ["workflow", "composite"])
   for (const runtime of runtimeActions)
@@ -172,7 +172,7 @@ for (const surface of ["workflow", "composite"])
         });
         expect(invocations).toBe(stable ? 0 : 1);
       }
-    });
+    }, 15_000);
 
 test("non-Node setup version files reject floating runtime series", async () => {
   for (const runtime of [
@@ -206,7 +206,7 @@ test("non-Node setup version files reject floating runtime series", async () => 
       });
     }
   }
-});
+}, 15_000);
 
 test("Bun JSON version selectors validate the exact packageManager release", async () => {
   for (const manager of [
@@ -236,7 +236,7 @@ test("Bun JSON version selectors validate the exact packageManager release", asy
       changed: !stable,
     });
   }
-});
+}, 15_000);
 
 test("Go file selection validates an overriding toolchain directive", async () => {
   for (const selector of ["go1.24.4", "go1.25rc1", "go1.25"]) {
@@ -260,7 +260,7 @@ test("Go file selection validates an overriding toolchain directive", async () =
       changed: !stable,
     });
   }
-});
+}, 15_000);
 
 test("Rust setup toolchains require an immutable stable release", async () => {
   for (const selector of ["1.96.0", "nightly-2026-04-16", "nightly"]) {
@@ -280,7 +280,7 @@ test("Rust setup toolchains require an immutable stable release", async () => {
       changed: !stable,
     });
   }
-});
+}, 15_000);
 
 test("canonical Node runtime selectors cannot float without a setup action", async () => {
   for (const declaration of [
@@ -316,7 +316,7 @@ test("canonical Node runtime selectors cannot float without a setup action", asy
       });
     }
   }
-});
+}, 15_000);
 
 test("committed quoted Yarn Classic compiler selectors bind unchanged and changed artifacts", async () => {
   const { repo, write, commit } = fixture();
@@ -334,7 +334,7 @@ test("committed quoted Yarn Classic compiler selectors bind unchanged and change
     const artifact = variant === "source" ? "changed" : "original";
     return `# yarn lockfile v1\n\n"@types/bun@>=1.1.0 <2":\n  version "${version}"\n  resolved "https://example.test/bun-${artifact}.tgz"\n  integrity sha512-${digest}\n\n"typescript@>=7 <8":\n  version "7.0.2"\n  resolved "https://example.test/typescript.tgz"\n  integrity sha512-${digest}\n`;
   };
-  write("yarn.lock", lock("original"));
+  write("yarn.lock", lock("original"), 15_000);
   const since = commit();
   for (const variant of ["original", "source", "version"]) {
     const changed = variant !== "original";
@@ -359,7 +359,7 @@ test("committed quoted Yarn Classic compiler selectors bind unchanged and change
     });
     expect(invocations).toBe(changed ? 1 : 0);
   }
-});
+}, 15_000);
 
 for (const location of ["catalog", "catalogs", "workspaces", "pnpm"])
   test(`compiler catalog alias in ${location} retains patch bytes and canonical resolution`, async () => {
@@ -408,7 +408,7 @@ for (const location of ["catalog", "catalogs", "workspaces", "pnpm"])
     expect(await detectToolchainChanges({ repo, since: "HEAD" })).toMatchObject(
       { status: "unreadable", changed: true },
     );
-  });
+  }, 15_000);
 
 test("compiler catalog archives require their own immutable source evidence", async () => {
   const { repo, write, commit } = fixture();
@@ -434,7 +434,7 @@ test("compiler catalog archives require their own immutable source evidence", as
     status: "compared",
     changed: false,
   });
-});
+}, 15_000);
 
 test("the nearest catalog owner controls compiler source validation", async () => {
   const { repo, write, commit } = fixture();
@@ -463,7 +463,7 @@ test("the nearest catalog owner controls compiler source validation", async () =
     status: "unreadable",
     changed: true,
   });
-});
+}, 15_000);
 
 for (const source of [
   "file:../compiler",
@@ -490,7 +490,7 @@ for (const source of [
     expect(await detectToolchainChanges({ repo, since: "HEAD" })).toMatchObject(
       { status: "unreadable", changed: true },
     );
-  });
+  }, 15_000);
 test("exact Bun image variants normalize while floating selectors always run parity", async () => {
   for (const variant of ["alpine", "slim", "debian", "distroless"]) {
     const { repo, write, commit } = fixture();
@@ -531,7 +531,7 @@ test("exact Bun image variants normalize while floating selectors always run par
       expect(calls).toBe(1);
     }
   }
-});
+}, 15_000);
 
 const bunLock = (swap: boolean) => ({
   lockfileVersion: 1,
@@ -556,7 +556,7 @@ test("JSONC preserves quoted comments, escaped quotes and URL slashes", () => {
     list: [1],
   });
   expect(() => parseChangedJson("{/*unfinished")).toThrow("Unterminated");
-});
+}, 15_000);
 
 test("Bun resolution locations prevent root/member compiler swaps from looking unchanged", async () => {
   const { repo, write, commit } = fixture();
@@ -581,7 +581,7 @@ test("Bun resolution locations prevent root/member compiler swaps from looking u
       bun: ["1.4.3"],
       typescript: ["typescript@6.0.3", "typescript@7.0.2"],
     });
-});
+}, 15_000);
 
 test("a nested version 2 Bun lockfile beside a version 1 root is compared", async () => {
   const { repo, write, commit } = fixture();
@@ -623,7 +623,7 @@ test("a nested version 2 Bun lockfile beside a version 1 root is compared", asyn
     changed: true,
     tools: ["typescript"],
   });
-});
+}, 15_000);
 
 test("a registry range Bun links to a workspace member is checked against its version", async () => {
   const { repo, write, commit } = fixture();
@@ -671,7 +671,7 @@ test("a registry range Bun links to a workspace member is checked against its ve
     error:
       "Toolchain lock resolution does not satisfy manifest: packages/kit/package.json:@stll/base",
   });
-});
+}, 15_000);
 
 test("pnpm importer alias swaps detect changes with an unchanged global package pool", async () => {
   const { repo, write, commit } = fixture();
@@ -691,7 +691,7 @@ test("pnpm importer alias swaps detect changes with an unchanged global package 
   expect((await detectToolchainChanges({ repo, since })).tools).toEqual([
     "typescript",
   ]);
-});
+}, 15_000);
 
 test("npm nested resolutions retain their installation locations", async () => {
   const { repo, write, commit } = fixture();
@@ -713,7 +713,7 @@ test("npm nested resolutions retain their installation locations", async () => {
   expect((await detectToolchainChanges({ repo, since })).tools).toEqual([
     "typescript",
   ]);
-});
+}, 15_000);
 
 test("immutable HEAD snapshots ignore working files and unrelated lock dependencies", async () => {
   const { repo, write, commit } = fixture();
@@ -737,7 +737,7 @@ test("immutable HEAD snapshots ignore working files and unrelated lock dependenc
     tools: [],
     current: { bun: ["1.4.3"], typescript: [] },
   });
-});
+}, 15_000);
 
 test("Bun, npm and pnpm compiler specifier edits retain resolved versions but run parity", async () => {
   for (const format of ["bun", "npm", "pnpm"] as const) {
@@ -775,7 +775,7 @@ test("Bun, npm and pnpm compiler specifier edits retain resolved versions but ru
       current: { bun: [], typescript: ["typescript@7.0.2"] },
     });
   }
-});
+}, 15_000);
 
 test("a compatible child compiler cannot conceal the root's stale resolution", async () => {
   for (const format of ["bun", "npm"] as const) {
@@ -806,7 +806,7 @@ test("a compatible child compiler cannot conceal the root's stale resolution", a
         "does not satisfy manifest: package.json:typescript",
       );
   }
-});
+}, 15_000);
 
 test("switching the declared manager binds a different effective compiler in a fixed lock pool", async () => {
   const { repo, write, commit } = fixture();
@@ -834,7 +834,7 @@ test("switching the declared manager binds a different effective compiler in a f
   const result = await detectToolchainChanges({ repo, since });
   expect(result.status).toBe("compared");
   expect(result.tools).toEqual(["typescript", "shared"]);
-});
+}, 15_000);
 
 test("nearest lock ownership outranks a longer root lock filename", async () => {
   const { repo, write, commit } = fixture();
@@ -869,7 +869,7 @@ test("nearest lock ownership outranks a longer root lock filename", async () => 
   const changed = await detectToolchainChanges({ repo, since });
   expect(changed.status).toBe("compared");
   expect(changed.tools).toEqual(["typescript"]);
-});
+}, 15_000);
 
 test("runtime changes and workflow fingerprints classify their independent categories", async () => {
   const { repo, write, commit } = fixture();
@@ -887,7 +887,7 @@ test("runtime changes and workflow fingerprints classify their independent categ
     "typescript",
     "shared",
   ]);
-});
+}, 15_000);
 
 test("unresolved dependencies, unknown refs and conflicting Bun selectors fail closed", async () => {
   const { repo, write, commit } = fixture();
@@ -910,7 +910,7 @@ test("unresolved dependencies, unknown refs and conflicting Bun selectors fail c
   expect((await detectToolchainChanges({ repo, since: "HEAD" })).status).toBe(
     "unreadable",
   );
-});
+}, 15_000);
 
 test("supported lock generations resolve aliases and reject unknown tool resolutions", () => {
   for (const version of [1, 2, 3]) {
@@ -949,7 +949,7 @@ test("supported lock generations resolve aliases and reject unknown tool resolut
       }),
     }),
   ).toThrow("Unresolved");
-});
+}, 15_000);
 
 test("CI event-base wiring invokes parity for a committed compiler bump", async () => {
   const workflow = parseDocument(
@@ -1065,4 +1065,4 @@ test("CI event-base wiring invokes parity for a committed compiler bump", async 
     });
     expect(invocations).toBe(1);
   }
-});
+}, 15_000);

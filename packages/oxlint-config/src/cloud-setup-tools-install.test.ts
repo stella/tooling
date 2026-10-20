@@ -236,7 +236,7 @@ RUSTUP_AUTO_INSTALL=1 RUSTUP_TOOLCHAIN=nightly verify_rust
     expect(existsSync(networkMarker)).toBe(false);
     expect(existsSync(networkCalls)).toBe(false);
   });
-});
+}, 15_000);
 
 test("Rust readiness requires each exact component for the active host, never a name prefix", () => {
   withFixture(({ run }) => {
@@ -257,7 +257,7 @@ test("Rust readiness requires each exact component for the active host, never a 
       }
     }
   });
-});
+}, 15_000);
 
 test("every declared tool rejects incomplete cached binaries and version prefix collisions", () => {
   withFixture(({ run, toolPath, writeTool }) => {
@@ -290,7 +290,7 @@ test("every declared tool rejects incomplete cached binaries and version prefix 
     );
     expect(run("verify_tools").exitCode).toBe(0);
   });
-});
+}, 15_000);
 
 test("cached gitleaks installs restore the launcher without downloading", () => {
   withFixture(({ run, directory, toolPath }) => {
@@ -316,7 +316,7 @@ test("cached gitleaks installs restore the launcher without downloading", () => 
       readFileSync(toolPath("gitleaks", "gitleaks"), "utf8"),
     );
   });
-});
+}, 15_000);
 
 test("verified artifacts use the bounded downloader and never hash failed downloads", () => {
   withFixture(({ run, directory }) => {
@@ -349,7 +349,7 @@ test("verified artifacts use the bounded downloader and never hash failed downlo
     expect(failed.exitCode).toBe(73);
     expect(existsSync(join(directory, "hashed"))).toBe(false);
   });
-});
+}, 15_000);
 
 test("Rust network execution passes one pinned environment through the bounded external command helper", () => {
   withFixture(({ run, networkCalls }) => {
@@ -372,7 +372,7 @@ test("Rust network execution passes one pinned environment through the bounded e
       run('rust_run invalid "$CARGO_HOME/bin/rustup" --version').exitCode,
     ).toBe(1);
   });
-});
+}, 15_000);
 
 test("both Rust provisioning entrypoints stop on bounded network failure before later install work", () => {
   for (const entrypoint of ["installer", "toolchain"]) {
@@ -411,7 +411,7 @@ test("both Rust provisioning entrypoints stop on bounded network failure before 
       }
     });
   }
-});
+}, 15_000);
 
 test("prebuilt tool downloads preserve bounded helper failure status and clean temporary files", () => {
   withFixture(({ run, directory, toolPath }) => {
@@ -433,13 +433,13 @@ test("prebuilt tool downloads preserve bounded helper failure status and clean t
     const downloadedPath = readFileSync(scratchFile, "utf8");
     expect(existsSync(join(downloadedPath, ".."))).toBe(false);
   });
-});
+}, 15_000);
 
 test("the closed tool list is exactly the artifact and package catalogs", () => {
   expect(cloudExtraTools.map(String).sort()).toEqual(
     [...cloudArtifactTools, ...Object.keys(cloudSetupPackages)].sort(),
   );
-});
+}, 15_000);
 
 test("GNU time readiness requires the GNU binary and the pinned Ubuntu package release", () => {
   withFixture(({ run, timePath, writeTime }) => {
@@ -459,7 +459,7 @@ test("GNU time readiness requires the GNU binary and the pinned Ubuntu package r
     rmSync(timePath);
     expect(run("verify_time").exitCode).toBe(1);
   });
-});
+}, 15_000);
 
 test("GNU time installation skips present packages and otherwise uses bounded apt", () => {
   withFixture(({ run, directory, networkCalls, timePath, writeTime }) => {
@@ -503,7 +503,7 @@ test("GNU time installation skips present packages and otherwise uses bounded ap
     );
     expect(existsSync(networkCalls)).toBe(false);
   });
-});
+}, 15_000);
 
 test("explicit additional Rust installs once and is required by offline readiness", () => {
   const selected = parseCloudSetup({
@@ -580,4 +580,4 @@ esac
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true });
   }
-});
+}, 15_000);

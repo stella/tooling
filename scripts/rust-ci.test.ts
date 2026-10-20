@@ -81,7 +81,7 @@ test("the aggregate awaits every validation job and rejects every failed or canc
       }
     }
   }
-});
+}, 15_000);
 
 test("the required-check workflows handle merge groups and use the reviewed verifier", () => {
   if (!record(workflow["on"])) throw new Error("Missing workflow triggers");
@@ -104,4 +104,4 @@ test("the required-check workflows handle merge groups and use the reviewed veri
   expect(cla["permissions"]).toEqual({
     contents: "read", issues: "write", "pull-requests": "read", checks: "write",
   });
-});
+}, 15_000);

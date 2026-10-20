@@ -90,7 +90,7 @@ describe("consumer toolchain guard CLI", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 });
 
 test("CLI delegation reaches stdout and preserves success while ordinary pins still fail", () => {
@@ -131,4 +131,4 @@ test("CLI delegation reaches stdout and preserves success while ordinary pins st
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, 15_000);

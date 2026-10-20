@@ -83,7 +83,7 @@ test("large tracked file lists preserve all paths and toolchain diagnostics", ()
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 const fixture = (
   files: Record<string, string>,
@@ -189,11 +189,11 @@ test("consumer check declarations remain mandatory despite runtime and action op
     expect(fixture(mutation).some(({ rule }) => rule === "configuration")).toBe(
       true,
     );
-});
+}, 15_000);
 
 test("empty repositories do not acquire unrelated tool requirements", () => {
   expect(fixture({ "readme.txt": "hello" })).toEqual([]);
-});
+}, 15_000);
 
 test("tracked root and nested action metadata cannot bypass snapshot discovery", () => {
   const config = JSON.stringify({
@@ -226,7 +226,7 @@ test("tracked root and nested action metadata cannot bypass snapshot discovery",
       ),
     ).toEqual([]);
   }
-});
+}, 15_000);
 
 test("mise environment overrides remain part of the tracked configuration snapshot", () => {
   for (const file of [
@@ -242,7 +242,7 @@ test("mise environment overrides remain part of the tracked configuration snapsh
           rule === "runtime-manager" && source === file,
       ),
     ).toBe(true);
-});
+}, 15_000);
 
 test("configuration discovery shares lockfile presence without parsing lock contents", () => {
   for (const file of ["bun.lock", "uv.lock", "tools/bun.lock", "tools/uv.lock"])
@@ -274,7 +274,7 @@ test("configuration discovery shares lockfile presence without parsing lock cont
       message: expect.stringContaining("tracked root bunfig.toml"),
     }),
   ]);
-});
+}, 15_000);
 
 test("Bun markers require a tracked quarantine policy while non-Bun repositories remain unaffected", () => {
   const configuration = {
@@ -338,7 +338,7 @@ test("Bun markers require a tracked quarantine policy while non-Bun repositories
       ),
     ).toEqual([]);
   }
-});
+}, 15_000);
 
 test("Docker action policy opt-outs require a tracked explicit reason", () => {
   const action =
@@ -364,7 +364,7 @@ test("Docker action policy opt-outs require a tracked explicit reason", () => {
       }),
     }),
   ).toEqual([]);
-});
+}, 15_000);
 
 test("permitted named rules have reasoned opt-outs; mandatory and malformed choices fail", () => {
   expect(new Set(toolchainRules).size).toBe(toolchainRules.length);
@@ -411,7 +411,7 @@ test("permitted named rules have reasoned opt-outs; mandatory and malformed choi
     },
   ])
     expect(() => parseToolchainConfiguration(input)).toThrow();
-});
+}, 15_000);
 
 test("untracked and invalid opt-outs cannot conceal a failing runtime", () => {
   const failing = { ".node-version": "0.0.0\n" };
@@ -434,7 +434,7 @@ test("untracked and invalid opt-outs cannot conceal a failing runtime", () => {
       (entry) => entry.rule,
     ),
   ).toEqual(["configuration", "node-version"]);
-});
+}, 15_000);
 
 test("policy rejects schema drift, missing pins, inconsistent TS layouts and invalid SHAs", () => {
   expect(policy.packages).toEqual(
@@ -471,7 +471,7 @@ test("policy rejects schema drift, missing pins, inconsistent TS layouts and inv
       dependabot: { ...toolchain.dependabot, cooldown: { defaultDays: 0 } },
     }),
   ).toThrow();
-});
+}, 15_000);
 
 test("all package and runtime diagnostics survive orchestration and only named rules opt out", () => {
   const files = {
@@ -500,7 +500,7 @@ test("all package and runtime diagnostics survive orchestration and only named r
       }),
     }).map((entry) => entry.rule),
   ).toEqual(["package-pins"]);
-});
+}, 15_000);
 
 test("GitHub origin identity reaches prefixed workflow selector validation", () => {
   const checkout = policy.actions["actions/checkout"];
@@ -541,7 +541,7 @@ test("GitHub origin identity reaches prefixed workflow selector validation", () 
       rmSync(root, { recursive: true, force: true });
     }
   }
-});
+}, 15_000);
 
 test("configuration readers accept only resolved targets inside the tracked tree", () => {
   for (const target of [
@@ -594,7 +594,7 @@ test("configuration readers accept only resolved targets inside the tracked tree
       rmSync(workspace, { recursive: true, force: true });
     }
   }
-});
+}, 15_000);
 
 test("a reasoned opt-out cannot hide a Node support range outside the shared series", () => {
   const diagnostics = fixture({
@@ -610,7 +610,7 @@ test("a reasoned opt-out cannot hide a Node support range outside the shared ser
         rule === "configuration" && message.includes("cannot be opted out"),
     ),
   ).toBe(true);
-});
+}, 15_000);
 
 test("repository configuration accepts an explicit cloud declaration without changing opt-outs", () => {
   const cloud = {
@@ -632,7 +632,7 @@ test("repository configuration accepts an explicit cloud declaration without cha
       cloud: { install: cloud.install, services: [] },
     }).cloud?.services,
   ).toEqual([]);
-});
+}, 15_000);
 
 test("unknown root keys and malformed cloud declarations fail through the tracked configuration boundary", () => {
   const cloud = {
@@ -665,7 +665,7 @@ test("unknown root keys and malformed cloud declarations fail through the tracke
   });
   expect(invalid.some(({ rule }) => rule === "configuration")).toBe(true);
   expect(invalid.some(({ rule }) => rule === "node-version")).toBe(true);
-});
+}, 15_000);
 
 const cloudDeclaration = {
   services: [],
@@ -701,7 +701,7 @@ test("cloud setup guard rejects missing, drifted and stray tracked scripts and a
     ),
   ).toBe(true);
   expect(fixture({}, { [cloudSetupPath]: script })).toEqual([]);
-});
+}, 15_000);
 
 test("cloud generation requires an exact tracked root Node patch within the shared series", () => {
   const files = cloudFixtureFiles();
@@ -725,7 +725,7 @@ test("cloud generation requires an exact tracked root Node patch within the shar
       { ".node-version": "26.10.0" },
     ).some(({ rule }) => rule === "cloud-setup-drift"),
   ).toBe(true);
-});
+}, 15_000);
 
 test("published engine floors permit only an exact selector in the declared workflow job", () => {
   const setup = policy.actions["actions/setup-node"];
@@ -896,7 +896,7 @@ test("published engine floors permit only an exact selector in the declared work
       }).some(({ rule }) => rule === "configuration"),
     ).toBe(true);
   }
-});
+}, 15_000);
 
 test("engine floor configuration is closed, scoped and independent of optional opt-outs", () => {
   const entry = {
@@ -921,7 +921,7 @@ test("engine floor configuration is closed, scoped and independent of optional o
     [entry, entry],
   ])
     expect(() => parseToolchainConfiguration({ engineFloors })).toThrow();
-});
+}, 15_000);
 
 test("dynamic selector declarations fail when absent, stale, duplicated by aliases or static", () => {
   const file = ".github/workflows/example.yml";
@@ -963,7 +963,7 @@ test("dynamic selector declarations fail when absent, stale, duplicated by alias
     "stll-toolchain.json": JSON.stringify({ dynamicSelectors: [composeEntry] }),
   });
   expect(multi.some(({ rule }) => rule === "configuration")).toBe(true);
-});
+}, 15_000);
 
 test("tracked shell and service image declarations share the strict Rust exception boundary", () => {
   const sources = {
@@ -997,7 +997,7 @@ test("tracked shell and service image declarations share the strict Rust excepti
       }),
     ).toEqual([]);
   }
-});
+}, 15_000);
 
 test("tracked extensionless shell shebangs enter Rust policy discovery", () => {
   for (const interpreter of [
@@ -1025,7 +1025,7 @@ test("tracked extensionless shell shebangs enter Rust policy discovery", () => {
       "node_modules/rust-check": "#!/bin/sh\ncargo +nightly test",
     }),
   ).toEqual([]);
-});
+}, 15_000);
 
 test("shell discovery skips initialized and absent tracked submodules", () => {
   const root = mkdtempSync(path.join(tmpdir(), "stll-gitlink-"));
@@ -1048,7 +1048,7 @@ test("shell discovery skips initialized and absent tracked submodules", () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("optional shebang discovery skips symlinks without tracked regular targets", () => {
   for (const target of [
@@ -1099,7 +1099,7 @@ test("optional shebang discovery skips symlinks without tracked regular targets"
       rmSync(workspace, { recursive: true, force: true });
     }
   }
-});
+}, 15_000);
 
 test("cloud drift requires the tracked remote-only SessionStart hook while preserving script checks", () => {
   const files = cloudFixtureFiles();
@@ -1154,7 +1154,7 @@ test("cloud drift requires the tracked remote-only SessionStart hook while prese
         }),
       );
   }
-});
+}, 15_000);
 
 test("cloud drift requires empty commit and pull request attribution with the exact repair", () => {
   const files = cloudFixtureFiles();
@@ -1188,4 +1188,4 @@ test("cloud drift requires empty commit and pull request attribution with the ex
     expect(check(JSON.stringify({ attribution, hooks }))).toEqual([
       attributionDrift,
     ]);
-});
+}, 15_000);

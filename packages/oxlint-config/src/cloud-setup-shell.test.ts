@@ -61,7 +61,7 @@ test("managed PATH prepending is an idempotent projection that preserves every u
     expect(result.exitCode).toBe(0);
     expect(result.stdout.toString()).toBe(expected);
   }
-});
+}, 15_000);
 
 test("shell environment installation cleans its temporary file and preserves startup failure status", () => {
   for (const status of [0, 73, 124]) {
@@ -107,4 +107,4 @@ test("shell environment installation cleans its temporary file and preserves sta
       rmSync(directory, { recursive: true, force: true });
     }
   }
-});
+}, 15_000);

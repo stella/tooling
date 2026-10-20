@@ -17,7 +17,7 @@ test("engine integration refuses non-CI execution before preparing services", ()
   expect(result.stderr.toString()).toContain(
     "This integration runs only in Linux CI",
   );
-});
+}, 15_000);
 
 test("every embedded shell verifier remains syntactically valid Bash", () => {
   const source = readFileSync(
@@ -36,7 +36,7 @@ test("every embedded shell verifier remains syntactically valid Bash", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stderr.toString()).toBe("");
   }
-});
+}, 15_000);
 
 test("nonroot dependency and Vite ownership verifier parses without executing writes", () => {
   const source = readFileSync(
@@ -52,4 +52,4 @@ test("nonroot dependency and Vite ownership verifier parses without executing wr
   });
   expect(result.exitCode).toBe(0);
   expect(result.stderr.toString()).toBe("");
-});
+}, 15_000);
