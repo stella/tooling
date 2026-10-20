@@ -68,19 +68,33 @@ const relativeMeasurements = () => {
   const elapsed = performance.now() - started;
   // expect-clean: no-wall-clock-bound/no-wall-clock-bound
   expect(elapsed).toBeLessThan(baselineElapsed * 2);
+  // oxlint-disable-next-line no-wall-clock-bound/no-wall-clock-bound -- fixture
+  expect(elapsed).toBeWithin(baselineElapsed, 1000);
+  // expect-clean: no-wall-clock-bound/no-wall-clock-bound
+  expect(elapsed).toBeWithin(baselineElapsed, elapsed);
+  // expect-clean: no-wall-clock-bound/no-wall-clock-bound
+  expect(elapsed).not.toBeWithin(baselineElapsed, elapsed);
+  // expect-clean: no-wall-clock-bound/no-wall-clock-bound
+  expect(elapsed).toBeCloseTo(baselineElapsed, 2);
+  // oxlint-disable-next-line no-wall-clock-bound/no-wall-clock-bound -- fixture
+  expect(elapsed).toUseCustomBound(baselineElapsed);
 
   // oxlint-disable-next-line no-wall-clock-in-tests/no-wall-clock-in-tests -- fixture
   const smallStart = performance.now();
   run();
   // oxlint-disable-next-line no-wall-clock-in-tests/no-wall-clock-in-tests -- fixture
   const small = performance.now();
+  const smallElapsed = small - smallStart;
   // oxlint-disable-next-line no-wall-clock-in-tests/no-wall-clock-in-tests -- fixture
   const largeStart = performance.now();
   run();
   // oxlint-disable-next-line no-wall-clock-in-tests/no-wall-clock-in-tests -- fixture
   const large = performance.now();
+  const largeElapsed = large - largeStart;
   // expect-clean: no-wall-clock-bound/no-wall-clock-bound
-  expect(large - largeStart).toBeLessThan((small - smallStart) * 10);
+  expect(largeElapsed).toBeLessThan(smallElapsed * 10);
+  // expect-clean: no-wall-clock-bound/no-wall-clock-bound
+  expect(elapsed).toBeWithin(smallElapsed, largeElapsed);
 };
 
 const otherClocks = () => {

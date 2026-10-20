@@ -9,14 +9,16 @@ import {
   type Node,
 } from "./test-rule-utils";
 
-const comparisonMatchers = new Set([
-  "toBeCloseTo",
-  "toBeGreaterThan",
-  "toBeGreaterThanOrEqual",
-  "toBeLessThan",
-  "toBeLessThanOrEqual",
-  "toBeWithin",
-]);
+const comparisonMatcherBoundPositions: Readonly<
+  Record<string, readonly number[]>
+> = {
+  toBeCloseTo: [0],
+  toBeGreaterThan: [0],
+  toBeGreaterThanOrEqual: [0],
+  toBeLessThan: [0],
+  toBeLessThanOrEqual: [0],
+  toBeWithin: [0, 1],
+};
 const timerModules = new Set([
   "node:timers/promises",
   "timers/promises",
@@ -210,7 +212,6 @@ export default testOnlyPlugin(
             report(node);
           return;
         }
-        if (!comparisonMatchers.has(member ?? "")) return;
         const expectCall = matcherExpectCall(node.callee.object);
         if (expectCall === null || !isNode(expectCall.callee)) return;
         const calleeBinding = resolveBinding(expectCall.callee);
@@ -224,11 +225,14 @@ export default testOnlyPlugin(
         const measured = Array.isArray(expectCall.arguments)
           ? expectCall.arguments.at(0)
           : null;
-        const boundIsMeasured = Array.isArray(node.arguments)
-          ? node.arguments.some((argument) =>
-              containsMeasuredDuration(argument, node),
-            )
-          : false;
+        const boundPositions =
+          member === null ? undefined : comparisonMatcherBoundPositions[member];
+        const boundIsMeasured =
+          boundPositions !== undefined &&
+          Array.isArray(node.arguments) &&
+          boundPositions.every((position) =>
+            containsMeasuredDuration(node.arguments?.[position], node),
+          );
         if (isMeasuredDuration(measured, node) && !boundIsMeasured) report(node);
       },
     };
