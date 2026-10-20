@@ -14,6 +14,7 @@ export default defineConfig({
     "src/no-unseeded-random-in-tests.ts",
     "src/no-real-network-in-tests.ts",
     "src/no-checkout-writes-in-tests.ts",
+    "src/no-wall-clock-bound.ts",
   ],
   format: ["esm", "cjs"],
   dts: true,

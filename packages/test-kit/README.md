@@ -23,6 +23,22 @@ bun add -d @stll/test-kit
 | Repeatable random data                          | `createSeededRandom(testSeed())`                                                    | `Math.random()`                                              |
 | Timer-driven behavior                           | `withFakeTimers()` or `createFakeTimers()`                                          | real `setTimeout()` and `setInterval()`                      |
 | HTTP dependencies                               | `withFakeServer()`                                                                  | the internet or shared services                              |
+| Performance growth                              | `expectLinearScaling()`                                                             | absolute wall-clock budgets                                  |
+
+## Performance scaling
+
+Assert how work scales instead of requiring it to finish before an absolute
+deadline. The helper warms up each size, measures repeated runs, and compares
+medians, so overall machine speed cancels out:
+
+```ts
+import { expectLinearScaling } from "@stll/test-kit";
+
+await expectLinearScaling({
+  run: (size) => parse(input.slice(0, size)),
+  sizes: [1_000, 4_000, 16_000],
+});
+```
 
 ## Clock
 
