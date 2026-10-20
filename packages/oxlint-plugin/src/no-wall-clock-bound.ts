@@ -77,12 +77,6 @@ export default testOnlyPlugin(
       );
     };
 
-    const isClockDifference = (value: unknown): boolean =>
-      isNode(value) &&
-      value.type === "BinaryExpression" &&
-      value.operator === "-" &&
-      isClockRead(value.left);
-
     const constInitializerInSameFunction = (
       identifier: Node,
       use: Node,
@@ -113,11 +107,24 @@ export default testOnlyPlugin(
       return null;
     };
 
-    const isMeasuredDuration = (value: unknown, use: Node): boolean => {
-      if (isClockDifference(value)) return true;
+    const isClockOperand = (value: unknown, use: Node): boolean => {
+      if (isClockRead(value)) return true;
       if (!isNode(value) || value.type !== "Identifier") return false;
       const initializer = constInitializerInSameFunction(value, use);
-      return initializer !== null && isClockDifference(initializer);
+      return initializer !== null && isClockRead(initializer);
+    };
+
+    const isClockDifference = (value: unknown, use: Node): boolean =>
+      isNode(value) &&
+      value.type === "BinaryExpression" &&
+      value.operator === "-" &&
+      (isClockOperand(value.left, use) || isClockOperand(value.right, use));
+
+    const isMeasuredDuration = (value: unknown, use: Node): boolean => {
+      if (isClockDifference(value, use)) return true;
+      if (!isNode(value) || value.type !== "Identifier") return false;
+      const initializer = constInitializerInSameFunction(value, use);
+      return initializer !== null && isClockDifference(initializer, use);
     };
 
     const matcherExpectCall = (value: unknown): Node | null => {

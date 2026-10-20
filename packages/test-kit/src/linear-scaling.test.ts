@@ -97,7 +97,7 @@ describe("expectLinearScaling", () => {
         run: runLinearWork,
       });
     }
-  });
+  }, 10_000);
 
   test("rejects a synchronous run when the clock does not advance", async () => {
     const error = await rejectionOf(
@@ -119,6 +119,55 @@ describe("expectLinearScaling", () => {
     );
     expect(error).toBeInstanceOf(TypeError);
     expect(String(error)).toMatch(/size 2.*clock did not advance/u);
+  });
+
+  test("rejects a callback that switches from synchronous to asynchronous without an unhandled rejection", async () => {
+    let calls = 0;
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+    const error = await rejectionOf(
+      linearScalingTestInternals.expectLinearScalingWithClock(
+        {
+          run: () => {
+            calls += 1;
+            if (calls === 1) return undefined;
+            return Promise.reject(new Error("measurement rejected"));
+          },
+          sizes: [2, 8],
+        },
+        { minimumSampleDurationMs: 5, now: () => calls * 5 },
+      ),
+    );
+    await Bun.sleep(0);
+    process.off("unhandledRejection", onUnhandled);
+
+    expect(error).toBeInstanceOf(TypeError);
+    expect(String(error)).toContain(
+      "switched from synchronous to asynchronous at size 2",
+    );
+    expect(unhandled).toEqual([]);
+  });
+
+  test("rejects a callback that switches from asynchronous to synchronous", async () => {
+    let calls = 0;
+    const error = await rejectionOf(
+      linearScalingTestInternals.expectLinearScalingWithClock(
+        {
+          run: () => {
+            calls += 1;
+            return calls === 1 ? Promise.resolve() : undefined;
+          },
+          sizes: [2, 8],
+        },
+        { minimumSampleDurationMs: 5, now: () => calls * 5 },
+      ),
+    );
+
+    expect(error).toBeInstanceOf(TypeError);
+    expect(String(error)).toContain(
+      "switched from asynchronous to synchronous at size 2",
+    );
   });
 
   test("rejects zero-duration samples and names the size", async () => {

@@ -74,6 +74,14 @@ const isThenable = (value: unknown): value is PromiseLike<unknown> =>
   "then" in value &&
   typeof value.then === "function";
 
+const measurementModeError = (
+  from: "synchronous" | "asynchronous",
+  size: number,
+) =>
+  new TypeError(
+    `expectLinearScaling callback switched from ${from} to ${from === "synchronous" ? "asynchronous" : "synchronous"} at size ${size}`,
+  );
+
 const measureSynchronousSample = (
   run: (size: number) => unknown,
   size: number,
@@ -82,7 +90,18 @@ const measureSynchronousSample = (
   let calls = 1;
   for (;;) {
     const started = clock.now();
-    for (let call = 0; call < calls; call += 1) run(size);
+    for (let call = 0; call < calls; call += 1) {
+      const result = run(size);
+      if (result !== undefined && isThenable(result))
+        return Promise.resolve(result).then(
+          () => {
+            throw measurementModeError("synchronous", size);
+          },
+          () => {
+            throw measurementModeError("synchronous", size);
+          },
+        );
+    }
     const elapsed = clock.now() - started;
     if (elapsed >= clock.minimumSampleDurationMs) return elapsed / calls;
     if (calls >= maximumCalibrationCalls)
@@ -102,7 +121,9 @@ const measureAsynchronousSample = async (
   let calls = 0;
   let elapsed: number;
   do {
-    await run(size);
+    const result = run(size);
+    if (!isThenable(result)) throw measurementModeError("asynchronous", size);
+    await result;
     calls += 1;
     elapsed = clock.now() - started;
     if (
@@ -137,7 +158,7 @@ const expectLinearScalingWithClock = async (
     for (let repeat = 0; repeat < repeats; repeat += 1) {
       const sample = asynchronous
         ? await measureAsynchronousSample(run, size, clock)
-        : measureSynchronousSample(run, size, clock);
+        : await measureSynchronousSample(run, size, clock);
       samples.push(sample);
     }
     const currentMedian = median(samples);

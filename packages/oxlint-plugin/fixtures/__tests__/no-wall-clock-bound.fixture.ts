@@ -37,6 +37,24 @@ const boundMeasurement = () => {
   expect(elapsed).not.toBeGreaterThanOrEqual(1000);
 };
 
+const twoTimestampMeasurement = () => {
+  // oxlint-disable-next-line no-wall-clock-in-tests/no-wall-clock-in-tests -- fixture
+  const start = performance.now();
+  run();
+  // oxlint-disable-next-line no-wall-clock-in-tests/no-wall-clock-in-tests -- fixture
+  const end = performance.now();
+  // oxlint-disable-next-line no-wall-clock-bound/no-wall-clock-bound -- fixture
+  expect(end - start).toBeLessThan(20_000);
+
+  // oxlint-disable-next-line no-wall-clock-in-tests/no-wall-clock-in-tests -- fixture
+  const dateStart = Date.now();
+  run();
+  // oxlint-disable-next-line no-wall-clock-in-tests/no-wall-clock-in-tests -- fixture
+  const dateEnd = Date.now();
+  // oxlint-disable-next-line no-wall-clock-bound/no-wall-clock-bound -- fixture
+  expect(dateEnd - dateStart).toBeLessThan(20_000);
+};
+
 const otherClocks = () => {
   const nanoseconds = Bun.nanoseconds() - 0;
   // oxlint-disable-next-line no-wall-clock-bound/no-wall-clock-bound -- fixture
@@ -71,5 +89,6 @@ const races = async () => {
 
 void directMeasurement;
 void boundMeasurement;
+void twoTimestampMeasurement;
 void otherClocks;
 void races;
