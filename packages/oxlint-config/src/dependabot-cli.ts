@@ -12,7 +12,10 @@ import {
   generationDiagnostics,
   writeGeneratedFile,
 } from "./generated-file";
-import { readToolchainInputs } from "./toolchain-guard";
+import {
+  parseToolchainConfiguration,
+  readToolchainInputs,
+} from "./toolchain-guard";
 
 const usage =
   "Usage: stll-dependabot [--check] [--config <path>] (run from repository root)\n       stll-dependabot --help";
@@ -79,10 +82,15 @@ const main = async () => {
       : parseDependabotInput(
           JSON.parse(await readFile(resolve(root, config), "utf8")),
         );
+  const toolchain = files["stll-toolchain.json"];
+  const { dependabotIgnores } = parseToolchainConfiguration(
+    toolchain === undefined ? {} : JSON.parse(toolchain),
+  );
   const text = generateDependabotConfig({
     files,
     policy: policy.dependabot,
     updates: declarations,
+    ignores: dependabotIgnores,
   });
   const destination = selected.path;
   if (mode === "check") {

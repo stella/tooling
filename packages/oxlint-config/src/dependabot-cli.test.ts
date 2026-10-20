@@ -381,3 +381,39 @@ test("unsupported ecosystem declarations cannot write or validate generated outp
     }
   });
 }, 15_000);
+
+test("the CLI generates and checks tracked stll-toolchain.json Dependabot ignores", async () => {
+  await withRepository(async (root) => {
+    const graphql = {
+      ecosystem: "bun",
+      dependency: "graphql",
+      updateTypes: ["version-update:semver-major"],
+      reason: "Payload 3 requires graphql ^16.",
+    };
+    const declare = async (configuration: unknown) => {
+      await writeFile(
+        join(root, "stll-toolchain.json"),
+        JSON.stringify(configuration),
+      );
+      execFileSync("git", ["add", "stll-toolchain.json"], { cwd: root });
+    };
+    await declare({ dependabotIgnores: [graphql] });
+    const written = invoke(root);
+    expect(written.status, written.stderr).toBe(0);
+    expect(
+      await readFile(join(root, ".github/dependabot.yml"), "utf8"),
+    ).toContain("dependency-name: graphql");
+    execFileSync("git", ["add", ".github/dependabot.yml"], { cwd: root });
+    expect(invoke(root, ["--check"]).status).toBe(0);
+    await declare({});
+    const drifted = invoke(root, ["--check"]);
+    expect(drifted.status).toBe(1);
+    expect(drifted.stderr).toContain("has drifted");
+    await declare({
+      dependabotIgnores: [{ ...graphql, dependency: "oxlint" }],
+    });
+    const conflict = invoke(root);
+    expect(conflict.status).toBe(1);
+    expect(conflict.stderr).toContain("shared pin oxlint");
+  });
+}, 15_000);

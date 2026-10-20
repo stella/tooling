@@ -1189,3 +1189,32 @@ test("cloud drift requires empty commit and pull request attribution with the ex
       attributionDrift,
     ]);
 }, 15_000);
+
+test("stll-toolchain.json Dependabot ignores cannot claim shared pins", () => {
+  const declaration = {
+    ecosystem: "npm",
+    dependency: "graphql",
+    updateTypes: ["version-update:semver-major"],
+    reason: "Payload 3 requires graphql ^16.",
+  };
+  expect(
+    parseToolchainConfiguration({ dependabotIgnores: [declaration] })
+      .dependabotIgnores,
+  ).toEqual([declaration]);
+  expect(() =>
+    parseToolchainConfiguration({
+      dependabotIgnores: [{ ...declaration, reason: "" }],
+    }),
+  ).toThrow();
+  const configuration = (dependency: string) =>
+    fixture({
+      "package.json": "{}",
+      "stll-toolchain.json": JSON.stringify({
+        dependabotIgnores: [{ ...declaration, dependency }],
+      }),
+    }).filter(({ rule }) => rule === "configuration");
+  expect(configuration("graphql")).toEqual([]);
+  expect(configuration("oxlint")).toMatchObject([
+    { rule: "configuration", path: "stll-toolchain.json" },
+  ]);
+}, 15_000);
