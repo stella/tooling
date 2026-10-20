@@ -23,27 +23,6 @@ bun add -d @stll/test-kit
 | Repeatable random data                          | `createSeededRandom(testSeed())`                                                    | `Math.random()`                                              |
 | Timer-driven behavior                           | `withFakeTimers()` or `createFakeTimers()`                                          | real `setTimeout()` and `setInterval()`                      |
 | HTTP dependencies                               | `withFakeServer()`                                                                  | the internet or shared services                              |
-| Performance growth                              | `expectLinearScaling()`                                                             | absolute wall-clock budgets                                  |
-
-## Performance scaling
-
-Assert how work scales instead of requiring it to finish before an absolute
-deadline. The helper warms up each size, calibrates every sample over a measurable window,
-and compares per-call medians, so overall machine speed cancels out. Each consecutive
-size ratio must be greater than `maxGrowthFactor` (2.5 by default); this ensures
-quadratic growth exceeds the allowed linear-growth threshold. Choose sizes for the
-slowest engine where the code runs: a quadratic implementation should show its growth
-in the ratio before any single call becomes slow. For example, a Stella citation
-extractor can measure successively longer citation-shaped strings:
-
-```ts
-import { expectLinearScaling } from "@stll/test-kit";
-
-await expectLinearScaling({
-  run: (size) => extractCitations(citationShape.repeat(size)),
-  sizes: [1_000, 4_000, 16_000],
-});
-```
 
 ## Clock
 

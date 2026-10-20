@@ -44,7 +44,3 @@ export {
   type RecordedRequest,
   withFakeServer,
 } from "./fake-server.ts";
-export {
-  type ExpectLinearScalingOptions,
-  expectLinearScaling,
-} from "./linear-scaling.ts";

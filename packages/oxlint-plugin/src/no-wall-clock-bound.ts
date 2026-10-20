@@ -43,7 +43,7 @@ const enclosingFunction = (node: Node): Node | null => {
 export default testOnlyPlugin(
   "no-wall-clock-bound",
   "noWallClockBound",
-  "Do not assert absolute wall-clock budgets: loaded runners make them flaky. Use expectLinearScaling from @stll/test-kit for performance, or a controlled clock or deferred for ordering.",
+  "A test must not assert an absolute duration or race a timer: loaded runners make these checks flaky. Assert relative growth across input sizes for performance, or use a controlled clock or deferred for ordering.",
   (report, getScope) => {
     const resolveBinding = createBindingResolver(getScope);
 

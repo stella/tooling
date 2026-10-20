@@ -1,6 +1,5 @@
 ---
 "@stll/oxlint-plugin": minor
-"@stll/test-kit": minor
 ---
 
-Ban absolute wall-clock assertions in tests and add a ratio-based performance scaling assertion.
+Ban tests from asserting an absolute duration or racing a timer. Assert relative growth across input sizes for performance, or use a controlled clock or deferred for ordering.
