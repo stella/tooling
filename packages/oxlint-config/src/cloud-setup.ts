@@ -31,9 +31,9 @@ const script = String.raw`#!/usr/bin/env bash
 # Supported platform: Ubuntu 24.04 (noble), amd64/arm64, root or passwordless sudo.
 set -euo pipefail
 
-usage() { echo 'Usage: cloud-setup.sh install|start' >&2; exit 2; }
+usage() { echo 'Usage: cloud-setup.sh install|start|session' >&2; exit 2; }
 [[ "$#" == 1 ]] || usage
-case "$1" in install|start) MODE="$1" ;; *) usage ;; esac
+case "$1" in install|start|session) MODE="$1" ;; *) usage ;; esac
 fail() { echo "cloud-setup: $*" >&2; exit 1; }
 trap 'echo "cloud-setup: command failed at line $LINENO" >&2' ERR
 # Each phase logs its start and duration so a stalled phase is visible in the task log.
@@ -103,6 +103,60 @@ runtime_ready() {
   node_ready || fail 'Pinned Node, npm or npx is unavailable; run install'
   [[ -x "$BUN_DIR/bun" && "$($BUN_DIR/bun --version)" == "$BUN_VERSION" ]] || fail 'Pinned Bun is unavailable; run install'
 }
+bun_route() {
+  local label="$1" resolved version
+  shift
+  resolved="$("$@" -c 'command -v bun')" || fail "Bun is unavailable through $label"
+  version="$("$@" -c 'bun --version')" || fail "Bun at $resolved failed through $label"
+  [[ "$version" == "$BUN_VERSION" ]] || fail "Bun at $resolved resolves version $version through $label; expected $BUN_VERSION"
+}
+verify_bun_routes() {
+  local configured_mise login_shell minimal_path mise_root root_mise shims
+  # Test-only overrides keep route executables and image locations inside fixtures.
+  login_shell="$(printenv STLL_CLOUD_TEST_LOGIN_SHELL || true)"
+  [[ -n "$login_shell" ]] || login_shell=bash
+  minimal_path="$(printenv STLL_CLOUD_TEST_MINIMAL_PATH || true)"
+  [[ -n "$minimal_path" ]] || minimal_path=/usr/local/bin:/usr/bin:/bin
+  root_mise="$(printenv STLL_CLOUD_TEST_ROOT_MISE || true)"
+  [[ -n "$root_mise" ]] || root_mise=/root/.local/share/mise
+  bun_route 'the setup PATH' env PATH="$PATH" sh
+  bun_route 'sh -c' sh
+  bun_route 'bash -lc' "$login_shell" -l
+  bun_route 'the minimal system PATH' env -i PATH="$minimal_path" sh
+  configured_mise="$(printenv MISE_DATA_DIR || true)"
+  for mise_root in "$configured_mise" "$OUTPUT_HOME/.local/share/mise" "$root_mise"; do
+    [[ -n "$mise_root" ]] || continue
+    shims="$mise_root/shims"
+    [[ -d "$shims" ]] || continue
+    bun_route "mise shims PATH $shims" env PATH="$shims:$PATH" sh
+  done
+}
+replace_image_buns() {
+  local candidate configured_mise directory mise_root root_mise
+  configured_mise="$(printenv MISE_DATA_DIR || true)"
+  root_mise="$(printenv STLL_CLOUD_TEST_ROOT_MISE || true)"
+  [[ -n "$root_mise" ]] || root_mise=/root/.local/share/mise
+  for mise_root in "$configured_mise" "$OUTPUT_HOME/.local/share/mise" "$root_mise"; do
+    [[ -n "$mise_root" ]] || continue
+    if [[ -d "$mise_root/installs/bun" ]]; then
+      while IFS= read -r -d '' candidate; do
+        [[ -d "$candidate" ]] || ln -sfnT -- "$BUN_DIR/bun" "$candidate"
+      done < <(find "$mise_root/installs/bun" \( -type f -o -type l \) \( -name bun -o -name bunx \) -print0)
+    fi
+    for candidate in "$mise_root/shims/bun" "$mise_root/shims/bunx"; do
+      [[ -e "$candidate" || -L "$candidate" ]] || continue
+      [[ -d "$candidate" ]] || ln -sfnT -- "$BUN_DIR/bun" "$candidate"
+    done
+  done
+  while IFS= read -r directory; do
+    [[ -n "$directory" ]] || directory=.
+    for candidate in "$directory/bun" "$directory/bunx"; do
+      [[ -e "$candidate" || -L "$candidate" ]] || continue
+      [[ -d "$candidate" ]] && continue
+      [[ "$(readlink -f -- "$candidate")" == "$(readlink -f -- "$BUN_DIR/bun")" ]] || ln -sfnT -- "$BUN_DIR/bun" "$candidate"
+    done
+  done < <(printf '%s' "$PATH" | tr : '\n')
+}
 install_runtimes() (
   if [[ ! -s /etc/ssl/certs/ca-certificates.crt ]]; then
     command -v update-ca-certificates >/dev/null || fail 'System CA certificate bundle is missing; restore ca-certificates in the base image offline before install'
@@ -140,6 +194,8 @@ install_runtimes() (
   ln -sfnT -- "$NODE_DIR/bin/npm" /usr/local/bin/npm
   ln -sfnT -- "$NODE_DIR/bin/npx" /usr/local/bin/npx
   ln -sfnT -- "$BUN_DIR/bun" /usr/local/bin/bun
+  replace_image_buns
+  verify_bun_routes
 )
 
 dependency_install() {
@@ -186,6 +242,8 @@ process.stdout.write([...hosts].sort().join(","));
 @INPUT_VALIDATION@
 
 @ENV_FUNCTIONS@
+@ENVIRONMENT_VALUES@
+@SESSION_ENVIRONMENT@
 
 @PREPARE_FUNCTION@
 
@@ -198,14 +256,39 @@ if [[ "$MODE" == install ]]; then
 @PREPARE_STEP@
   exit 0
 fi
-step runtime-check runtime_ready
-step tool-check verify_tools
-step shell install_shell_environment
-step shell-check verify_shell_environment
-@ENV_VALIDATE@
-step state prepare_state
-step service-start start_services
-@ENV_WRITE@
+@ENV_INITIALIZE@
+start_environment() {
+  step runtime-check runtime_ready
+  step tool-check verify_tools
+  step shell install_shell_environment
+  step shell-check verify_shell_environment
+  @ENV_VALIDATE@
+  step state prepare_state
+  step service-start start_services
+  @ENV_WRITE@
+}
+if [[ "$MODE" == session ]]; then
+  start_environment >&2
+else
+  start_environment
+fi
+@SESSION_ENVIRONMENT_CALL@
+`;
+
+const environmentValuesFunction = String.raw`
+environment_values() {
+  local emit="$1"
+  "$emit" NODE_ENV test
+  if [[ -n "$DATABASE_URL" ]]; then
+    "$emit" DATABASE_URL "$DATABASE_URL"
+    "$emit" POSTGRES_HOST "$POSTGRES_HOST"
+    "$emit" POSTGRES_USER "$POSTGRES_USER"
+    "$emit" POSTGRES_PASSWORD "$POSTGRES_PASSWORD"
+    "$emit" POSTGRES_DB_NAME "$POSTGRES_DB_NAME"
+    "$emit" POSTGRES_ADDITIONAL_CONNECTION_DATA "$POSTGRES_ADDITIONAL_CONNECTION_DATA"
+  fi
+  if [[ -n "$REDIS_URL" ]]; then "$emit" REDIS_URL "$REDIS_URL"; fi
+}
 `;
 
 const environmentFunctions = String.raw`
@@ -222,18 +305,25 @@ validate_environment() {
     [[ "$first_line" == "$ENV_MARKER" ]] || fail 'Refusing to overwrite an unowned environment file'
   fi
 }
+environment_file_value() { printf '%s=%s\n' "$1" "$2"; }
 write_environment() {
   validate_environment
   local env_path="$REPO_ROOT/$ENV_FILE" temporary
   temporary="$(mktemp "$(dirname -- "$env_path")/.stll-cloud-env.XXXXXX")"
   chmod 600 "$temporary"
   {
-    printf '%s\n' "$ENV_MARKER" 'NODE_ENV=test'
-    if [[ -n "$DATABASE_URL" ]]; then printf 'DATABASE_URL=%s\n' "$DATABASE_URL"; fi
-    if [[ -n "$REDIS_URL" ]]; then printf 'REDIS_URL=%s\n' "$REDIS_URL"; fi
+    printf '%s\n' "$ENV_MARKER"
+    environment_values environment_file_value
   } > "$temporary"
   chown "$OUTPUT_UID:$OUTPUT_GID" "$temporary"
   mv -f -- "$temporary" "$env_path"
+}
+`;
+
+const sessionEnvironmentFunction = String.raw`
+environment_shell_value() { printf 'export %s=%q\n' "$1" "$2"; }
+emit_session_environment() {
+  environment_values environment_shell_value
 }
 `;
 
@@ -350,10 +440,28 @@ export const generateCloudSetup = ({
       selected.envFile === undefined ? "" : environmentFunctions,
     ],
     [
-      "@ENV_VALIDATE@",
-      selected.envFile === undefined
+      "@ENVIRONMENT_VALUES@",
+      selected.services.length === 0 ? "" : environmentValuesFunction,
+    ],
+    [
+      "@ENV_INITIALIZE@",
+      selected.services.length === 0
         ? ""
-        : "DATABASE_URL=''\nREDIS_URL=''\nvalidate_environment",
+        : "DATABASE_URL=''\nPOSTGRES_HOST=''\nPOSTGRES_USER=''\nPOSTGRES_PASSWORD=''\nPOSTGRES_DB_NAME=''\nPOSTGRES_ADDITIONAL_CONNECTION_DATA=''\nREDIS_URL=''",
+    ],
+    [
+      "@ENV_VALIDATE@",
+      selected.envFile === undefined ? "" : "validate_environment",
+    ],
+    [
+      "@SESSION_ENVIRONMENT@",
+      selected.services.length === 0 ? "" : sessionEnvironmentFunction,
+    ],
+    [
+      "@SESSION_ENVIRONMENT_CALL@",
+      selected.services.length === 0
+        ? ""
+        : 'if [[ "$MODE" == session ]]; then emit_session_environment; fi',
     ],
     ["@ENV_WRITE@", selected.envFile === undefined ? "" : "write_environment"],
     ["@PREPARE_FUNCTION@", renderPrepare(selected.prepare, files)],

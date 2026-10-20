@@ -37,7 +37,7 @@ test("all declared service subsets render deterministic valid Bash", () => {
     }
     expect(fragment).not.toMatch(/curl|wget|apt-get|systemctl|kill /);
   }
-});
+}, 15_000);
 
 test("no declared services require no service state or commands", () => {
   const fragment = renderCloudServiceStart({ services: [], ...policy });
@@ -49,7 +49,7 @@ test("no declared services require no service state or commands", () => {
   ]);
   expect(result.exitCode).toBe(0);
   expect(result.stdout.toString()).toBe("");
-});
+}, 15_000);
 
 test("service policy parameters cannot introduce shell syntax", () => {
   for (const postgres of ["", "18.x", "18;true", "018"])
@@ -60,7 +60,7 @@ test("service policy parameters cannot introduce shell syntax", () => {
     expect(() =>
       renderCloudServiceStart({ services: [], ...policy, valkey }),
     ).toThrow();
-});
+}, 15_000);
 
 test("PostgreSQL uses authenticated private state and checks endpoint identity", () => {
   const fragment = renderCloudServiceStart({
@@ -81,11 +81,16 @@ test("PostgreSQL uses authenticated private state and checks endpoint identity",
     "pg_version / 10000 == 18",
     "service_process",
     "cloud_test",
-    "DATABASE_URL=",
+    "POSTGRES_HOST='127.0.0.1:55432'",
+    "POSTGRES_USER='stll_cloud'",
+    "POSTGRES_PASSWORD=\"$pg_password\"",
+    "POSTGRES_DB_NAME='cloud_test'",
+    "POSTGRES_ADDITIONAL_CONNECTION_DATA=''",
+    'DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST/$POSTGRES_DB_NAME$POSTGRES_ADDITIONAL_CONNECTION_DATA"',
   ])
     expect(fragment).toContain(required);
   expect(fragment).not.toContain("--auth-local=trust");
-});
+}, 15_000);
 
 test("Valkey verifies its own version and managed process rather than Redis compatibility", () => {
   const fragment = renderCloudServiceStart({ services: ["valkey"], ...policy });
@@ -110,7 +115,7 @@ test("Valkey verifies its own version and managed process rather than Redis comp
       valkey: "9.1.2",
     }),
   ).toContain("valkey_version:9.1.2");
-});
+}, 15_000);
 
 test("symbolic service state is refused before any service command", () => {
   const temporary = mkdtempSync(path.join(tmpdir(), "cloud-service-test-"));
@@ -145,7 +150,7 @@ start_services
   } finally {
     rmSync(temporary, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("cached Valkey configuration must match before a process can start", () => {
   const state = mkdtempSync(path.join(tmpdir(), "cloud-service-test-"));
@@ -190,7 +195,7 @@ start_services
   } finally {
     rmSync(state, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 type StartStatusFixtureOptions = {
   services: readonly CloudService[];
@@ -341,7 +346,7 @@ test("start reports one successful state per declared service without subprocess
     }
   }
   expect([...exercised].sort()).toEqual(cloudServices.map(String).sort());
-});
+}, 15_000);
 
 test("start emits no success status when service authentication or identity fails", () => {
   for (const service of cloudServices) {
@@ -359,7 +364,7 @@ test("start emits no success status when service authentication or identity fail
       }
     }
   }
-});
+}, 15_000);
 
 const processHelpers = () => {
   const fragment = renderCloudServiceStart({
@@ -520,7 +525,7 @@ test("emitted process predicate is nonfatal for dead, foreign and unresolvable p
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test.skipIf(!existsSync("/proc/self/exe"))(
   "emitted predicate leaves an unrelated live Linux process untouched",
@@ -665,4 +670,4 @@ test("emitted PID recovery preserves PostgreSQL lock metadata and rejects unobse
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, 15_000);

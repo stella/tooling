@@ -38,6 +38,52 @@ const sessionStartHook = (script: string) =>
     printf '%s\\n' "cloud-setup: $1" >&2
     exit 0
   }
+  if [ -n "\${CLAUDE_ENV_FILE:-}" ]; then
+    cloud_session_exports="$(${script} session)" || cloud_setup_incomplete 'startup failed; run install'
+  else
+    ${script} start >&2 || cloud_setup_incomplete 'startup failed; run install'
+    exit 0
+  fi
+  if [ -n "\${CLAUDE_ENV_FILE:-}" ]; then
+    if [ ! -s ${cloudShellProfilePath} ]; then
+      cloud_setup_incomplete 'cloud shell profile is unavailable; run install'
+    fi
+    cloud_shell_exports="$(cat ${cloudShellProfilePath})" || cloud_setup_incomplete 'cloud shell profile could not be read; run install'
+    [ -n "$cloud_shell_exports" ] || cloud_setup_incomplete 'cloud shell profile is unavailable; run install'
+    if [ -e "$CLAUDE_ENV_FILE" ] || [ -L "$CLAUDE_ENV_FILE" ]; then
+      [ -f "$CLAUDE_ENV_FILE" ] && [ ! -L "$CLAUDE_ENV_FILE" ] || cloud_setup_incomplete 'session environment must be a regular file; check its path and rerun start'
+    fi
+    cloud_env_temporary="$(umask 077; mktemp "\${CLAUDE_ENV_FILE}.XXXXXX")" || cloud_setup_incomplete 'session environment could not be prepared; check its write access and rerun start'
+    if [ -e "$CLAUDE_ENV_FILE" ] || [ -L "$CLAUDE_ENV_FILE" ]; then
+      cat "$CLAUDE_ENV_FILE" > "$cloud_env_temporary" || { rm -f -- "$cloud_env_temporary"; cloud_setup_incomplete 'session environment could not be read; check its access and rerun start'; }
+    fi
+    if [ -n "$cloud_session_exports" ]; then
+      cloud_session_exports="$cloud_session_exports
+$cloud_shell_exports"
+    else
+      cloud_session_exports="$cloud_shell_exports"
+    fi
+    printf '\\n%s\\n' "$cloud_session_exports" >> "$cloud_env_temporary" || { rm -f -- "$cloud_env_temporary"; cloud_setup_incomplete 'session environment could not be prepared; check its write access and rerun start'; }
+    mv -f -- "$cloud_env_temporary" "$CLAUDE_ENV_FILE" || { rm -f -- "$cloud_env_temporary"; cloud_setup_incomplete 'session environment could not be persisted; check its write access and rerun start'; }
+  fi
+fi`,
+      },
+    ],
+  }) as const;
+// This exact form was persisted by the previous main-branch generator at 783bc97.
+// Keep it only so consumers of that release can regenerate to the current hook.
+const currentMainSessionStartHook = (script: string) =>
+  ({
+    matcher: "",
+    hooks: [
+      {
+        type: "command",
+        command: `if [ "\${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
+  cloud_setup_incomplete() {
+    printf '%s\\n' 'Cloud setup could not establish a verified session environment. From the repository root, run bash .agents/cloud-setup.sh install and then bash .agents/cloud-setup.sh start. Do not assume pinned tools or services are ready until start succeeds.'
+    printf '%s\\n' "cloud-setup: $1" >&2
+    exit 0
+  }
   ${script} start >&2 || cloud_setup_incomplete 'startup failed; run install'
   if [ -n "\${CLAUDE_ENV_FILE:-}" ]; then
     if [ ! -s ${cloudShellProfilePath} ]; then
@@ -60,6 +106,7 @@ export const cloudSessionStartHook = sessionStartHook(
 const previousCloudSessionStartHooks = [
   releasedSessionStartHook(`bash ${cloudSetupPath}`),
   releasedSessionStartHook(`bash "$CLAUDE_PROJECT_DIR/${cloudSetupPath}"`),
+  currentMainSessionStartHook(`bash "$CLAUDE_PROJECT_DIR/${cloudSetupPath}"`),
 ];
 export const cloudAttribution = { commit: "", pr: "" } as const;
 

@@ -54,6 +54,63 @@ export const getPropertyName = (node: unknown): string | null => {
   return null;
 };
 
+export const staticStringValue = (node: unknown): string | null => {
+  const expression = unwrapExpression(node);
+  if (expression === null) return null;
+  node = expression;
+  if (isStringLiteral(node)) return node.value;
+  if (
+    !isAstNode(node) ||
+    node.type !== "TemplateLiteral" ||
+    !Array.isArray(node.expressions) ||
+    node.expressions.length !== 0 ||
+    !Array.isArray(node.quasis)
+  )
+    return null;
+  const quasi = node.quasis.at(0);
+  if (!isAstNode(quasi)) return null;
+  const value = quasi.value;
+  const cooked =
+    typeof value === "object" && value !== null
+      ? Reflect.get(value, "cooked")
+      : undefined;
+  return typeof cooked === "string" ? cooked : null;
+};
+
+export const memberPropertyName = (node: unknown): string | null => {
+  if (!isAstNode(node) || node.type !== "MemberExpression") {
+    return null;
+  }
+  if (node.computed !== true) {
+    return getPropertyName(node.property);
+  }
+  return staticStringValue(node.property);
+};
+
+export const invokedCallee = (node: unknown): AstNode | null => {
+  if (!isAstNode(node) || node.type !== "CallExpression") {
+    return null;
+  }
+  const callee = unwrapExpression(node.callee);
+  if (!isAstNode(callee)) {
+    return null;
+  }
+  if (
+    callee.type === "SequenceExpression" &&
+    Array.isArray(callee.expressions)
+  ) {
+    return unwrapExpression(callee.expressions.at(-1));
+  }
+  if (
+    callee.type === "MemberExpression" &&
+    (memberPropertyName(callee) === "call" ||
+      memberPropertyName(callee) === "apply")
+  ) {
+    return unwrapExpression(callee.object);
+  }
+  return callee;
+};
+
 // Match `<object>.<property>` member access where both halves are
 // Identifiers and the access is not computed.
 export const isMemberAccess = (
@@ -114,6 +171,46 @@ export const unwrapExpression = (node: unknown): AstNode | null => {
     return unwrapExpression(node.expression);
   }
   return node;
+};
+
+export type LiteralArgumentResolution =
+  | { status: "known"; args: unknown[] }
+  | { status: "opaque"; args: unknown[]; spread: unknown; tail: unknown[] };
+
+// Expand literal array spreads and retain unresolved spread nodes in sequence.
+// Positional readers use only `args`, the prefix before the first barrier;
+// source inspectors can still inspect later entries in `tail`.
+export const resolveLiteralArraySpreads = (
+  args: unknown[],
+): LiteralArgumentResolution => {
+  const expanded: unknown[] = [];
+  const append = (argument: unknown): void => {
+    if (!isAstNode(argument) || argument.type !== "SpreadElement") {
+      expanded.push(argument);
+      return;
+    }
+    const expression = unwrapExpression(argument.argument);
+    if (
+      expression?.type !== "ArrayExpression" ||
+      !Array.isArray(expression.elements)
+    ) {
+      expanded.push(argument);
+      return;
+    }
+    for (const element of expression.elements) append(element);
+  };
+  for (const argument of args) append(argument);
+  const barrierIndex = expanded.findIndex(
+    (argument) => isAstNode(argument) && argument.type === "SpreadElement",
+  );
+  if (barrierIndex === -1) return { status: "known", args: expanded };
+  const spread = expanded.at(barrierIndex);
+  return {
+    status: "opaque",
+    args: expanded.slice(0, barrierIndex),
+    spread,
+    tail: expanded.slice(barrierIndex + 1),
+  };
 };
 
 // Resolve an ImportSpecifier's imported binding name (Identifier.name or

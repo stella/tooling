@@ -209,7 +209,9 @@ repository root; the command reads tracked declarations and writes canonical
 rejects missing coverage and policy drift. Use `stll-dependabot --check` in CI for
 read-only byte drift detection. Pass `--config stll-dependabot.json` to declare
 ecosystems and directories explicitly; the declaration cannot change shared
-schedule, cooldown, groups, or owned-tool ignores. See the
+schedule, cooldown, groups, or owned-tool ignores. Repository holds on other
+dependencies go in `stll-toolchain.json` `dependabotIgnores`, each with a reason;
+they cannot name or match a shared pin. See the
 [package guide](packages/oxlint-config/README.md#generate-dependency-update-configuration)
 for the input format. The published `@stll/oxlint-config/dependabot` subpath exports
 `generateDependabotConfig` and `parseToolchainPolicy` for programmatic generation. Owned package pins follow
@@ -218,6 +220,49 @@ package in the release plan whenever an owned workspace pin changes, then
 synchronizes pins through `bun scripts/check-lockfile-workspace-versions.ts
 --write`, which also refreshes cached workspace versions without regenerating
 the dependency graph.
+
+## Package quarantine
+
+Before installing dependencies, run the CLI from the exact published
+`@stll/oxlint-config` release that includes `stll-quarantine`. Replace `X.Y.Z`
+with that release's exact version; `bunx` installs the pinned package when it is
+not already available:
+
+```sh
+bunx --bun --package @stll/oxlint-config@X.Y.Z stll-quarantine --sync
+bun install
+```
+
+`stll-quarantine --sync` creates or updates the Bun quarantine preset. The
+preset keeps the five-day release-age gate for third-party packages and writes
+permanent exemptions for exact registry-backed `@stll/` package names from declarations and the lockfile, including native platform
+packages. Wildcards and version selectors are rejected. Creation timestamps
+record audit history; they never expire.
+
+Third-party exceptions require an inline exact UTC expiry:
+
+```toml
+[install]
+minimumReleaseAge = 432_000
+minimumReleaseAgeExcludes = [
+  "@stll/oxlint-config", # quarantine-excluded-since: 2026-10-17T00:00:00.000Z
+  "third-party-package", # quarantine-expires: 2026-10-20T00:00:00.000Z
+]
+```
+
+`stll-toolchain-check` validates tracked root `bunfig.toml` and warns starting
+48 hours before a temporary exception expires. Expired exceptions warn during
+the existing 24-hour removal grace period, then fail validation. The standalone
+`stll-quarantine --check` command performs the same policy check without writes;
+`--prune` removes expired third-party entries and retains first-party entries.
+Only `--sync` changes the generated first-party set. Unrelated Bun settings and
+temporary third-party entries remain repository inputs.
+
+The shared scheduled quarantine workflow runs the same tooling-owned core from
+an immutable source checkout, before installing consumer dependencies. It opens
+or refreshes the existing removal branch, so each repository has one removal
+PR. Consumers retain the pinned `stella/.github` policy and scheduled-prune
+callers; adopt the workflow revision that delegates to this core.
 
 ## Usage
 
@@ -291,6 +336,37 @@ Use the library TypeScript preset:
   "include": ["src"]
 }
 ```
+
+The package also exports `base.json`, `node.json`, `bun.json`,
+`published.json` (JavaScript disabled, isolated declarations enabled), and
+`react-library.json` (DOM libraries and the React JSX runtime). These profiles
+inherit errors for unreachable code and unused labels.
+
+With the TypeScript 7 native compiler, opt into one checker per project by
+adding `@stll/typescript-config/single-checker.json` after the main profile in
+an `extends` array. This additive profile changes only the checker count:
+
+```json
+{
+  "extends": [
+    "@stll/typescript-config/react-library.json",
+    "@stll/typescript-config/single-checker.json"
+  ],
+  "include": ["src"]
+}
+```
+
+`checkers: 1` also applies to native checker consumers that read tsconfig, such
+as oxlint-tsgolint. This profile requires the native compiler; TypeScript 6 does
+not recognize `checkers`. A repository-recorded application measurement compared
+one checker at 82 seconds / 3.0 GB / 12.0 million instantiations with four at
+87 seconds / 5.3 GB / 31.3 million instantiations. These results are specific to
+that project, not a benchmark of every consumer.
+
+Import-extension rewriting, symlink preservation, incremental compilation, and
+`tsBuildInfoFile` placement remain explicit consumer options: they depend on
+emit requirements, module identity, and cache ownership. The shared base sets
+none of them.
 
 Node scripts need an explicit TypeScript project when the library project's
 `include` does not cover them. Install `@types/node` as a direct development
@@ -415,9 +491,11 @@ export default defineConfig({
 `no-raw-route-query-client` requires route freshness helpers instead of raw
 TanStack Query client calls and keeps pending components synchronous.
 
-When using `no-unsafe-inner-html`, disable the blanket `react/no-danger` rule;
-the portable rule permits static and provably sanitized HTML while rejecting
-untrusted values.
+When using `no-unsafe-inner-html`, disable the blanket `react/no-danger` rule.
+Its default `sanitizerPolicy: "allowlist"` permits static HTML and calls whose
+names match the shared HTML sanitizer allowlist. Set
+`sanitizerPolicy: "provenance"` to require a `// safe-html: <provenance>`
+comment for dynamic values, including calls to sanitizer-named functions.
 
 Oxlint 1.80 replaced `react/react-compiler` with category-specific React
 Compiler rules. Enable the actionable categories explicitly with

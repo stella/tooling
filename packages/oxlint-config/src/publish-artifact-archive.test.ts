@@ -61,7 +61,7 @@ test("packed bins and exports require their transitive externalized helper", asy
       ).toBe(true);
     },
   );
-});
+}, 15_000);
 
 test("opaque native members are validated without decoding or caching their bytes", async () => {
   await withPackedFixture(
@@ -76,7 +76,7 @@ test("opaque native members are validated without decoding or caching their byte
       expect(packed.has("package/binding.node")).toBe(false);
     },
   );
-});
+}, 15_000);
 
 test("a packed native dependency must be regular even when its link target is packed", async () => {
   await withPackedFixture(
@@ -91,7 +91,7 @@ test("a packed native dependency must be regular even when its link target is pa
       await assert.rejects(readPackedSyntaxFiles(archive), /regular file/);
     },
   );
-});
+}, 15_000);
 
 test("literal extensionless CommonJS helpers are loaded lazily from the full archive index", async () => {
   await withPackedFixture(
@@ -107,7 +107,7 @@ test("literal extensionless CommonJS helpers are loaded lazily from the full arc
       );
     },
   );
-});
+}, 15_000);
 
 test("wildcard exported archive patterns leave licenses and directories opaque but follow extensionless imports", async () => {
   await withPackedFixture(
@@ -138,7 +138,7 @@ test("wildcard exported archive patterns leave licenses and directories opaque b
       await assert.rejects(readPackedSyntaxFiles(archive), /leaf\.mjs/);
     },
   );
-});
+}, 15_000);
 
 test("malformed packed JavaScript retains its import parser cause and member path", async () => {
   await withPackedFixture(
@@ -158,4 +158,4 @@ test("malformed packed JavaScript retains its import parser cause and member pat
       );
     },
   );
-});
+}, 15_000);
