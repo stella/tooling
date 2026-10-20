@@ -146,6 +146,24 @@ const otherClocks = () => {
   expect(process.hrtime.bigint() - 0n).toBeWithin(0n, 10n);
 };
 
+const nonReferenceIdentifierCollisions = () => {
+  // oxlint-disable-next-line no-wall-clock-in-tests/no-wall-clock-in-tests -- fixture
+  const started = performance.now();
+  // oxlint-disable-next-line no-wall-clock-in-tests/no-wall-clock-in-tests -- fixture
+  const elapsed = performance.now() - started;
+  const result = { elapsed: 1 };
+
+  // expect-clean: no-wall-clock-bound/no-wall-clock-bound
+  expect(result.elapsed).toBe(1);
+  // expect-clean: no-wall-clock-bound/no-wall-clock-bound
+  expect({ elapsed: 1 }).toEqual(result);
+  // expect-clean: no-wall-clock-bound/no-wall-clock-bound
+  // oxlint-disable-next-line typescript/dot-notation -- fixture verifies a string-key lookup
+  expect(result["elapsed"]).toBe(1);
+  // oxlint-disable-next-line no-wall-clock-bound/no-wall-clock-bound -- fixture
+  expect(result[elapsed]).toBeUndefined();
+};
+
 // expect-clean: no-wall-clock-bound/no-wall-clock-bound
 expect(statementTimeoutMs).toBeLessThanOrEqual((idleTimeoutS * 1000) / 2);
 // expect-clean: no-wall-clock-bound/no-wall-clock-bound
@@ -176,4 +194,5 @@ void boundMeasurement;
 void twoTimestampMeasurement;
 void relativeMeasurements;
 void otherClocks;
+void nonReferenceIdentifierCollisions;
 void races;

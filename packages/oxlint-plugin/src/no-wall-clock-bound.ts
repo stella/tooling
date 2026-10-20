@@ -23,6 +23,43 @@ const functionTypes = new Set([
 ]);
 const matcherModifiers = new Set(["not", "rejects", "resolves"]);
 
+const isVariableReference = (identifier: Node): boolean => {
+  const parent = identifier.parent;
+  if (!isNode(parent)) return true;
+  if (
+    parent.type === "MemberExpression" &&
+    parent.property === identifier &&
+    parent.computed !== true
+  )
+    return false;
+  if (
+    (parent.type === "Property" ||
+      parent.type === "MethodDefinition" ||
+      parent.type === "PropertyDefinition") &&
+    parent.key === identifier &&
+    parent.computed !== true &&
+    parent.value !== identifier
+  )
+    return false;
+  if (
+    (parent.type === "LabeledStatement" ||
+      parent.type === "BreakStatement" ||
+      parent.type === "ContinueStatement") &&
+    parent.label === identifier
+  )
+    return false;
+  if (
+    (parent.type === "VariableDeclarator" ||
+      parent.type === "FunctionDeclaration" ||
+      parent.type === "FunctionExpression" ||
+      parent.type === "ClassDeclaration" ||
+      parent.type === "ClassExpression") &&
+    parent.id === identifier
+  )
+    return false;
+  return true;
+};
+
 const enclosingFunction = (node: Node): Node | null => {
   let current = node.parent;
   while (isNode(current)) {
@@ -111,7 +148,11 @@ export default testOnlyPlugin(
         );
       if (!isNode(value)) return false;
       if (isClockRead(value)) return true;
-      if (followIdentifier && value.type === "Identifier") {
+      if (
+        followIdentifier &&
+        value.type === "Identifier" &&
+        isVariableReference(value)
+      ) {
         if (visitedIdentifiers.has(value)) return false;
         visitedIdentifiers.add(value);
         const initializer = constInitializerInSameFunction(value, use);

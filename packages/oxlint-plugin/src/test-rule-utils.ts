@@ -16,6 +16,7 @@ export type Node = {
   elements?: unknown;
   operator?: unknown;
   key?: unknown;
+  label?: unknown;
   kind?: unknown;
   left?: unknown;
   local?: unknown;
