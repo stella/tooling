@@ -381,3 +381,57 @@ test("unsupported ecosystem declarations cannot write or validate generated outp
     }
   });
 }, 15_000);
+
+test("the CLI generates and checks tracked stll-toolchain.json Dependabot ignores", async () => {
+  await withRepository(async (root) => {
+    const graphql = {
+      ecosystem: "bun",
+      dependency: "graphql",
+      updateTypes: ["version-update:semver-major"],
+      reason: "Payload 3 requires graphql ^16.",
+    };
+    const declare = async (configuration: unknown) => {
+      await writeFile(
+        join(root, "stll-toolchain.json"),
+        JSON.stringify(configuration),
+      );
+      execFileSync("git", ["add", "stll-toolchain.json"], { cwd: root });
+    };
+    await declare({ dependabotIgnores: [graphql] });
+    const written = invoke(root);
+    expect(written.status, written.stderr).toBe(0);
+    expect(
+      await readFile(join(root, ".github/dependabot.yml"), "utf8"),
+    ).toContain("dependency-name: graphql");
+    execFileSync("git", ["add", ".github/dependabot.yml"], { cwd: root });
+    expect(invoke(root, ["--check"]).status).toBe(0);
+    await declare({});
+    const drifted = invoke(root, ["--check"]);
+    expect(drifted.status).toBe(1);
+    expect(drifted.stderr).toContain("has drifted");
+    // stll-toolchain-check owns unrelated declarations; they must not block generation.
+    const unrelated = {
+      optOuts: [{ rule: "unknown-rule", reason: "" }],
+      futureDeclaration: true,
+    };
+    await declare({ ...unrelated, dependabotIgnores: [graphql] });
+    const scoped = invoke(root);
+    expect(scoped.status, scoped.stderr).toBe(0);
+    expect(invoke(root, ["--check"]).status).toBe(0);
+    for (const { dependabotIgnores, message } of [
+      {
+        dependabotIgnores: [{ ...graphql, dependency: "oxlint" }],
+        message: "shared pin oxlint",
+      },
+      {
+        dependabotIgnores: [{ ...graphql, reason: " " }],
+        message: "nonempty reason",
+      },
+    ]) {
+      await declare({ ...unrelated, dependabotIgnores });
+      const rejected = invoke(root);
+      expect(rejected.status).toBe(1);
+      expect(rejected.stderr).toContain(message);
+    }
+  });
+}, 15_000);

@@ -209,7 +209,9 @@ repository root; the command reads tracked declarations and writes canonical
 rejects missing coverage and policy drift. Use `stll-dependabot --check` in CI for
 read-only byte drift detection. Pass `--config stll-dependabot.json` to declare
 ecosystems and directories explicitly; the declaration cannot change shared
-schedule, cooldown, groups, or owned-tool ignores. See the
+schedule, cooldown, groups, or owned-tool ignores. Repository holds on other
+dependencies go in `stll-toolchain.json` `dependabotIgnores`, each with a reason;
+they cannot name or match a shared pin. See the
 [package guide](packages/oxlint-config/README.md#generate-dependency-update-configuration)
 for the input format. The published `@stll/oxlint-config/dependabot` subpath exports
 `generateDependabotConfig` and `parseToolchainPolicy` for programmatic generation. Owned package pins follow
@@ -365,7 +367,6 @@ Import-extension rewriting, symlink preservation, incremental compilation, and
 `tsBuildInfoFile` placement remain explicit consumer options: they depend on
 emit requirements, module identity, and cache ownership. The shared base sets
 none of them.
-
 
 Node scripts need an explicit TypeScript project when the library project's
 `include` does not cover them. Install `@types/node` as a direct development

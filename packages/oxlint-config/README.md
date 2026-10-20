@@ -323,10 +323,47 @@ Shared `toolchain.json` owns the schedule, cooldown, groups, and tooling-owned
 package/action/image ignores. The input rejects policy overrides. Without
 `--config`, the tracked manifest inventory supplies ecosystem roots.
 
+A repository that deliberately holds a dependency declares the decision in
+tracked root `stll-toolchain.json`:
+
+```json
+{
+  "dependabotIgnores": [
+    {
+      "ecosystem": "bun",
+      "dependency": "graphql",
+      "updateTypes": ["version-update:semver-major"],
+      "reason": "Payload 3 requires graphql ^16."
+    },
+    {
+      "ecosystem": "github-actions",
+      "dependency": "owner/repo/.github/workflows/reusable.yml",
+      "updateTypes": [
+        "version-update:semver-major",
+        "version-update:semver-minor",
+        "version-update:semver-patch"
+      ],
+      "reason": "Newer commits no longer ship this reusable workflow."
+    }
+  ]
+}
+```
+
+`dependency` is Dependabot's `dependency-name`; `*` is the only wildcard
+(`@babel/*`). `updateTypes` is a nonempty set of version-update types, so
+security updates stay enabled. Each declaration needs a supported ecosystem with
+a generated update entry and a nonempty reason; duplicates fail. A declaration
+that names or matches a shared pin fails configuration validation: the shared
+policy owns those ignores. The generator appends declarations after the shared
+pins in code-unit order with canonical update types, so output stays
+byte-stable. `stll-toolchain-check` accepts exactly the shared pins plus these
+declarations; any other ignore fails.
+
 For programmatic generation, the `@stll/oxlint-config/dependabot` subpath exports
-`generateDependabotConfig({ files, policy, updates? })`, `parseDependabotInput`,
-and `parseToolchainPolicy`. `parseDependabotInput` validates the JSON shape above
-and returns the `updates` array:
+`generateDependabotConfig({ files, policy, updates?, ignores? })`,
+`parseDependabotInput`, `parseDependabotIgnores` and `parseToolchainPolicy`.
+`parseDependabotInput` validates the JSON shape above and returns the `updates`
+array; `parseDependabotIgnores` validates `dependabotIgnores` for `ignores`:
 
 ```ts
 import {
@@ -477,9 +514,9 @@ prints usage without reading repository configuration.
 
 | Environment phase       | Command                               |
 | ----------------------- | ------------------------------------- |
-| Networked install       | `bash .agents/cloud-setup.sh install`   |
-| Offline session startup | `bash .agents/cloud-setup.sh start`     |
-| Startup with exports    | `bash .agents/cloud-setup.sh session`   |
+| Networked install       | `bash .agents/cloud-setup.sh install` |
+| Offline session startup | `bash .agents/cloud-setup.sh start`   |
+| Startup with exports    | `bash .agents/cloud-setup.sh session` |
 
 Runtime installation repairs and verifies a missing or empty system CA bundle
 offline before any apt refresh or download, including when the certificate package
