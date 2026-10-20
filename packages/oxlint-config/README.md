@@ -1027,3 +1027,36 @@ from an exact tooling commit; it does not install consumer dependencies to
 perform enforcement or pruning. Its stable removal branch updates one PR per
 repository. See the [root guide](../../README.md#package-quarantine) for the
 inline annotation format and adoption boundary.
+
+## Normalize generated WASI loaders
+
+Run `stll-normalize-wasi-loaders <loader-1> <loader-2>` after `@napi-rs/cli`
+generates the two WASI loaders. Arguments may appear in either order: the
+`.wasi-browser.js` and `.wasi.cjs` suffixes select the loader kind, and any other
+suffix produces an unsupported-file error.
+
+The normalizer applies these exact transformations:
+
+- **cleanup handshake:** wraps the cleanup macrotask scheduler so synchronous
+  completion settles safely and thrown scheduler errors reject the promise.
+- **runtime poll promise:** adds the rejection path used by the scheduler wrapper.
+- **runtime poll timer:** runs the paced runtime timer through the scheduler wrapper.
+- **runtime poll macrotask:** runs the early runtime macrotask through the scheduler
+  wrapper.
+- **async work poll:** runs the async-work timer through the scheduler wrapper.
+- **worker construction:** builds named worker data and options objects; the browser
+  loader receives the add-on crash flag, while the CommonJS loader keeps its crash
+  data and retries invalid `execArgv` by updating the shared options.
+- **scheduler helper:** adds the wrapper that handles synchronous completion and
+  converts thrown scheduler errors into promise rejections.
+- **artifact metadata:** keeps napi-rs artifact metadata on line 1 when present.
+- **generated-file header:** removes leading generator directives and writes the
+  standard `@ts-nocheck` header immediately after metadata, or first when metadata
+  is absent.
+
+Each named transformation must have its exact expected count. The command fails
+closed and writes nothing unless both inputs normalize successfully.
+
+Use `stll-normalize-wasi-loaders --check <loader-1> <loader-2>` in CI. Check mode
+does not write files and exits non-zero if either loader differs from the normalized
+output.
