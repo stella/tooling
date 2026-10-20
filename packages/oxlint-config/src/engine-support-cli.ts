@@ -1,85 +1,27 @@
 #!/usr/bin/env node
-import parseChangeset from "@changesets/parse";
+import { assembleReleasePlan } from "@changesets/assemble-release-plan";
+import { readConfig } from "@changesets/config";
+import { readChangesets } from "@changesets/read";
 import { getPackagesSync, type Package } from "@manypkg/get-packages";
 import { execFileSync } from "node:child_process";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { checkEngineSupport, type EnginePackage } from "./engine-support";
 
-const git = (root: string, args: string[]) =>
-  execFileSync("git", args, { cwd: root, encoding: "utf8" });
+const MAX_MANIFEST_BUFFER = 100 * 1024 * 1024;
 
-const workspaceMetadataFiles = [
-  "bun.lock",
-  "bun.lockb",
-  "package-lock.json",
-  "npm-shrinkwrap.json",
-  "yarn.lock",
-  ".yarnrc.yml",
-  "pnpm-lock.yaml",
-  "pnpm-workspace.yaml",
-  "lerna.json",
-] as const;
+const git = (root: string, args: string[]) =>
+  execFileSync("git", args, {
+    cwd: root,
+    encoding: "utf8",
+    maxBuffer: MAX_MANIFEST_BUFFER,
+  });
 
 const parseBase = (args: string[]) => {
   if (args.length === 1 && args.at(0) === "--help") return undefined;
   if (args.length === 2 && args.at(0) === "--base" && args.at(1) !== "")
     return args.at(1);
   throw new Error("Usage: stll-engine-support --base <git ref>");
-};
-
-const manifestFiles = (root: string, base?: string) => {
-  if (base !== undefined)
-    return git(root, ["ls-tree", "-r", "--name-only", base, "--"])
-      .split("\n")
-      .filter((file) => path.posix.basename(file) === "package.json");
-  return git(root, [
-    "ls-files",
-    "--cached",
-    "--others",
-    "--exclude-standard",
-    "--",
-    "**/package.json",
-    "package.json",
-  ])
-    .split("\n")
-    .filter((file) => file !== "" && existsSync(path.join(root, file)));
-};
-
-const baseWorkspaceMetadataFiles = (root: string, base: string) =>
-  git(root, ["ls-tree", "--name-only", base, "--", ...workspaceMetadataFiles])
-    .split("\n")
-    .filter((file) => file !== "");
-
-const resolvedPackages = (root: string, base?: string) => {
-  if (base === undefined) return getPackagesSync(root);
-
-  const temporaryRoot = mkdtempSync(
-    path.join(tmpdir(), "engine-support-base-"),
-  );
-  try {
-    for (const file of [
-      ...manifestFiles(root, base),
-      ...baseWorkspaceMetadataFiles(root, base),
-    ]) {
-      const source = git(root, ["show", `${base}:${file}`]);
-      const destination = path.join(temporaryRoot, file);
-      mkdirSync(path.dirname(destination), { recursive: true });
-      writeFileSync(destination, source);
-    }
-    return getPackagesSync(temporaryRoot);
-  } finally {
-    rmSync(temporaryRoot, { recursive: true, force: true });
-  }
 };
 
 const allPackages = ({
@@ -98,70 +40,76 @@ const packageNodeRange = ({ packageJson }: Package) => {
     : undefined;
 };
 
-const collectPackages = (root: string, base?: string) => {
-  const discovered = allPackages(resolvedPackages(root, base));
-  const ignored = new Set<string>();
-  const configFile = ".changeset/config.json";
-  if (base === undefined) {
-    const config: unknown = JSON.parse(
-      readFileSync(path.join(root, configFile), "utf8"),
-    );
-    if (typeof config === "object" && config !== null && "ignore" in config)
-      for (const name of Array.isArray(config.ignore) ? config.ignore : [])
-        if (typeof name === "string") ignored.add(name);
-  }
-  const packages = new Map<string, EnginePackage>();
-  for (const pkg of discovered) {
+const publishedPackages = (packages: Package[], ignored: Set<string>) => {
+  const collected = new Map<string, EnginePackage>();
+  for (const pkg of packages) {
     const { name, private: isPrivate } = pkg.packageJson;
     if (isPrivate === true || typeof name !== "string") continue;
-    if (packages.has(name))
+    if (collected.has(name))
       throw new Error(`Duplicate published package name: ${name}`);
     const node = packageNodeRange(pkg);
-    packages.set(name, {
+    collected.set(name, {
       name,
       ...(node === undefined ? {} : { node }),
       changesetsManaged: !ignored.has(name),
     });
   }
-  return packages;
+  return collected;
 };
 
-const pendingMajorReleases = (root: string) => {
-  const majors = new Set<string>();
-  const files = git(root, [
-    "ls-files",
-    "--cached",
-    "--others",
-    "--exclude-standard",
-    "--",
-    ".changeset/*.md",
-  ])
-    .split("\n")
-    .filter(
-      (file) =>
-        file !== "" &&
-        file !== ".changeset/README.md" &&
-        existsSync(path.join(root, file)),
+const basePackage = (root: string, base: string, pkg: Package) => {
+  const relativeManifest = path
+    .relative(root, path.join(pkg.dir, "package.json"))
+    .split(path.sep)
+    .join(path.posix.sep);
+  if (
+    git(root, ["ls-tree", "--name-only", base, "--", relativeManifest]).trim() ===
+    ""
+  )
+    return undefined;
+  const packageJson = JSON.parse(
+    git(root, ["show", `${base}:${relativeManifest}`]),
+  );
+  if (typeof packageJson !== "object" || packageJson === null)
+    throw new Error(
+      `Invalid package manifest at ${base}:${relativeManifest}`,
     );
-  for (const file of files) {
-    const source = readFileSync(path.join(root, file), "utf8");
-    for (const { name, type } of parseChangeset(source).releases)
-      if (type === "major") majors.add(name);
-  }
-  return majors;
+  return { ...pkg, packageJson };
 };
 
-const main = () => {
+const main = async () => {
   const base = parseBase(process.argv.slice(2));
   if (base === undefined) {
     process.stdout.write("Usage: stll-engine-support --base <git ref>\n");
     return;
   }
   const root = process.cwd();
+  git(root, ["cat-file", "-e", `${base}^{commit}`]);
+  const workspace = getPackagesSync(root);
+  const discovered = allPackages(workspace);
+  const configResult = await readConfig(root, workspace);
+  if (configResult.errors !== undefined)
+    throw new Error(configResult.errors.join("\n"));
+  const config = configResult.config;
+  const ignored = new Set(config.ignore);
+  const releasePlan = assembleReleasePlan(
+    await readChangesets(root),
+    workspace,
+    config,
+    undefined,
+  );
+  const basePackages = discovered.flatMap((pkg) => {
+    const found = basePackage(root, base, pkg);
+    return found === undefined ? [] : [found];
+  });
   const failures = checkEngineSupport({
-    base: collectPackages(root, base),
-    head: collectPackages(root),
-    majorReleases: pendingMajorReleases(root),
+    base: publishedPackages(basePackages, ignored),
+    head: publishedPackages(discovered, ignored),
+    majorReleases: new Set(
+      releasePlan.releases
+        .filter(({ type }) => type === "major")
+        .map(({ name }) => name),
+    ),
   });
   for (const failure of failures)
     process.stderr.write(
@@ -170,11 +118,9 @@ const main = () => {
   if (failures.length > 0) process.exitCode = 1;
 };
 
-try {
-  main();
-} catch (error) {
+void main().catch((error: unknown) => {
   process.stderr.write(
     `engine-support: ${error instanceof Error ? error.message : String(error)}\n`,
   );
   process.exitCode = 1;
-}
+});

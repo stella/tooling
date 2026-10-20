@@ -67,31 +67,6 @@ test("a workspace without a lockfile is checked", async () => {
   );
 });
 
-test("pnpm-workspace.yaml discovers packages in the base snapshot", async () => {
-  await withRepository(
-    {
-      "package.json": {
-        name: "workspace",
-        private: true,
-      },
-      "pnpm-workspace.yaml": { packages: ["packages/*"] },
-      "packages/library/package.json": manifest("library", ">=18"),
-    },
-    async (root, run) => {
-      await writeJson(
-        root,
-        "packages/library/package.json",
-        manifest("library", ">=20"),
-      );
-      const result = run();
-      expect(result.exitCode).toBe(1);
-      expect(stderrText(result)).toContain(
-        "library narrows Node support from >=18 to >=20",
-      );
-    },
-  );
-});
-
 const writeJson = async (root: string, file: string, value: unknown) => {
   await mkdir(path.dirname(path.join(root, file)), { recursive: true });
   await writeFile(path.join(root, file), `${JSON.stringify(value)}\n`);
@@ -149,7 +124,7 @@ test("widening needs nothing and adding a range needs a major", async () => {
   );
 });
 
-test("new packages are skipped and moved packages are matched by name", async () => {
+test("new and moved packages with no base manifest are skipped", async () => {
   await withRepository(
     { "packages/library/package.json": manifest("library", ">=18") },
     async (root, run) => {
@@ -164,8 +139,6 @@ test("new packages are skipped and moved packages are matched by name", async ()
         "packages/new/package.json",
         manifest("new", ">=22"),
       );
-      expect(run().exitCode).toBe(1);
-      await writeChangeset(root, "major");
       expect(run().exitCode).toBe(0);
     },
   );
@@ -246,6 +219,41 @@ test("a managed package listed in Changesets ignore is not checked", async () =>
         manifest("library", ">=20"),
       );
       expect(run().exitCode).toBe(0);
+    },
+  );
+});
+
+test("a scoped Changesets ignore glob skips a narrowing package", async () => {
+  await withRepository(
+    { "packages/library/package.json": manifest("@scope/library", ">=18") },
+    async (root, run) => {
+      await writeJson(root, ".changeset/config.json", {
+        ignore: ["@scope/*"],
+      });
+      await writeJson(
+        root,
+        "packages/library/package.json",
+        manifest("@scope/library", ">=20"),
+      );
+      expect(run().exitCode).toBe(0);
+    },
+  );
+});
+
+test("a narrowing without a major release fails", async () => {
+  await withRepository(
+    { "packages/library/package.json": manifest("library", ">=18") },
+    async (root, run) => {
+      await writeJson(
+        root,
+        "packages/library/package.json",
+        manifest("library", ">=20"),
+      );
+      const result = run();
+      expect(result.exitCode).toBe(1);
+      expect(stderrText(result)).toContain(
+        "library narrows Node support from >=18 to >=20",
+      );
     },
   );
 });

@@ -559,9 +559,9 @@ performs no downloads.
 
 Run `stll-engine-support --base <git ref>` in pull request CI to require a major
 changeset when an existing published package narrows its `engines.node` range.
-The check matches packages by name, so moving a package does not hide a support
-change; packages that are new by name are skipped. A missing range means
-unrestricted Node support.
+Base engine ranges are read from the manifest at each HEAD package directory.
+Packages moved or renamed between the base and HEAD are therefore treated as new
+packages and skipped. A missing range means unrestricted Node support.
 
 Only published workspace packages managed by Changesets and absent from its
 `ignore` list are checked. Derived platform packages and ignored packages are
