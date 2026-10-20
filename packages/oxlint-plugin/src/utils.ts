@@ -272,36 +272,6 @@ const isSingleAssignment = (variable: Variable): boolean =>
 type ImportedBinding = { source: string; imported: string };
 const NAMESPACE_IMPORT = "*";
 
-// The static key of a member expression: `a.b`, `a["b"]`, `` a[`b`] ``.
-export const memberPropertyName = (member: AstNode): string | null => {
-  if (member.computed !== true) {
-    return getPropertyName(member.property);
-  }
-  if (isStringLiteral(member.property)) {
-    return member.property.value;
-  }
-  const property = member.property;
-  if (
-    !isAstNode(property) ||
-    property.type !== "TemplateLiteral" ||
-    !Array.isArray(property.expressions) ||
-    property.expressions.length > 0 ||
-    !Array.isArray(property.quasis)
-  ) {
-    return null;
-  }
-  const quasi: unknown = property.quasis[0];
-  if (!isAstNode(quasi)) {
-    return null;
-  }
-  const value: unknown = quasi.value;
-  const cooked =
-    typeof value === "object" && value !== null
-      ? Reflect.get(value, "cooked")
-      : undefined;
-  return typeof cooked === "string" ? cooked : null;
-};
-
 const memberOfNamespace = (
   base: ImportedBinding | null,
   property: string | null,

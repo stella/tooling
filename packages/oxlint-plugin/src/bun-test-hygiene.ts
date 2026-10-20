@@ -560,9 +560,6 @@ export default eslintCompatPlugin({
             ) {
               return;
             }
-            if (enclosingBlock(registration.call).conditional) {
-              return;
-            }
             comments ??= context.sourceCode
               .getAllComments()
               .filter(isSourceComment);

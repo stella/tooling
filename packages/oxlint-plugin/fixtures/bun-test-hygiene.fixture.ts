@@ -24,6 +24,7 @@ declare const obj: { only: unknown; skip: unknown };
 declare const flag: string | undefined;
 const noop = () => undefined;
 const table = [[1], [2]];
+const enabled = flag !== undefined;
 
 // --- no-focused-tests ---
 
@@ -49,9 +50,9 @@ bt.test.only("namespace focus", noop);
 // oxlint-disable-next-line bun-test-hygiene/no-focused-tests
 test.if(true).only("conditional focus", noop);
 // focus reference retained after a modifier call
-const enabled = test.if(true);
+const enabledTest = test.if(true);
 // oxlint-disable-next-line bun-test-hygiene/no-focused-tests
-enabled.only("aliased conditional focus", noop);
+enabledTest.only("aliased conditional focus", noop);
 // oxlint-disable-next-line bun-test-hygiene/no-focused-tests
 test.only.each(table)("focused table %d", noop);
 // oxlint-disable-next-line bun-test-hygiene/no-focused-tests
@@ -92,6 +93,23 @@ xit("x-prefixed it", noop);
 
 // oxlint-disable-next-line bun-test-hygiene/no-disabled-tests
 xdescribe("x-prefixed block", noop);
+
+if (enabled) {
+  // oxlint-disable-next-line bun-test-hygiene/no-disabled-tests
+  xit("case", noop);
+}
+
+// oxlint-disable-next-line bun-test-hygiene/no-disabled-tests, no-unused-expressions -- conditional expression fixture
+enabled ? xdescribe("suite", noop) : describe("suite", noop);
+
+// oxlint-disable-next-line bun-test-hygiene/no-disabled-tests, no-unused-expressions -- logical expression fixture
+enabled && xtest("case", noop);
+
+if (enabled) {
+  // Disabled until the conditional test setup supports this case.
+  // expect-clean: bun-test-hygiene/no-disabled-tests
+  xit("case with a reason", noop);
+}
 
 // oxlint-disable-next-line bun-test-hygiene/no-disabled-tests
 bt.it.skip("namespace skip", noop);
