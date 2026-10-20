@@ -9,15 +9,6 @@ import {
   type Node,
 } from "./test-rule-utils";
 
-const comparisonMatcherBoundPositions: ReadonlyMap<string, readonly number[]> =
-  new Map([
-    ["toBeCloseTo", [0]],
-    ["toBeGreaterThan", [0]],
-    ["toBeGreaterThanOrEqual", [0]],
-    ["toBeLessThan", [0]],
-    ["toBeLessThanOrEqual", [0]],
-    ["toBeWithin", [0, 1]],
-  ]);
 const timerModules = new Set([
   "node:timers/promises",
   "timers/promises",
@@ -44,7 +35,7 @@ const enclosingFunction = (node: Node): Node | null => {
 export default testOnlyPlugin(
   "no-wall-clock-bound",
   "noWallClockBound",
-  "A test must not assert an absolute duration or race a timer: loaded runners make these checks flaky. Assert relative growth across input sizes for performance, or use a controlled clock or deferred for ordering.",
+  "A test must not assert on measured wall-clock time or race a timer, because such assertions fail on loaded runners; use a controlled clock or deferred for ordering.",
   (report, getScope) => {
     const resolveBinding = createBindingResolver(getScope);
 
@@ -137,48 +128,6 @@ export default testOnlyPlugin(
       );
     };
 
-    const isDurationValue = (value: unknown, use: Node): boolean => {
-      if (!isNode(value)) return false;
-      if (value.type === "Identifier") {
-        const initializer = constInitializerInSameFunction(value, use);
-        return (
-          initializer !== null && containsClockRead(initializer, use, true)
-        );
-      }
-      return (
-        value.type === "BinaryExpression" &&
-        value.operator === "-" &&
-        containsClockRead(value, use, true)
-      );
-    };
-
-    const isNumericConstant = (value: unknown, use: Node): boolean => {
-      if (!isNode(value)) return false;
-      if (value.type === "Literal" && typeof value.value === "number") return true;
-      if (value.type !== "Identifier") return false;
-      const initializer = constInitializerInSameFunction(value, use);
-      return (
-        initializer?.type === "Literal" && typeof initializer.value === "number"
-      );
-    };
-
-    const isRelativeBound = (value: unknown, use: Node): boolean => {
-      if (isDurationValue(value, use)) return true;
-      if (!isNode(value) || value.type !== "BinaryExpression") return false;
-      if (value.operator === "/")
-        return (
-          isDurationValue(value.left, use) &&
-          isNumericConstant(value.right, use)
-        );
-      if (value.operator !== "*") return false;
-      return (
-        (isDurationValue(value.left, use) &&
-          isNumericConstant(value.right, use)) ||
-        (isNumericConstant(value.left, use) &&
-          isDurationValue(value.right, use))
-      );
-    };
-
     const matcherExpectCall = (value: unknown): Node | null => {
       let current = value;
       while (
@@ -265,18 +214,7 @@ export default testOnlyPlugin(
         const measured = Array.isArray(expectCall.arguments)
           ? expectCall.arguments.at(0)
           : null;
-        if (!containsClockRead(measured, node, true)) return;
-        const boundPositions =
-          member === null
-            ? undefined
-            : comparisonMatcherBoundPositions.get(member);
-        const boundIsMeasured =
-          boundPositions !== undefined &&
-          Array.isArray(node.arguments) &&
-          boundPositions.every((position) =>
-            isRelativeBound(node.arguments?.[position], node),
-          );
-        if (!boundIsMeasured) report(node);
+        if (containsClockRead(measured, node, true)) report(node);
       },
     };
   },
