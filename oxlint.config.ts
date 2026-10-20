@@ -1,5 +1,7 @@
 import { library } from "./packages/oxlint-config/src/index";
 import {
+  bunTestHygienePluginSpecifiers,
+  bunTestHygieneRules,
   portableSafetyPluginSpecifiers,
   portableSafetyRules,
   routeQueryPluginSpecifiers,
@@ -15,6 +17,7 @@ export default library({
     "packages/oxlint-config/src/__fixtures__/wasi-loaders/",
   ],
   jsPlugins: [
+    ...bunTestHygienePluginSpecifiers,
     ...portableSafetyPluginSpecifiers,
     ...routeQueryPluginSpecifiers,
     ...testReliabilityPluginSpecifiers,
@@ -40,9 +43,13 @@ export default library({
       // Fixtures preserve literal spreads and array holes as AST inputs for the
       // plugin rules; generic syntax-style fixes would erase those test cases.
       rules: {
+        ...bunTestHygieneRules,
         ...portableSafetyRules,
         ...routeQueryRules,
         ...testReliabilityRules,
+        // Fixtures intentionally place Bun's void-returning registrations in
+        // expression positions to exercise conditional-branch handling.
+        "typescript/no-confusing-void-expression": "off",
         "unicorn/no-useless-spread": "off",
         "no-sparse-arrays": "off",
       },

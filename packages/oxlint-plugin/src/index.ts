@@ -14,6 +14,20 @@ export const noRawRouteQueryClientPluginSpecifier =
   "@stll/oxlint-plugin/no-raw-route-query-client";
 export const requireLoaderPrefetchPluginSpecifier =
   "@stll/oxlint-plugin/require-loader-prefetch";
+export const bunTestHygienePluginSpecifier =
+  "@stll/oxlint-plugin/bun-test-hygiene";
+
+export const bunTestHygienePluginSpecifiers = [
+  bunTestHygienePluginSpecifier,
+] satisfies JsPlugins;
+
+export const bunTestHygieneRules = {
+  "bun-test-hygiene/no-disabled-tests": "error",
+  "bun-test-hygiene/no-focused-tests": "error",
+  "bun-test-hygiene/no-forced-database-drop": "error",
+  "bun-test-hygiene/no-identical-title": "error",
+  "bun-test-hygiene/no-promise-matchers": "error",
+} satisfies Rules;
 
 export const portableSafetyPluginSpecifiers = [
   noAnyCastsPluginSpecifier,

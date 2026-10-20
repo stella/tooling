@@ -1,0 +1,248 @@
+// Passive regression fixture for `bun-test-hygiene`.
+//
+// Each `oxlint-disable-next-line` suppresses a case the rule MUST flag; if the
+// rule regresses, the unused directive fails the fixture harness. A blank line
+// separates each case description from a disabled-test case, because a
+// comment directly above a `.skip` counts as its reason.
+
+import * as bt from "bun:test";
+import {
+  describe,
+  expect,
+  expect as assertThat,
+  it,
+  test as check,
+  test,
+  xdescribe,
+  xit,
+  xtest,
+} from "bun:test";
+
+declare const local: { only: (title: string, fn: () => void) => void };
+declare const config: { only: boolean };
+declare const obj: { only: unknown; skip: unknown };
+declare const flag: string | undefined;
+const noop = () => undefined;
+const table = [[1], [2]];
+const enabled = flag !== undefined;
+
+// --- no-focused-tests ---
+
+// named import
+// oxlint-disable-next-line bun-test-hygiene/no-focused-tests
+test.only("focused test", noop);
+// oxlint-disable-next-line bun-test-hygiene/no-focused-tests
+it.only("focused it", noop);
+// oxlint-disable-next-line bun-test-hygiene/no-focused-tests
+describe.only("focused block", noop);
+// computed member
+// oxlint-disable-next-line bun-test-hygiene/no-focused-tests, typescript/dot-notation -- the computed form is the case under test
+test["only"]("computed focus", noop);
+// oxlint-disable-next-line bun-test-hygiene/no-focused-tests, typescript/dot-notation -- the computed form is the case under test
+test[`only`]("computed template focus", noop);
+// aliased import
+// oxlint-disable-next-line bun-test-hygiene/no-focused-tests
+check.only("aliased focus", noop);
+// namespace import
+// oxlint-disable-next-line bun-test-hygiene/no-focused-tests
+bt.test.only("namespace focus", noop);
+// chained after a modifier call, and before `.each`
+// oxlint-disable-next-line bun-test-hygiene/no-focused-tests
+test.if(true).only("conditional focus", noop);
+// focus reference retained after a modifier call
+const enabledTest = test.if(true);
+// oxlint-disable-next-line bun-test-hygiene/no-focused-tests
+enabledTest.only("aliased conditional focus", noop);
+// oxlint-disable-next-line bun-test-hygiene/no-focused-tests
+test.only.each(table)("focused table %d", noop);
+// oxlint-disable-next-line bun-test-hygiene/no-focused-tests
+test.concurrent.only("concurrent focus", noop);
+// focus reference assigned for later use
+// oxlint-disable-next-line bun-test-hygiene/no-focused-tests
+const focused = test.only;
+focused("aliased focus reference", noop);
+// focus reference passed through another expression
+// oxlint-disable-next-line bun-test-hygiene/no-focused-tests
+[test.only][0]("array focus reference", noop);
+// conservative detection rejects every `.only` in a Bun test file
+// oxlint-disable-next-line bun-test-hygiene/no-focused-tests
+local.only("not a test function", noop);
+// oxlint-disable-next-line bun-test-hygiene/no-focused-tests
+if (config.only) noop();
+// oxlint-disable-next-line bun-test-hygiene/no-focused-tests, typescript/dot-notation -- the computed form is the case under test
+void obj["only"];
+// expect-clean: bun-test-hygiene/no-focused-tests
+test("plain test", noop);
+
+// --- no-disabled-tests ---
+
+// oxlint-disable-next-line bun-test-hygiene/no-disabled-tests
+test.skip("skipped test", noop);
+
+// oxlint-disable-next-line bun-test-hygiene/no-disabled-tests
+it.todo("todo it");
+
+// oxlint-disable-next-line bun-test-hygiene/no-disabled-tests
+describe.skip("skipped block", noop);
+
+// oxlint-disable-next-line bun-test-hygiene/no-disabled-tests
+xtest("x-prefixed test", noop);
+
+// oxlint-disable-next-line bun-test-hygiene/no-disabled-tests
+xit("x-prefixed it", noop);
+
+// oxlint-disable-next-line bun-test-hygiene/no-disabled-tests
+xdescribe("x-prefixed block", noop);
+
+if (enabled) {
+  // oxlint-disable-next-line bun-test-hygiene/no-disabled-tests
+  xit("case", noop);
+}
+
+// oxlint-disable-next-line bun-test-hygiene/no-disabled-tests, no-unused-expressions -- conditional expression fixture
+enabled ? xdescribe("suite", noop) : describe("suite", noop);
+
+// oxlint-disable-next-line bun-test-hygiene/no-disabled-tests, no-unused-expressions -- logical expression fixture
+enabled && xtest("case", noop);
+
+if (enabled) {
+  // Disabled until the conditional test setup supports this case.
+  // expect-clean: bun-test-hygiene/no-disabled-tests
+  xit("case with a reason", noop);
+}
+
+// oxlint-disable-next-line bun-test-hygiene/no-disabled-tests
+bt.it.skip("namespace skip", noop);
+
+// oxlint-disable-next-line bun-test-hygiene/no-disabled-tests, typescript/dot-notation -- the computed form is the case under test
+check["todo"]("aliased computed todo");
+
+// oxlint-disable-next-line bun-test-hygiene/no-disabled-tests
+test.skip.each(table)("skipped table %d", noop);
+
+// disabling references remain detectable after they lose registration identity
+
+// oxlint-disable-next-line bun-test-hygiene/no-disabled-tests
+const disabled = test.skip;
+disabled("aliased disabled reference", noop);
+// oxlint-disable-next-line bun-test-hygiene/no-disabled-tests
+const conditionallyDisabled = test.skipIf(true);
+conditionallyDisabled("aliased conditional disabled reference", noop);
+// oxlint-disable-next-line bun-test-hygiene/no-disabled-tests
+void [test.skip][0];
+// oxlint-disable-next-line bun-test-hygiene/no-disabled-tests, typescript/dot-notation -- the computed form is the case under test
+void obj["skip"];
+
+// The external service is unavailable in this fixture environment.
+// expect-clean: bun-test-hygiene/no-disabled-tests
+const explainedDisabled = test.skip;
+explainedDisabled("explained aliased disabled reference", noop);
+// The feature flag documents why this conditional registration is disabled.
+// expect-clean: bun-test-hygiene/no-disabled-tests
+const explainedConditional = test.skipIf(true);
+explainedConditional("explained conditional disabled reference", noop);
+// These retained references model a documented compatibility hold.
+// expect-clean: bun-test-hygiene/no-disabled-tests
+void [test.skip][0];
+// This property is retained until the fixture protocol is upgraded.
+// expect-clean: bun-test-hygiene/no-disabled-tests, typescript/dot-notation
+// oxlint-disable-next-line typescript/dot-notation -- the computed form is the case under test
+void obj["skip"];
+
+// Waits on the upstream parser fix; re-enable when it lands.
+// expect-clean: bun-test-hygiene/no-disabled-tests
+test.skip("skip with a reason above", noop);
+// expect-clean: bun-test-hygiene/no-disabled-tests
+test.todo("todo with a reason on the same line"); // needs a fixture corpus
+// expect-clean: bun-test-hygiene/no-disabled-tests
+test.skipIf(flag === "off")("conditional skip", noop); // disabled when the service is off
+// expect-clean: bun-test-hygiene/no-disabled-tests
+test.todoIf(flag === "off")("conditional todo", noop); // pending while the service is off
+
+// a disabled registration in a branch, beside the real one with its title
+if (flag === undefined) {
+  // The suite needs the optional integration configured.
+  // expect-clean: bun-test-hygiene/no-disabled-tests, bun-test-hygiene/no-identical-title
+  describe.skip("branch suite", noop);
+} else {
+  // expect-clean: bun-test-hygiene/no-disabled-tests, bun-test-hygiene/no-identical-title
+  describe("branch suite", noop);
+}
+
+// a conditional expression arm
+// expect-clean: bun-test-hygiene/no-disabled-tests
+const _armed = flag ? test.skip("arm", noop) : undefined;
+
+describe("block with a branch", () => {
+  if (flag === undefined) {
+    return;
+  }
+
+  // oxlint-disable-next-line bun-test-hygiene/no-disabled-tests
+  test.skip("inside a block, not a branch", noop);
+});
+
+// --- no-identical-title ---
+
+describe("first block", () => {
+  test("same title", noop);
+  // oxlint-disable-next-line bun-test-hygiene/no-identical-title
+  test("same title", noop);
+  // oxlint-disable-next-line bun-test-hygiene/no-identical-title
+  it(`same title`, noop);
+  // a block may share a test's title
+  // expect-clean: bun-test-hygiene/no-identical-title
+  describe("same title", noop);
+  // `.each` titles are format strings
+  test.each(table)("row %d", noop);
+  // expect-clean: bun-test-hygiene/no-identical-title
+  test.each(table)("row %d", noop);
+});
+
+describe("second block", () => {
+  // the same title in another block
+  // expect-clean: bun-test-hygiene/no-identical-title
+  test("same title", noop);
+});
+
+// oxlint-disable-next-line bun-test-hygiene/no-identical-title
+describe("first block", noop);
+
+// --- no-forced-database-drop ---
+declare const fixtureDatabaseName: string;
+// oxlint-disable-next-line bun-test-hygiene/no-forced-database-drop -- Fixture exercises rejected database teardown.
+const _forcedDrop = `DROP DATABASE "${fixtureDatabaseName}" WITH (FORCE)`;
+// expect-clean: bun-test-hygiene/no-forced-database-drop
+const _normalDrop = "DROP DATABASE IF EXISTS fixture";
+
+// --- no-promise-matchers ---
+
+declare const pending: Promise<number>;
+declare const playwrightExpect: (value: unknown) => {
+  rejects: { toThrow: () => Promise<void> };
+};
+
+// oxlint-disable-next-line bun-test-hygiene/no-promise-matchers
+expect(pending).rejects.toThrow("boom");
+// oxlint-disable-next-line bun-test-hygiene/no-promise-matchers
+expect(pending).resolves.toBe(1);
+// aliased import
+// oxlint-disable-next-line bun-test-hygiene/no-promise-matchers
+assertThat(pending).resolves.toBe(1);
+// namespace member
+// oxlint-disable-next-line bun-test-hygiene/no-promise-matchers
+bt.expect(pending).rejects.toBeInstanceOf(Error);
+// computed member
+// oxlint-disable-next-line bun-test-hygiene/no-promise-matchers, typescript/dot-notation -- the computed form is the case under test
+expect(pending)["rejects"].toBeInstanceOf(Error);
+// a negation before the promise matcher
+// oxlint-disable-next-line bun-test-hygiene/no-promise-matchers
+expect(pending).not.rejects.toThrow("boom");
+// oxlint-disable-next-line bun-test-hygiene/no-promise-matchers
+expect(pending).not.resolves.toBe(2);
+// an awaited value
+// expect-clean: bun-test-hygiene/no-promise-matchers
+const _awaited = async () => expect(await pending).toBe(1);
+// a framework whose `expect` is not from `bun:test`
+// expect-clean: bun-test-hygiene/no-promise-matchers
+const _playwright = playwrightExpect(pending).rejects.toThrow();

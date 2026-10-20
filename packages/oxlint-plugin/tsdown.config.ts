@@ -3,6 +3,7 @@ import { defineConfig } from "tsdown";
 export default defineConfig({
   entry: [
     "src/index.ts",
+    "src/bun-test-hygiene.ts",
     "src/no-any-casts.ts",
     "src/no-dangerous-type-assertions.ts",
     "src/no-partial-record-satisfies.ts",

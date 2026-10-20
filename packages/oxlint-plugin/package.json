@@ -92,6 +92,17 @@
       },
       "default": "./dist/require-loader-prefetch.mjs"
     },
+    "./bun-test-hygiene": {
+      "import": {
+        "types": "./dist/bun-test-hygiene.d.mts",
+        "default": "./dist/bun-test-hygiene.mjs"
+      },
+      "require": {
+        "types": "./dist/bun-test-hygiene.d.cts",
+        "default": "./dist/bun-test-hygiene.cjs"
+      },
+      "default": "./dist/bun-test-hygiene.mjs"
+    },
     "./no-wall-clock-in-tests": {
       "import": {
         "types": "./dist/no-wall-clock-in-tests.d.mts",
