@@ -28,11 +28,13 @@ for (const name of loaderNames) {
     );
     const normalized = normalizeGeneratedLoader(generated, {
       keepGeneratedTypecheckOptOut: true,
+      file: name,
     });
     expect(normalized).toBe(committed);
     expect(
       normalizeGeneratedLoader(normalized, {
         keepGeneratedTypecheckOptOut: true,
+        file: name,
       }),
     ).toBe(committed);
     expect(normalized.split("\n").at(0)).toBe(generated.split("\n").at(0));
@@ -104,6 +106,53 @@ test("CLI writes both loaders and check mode detects drift", async () => {
           "utf8",
         ),
       );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("CLI derives loader kinds from suffix regardless of argument order or directory name", async () => {
+  const root = await mkdtemp(
+    join(tmpdir(), "contains.wasi.cjs-and.wasi-browser.js-"),
+  );
+  try {
+    const names = [...loaderNames].reverse();
+    const paths = names.map((name) => join(root, name));
+    await Promise.all(
+      names.map(async (name, index) =>
+        writeFile(paths[index]!, await readFile(join(fixtures, name), "utf8")),
+      ),
+    );
+    await runWasiLoaderNormalizer(paths);
+    await runWasiLoaderNormalizer(["--check", ...paths]);
+    for (const [index, name] of names.entries())
+      expect(await readFile(paths[index]!, "utf8")).toBe(
+        await readFile(join(fixtures, `${name}.normalized`), "utf8"),
+      );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("CLI rejects a loader without a supported file-name suffix", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wasi-normalizer-kind-"));
+  const path = join(root, "aho-corasick.js");
+  const commonjsPath = join(root, loaderNames[1]);
+  try {
+    await Promise.all([
+      writeFile(
+        path,
+        await readFile(join(fixtures, loaderNames[0]), "utf8"),
+      ),
+      writeFile(
+        commonjsPath,
+        await readFile(join(fixtures, loaderNames[1]), "utf8"),
+      ),
+    ]);
+    await assert.rejects(
+      runWasiLoaderNormalizer([path, commonjsPath]),
+      /Unsupported WASI loader file.*aho-corasick\.js/u,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -209,13 +258,15 @@ test("every changed transformation anchor is rejected in write and check modes",
 test("every transformation rejects mixed normalized and generated occurrences in write and check modes", async () => {
   for (const transformation of WASI_LOADER_TRANSFORMATIONS) {
     for (const [index, name] of loaderNames.entries()) {
-      const loaderKind = index === 0 ? "browser" : "commonjs";
+      const loaderKind = name.endsWith(".wasi-browser.js")
+        ? "browser"
+        : "commonjs";
       if (transformation.expectedOccurrences[loaderKind] === 0) continue;
 
       const generated = await readFile(join(fixtures, name), "utf8");
       const normalized = normalizeGeneratedLoader(generated, {
         keepGeneratedTypecheckOptOut: true,
-        loaderKind,
+        file: name,
       });
       const mixed = `${normalized}\n${transformation.anchor}\n`;
 

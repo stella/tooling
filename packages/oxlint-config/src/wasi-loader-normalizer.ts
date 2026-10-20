@@ -163,7 +163,12 @@ type Transformation = {
   expectedOccurrences: Record<LoaderKind, number>;
 };
 
-type LoaderKind = "browser" | "commonjs";
+const LOADER_KINDS_BY_SUFFIX = {
+  ".wasi-browser.js": "browser",
+  ".wasi.cjs": "commonjs",
+} as const;
+
+type LoaderKind = (typeof LOADER_KINDS_BY_SUFFIX)[keyof typeof LOADER_KINDS_BY_SUFFIX];
 
 const BOTH_LOADERS = { browser: 1, commonjs: 1 } as const;
 const BROWSER_LOADER = { browser: 1, commonjs: 0 } as const;
@@ -223,8 +228,13 @@ export const WASI_LOADER_TRANSFORMATIONS = [
 const countOccurrences = (source: string, value: string) =>
   source.split(value).length - 1;
 
-const inferLoaderKind = (source: string): LoaderKind =>
-  source.includes("wasi-worker-browser.mjs") ? "browser" : "commonjs";
+const loaderKindFromFile = (file: string): LoaderKind => {
+  if (file.endsWith(".wasi-browser.js")) return "browser";
+  if (file.endsWith(".wasi.cjs")) return "commonjs";
+  throw new Error(
+    `Unsupported WASI loader file ${file}: expected a name ending in ${Object.keys(LOADER_KINDS_BY_SUFFIX).join(" or ")}`,
+  );
+};
 
 const applyTransformations = (
   source: string,
@@ -275,11 +285,9 @@ export const normalizeGeneratedLoader = (
   {
     keepGeneratedTypecheckOptOut = false,
     file = "<input>",
-    loaderKind,
   }: {
     keepGeneratedTypecheckOptOut?: boolean;
     file?: string;
-    loaderKind?: LoaderKind;
   } = {},
 ) => {
   if (source.includes("\r\n"))
@@ -291,7 +299,7 @@ export const normalizeGeneratedLoader = (
   const normalized = applyTransformations(
     withoutDirective,
     file,
-    loaderKind ?? inferLoaderKind(withoutDirective),
+    loaderKindFromFile(file),
   ).replace(/[ \t]+$/gmu, "");
 
   return keepGeneratedTypecheckOptOut
@@ -309,12 +317,11 @@ export const runWasiLoaderNormalizer = async (args: string[]) => {
     throw new Error(usage);
 
   const loaders = await Promise.all(
-    paths.map(async (path, index) => {
+    paths.map(async (path) => {
       const source = await readFile(path, "utf8");
       const normalized = normalizeGeneratedLoader(source, {
         keepGeneratedTypecheckOptOut: true,
         file: path,
-        loaderKind: index === 0 ? "browser" : "commonjs",
       });
       return { normalized, path, source };
     }),
