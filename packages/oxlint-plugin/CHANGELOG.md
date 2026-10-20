@@ -1,5 +1,13 @@
 # @stll/oxlint-plugin
 
+## 0.6.0
+
+### Minor Changes
+
+- [#173](https://github.com/stella/tooling/pull/173) [`bfc0cfd`](https://github.com/stella/tooling/commit/bfc0cfd171b92b1ff4c6393a08e03ee2a56c62ab) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Add the bun-test-hygiene rules.
+
+- [#174](https://github.com/stella/tooling/pull/174) [`79e0baf`](https://github.com/stella/tooling/commit/79e0baff5fdc33da6b63fbf1e9c280383f605867) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Extend HTML sink DOM provenance through expression wrappers, child collections, stable document aliases, and for-of bindings. Inspect literal React props spreads and namespaced HTML attributes through shared sink tables.
+
 ## 0.5.0
 
 ### Minor Changes
