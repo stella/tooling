@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import net from "node:net";
 import tls from "node:tls";
 
-import { setProcessEnvironment } from "../tests/environment.ts";
+import { setProcessEnvironment } from "./environment-support.ts";
 import {
   NetworkAccessError,
   installNetworkGuard,
