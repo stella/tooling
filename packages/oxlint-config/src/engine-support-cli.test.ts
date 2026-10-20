@@ -37,6 +37,7 @@ const withRepository = async (
     });
     await write(".changeset/config.json", { ignore: [] });
     await write(".changeset/README.md", "changesets\n");
+    await writeFile(path.join(root, "bun.lock"), "");
     for (const [file, value] of Object.entries(initial))
       await write(file, value);
     execFileSync("git", ["init", "--quiet"], { cwd: root });
@@ -150,8 +151,31 @@ test("manifests outside the workspace do not conflict with workspace packages", 
       expect(stderrText(result)).toContain(
         "library narrows Node support from >=18 to >=20",
       );
-      expect(stderrText(result)).not.toContain("Duplicate published package name");
+      expect(stderrText(result)).not.toContain(
+        "Duplicate published package name",
+      );
       await writeChangeset(root, "major");
+      expect(run().exitCode).toBe(0);
+    },
+  );
+});
+
+test("excluded workspaces and same-named fixtures are ignored", async () => {
+  await withRepository(
+    {
+      "package.json": {
+        private: true,
+        workspaces: ["packages/*", "!packages/excluded"],
+      },
+      "packages/excluded/package.json": manifest("excluded", ">=18"),
+      "fixtures/excluded/package.json": manifest("excluded", ">=18"),
+    },
+    async (root, run) => {
+      await writeJson(
+        root,
+        "packages/excluded/package.json",
+        manifest("excluded", ">=20"),
+      );
       expect(run().exitCode).toBe(0);
     },
   );

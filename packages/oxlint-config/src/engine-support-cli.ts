@@ -1,18 +1,19 @@
 #!/usr/bin/env node
 import parseChangeset from "@changesets/parse";
+import { getPackagesSync, type Package } from "@manypkg/get-packages";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
-import picomatch from "picomatch";
 
 import { checkEngineSupport, type EnginePackage } from "./engine-support";
-
-type Manifest = {
-  name?: unknown;
-  private?: unknown;
-  workspaces?: unknown;
-  engines?: unknown;
-};
 
 const git = (root: string, args: string[]) =>
   execFileSync("git", args, { cwd: root, encoding: "utf8" });
@@ -42,46 +43,43 @@ const manifestFiles = (root: string, base?: string) => {
     .filter((file) => file !== "" && existsSync(path.join(root, file)));
 };
 
-const readManifest = (root: string, file: string, base?: string): Manifest => {
-  const source =
-    base === undefined
-      ? readFileSync(path.join(root, file), "utf8")
-      : git(root, ["show", `${base}:${file}`]);
-  const value: unknown = JSON.parse(source);
-  if (typeof value !== "object" || value === null || Array.isArray(value))
-    throw new Error(`Invalid package manifest: ${file}`);
-  return value;
+const resolvedPackages = (root: string, base?: string) => {
+  if (base === undefined) return getPackagesSync(root);
+
+  const temporaryRoot = mkdtempSync(
+    path.join(tmpdir(), "engine-support-base-"),
+  );
+  try {
+    for (const file of [...manifestFiles(root, base), "bun.lock"]) {
+      const source = git(root, ["show", `${base}:${file}`]);
+      const destination = path.join(temporaryRoot, file);
+      mkdirSync(path.dirname(destination), { recursive: true });
+      writeFileSync(destination, source);
+    }
+    return getPackagesSync(temporaryRoot);
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true });
+  }
 };
 
-const workspacePatterns = (manifest: Manifest) => {
-  const workspaces = manifest.workspaces;
-  if (Array.isArray(workspaces))
-    return workspaces.filter(
-      (item): item is string => typeof item === "string",
-    );
-  if (
-    typeof workspaces === "object" &&
-    workspaces !== null &&
-    "packages" in workspaces &&
-    Array.isArray(workspaces.packages)
-  )
-    return workspaces.packages.filter(
-      (item): item is string => typeof item === "string",
-    );
-  return [];
+const allPackages = ({
+  packages,
+  rootPackage,
+}: ReturnType<typeof getPackagesSync>) =>
+  rootPackage === undefined ? packages : [rootPackage, ...packages];
+
+const packageNodeRange = ({ packageJson }: Package) => {
+  const engines = "engines" in packageJson ? packageJson.engines : undefined;
+  return typeof engines === "object" &&
+    engines !== null &&
+    "node" in engines &&
+    typeof engines.node === "string"
+    ? engines.node
+    : undefined;
 };
 
 const collectPackages = (root: string, base?: string) => {
-  const manifestCandidates = manifestFiles(root, base);
-  const rootManifest = manifestCandidates.includes("package.json")
-    ? readManifest(root, "package.json", base)
-    : {};
-  const patterns = workspacePatterns(rootManifest);
-  const matchesWorkspace = picomatch(patterns);
-  const files = manifestCandidates.filter((file) => {
-    if (file === "package.json") return true;
-    return matchesWorkspace(path.posix.dirname(file));
-  });
+  const discovered = allPackages(resolvedPackages(root, base));
   const ignored = new Set<string>();
   const configFile = ".changeset/config.json";
   if (base === undefined) {
@@ -93,27 +91,16 @@ const collectPackages = (root: string, base?: string) => {
         if (typeof name === "string") ignored.add(name);
   }
   const packages = new Map<string, EnginePackage>();
-  for (const file of files) {
-    const manifest = readManifest(root, file, base);
-    if (manifest.private === true || typeof manifest.name !== "string")
-      continue;
-    if (packages.has(manifest.name))
-      throw new Error(`Duplicate published package name: ${manifest.name}`);
-    const directory = path.posix.dirname(file);
-    const engines = manifest.engines;
-    const node =
-      typeof engines === "object" &&
-      engines !== null &&
-      "node" in engines &&
-      typeof engines.node === "string"
-        ? engines.node
-        : undefined;
-    packages.set(manifest.name, {
-      name: manifest.name,
+  for (const pkg of discovered) {
+    const { name, private: isPrivate } = pkg.packageJson;
+    if (isPrivate === true || typeof name !== "string") continue;
+    if (packages.has(name))
+      throw new Error(`Duplicate published package name: ${name}`);
+    const node = packageNodeRange(pkg);
+    packages.set(name, {
+      name,
       ...(node === undefined ? {} : { node }),
-      changesetsManaged:
-        !ignored.has(manifest.name) &&
-        (directory === "." || matchesWorkspace(directory)),
+      changesetsManaged: !ignored.has(name),
     });
   }
   return packages;
