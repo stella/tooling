@@ -127,6 +127,16 @@ export default testOnlyPlugin(
       return initializer !== null && isClockDifference(initializer, use);
     };
 
+    const containsMeasuredDuration = (value: unknown, use: Node): boolean => {
+      if (Array.isArray(value))
+        return value.some((child) => containsMeasuredDuration(child, use));
+      if (!isNode(value)) return false;
+      if (isMeasuredDuration(value, use)) return true;
+      return Object.values(value).some(
+        (child) => child !== value.parent && containsMeasuredDuration(child, use),
+      );
+    };
+
     const matcherExpectCall = (value: unknown): Node | null => {
       let current = value;
       while (
@@ -214,7 +224,12 @@ export default testOnlyPlugin(
         const measured = Array.isArray(expectCall.arguments)
           ? expectCall.arguments.at(0)
           : null;
-        if (isMeasuredDuration(measured, node)) report(node);
+        const boundIsMeasured = Array.isArray(node.arguments)
+          ? node.arguments.some((argument) =>
+              containsMeasuredDuration(argument, node),
+            )
+          : false;
+        if (isMeasuredDuration(measured, node) && !boundIsMeasured) report(node);
       },
     };
   },
