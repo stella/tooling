@@ -11,6 +11,7 @@ function __scheduleTimer(callback, delay) {
     __scheduleMacrotask(callback)
   }
 }
+
 function __createWasmRuntimePollPace() {
   return {
     // Timers armed by *this* poll that have actually arrived.
@@ -21,6 +22,7 @@ function __createWasmRuntimePollPace() {
     turnTimerDueAt: 0,
   }
 }
+
 function __armWasmRuntimePollStallBackup(pace) {
   const setTimer = globalThis.setTimeout
   if (typeof setTimer !== 'function') {
