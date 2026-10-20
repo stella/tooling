@@ -20,7 +20,7 @@ import {
 
 declare const local: { only: (title: string, fn: () => void) => void };
 declare const config: { only: boolean };
-declare const obj: { only: unknown };
+declare const obj: { only: unknown; skip: unknown };
 declare const flag: string | undefined;
 const noop = () => undefined;
 const table = [[1], [2]];
@@ -102,18 +102,48 @@ check["todo"]("aliased computed todo");
 // oxlint-disable-next-line bun-test-hygiene/no-disabled-tests
 test.skip.each(table)("skipped table %d", noop);
 
+// disabling references remain detectable after they lose registration identity
+
+// oxlint-disable-next-line bun-test-hygiene/no-disabled-tests
+const disabled = test.skip;
+disabled("aliased disabled reference", noop);
+// oxlint-disable-next-line bun-test-hygiene/no-disabled-tests
+const conditionallyDisabled = test.skipIf(true);
+conditionallyDisabled("aliased conditional disabled reference", noop);
+// oxlint-disable-next-line bun-test-hygiene/no-disabled-tests
+void [test.skip][0];
+// oxlint-disable-next-line bun-test-hygiene/no-disabled-tests, typescript/dot-notation -- the computed form is the case under test
+void obj["skip"];
+
+// The external service is unavailable in this fixture environment.
+// expect-clean: bun-test-hygiene/no-disabled-tests
+const explainedDisabled = test.skip;
+explainedDisabled("explained aliased disabled reference", noop);
+// The feature flag documents why this conditional registration is disabled.
+// expect-clean: bun-test-hygiene/no-disabled-tests
+const explainedConditional = test.skipIf(true);
+explainedConditional("explained conditional disabled reference", noop);
+// These retained references model a documented compatibility hold.
+// expect-clean: bun-test-hygiene/no-disabled-tests
+void [test.skip][0];
+// This property is retained until the fixture protocol is upgraded.
+// expect-clean: bun-test-hygiene/no-disabled-tests, typescript/dot-notation
+// oxlint-disable-next-line typescript/dot-notation -- the computed form is the case under test
+void obj["skip"];
+
 // Waits on the upstream parser fix; re-enable when it lands.
 // expect-clean: bun-test-hygiene/no-disabled-tests
 test.skip("skip with a reason above", noop);
 // expect-clean: bun-test-hygiene/no-disabled-tests
 test.todo("todo with a reason on the same line"); // needs a fixture corpus
 // expect-clean: bun-test-hygiene/no-disabled-tests
-test.skipIf(flag === "off")("conditional skip", noop);
+test.skipIf(flag === "off")("conditional skip", noop); // disabled when the service is off
 // expect-clean: bun-test-hygiene/no-disabled-tests
-test.todoIf(flag === "off")("conditional todo", noop);
+test.todoIf(flag === "off")("conditional todo", noop); // pending while the service is off
 
 // a disabled registration in a branch, beside the real one with its title
 if (flag === undefined) {
+  // The suite needs the optional integration configured.
   // expect-clean: bun-test-hygiene/no-disabled-tests, bun-test-hygiene/no-identical-title
   describe.skip("branch suite", noop);
 } else {

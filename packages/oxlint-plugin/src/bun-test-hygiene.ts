@@ -14,13 +14,9 @@
 //
 // no-disabled-tests
 //   Flagged without a reason comment on the same line or directly above:
-//            test.skip(...), test.todo(...), describe.skip(...), xtest(...),
-//            xit(...), xdescribe(...)
-//   Allowed: the conditional forms (`test.skipIf(condition)`,
-//            `test.todoIf(condition)`, `test.if(condition)`), and a disabled
-//            registration inside a branch of the block it belongs to
-//            (`if (!databaseUrl) describe.skip(...) else describe(...)`);
-//            both state their reason in code.
+//            every `.skip`/`.skipIf`/`.todo`/`.todoIf` property access in a
+//            Bun test file, plus bun:test's xtest(...), xit(...), and
+//            xdescribe(...) exports.
 //
 // no-forced-database-drop
 //   Flagged: SQL string and template literals that use DROP DATABASE with
@@ -218,7 +214,7 @@ const PROMISE_MATCHER_PROPERTIES = new Set(["rejects", "resolves"]);
 const NEGATION_MODIFIER = "not";
 
 const FOCUS_MODIFIER = "only";
-const DISABLE_MODIFIERS = new Set(["skip", "todo"]);
+const DISABLE_MODIFIERS = new Set(["skip", "skipIf", "todo", "todoIf"]);
 const EACH_MODIFIER = "each";
 
 const FUNCTION_TYPES = new Set([
@@ -520,8 +516,7 @@ export default eslintCompatPlugin({
           disabled:
             "`{{call}}` disables this test without a stated reason. Add a " +
             "comment on the same line or directly above saying why it is " +
-            "disabled and what re-enables it, use a conditional form " +
-            "(`.skipIf(condition)`, `.todoIf(condition)`), or remove it.",
+            "disabled and what re-enables it, or remove it.",
         },
       },
       createOnce(context) {
@@ -532,14 +527,36 @@ export default eslintCompatPlugin({
             comments = null;
             return mentionsBunTest(context.sourceCode.text);
           },
+          MemberExpression(node) {
+            if (
+              !isAstNode(node) ||
+              !DISABLE_MODIFIERS.has(memberPropertyName(node) ?? "")
+            ) {
+              return;
+            }
+            comments ??= context.sourceCode
+              .getAllComments()
+              .filter(isSourceComment);
+            if (
+              hasReasonComment({
+                comments,
+                node,
+                text: context.sourceCode.text,
+              })
+            ) {
+              return;
+            }
+            context.report({
+              node,
+              messageId: "disabled",
+              data: { call: `.${memberPropertyName(node)}` },
+            });
+          },
           CallExpression(node) {
             const registration = testRegistration(context, node);
             if (
               registration === null ||
-              (!DISABLED_FUNCTIONS.has(registration.exportName) &&
-                !registration.modifiers.some((modifier) =>
-                  DISABLE_MODIFIERS.has(modifier),
-                ))
+              !DISABLED_FUNCTIONS.has(registration.exportName)
             ) {
               return;
             }
