@@ -67,15 +67,7 @@ const writeChangeset = (root: string, bump: "major" | "minor") =>
 
 test("narrowing passes with a major and fails with a minor", async () => {
   await withRepository(
-    {
-      "packages/library/package.json": manifest("library", ">=18"),
-      "packages/first/package.json": manifest("first", ">=18", {
-        optionalDependencies: { library: "1.0.0" },
-      }),
-      "packages/second/package.json": manifest("second", ">=18", {
-        optionalDependencies: { library: "1.0.0" },
-      }),
-    },
+    { "packages/library/package.json": manifest("library", ">=18") },
     async (root, run) => {
       await writeJson(
         root,
@@ -141,12 +133,10 @@ test("new packages are skipped and moved packages are matched by name", async ()
   );
 });
 
-test("a derived platform package is released by its owner", async () => {
+test("a derived platform package is not checked separately", async () => {
   await withRepository(
     {
-      "packages/library/package.json": manifest("library", ">=18", {
-        optionalDependencies: { "library-linux": "1.0.0" },
-      }),
+      "packages/library/package.json": manifest("library", ">=18"),
       "npm/linux/package.json": manifest("library-linux", ">=18"),
     },
     async (root, run) => {
@@ -155,7 +145,21 @@ test("a derived platform package is released by its owner", async () => {
         "npm/linux/package.json",
         manifest("library-linux", ">=20"),
       );
-      await writeChangeset(root, "major");
+      expect(run().exitCode).toBe(0);
+    },
+  );
+});
+
+test("a managed package listed in Changesets ignore is not checked", async () => {
+  await withRepository(
+    { "packages/library/package.json": manifest("library", ">=18") },
+    async (root, run) => {
+      await writeJson(root, ".changeset/config.json", { ignore: ["library"] });
+      await writeJson(
+        root,
+        "packages/library/package.json",
+        manifest("library", ">=20"),
+      );
       expect(run().exitCode).toBe(0);
     },
   );

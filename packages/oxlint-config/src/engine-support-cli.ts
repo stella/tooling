@@ -12,7 +12,6 @@ type Manifest = {
   private?: unknown;
   workspaces?: unknown;
   engines?: unknown;
-  optionalDependencies?: unknown;
 };
 
 const git = (root: string, args: string[]) =>
@@ -104,19 +103,12 @@ const collectPackages = (root: string, base?: string) => {
       typeof engines.node === "string"
         ? engines.node
         : undefined;
-    const optionalDependencies = manifest.optionalDependencies;
     packages.set(manifest.name, {
       name: manifest.name,
       ...(node === undefined ? {} : { node }),
       changesetsManaged:
         !ignored.has(manifest.name) &&
         (directory === "." || picomatch(patterns)(directory)),
-      optionalDependencies:
-        typeof optionalDependencies === "object" &&
-        optionalDependencies !== null &&
-        !Array.isArray(optionalDependencies)
-          ? Object.keys(optionalDependencies)
-          : [],
     });
   }
   return packages;
@@ -161,7 +153,7 @@ const main = () => {
   });
   for (const failure of failures)
     process.stderr.write(
-      `[engine-support] ${failure.packageName} narrows Node support from ${failure.baseRange} to ${failure.headRange}; ${failure.releasingPackage} requires a pending major changeset\n`,
+      `[engine-support] ${failure.packageName} narrows Node support from ${failure.baseRange} to ${failure.headRange}; ${failure.packageName} requires a pending major changeset\n`,
     );
   if (failures.length > 0) process.exitCode = 1;
 };

@@ -4,7 +4,6 @@ export type EnginePackage = {
   name: string;
   node?: string;
   changesetsManaged: boolean;
-  optionalDependencies: readonly string[];
 };
 
 export type EngineSupportInput = {
@@ -17,7 +16,6 @@ export type EngineSupportFailure = {
   packageName: string;
   baseRange: string;
   headRange: string;
-  releasingPackage: string;
 };
 
 const displayedRange = (range: string | undefined) => range ?? "unrestricted";
@@ -30,32 +28,18 @@ export const checkEngineSupport = ({
 }: EngineSupportInput): EngineSupportFailure[] => {
   const failures: EngineSupportFailure[] = [];
   for (const [name, current] of head) {
+    if (!current.changesetsManaged) continue;
     const previous = base.get(name);
     if (previous === undefined) continue;
     const baseRange = previous.node ?? "*";
     const headRange = current.node ?? "*";
     if (semver.subset(baseRange, headRange)) continue;
 
-    const releasingPackage = current.changesetsManaged
-      ? name
-      : (() => {
-          const owners = [...head.values()].filter(
-            (candidate) =>
-              candidate.name !== name &&
-              candidate.optionalDependencies.includes(name),
-          );
-          if (owners.length > 1)
-            throw new Error(
-              `Multiple releasing packages declare ${name}: ${owners.map(({ name: ownerName }) => ownerName).join(", ")}`,
-            );
-          return owners.at(0)?.name ?? name;
-        })();
-    if (majorReleases.has(releasingPackage)) continue;
+    if (majorReleases.has(name)) continue;
     failures.push({
       packageName: name,
       baseRange: displayedRange(previous.node),
       headRange: displayedRange(current.node),
-      releasingPackage,
     });
   }
   return failures;
