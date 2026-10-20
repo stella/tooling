@@ -274,18 +274,18 @@ export const UnsafeObjectAssignDomAliasChain = () => {
   Object.assign(secondAlias, unsafeDomProperties);
 };
 
-export const SafeObjectAssignCyclicAliases = () => {
+export const UnsafeObjectAssignCyclicAliases = () => {
   const first = second;
   const second = first;
-  // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- cyclic aliases cannot prove a stable non-DOM target
   Object.assign(first, unsafeDomProperties);
 };
 
-export const SafeObjectAssignReassignedTarget = () => {
+export const UnsafeConservativeObjectAssignReassignedTarget = () => {
   let element: object = document.createElement("div");
   Object.assign(element, { textContent: "initial" });
   element = config;
-  // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- reassigned bindings conservatively remain possible DOM targets
   Object.assign(element, unsafeDomProperties);
 };
 
@@ -314,11 +314,11 @@ export const SafeForOfOrdinaryCollection = () => {
   }
 };
 
-export const SafeReassignedForOfBinding = () => {
+export const UnsafeReassignedForOfBinding = () => {
   for (let element of document.querySelectorAll("div")) {
     Object.assign(element, { textContent: "initial" });
     element = document.createElement("div");
-    // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
+    // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- reassigned iteration bindings remain possible DOM targets
     Object.assign(element, unsafeDomProperties);
   }
 };
@@ -390,8 +390,13 @@ export const UnsafeObjectAssignKnownTailAfterOpaqueSource = () => {
 };
 
 export const UnsafeObjectAssignLiteralSpreadTailAfterOpaqueSource = () => {
-  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- literal source spread after an opaque source remains detectable
-  Object.assign(config, ...opaqueObjectAssignSources, ...[{ innerHTML: rawHtml }]);
+  Object.assign(
+    config,
+    // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- opaque source through a possible DOM target fails closed
+    ...opaqueObjectAssignSources,
+    // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- literal source spread after an opaque source remains detectable
+    ...[{ innerHTML: rawHtml }],
+  );
 };
 
 export const SafeObjectAssignStaticHtmlSpread = () => {
@@ -432,8 +437,8 @@ export const UnsafeObjectAssignComputedKey = (key: string) =>
   Object.assign(document.createElement("div"), { [key]: rawHtml });
 
 declare const config: Record<string, unknown>;
-export const SafeObjectAssignHoistedConfig = () => {
-  // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
+export const UnsafeConservativeObjectAssignHoistedConfig = () => {
+  // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- an external binding cannot prove a stable non-DOM target
   Object.assign(config, unsafeDomProperties);
 };
 

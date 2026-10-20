@@ -365,8 +365,13 @@ export default eslintCompatPlugin({
             "Function names outside the allowlist are not proof because a " +
             "local identity function can shadow them.",
           unsafeInnerHtmlSpread:
-            "Do not spread an object or use an unresolved computed key in " +
-            "dangerouslySetInnerHTML. Keep `__html` inline so this rule can " +
+            "Do not spread an object in dangerouslySetInnerHTML. Keep " +
+            "`__html` inline so this rule can prove the HTML value is " +
+            "sanitized or escaped.",
+          unsafeInnerHtmlComputedKey:
+            "Do not use an unresolved computed key in " +
+            "dangerouslySetInnerHTML. Write an explicit `__html` property " +
+            "so this rule can " +
             "prove the HTML value is sanitized or escaped.",
         },
       },
@@ -481,7 +486,9 @@ export default eslintCompatPlugin({
           kind = "element",
         }: DomTargetOptions): boolean => {
           const source = resolveStableBinding({ node, scope, seen });
-          if (source === null) return false;
+          // An unstable binding may have been reassigned to a DOM target. Fail
+          // closed unless the resolver can prove a stable non-DOM value.
+          if (source === null) return true;
           if (source.kind === "iteration") {
             return (
               kind === "element" &&
@@ -565,7 +572,11 @@ export default eslintCompatPlugin({
         const waiverLines = new Set<number>();
         type SinkObservation = {
           node: AstNode;
-          kind: "safe" | "unsafe" | "opaque-payload";
+          kind:
+            | "safe"
+            | "unsafe"
+            | "opaque-payload-spread"
+            | "opaque-payload-computed-key";
         };
         const sinks: SinkObservation[] = [];
         const observeSink = (
@@ -573,6 +584,15 @@ export default eslintCompatPlugin({
           kind: SinkObservation["kind"],
         ): void => {
           if (isAstNode(node)) sinks.push({ node, kind });
+        };
+        const messageIdFor = (kind: SinkObservation["kind"]) => {
+          if (kind === "opaque-payload-spread") {
+            return "unsafeInnerHtmlSpread";
+          }
+          if (kind === "opaque-payload-computed-key") {
+            return "unsafeInnerHtmlComputedKey";
+          }
+          return "unsafeInnerHtml";
         };
 
         const consumeWaiver = (node: unknown): boolean => {
@@ -602,7 +622,12 @@ export default eslintCompatPlugin({
           }
           for (const property of objectProperties(expression)) {
             if (isOpaqueProperty(property)) {
-              observeSink(property, "opaque-payload");
+              observeSink(
+                property,
+                property.type === "SpreadElement"
+                  ? "opaque-payload-spread"
+                  : "opaque-payload-computed-key",
+              );
               continue;
             }
             if (
@@ -682,10 +707,7 @@ export default eslintCompatPlugin({
               if (kind === "safe" || (kind === "unsafe" && waived)) continue;
               context.report({
                 node,
-                messageId:
-                  kind === "opaque-payload"
-                    ? "unsafeInnerHtmlSpread"
-                    : "unsafeInnerHtml",
+                messageId: messageIdFor(kind),
               });
             }
             sinks.length = 0;

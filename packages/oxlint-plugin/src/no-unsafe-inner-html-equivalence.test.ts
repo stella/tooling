@@ -1109,10 +1109,10 @@ const producerCorpus = (): {
     }
   }
   const cleanTargets = [
-    "config.body",
-    'config.querySelector("div")',
-    'config.getElementsByTagName("div")[0]',
-    'config.getElementsByTagName("div").item(0)',
+    "({}).body",
+    '({}).querySelector("div")',
+    '({}).getElementsByTagName("div")[0]',
+    '({}).getElementsByTagName("div").item(0)',
   ];
   for (const target of cleanTargets) {
     lines.push(
