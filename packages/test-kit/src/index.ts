@@ -44,3 +44,4 @@ export {
   type RecordedRequest,
   withFakeServer,
 } from "./fake-server.ts";
+export { writeRegeneratedFile } from "./regenerate.ts";

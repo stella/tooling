@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import net from "node:net";
 import tls from "node:tls";
 
+import { setProcessEnvironment } from "./environment-support.ts";
 import {
   NetworkAccessError,
   installNetworkGuard,
@@ -10,6 +11,7 @@ import {
 import { rejectionOf } from "./rejection-support.ts";
 
 let uninstall: (() => void) | undefined;
+let restoreProcessEnvironment: (() => void) | undefined;
 
 // What a fake fetch was asked for, whichever input form it received.
 const requestedUrl = (input: unknown): string => {
@@ -24,6 +26,8 @@ const requestedUrl = (input: unknown): string => {
 afterEach(() => {
   uninstall?.();
   uninstall = undefined;
+  restoreProcessEnvironment?.();
+  restoreProcessEnvironment = undefined;
 });
 
 describe("loopback hosts", () => {
@@ -327,11 +331,13 @@ describe("network guard", () => {
       HTTP_PROXY: "http://proxy.example:3128",
       https_proxy: "http://other-proxy.example:8080",
     };
+    expect(Object.hasOwn(environment, "ALL_PROXY")).toBe(false);
     uninstall = installNetworkGuard({ environment });
 
     expect(environment).not.toHaveProperty("HTTP_PROXY");
     expect(environment).not.toHaveProperty("https_proxy");
     expect(environment).not.toHaveProperty("ALL_PROXY");
+    expect(Object.hasOwn(environment, "ALL_PROXY")).toBe(false);
     const error = await rejectionOf(fetch("http://example.invalid/"));
     expect(error).toBeInstanceOf(NetworkAccessError);
 
@@ -342,34 +348,23 @@ describe("network guard", () => {
       https_proxy: "http://other-proxy.example:8080",
     });
     expect(environment).not.toHaveProperty("ALL_PROXY");
+    expect(Object.hasOwn(environment, "ALL_PROXY")).toBe(false);
   });
 
   test("a separate environment also neutralizes the process proxy", async () => {
-    const hadHttpProxy = Object.hasOwn(process.env, "HTTP_PROXY");
-    const originalHttpProxy = process.env["HTTP_PROXY"];
-    process.env["HTTP_PROXY"] = "http://proxy.example:3128";
+    restoreProcessEnvironment = setProcessEnvironment({
+      HTTP_PROXY: "http://proxy.example:3128",
+    });
     using server = Bun.serve({ fetch: () => new Response("direct"), port: 0 });
 
-    try {
-      uninstall = installNetworkGuard({ environment: {} });
-      expect(process.env).not.toHaveProperty("HTTP_PROXY");
-      const response = await fetch(
-        `http://127.0.0.1:${String(server.port)}/`,
-      );
-      expect(await response.text()).toBe("direct");
+    uninstall = installNetworkGuard({ environment: {} });
+    expect(process.env).not.toHaveProperty("HTTP_PROXY");
+    const response = await fetch(`http://127.0.0.1:${String(server.port)}/`);
+    expect(await response.text()).toBe("direct");
 
-      uninstall();
-      uninstall = undefined;
-      expect(process.env["HTTP_PROXY"]).toBe("http://proxy.example:3128");
-    } finally {
-      uninstall?.();
-      uninstall = undefined;
-      if (hadHttpProxy) {
-        process.env["HTTP_PROXY"] = originalHttpProxy;
-      } else {
-        Reflect.deleteProperty(process.env, "HTTP_PROXY");
-      }
-    }
+    uninstall();
+    uninstall = undefined;
+    expect(process.env["HTTP_PROXY"]).toBe("http://proxy.example:3128");
   });
 
   test("fetch.preconnect is refused for a remote host before it connects", () => {
