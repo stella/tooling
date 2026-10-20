@@ -1,9 +1,9 @@
 #!/usr/bin/env node
+import parseChangeset from "@changesets/parse";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import picomatch from "picomatch";
-import { parse } from "yaml";
 
 import { checkEngineSupport, type EnginePackage } from "./engine-support";
 
@@ -107,7 +107,7 @@ const collectPackages = (root: string, base?: string) => {
     const optionalDependencies = manifest.optionalDependencies;
     packages.set(manifest.name, {
       name: manifest.name,
-      node,
+      ...(node === undefined ? {} : { node }),
       changesetsManaged:
         !ignored.has(manifest.name) &&
         (directory === "." || picomatch(patterns)(directory)),
@@ -136,15 +136,8 @@ const pendingMajorReleases = (root: string) => {
     .filter((file) => file !== "" && file !== ".changeset/README.md");
   for (const file of files) {
     const source = readFileSync(path.join(root, file), "utf8");
-    const frontmatter = source
-      .match(/^---\s*\n([\s\S]*?)\n---(?:\s*\n|$)/u)
-      ?.at(1);
-    if (frontmatter === undefined)
-      throw new Error(`Invalid changeset frontmatter: ${file}`);
-    const releases: unknown = parse(frontmatter);
-    if (typeof releases !== "object" || releases === null) continue;
-    for (const [name, bump] of Object.entries(releases))
-      if (bump === "major") majors.add(name);
+    for (const { name, type } of parseChangeset(source).releases)
+      if (type === "major") majors.add(name);
   }
   return majors;
 };

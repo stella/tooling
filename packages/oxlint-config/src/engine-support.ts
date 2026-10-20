@@ -36,18 +36,20 @@ export const checkEngineSupport = ({
     const headRange = current.node ?? "*";
     if (semver.subset(baseRange, headRange)) continue;
 
-    const owners = [...head.values()].filter(
-      (candidate) =>
-        candidate.name !== name &&
-        candidate.optionalDependencies.includes(name),
-    );
-    if (owners.length > 1)
-      throw new Error(
-        `Multiple releasing packages declare ${name}: ${owners.map(({ name: ownerName }) => ownerName).join(", ")}`,
-      );
     const releasingPackage = current.changesetsManaged
       ? name
-      : (owners.at(0)?.name ?? name);
+      : (() => {
+          const owners = [...head.values()].filter(
+            (candidate) =>
+              candidate.name !== name &&
+              candidate.optionalDependencies.includes(name),
+          );
+          if (owners.length > 1)
+            throw new Error(
+              `Multiple releasing packages declare ${name}: ${owners.map(({ name: ownerName }) => ownerName).join(", ")}`,
+            );
+          return owners.at(0)?.name ?? name;
+        })();
     if (majorReleases.has(releasingPackage)) continue;
     failures.push({
       packageName: name,

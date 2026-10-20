@@ -6,6 +6,11 @@ import path from "node:path";
 
 const cli = path.join(import.meta.dir, "engine-support-cli.ts");
 
+const stderrText = ({ stderr }: Bun.SyncSubprocess) => {
+  if (stderr === undefined) throw new Error("Expected stderr to be captured");
+  return stderr.toString();
+};
+
 const manifest = (name: string, node?: string, extra = {}) => ({
   name,
   version: "1.0.0",
@@ -62,7 +67,15 @@ const writeChangeset = (root: string, bump: "major" | "minor") =>
 
 test("narrowing passes with a major and fails with a minor", async () => {
   await withRepository(
-    { "packages/library/package.json": manifest("library", ">=18") },
+    {
+      "packages/library/package.json": manifest("library", ">=18"),
+      "packages/first/package.json": manifest("first", ">=18", {
+        optionalDependencies: { library: "1.0.0" },
+      }),
+      "packages/second/package.json": manifest("second", ">=18", {
+        optionalDependencies: { library: "1.0.0" },
+      }),
+    },
     async (root, run) => {
       await writeJson(
         root,
@@ -72,7 +85,7 @@ test("narrowing passes with a major and fails with a minor", async () => {
       await writeChangeset(root, "minor");
       const minor = run();
       expect(minor.exitCode).toBe(1);
-      expect(minor.stderr.toString()).toContain(
+      expect(stderrText(minor)).toContain(
         "library narrows Node support from >=18 to >=20",
       );
       await writeChangeset(root, "major");
@@ -155,7 +168,30 @@ test("consumed changesets without an engine change pass and git errors fail", as
       expect(run().exitCode).toBe(0);
       const failure = run("missing-ref");
       expect(failure.exitCode).toBe(1);
-      expect(failure.stderr.toString()).toContain("fatal:");
+      expect(stderrText(failure)).toContain("fatal:");
+    },
+  );
+});
+
+test("official changeset parsing handles empty, unrelated, and quoted releases", async () => {
+  await withRepository(
+    { "packages/library/package.json": manifest("library", ">=18") },
+    async (root, run) => {
+      const changeset = path.join(root, ".changeset/engine.md");
+      await writeFile(changeset, "---\n---\n");
+      expect(run().exitCode).toBe(0);
+      await writeJson(
+        root,
+        "packages/library/package.json",
+        manifest("library", ">=20"),
+      );
+      expect(run().exitCode).toBe(1);
+      await writeFile(changeset, "---\nother: major\n---\n");
+      expect(run().exitCode).toBe(1);
+      for (const name of ['"library"', "'library'", "library"]) {
+        await writeFile(changeset, `---\n${name}: major\n---\n`);
+        expect(run().exitCode).toBe(0);
+      }
     },
   );
 });
