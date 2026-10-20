@@ -18,6 +18,18 @@ import { checkEngineSupport, type EnginePackage } from "./engine-support";
 const git = (root: string, args: string[]) =>
   execFileSync("git", args, { cwd: root, encoding: "utf8" });
 
+const workspaceMetadataFiles = [
+  "bun.lock",
+  "bun.lockb",
+  "package-lock.json",
+  "npm-shrinkwrap.json",
+  "yarn.lock",
+  ".yarnrc.yml",
+  "pnpm-lock.yaml",
+  "pnpm-workspace.yaml",
+  "lerna.json",
+] as const;
+
 const parseBase = (args: string[]) => {
   if (args.length === 1 && args.at(0) === "--help") return undefined;
   if (args.length === 2 && args.at(0) === "--base" && args.at(1) !== "")
@@ -43,6 +55,11 @@ const manifestFiles = (root: string, base?: string) => {
     .filter((file) => file !== "" && existsSync(path.join(root, file)));
 };
 
+const baseWorkspaceMetadataFiles = (root: string, base: string) =>
+  git(root, ["ls-tree", "--name-only", base, "--", ...workspaceMetadataFiles])
+    .split("\n")
+    .filter((file) => file !== "");
+
 const resolvedPackages = (root: string, base?: string) => {
   if (base === undefined) return getPackagesSync(root);
 
@@ -50,7 +67,10 @@ const resolvedPackages = (root: string, base?: string) => {
     path.join(tmpdir(), "engine-support-base-"),
   );
   try {
-    for (const file of [...manifestFiles(root, base), "bun.lock"]) {
+    for (const file of [
+      ...manifestFiles(root, base),
+      ...baseWorkspaceMetadataFiles(root, base),
+    ]) {
       const source = git(root, ["show", `${base}:${file}`]);
       const destination = path.join(temporaryRoot, file);
       mkdirSync(path.dirname(destination), { recursive: true });

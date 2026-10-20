@@ -24,6 +24,7 @@ const withRepository = async (
     root: string,
     run: (base?: string) => Bun.SyncSubprocess,
   ) => Promise<void>,
+  includeLockfile = true,
 ) => {
   const root = await mkdtemp(path.join(tmpdir(), "engine-support-"));
   const write = async (file: string, value: unknown) => {
@@ -32,12 +33,13 @@ const withRepository = async (
   };
   try {
     await write("package.json", {
+      name: "workspace",
       private: true,
       workspaces: ["packages/*"],
     });
     await write(".changeset/config.json", { ignore: [] });
     await write(".changeset/README.md", "changesets\n");
-    await writeFile(path.join(root, "bun.lock"), "");
+    if (includeLockfile) await writeFile(path.join(root, "bun.lock"), "");
     for (const [file, value] of Object.entries(initial))
       await write(file, value);
     execFileSync("git", ["init", "--quiet"], { cwd: root });
@@ -54,6 +56,41 @@ const withRepository = async (
     await rm(root, { recursive: true, force: true });
   }
 };
+
+test("a workspace without a lockfile is checked", async () => {
+  await withRepository(
+    { "packages/library/package.json": manifest("library", ">=18") },
+    async (_root, run) => {
+      expect(run().exitCode).toBe(0);
+    },
+    false,
+  );
+});
+
+test("pnpm-workspace.yaml discovers packages in the base snapshot", async () => {
+  await withRepository(
+    {
+      "package.json": {
+        name: "workspace",
+        private: true,
+      },
+      "pnpm-workspace.yaml": { packages: ["packages/*"] },
+      "packages/library/package.json": manifest("library", ">=18"),
+    },
+    async (root, run) => {
+      await writeJson(
+        root,
+        "packages/library/package.json",
+        manifest("library", ">=20"),
+      );
+      const result = run();
+      expect(result.exitCode).toBe(1);
+      expect(stderrText(result)).toContain(
+        "library narrows Node support from >=18 to >=20",
+      );
+    },
+  );
+});
 
 const writeJson = async (root: string, file: string, value: unknown) => {
   await mkdir(path.dirname(path.join(root, file)), { recursive: true });
