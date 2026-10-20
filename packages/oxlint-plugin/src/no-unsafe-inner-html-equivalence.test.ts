@@ -1254,6 +1254,26 @@ const generatedHtmlSinkCorpus = (): {
     });
     addCase({
       kind: "invalid",
+      label: `${method} treats a logical initializer as a document`,
+      code: `{ const document = globalThis.document ?? window.document; document.${method}(rawHtml); }`,
+    });
+    addCase({
+      kind: "invalid",
+      label: `${method} treats a call initializer as a document`,
+      code: `{ const doc = getDocument(); doc.${method}(rawHtml); }`,
+    });
+    addCase({
+      kind: "invalid",
+      label: `${method} treats an await initializer as a document`,
+      code: `{ async function render() { const doc = await getDocument(); doc.${method}(rawHtml); } }`,
+    });
+    addCase({
+      kind: "invalid",
+      label: `${method} treats a conditional initializer as a document`,
+      code: `{ const doc = flag ? a : b; doc.${method}(rawHtml); }`,
+    });
+    addCase({
+      kind: "invalid",
       label: `${method} treats an imported receiver as a document`,
       code: `importedDocument.${method}(rawHtml);`,
     });
@@ -1279,7 +1299,7 @@ const generatedHtmlSinkCorpus = (): {
     });
     addCase({
       kind: "clean",
-      label: `${method} ignores a stable non-document receiver`,
+      label: `${method} ignores a const plain-object receiver`,
       code: `config.${method}(rawHtml);`,
     });
   }
@@ -1357,7 +1377,7 @@ test(
     );
     const expectedHtmlSinkInvalidCount =
       REACT_HTML_PROPS.length * htmlSinkFactories.length +
-      DOCUMENT_WRITE_METHODS.size * 9 +
+      DOCUMENT_WRITE_METHODS.size * 13 +
       HTML_ATTRIBUTE_SINKS.length * 2 +
       HTML_ATTRIBUTE_SINKS.filter((sink) => sink.namespaceIndex !== null).length *
         ATTRIBUTE_NAMESPACE_CASES.filter((entry) => entry.kind === "invalid").length;

@@ -122,7 +122,6 @@ const DOCUMENT_MEMBERS: ReadonlySet<string> = new Set([
   "document",
   "ownerDocument",
 ]);
-
 const HTML_SANITIZER_LEAF_RE =
   /^(?:escape(?:html|xml)|sanitize(?:html|dom)|purify(?:html|dom)|dompurify)$/iu;
 const SANITIZER_RESULT_MEMBERS = new Set(["value", "data", "html"]);
@@ -466,14 +465,42 @@ export default eslintCompatPlugin({
             scope,
             seen: new Set<Variable>(),
           });
-          // An unstable binding could still refer to a document. Only exclude a
-          // receiver when its stable value proves that it is not a document.
           if (source === null || source.kind !== "expression") return true;
           const receiver = source.node;
           if (isIdentifier(receiver, "document")) return true;
           if (receiver?.type !== "MemberExpression") return false;
           const name = memberPropertyName(receiver);
           return name !== null && DOCUMENT_MEMBERS.has(name);
+        };
+
+        const isDocumentSinkReceiver = (node: unknown, scope: Scope): boolean => {
+          const receiver = unwrapExpression(node);
+          if (!isIdentifier(receiver)) return true;
+          let current: Scope | null = scope;
+          let variable: Variable | undefined;
+          while (current !== null) {
+            variable = current.set.get(receiver.name);
+            if (variable !== undefined) break;
+            current = current.upper;
+          }
+          if (variable === undefined || variable.defs.length !== 1) return true;
+          const definition = variable.defs.at(0);
+          if (
+            definition?.type !== "Variable" ||
+            definition.node.type !== "VariableDeclarator" ||
+            definition.node.id.type !== "Identifier" ||
+            definition.node.init === null ||
+            unwrapExpression(definition.node.init)?.type !== "ObjectExpression" ||
+            definition.node.parent.type !== "VariableDeclaration" ||
+            definition.node.parent.kind !== "const" ||
+            variable.scope.variableScope !== scope.variableScope ||
+            variable.references.some(
+              (reference) => reference.isWrite() && !reference.init,
+            )
+          ) {
+            return true;
+          }
+          return false;
         };
         type DomTargetOptions = {
           node: unknown;
@@ -822,7 +849,7 @@ export default eslintCompatPlugin({
             }
             if (
               DOCUMENT_WRITE_METHODS.has(method) &&
-              isDocumentReceiver(
+              isDocumentSinkReceiver(
                 callee.object,
                 context.sourceCode.getScope(node),
               )
