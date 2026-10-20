@@ -160,71 +160,102 @@ type Transformation = {
   name: string;
   anchor: string;
   replacement: string;
+  expectedOccurrences: Record<LoaderKind, number>;
 };
+
+type LoaderKind = "browser" | "commonjs";
+
+const BOTH_LOADERS = { browser: 1, commonjs: 1 } as const;
+const BROWSER_LOADER = { browser: 1, commonjs: 0 } as const;
+const COMMONJS_LOADER = { browser: 0, commonjs: 1 } as const;
 
 export const WASI_LOADER_TRANSFORMATIONS = [
   {
     name: "cleanup handshake",
     anchor: UNSAFE_CLEANUP_HANDSHAKE,
     replacement: SAFE_CLEANUP_HANDSHAKE,
+    expectedOccurrences: BOTH_LOADERS,
   },
   {
     name: "runtime poll promise",
     anchor: UNSAFE_RUNTIME_POLL_PROMISE,
     replacement: SAFE_RUNTIME_POLL_PROMISE,
+    expectedOccurrences: BOTH_LOADERS,
   },
   {
     name: "runtime poll timer",
     anchor: UNSAFE_RUNTIME_POLL_TIMER,
     replacement: SAFE_RUNTIME_POLL_TIMER,
+    expectedOccurrences: BOTH_LOADERS,
   },
   {
     name: "runtime poll macrotask",
     anchor: UNSAFE_RUNTIME_POLL_MACROTASK,
     replacement: SAFE_RUNTIME_POLL_MACROTASK,
+    expectedOccurrences: BOTH_LOADERS,
   },
   {
     name: "async work poll",
     anchor: UNSAFE_ASYNC_WORK_POLL,
     replacement: SAFE_ASYNC_WORK_POLL,
+    expectedOccurrences: BOTH_LOADERS,
   },
   {
     name: "worker construction",
     anchor: GENERATED_WASI_WORKER_FACTORY,
     replacement: NORMALIZED_WASI_WORKER_FACTORY,
+    expectedOccurrences: COMMONJS_LOADER,
   },
   {
     name: "worker construction",
     anchor: GENERATED_BROWSER_WORKER,
     replacement: NORMALIZED_BROWSER_WORKER,
+    expectedOccurrences: BROWSER_LOADER,
   },
   {
     name: "scheduler helper",
     anchor: RUNTIME_POLL_MARKER,
     replacement: `${SAFE_SCHEDULER_HELPER}${RUNTIME_POLL_MARKER}`,
+    expectedOccurrences: BOTH_LOADERS,
   },
 ] satisfies Transformation[];
 
-const applyTransformations = (source: string, file: string) => {
+const countOccurrences = (source: string, value: string) =>
+  source.split(value).length - 1;
+
+const inferLoaderKind = (source: string): LoaderKind =>
+  source.includes("wasi-worker-browser.mjs") ? "browser" : "commonjs";
+
+const applyTransformations = (
+  source: string,
+  file: string,
+  loaderKind: LoaderKind,
+) => {
   let result = source;
-  const names = new Set(WASI_LOADER_TRANSFORMATIONS.map(({ name }) => name));
-  for (const name of names) {
-    let alreadyApplied = false;
-    let applicable: Transformation | undefined;
-    for (const transformation of WASI_LOADER_TRANSFORMATIONS) {
-      if (transformation.name !== name) continue;
-      if (result.includes(transformation.replacement)) {
-        alreadyApplied = true;
-        break;
-      }
-      if (result.includes(transformation.anchor)) applicable = transformation;
-    }
-    if (alreadyApplied) continue;
-    if (!applicable)
+  for (const transformation of WASI_LOADER_TRANSFORMATIONS) {
+    const expected = transformation.expectedOccurrences[loaderKind];
+    const replacementCount = countOccurrences(
+      result,
+      transformation.replacement,
+    );
+    const anchorsPerReplacement = countOccurrences(
+      transformation.replacement,
+      transformation.anchor,
+    );
+    const anchorCount =
+      countOccurrences(result, transformation.anchor) -
+      replacementCount * anchorsPerReplacement;
+
+    if (expected === 0 && anchorCount === 0 && replacementCount === 0) continue;
+    if (anchorCount === 0 && replacementCount === expected) continue;
+    if (anchorCount !== expected || replacementCount !== 0)
       throw new Error(
-        `WASI loader transformation "${name}" did not match ${file}`,
+        `WASI loader transformation "${transformation.name}" did not match ${file}: expected ${expected}, found anchors=${anchorCount}, replacements=${replacementCount}`,
       );
-    result = result.replaceAll(applicable.anchor, applicable.replacement);
+    result = result.replaceAll(
+      transformation.anchor,
+      transformation.replacement,
+    );
   }
   return result;
 };
@@ -244,9 +275,11 @@ export const normalizeGeneratedLoader = (
   {
     keepGeneratedTypecheckOptOut = false,
     file = "<input>",
+    loaderKind,
   }: {
     keepGeneratedTypecheckOptOut?: boolean;
     file?: string;
+    loaderKind?: LoaderKind;
   } = {},
 ) => {
   if (source.includes("\r\n"))
@@ -254,9 +287,11 @@ export const normalizeGeneratedLoader = (
       `WASI loader transformation "LF line endings" did not match ${file}`,
     );
 
+  const withoutDirective = source.replace(GENERATOR_DIRECTIVE, "");
   const normalized = applyTransformations(
-    source.replace(GENERATOR_DIRECTIVE, ""),
+    withoutDirective,
     file,
+    loaderKind ?? inferLoaderKind(withoutDirective),
   ).replace(/[ \t]+$/gmu, "");
 
   return keepGeneratedTypecheckOptOut
@@ -274,11 +309,12 @@ export const runWasiLoaderNormalizer = async (args: string[]) => {
     throw new Error(usage);
 
   const loaders = await Promise.all(
-    paths.map(async (path) => {
+    paths.map(async (path, index) => {
       const source = await readFile(path, "utf8");
       const normalized = normalizeGeneratedLoader(source, {
         keepGeneratedTypecheckOptOut: true,
         file: path,
+        loaderKind: index === 0 ? "browser" : "commonjs",
       });
       return { normalized, path, source };
     }),

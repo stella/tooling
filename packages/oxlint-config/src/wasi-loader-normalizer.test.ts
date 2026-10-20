@@ -205,3 +205,53 @@ test("every changed transformation anchor is rejected in write and check modes",
     }
   }
 });
+
+test("every transformation rejects mixed normalized and generated occurrences in write and check modes", async () => {
+  for (const transformation of WASI_LOADER_TRANSFORMATIONS) {
+    for (const [index, name] of loaderNames.entries()) {
+      const loaderKind = index === 0 ? "browser" : "commonjs";
+      if (transformation.expectedOccurrences[loaderKind] === 0) continue;
+
+      const generated = await readFile(join(fixtures, name), "utf8");
+      const normalized = normalizeGeneratedLoader(generated, {
+        keepGeneratedTypecheckOptOut: true,
+        loaderKind,
+      });
+      const mixed = `${normalized}\n${transformation.anchor}\n`;
+
+      for (const mode of ["write", "check"] as const) {
+        const root = await mkdtemp(join(tmpdir(), "wasi-normalizer-mixed-"));
+        const paths = loaderNames.map((loaderName) =>
+          join(root, basename(loaderName)),
+        );
+        const path = paths[index]!;
+        try {
+          await Promise.all(
+            paths.map(async (loaderPath, loaderIndex) =>
+              writeFile(
+                loaderPath,
+                loaderIndex === index
+                  ? mixed
+                  : await readFile(
+                      join(fixtures, `${loaderNames[loaderIndex]!}.normalized`),
+                      "utf8",
+                    ),
+              ),
+            ),
+          );
+          const args = mode === "check" ? ["--check", ...paths] : paths;
+          await assert.rejects(
+            runWasiLoaderNormalizer(args),
+            new RegExp(
+              `${transformation.name}.*${basename(name)}.*anchors=1, replacements=1`,
+              "u",
+            ),
+          );
+          expect(await readFile(path, "utf8")).toBe(mixed);
+        } finally {
+          await rm(root, { recursive: true, force: true });
+        }
+      }
+    }
+  }
+});
