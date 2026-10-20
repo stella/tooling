@@ -72,6 +72,26 @@ describe("expectLinearScaling", () => {
     }
   });
 
+  test("rejects a synchronous run when the clock does not advance", async () => {
+    const assertion = linearScalingTestInternals.expectLinearScalingWithClock(
+      { run: () => {}, sizes: [2, 4] },
+      { minimumSampleDurationMs: 5, now: () => 10 },
+    );
+    expect(assertion).rejects.toThrow(TypeError);
+    expect(assertion).rejects.toThrow(/size 2.*clock did not advance/u);
+    await assertion.catch(() => {});
+  });
+
+  test("rejects an asynchronous run when the clock does not advance", async () => {
+    const assertion = linearScalingTestInternals.expectLinearScalingWithClock(
+      { run: async () => {}, sizes: [2, 4] },
+      { minimumSampleDurationMs: 5, now: () => 10 },
+    );
+    expect(assertion).rejects.toThrow(TypeError);
+    expect(assertion).rejects.toThrow(/size 2.*clock did not advance/u);
+    await assertion.catch(() => {});
+  });
+
   test("rejects zero-duration samples and names the size", async () => {
     const assertion = linearScalingTestInternals.expectLinearScalingWithClock(
       { run: () => {}, sizes: [2, 4] },

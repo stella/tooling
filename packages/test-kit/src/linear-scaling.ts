@@ -8,6 +8,7 @@ export type ExpectLinearScalingOptions = {
 const defaultRepeats = 5;
 const defaultMaxGrowthFactor = 2.5;
 const minimumSampleDurationMs = 5;
+const maximumCalibrationCalls = 2 ** 24;
 
 const median = (samples: number[]): number => {
   samples.sort((left, right) => left - right);
@@ -72,6 +73,10 @@ const measureSynchronousSample = (
     for (let call = 0; call < calls; call += 1) run(size);
     const elapsed = clock.now() - started;
     if (elapsed >= clock.minimumSampleDurationMs) return elapsed / calls;
+    if (calls >= maximumCalibrationCalls)
+      throw new TypeError(
+        `expectLinearScaling could not measure size ${size} because the clock did not advance; fake timers may be active`,
+      );
     calls *= 2;
   }
 };
@@ -88,6 +93,13 @@ const measureAsynchronousSample = async (
     await run(size);
     calls += 1;
     elapsed = clock.now() - started;
+    if (
+      elapsed < clock.minimumSampleDurationMs &&
+      calls >= maximumCalibrationCalls
+    )
+      throw new TypeError(
+        `expectLinearScaling could not measure size ${size} because the clock did not advance; fake timers may be active`,
+      );
   } while (elapsed < clock.minimumSampleDurationMs);
   return elapsed / calls;
 };
