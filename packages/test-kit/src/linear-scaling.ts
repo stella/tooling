@@ -9,6 +9,7 @@ const defaultRepeats = 5;
 const defaultMaxGrowthFactor = 2.5;
 const minimumSampleDurationMs = 5;
 const maximumCalibrationCalls = 2 ** 24;
+const maximumAsynchronousCalibrationCalls = 2 ** 12;
 
 const median = (samples: number[]): number => {
   samples.sort((left, right) => left - right);
@@ -123,7 +124,7 @@ const measureAsynchronousSample = async (
     elapsed = clock.now() - started;
     if (
       elapsed < clock.minimumSampleDurationMs &&
-      calls >= maximumCalibrationCalls
+      calls >= maximumAsynchronousCalibrationCalls
     )
       throw new TypeError(
         `expectLinearScaling could not measure size ${size} because the clock did not advance; fake timers may be active`,
@@ -190,4 +191,7 @@ export const expectLinearScaling = (
   });
 
 /** @internal Test seam for deterministic measurement behavior. */
-export const linearScalingTestInternals = { expectLinearScalingWithClock };
+export const linearScalingTestInternals = {
+  expectLinearScalingWithClock,
+  maximumAsynchronousCalibrationCalls,
+};

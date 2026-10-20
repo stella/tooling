@@ -137,14 +137,23 @@ describe("expectLinearScaling", () => {
   });
 
   test("rejects an asynchronous run when the clock does not advance", async () => {
+    let calls = 0;
     const error = await rejectionOf(
       linearScalingTestInternals.expectLinearScalingWithClock(
-        { run: async () => {}, sizes: [2, 8] },
+        {
+          run: async () => {
+            calls += 1;
+          },
+          sizes: [2, 8],
+        },
         { minimumSampleDurationMs: 5, now: () => 10 },
       ),
     );
     expect(error).toBeInstanceOf(TypeError);
     expect(String(error)).toMatch(/size 2.*clock did not advance/u);
+    expect(calls).toBeLessThanOrEqual(
+      linearScalingTestInternals.maximumAsynchronousCalibrationCalls + 1,
+    );
   });
 
   test("rejects a callback that switches from synchronous to asynchronous without an unhandled rejection", async () => {
