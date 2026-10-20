@@ -28,14 +28,17 @@ bun add -d @stll/test-kit
 ## Performance scaling
 
 Assert how work scales instead of requiring it to finish before an absolute
-deadline. The helper warms up each size, measures repeated runs, and compares
-medians, so overall machine speed cancels out:
+deadline. The helper warms up each size, calibrates every sample over a measurable window,
+and compares per-call medians, so overall machine speed cancels out. Choose sizes
+for the slowest engine where the code runs: a quadratic implementation should show
+its growth in the ratio before any single call becomes slow. For example, a Stella
+citation extractor can measure successively longer citation-shaped strings:
 
 ```ts
 import { expectLinearScaling } from "@stll/test-kit";
 
 await expectLinearScaling({
-  run: (size) => parse(input.slice(0, size)),
+  run: (size) => extractCitations(citationShape.repeat(size)),
   sizes: [1_000, 4_000, 16_000],
 });
 ```

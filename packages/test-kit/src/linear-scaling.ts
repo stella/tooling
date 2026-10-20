@@ -1,13 +1,13 @@
 export type ExpectLinearScalingOptions = {
   run: (size: number) => unknown;
-  sizes?: readonly number[];
+  sizes: readonly number[];
   repeats?: number;
   maxGrowthFactor?: number;
 };
 
-const defaultSizes = [1, 4, 16] as const;
 const defaultRepeats = 5;
 const defaultMaxGrowthFactor = 2.5;
+const minimumSampleDurationMs = 5;
 
 const median = (samples: number[]): number => {
   samples.sort((left, right) => left - right);
@@ -50,48 +50,73 @@ const validateOptions = (
     );
 };
 
-/** Assert relative run-time growth without imposing a machine-speed budget. */
-export const expectLinearScaling = async ({
-  run,
-  sizes = defaultSizes,
-  repeats = defaultRepeats,
-  maxGrowthFactor = defaultMaxGrowthFactor,
-}: ExpectLinearScalingOptions): Promise<void> => {
+type MeasurementClock = {
+  minimumSampleDurationMs: number;
+  now: () => number;
+};
+
+const measureSample = async (
+  run: (size: number) => unknown,
+  size: number,
+  clock: MeasurementClock,
+) => {
+  const started = clock.now();
+  let calls = 0;
+  let elapsed: number;
+  do {
+    await run(size);
+    calls += 1;
+    elapsed = clock.now() - started;
+  } while (elapsed < clock.minimumSampleDurationMs);
+  return elapsed / calls;
+};
+
+const expectLinearScalingWithClock = async (
+  {
+    run,
+    sizes,
+    repeats = defaultRepeats,
+    maxGrowthFactor = defaultMaxGrowthFactor,
+  }: ExpectLinearScalingOptions,
+  clock: MeasurementClock,
+) => {
   validateOptions(sizes, repeats, maxGrowthFactor);
-  const medians: number[] = [];
+  let previousSize: number | undefined;
+  let previousMedian: number | undefined;
 
   for (const size of sizes) {
     await run(size);
     const samples: number[] = [];
-    for (let repeat = 0; repeat < repeats; repeat += 1) {
-      const started = performance.now();
-      await run(size);
-      samples.push(performance.now() - started);
-    }
-    medians.push(median(samples));
-  }
-
-  for (let index = 1; index < sizes.length; index += 1) {
-    const previousSize = sizes.at(index - 1);
-    const size = sizes.at(index);
-    const previousMedian = medians.at(index - 1);
-    const currentMedian = medians.at(index);
-    if (
-      previousSize === undefined ||
-      size === undefined ||
-      previousMedian === undefined ||
-      currentMedian === undefined
-    )
-      throw new Error("expectLinearScaling measurement result is incomplete");
-    const sizeGrowth = size / previousSize;
-    const allowedGrowth = maxGrowthFactor * sizeGrowth;
-    let timeGrowth = currentMedian / previousMedian;
-    if (previousMedian === 0)
-      timeGrowth = currentMedian === 0 ? 1 : Number.POSITIVE_INFINITY;
-    if (timeGrowth >= allowedGrowth) {
-      throw new Error(
-        `Expected run time from size ${previousSize} (median ${previousMedian.toFixed(3)} ms) to size ${size} (median ${currentMedian.toFixed(3)} ms) to grow by less than ${allowedGrowth.toFixed(2)}x; observed ${timeGrowth.toFixed(2)}x`,
+    for (let repeat = 0; repeat < repeats; repeat += 1)
+      samples.push(await measureSample(run, size, clock));
+    const currentMedian = median(samples);
+    if (!Number.isFinite(currentMedian) || currentMedian <= 0)
+      throw new TypeError(
+        `expectLinearScaling measured a non-positive or non-finite duration for size ${size}`,
       );
+
+    if (previousSize !== undefined && previousMedian !== undefined) {
+      const allowedGrowth = maxGrowthFactor * (size / previousSize);
+      const timeGrowth = currentMedian / previousMedian;
+      if (timeGrowth >= allowedGrowth)
+        throw new Error(
+          `Expected run time from size ${previousSize} (median ${previousMedian.toFixed(3)} ms) to size ${size} (median ${currentMedian.toFixed(3)} ms) to grow by less than ${allowedGrowth.toFixed(2)}x; observed ${timeGrowth.toFixed(2)}x`,
+        );
     }
+
+    previousSize = size;
+    previousMedian = currentMedian;
   }
 };
+
+/** Assert relative run-time growth without imposing a machine-speed budget. */
+export const expectLinearScaling = (
+  options: ExpectLinearScalingOptions,
+): Promise<void> =>
+  expectLinearScalingWithClock(options, {
+    minimumSampleDurationMs,
+    now: () => performance.now(),
+  });
+
+/** @internal Test seam for deterministic measurement behavior. */
+export const linearScalingTestInternals = { expectLinearScalingWithClock };

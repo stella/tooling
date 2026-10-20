@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
-import { expectLinearScaling } from "./linear-scaling.ts";
+import {
+  expectLinearScaling,
+  linearScalingTestInternals,
+} from "./linear-scaling.ts";
 
 let sink = 0;
 
@@ -17,11 +20,13 @@ describe("expectLinearScaling", () => {
     });
   });
 
-  test("rejects quadratic work and names the measurements", async () => {
+  test("rejects quadratic work before running the next size", async () => {
+    const calls = new Map<number, number>();
     const assertion = expectLinearScaling({
       sizes: [250, 1_000, 4_000],
       repeats: 5,
       run: (size) => {
+        calls.set(size, (calls.get(size) ?? 0) + 1);
         let total = 0;
         for (let outer = 0; outer < size; outer += 1) {
           for (let inner = 0; inner < size; inner += 1) total += outer + inner;
@@ -29,9 +34,9 @@ describe("expectLinearScaling", () => {
         sink = total;
       },
     });
-    expect(assertion).rejects.toThrow(
-      /size (?:250 .*size 1000|1000 .*size 4000).*median/u,
-    );
+    expect(assertion).rejects.toThrow(/size 250 .*size 1000.*median/u);
+    await assertion.catch(() => {});
+    expect(calls.has(4_000)).toBeFalse();
   });
 
   test("accepts constant timing noise", async () => {
@@ -50,9 +55,51 @@ describe("expectLinearScaling", () => {
     expect(
       expectLinearScaling({ run: () => {}, sizes: [2, 1] }),
     ).rejects.toThrow("strictly increasing");
-    expect(expectLinearScaling({ run: () => {}, repeats: 0 })).rejects.toThrow(
-      "positive integer",
+    expect(
+      expectLinearScaling({ run: () => {}, sizes: [1, 2], repeats: 0 }),
+    ).rejects.toThrow("positive integer");
+  });
+
+  test("calibrates sub-microsecond linear work without flaking", async () => {
+    const runLinearWork = (size: number) => {
+      for (let index = 0; index < size; index += 1) sink += index;
+    };
+    for (let trial = 0; trial < 20; trial += 1) {
+      await expectLinearScaling({
+        sizes: [1, 4, 16],
+        run: runLinearWork,
+      });
+    }
+  });
+
+  test("rejects zero-duration samples and names the size", async () => {
+    const assertion = linearScalingTestInternals.expectLinearScalingWithClock(
+      { run: () => {}, sizes: [2, 4] },
+      { minimumSampleDurationMs: 0, now: () => 10 },
     );
+    expect(assertion).rejects.toThrow(TypeError);
+    expect(assertion).rejects.toThrow("size 2");
+    await assertion.catch(() => {});
+  });
+
+  test("calibration exposes quadratic growth below clock resolution", async () => {
+    let work = 0;
+    const calls = new Map<number, number>();
+    const assertion = linearScalingTestInternals.expectLinearScalingWithClock(
+      {
+        sizes: [1, 2, 4],
+        repeats: 3,
+        maxGrowthFactor: 1.5,
+        run: (size) => {
+          calls.set(size, (calls.get(size) ?? 0) + 1);
+          work += size * size;
+        },
+      },
+      { minimumSampleDurationMs: 5, now: () => Math.floor(work / 100) },
+    );
+    expect(assertion).rejects.toThrow(/size 1 .*size 2/u);
+    await assertion.catch(() => {});
+    expect(calls.has(4)).toBeFalse();
   });
 });
 
