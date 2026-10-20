@@ -555,6 +555,19 @@ performs no downloads.
 
 ## Published package contracts
 
+### Engine support releases
+
+Run `stll-engine-support --base <git ref>` in pull request CI to require a major
+changeset when an existing published package narrows its `engines.node` range.
+Base engine ranges are read from the manifest at each HEAD package directory.
+Packages moved or renamed between the base and HEAD are therefore treated as new
+packages and skipped. A missing range means unrestricted Node support.
+
+Only published workspace packages managed by Changesets and absent from its
+`ignore` list are checked. Derived platform packages and ignored packages are
+not checked separately; their owner package carries the engine range users
+install against.
+
 Run `stll-publish-contract` in PR CI. Every published root or declared workspace
 package commits `publish-contract.json`, recording engines, peer support ranges,
 resolved JavaScript targets, and entry points. `stll-publish-contract --write`
