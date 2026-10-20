@@ -1,5 +1,11 @@
 # @stll/oxlint-plugin
 
+## 0.5.0
+
+### Minor Changes
+
+- [#193](https://github.com/stella/tooling/pull/193) [`1e0be5e`](https://github.com/stella/tooling/commit/1e0be5e6432583ec694ad3be7e3cdc29198d6bf9) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Report any assertion on measured wall-clock time and any timer race, with no exemptions. Test ordering with a controlled clock or deferred.
+
 ## 0.4.0
 
 ### Minor Changes

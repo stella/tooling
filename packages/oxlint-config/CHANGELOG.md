@@ -1,5 +1,11 @@
 # @stll/oxlint-config
 
+## 1.6.1
+
+### Patch Changes
+
+- Synchronize shared tool pins with workspace releases.
+
 ## 1.6.0
 
 ### Minor Changes
