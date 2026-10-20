@@ -49,6 +49,18 @@ const validateOptions = (
     throw new TypeError(
       "expectLinearScaling maxGrowthFactor must be finite and positive",
     );
+  for (let index = 1; index < sizes.length; index += 1) {
+    const previousSize = sizes[index - 1];
+    const size = sizes[index];
+    if (
+      previousSize !== undefined &&
+      size !== undefined &&
+      size / previousSize <= maxGrowthFactor
+    )
+      throw new TypeError(
+        `expectLinearScaling sizes ${previousSize} and ${size} must have a ratio greater than ${maxGrowthFactor} to distinguish quadratic growth`,
+      );
+  }
 };
 
 type MeasurementClock = {

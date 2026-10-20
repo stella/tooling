@@ -4,6 +4,7 @@ import {
   expectLinearScaling,
   linearScalingTestInternals,
 } from "./linear-scaling.ts";
+import { rejectionOf } from "./rejection-support.ts";
 
 let sink = 0;
 
@@ -22,20 +23,23 @@ describe("expectLinearScaling", () => {
 
   test("rejects quadratic work before running the next size", async () => {
     const calls = new Map<number, number>();
-    const assertion = expectLinearScaling({
-      sizes: [250, 1_000, 4_000],
-      repeats: 5,
-      run: (size) => {
-        calls.set(size, (calls.get(size) ?? 0) + 1);
-        let total = 0;
-        for (let outer = 0; outer < size; outer += 1) {
-          for (let inner = 0; inner < size; inner += 1) total += outer + inner;
-        }
-        sink = total;
-      },
-    });
-    expect(assertion).rejects.toThrow(/size 250 .*size 1000.*median/u);
-    await assertion.catch(() => {});
+    const error = await rejectionOf(
+      expectLinearScaling({
+        sizes: [250, 1_000, 4_000],
+        repeats: 5,
+        run: (size) => {
+          calls.set(size, (calls.get(size) ?? 0) + 1);
+          let total = 0;
+          for (let outer = 0; outer < size; outer += 1) {
+            for (let inner = 0; inner < size; inner += 1)
+              total += outer + inner;
+          }
+          sink = total;
+        },
+      }),
+    );
+    expect(error).toBeInstanceOf(Error);
+    expect(String(error)).toMatch(/size 250 .*size 1000.*median/u);
     expect(calls.has(4_000)).toBeFalse();
   });
 
@@ -52,12 +56,35 @@ describe("expectLinearScaling", () => {
   });
 
   test("validates measurement options", async () => {
-    expect(
+    const sizesError = await rejectionOf(
       expectLinearScaling({ run: () => {}, sizes: [2, 1] }),
-    ).rejects.toThrow("strictly increasing");
-    expect(
-      expectLinearScaling({ run: () => {}, sizes: [1, 2], repeats: 0 }),
-    ).rejects.toThrow("positive integer");
+    );
+    expect(sizesError).toBeInstanceOf(TypeError);
+    expect(String(sizesError)).toContain("strictly increasing");
+
+    const repeatsError = await rejectionOf(
+      expectLinearScaling({ run: () => {}, sizes: [1, 4], repeats: 0 }),
+    );
+    expect(repeatsError).toBeInstanceOf(TypeError);
+    expect(String(repeatsError)).toContain("positive integer");
+  });
+
+  test("rejects size ratios that cannot distinguish quadratic growth", async () => {
+    let calls = 0;
+    const error = await rejectionOf(
+      expectLinearScaling({
+        run: () => {
+          calls += 1;
+        },
+        sizes: [10_000, 20_000, 40_000],
+      }),
+    );
+
+    expect(error).toBeInstanceOf(TypeError);
+    expect(String(error)).toContain(
+      "sizes 10000 and 20000 must have a ratio greater than 2.5",
+    );
+    expect(calls).toBe(0);
   });
 
   test("calibrates sub-microsecond linear work without flaking", async () => {
@@ -73,52 +100,57 @@ describe("expectLinearScaling", () => {
   });
 
   test("rejects a synchronous run when the clock does not advance", async () => {
-    const assertion = linearScalingTestInternals.expectLinearScalingWithClock(
-      { run: () => {}, sizes: [2, 4] },
-      { minimumSampleDurationMs: 5, now: () => 10 },
+    const error = await rejectionOf(
+      linearScalingTestInternals.expectLinearScalingWithClock(
+        { run: () => {}, sizes: [2, 8] },
+        { minimumSampleDurationMs: 5, now: () => 10 },
+      ),
     );
-    expect(assertion).rejects.toThrow(TypeError);
-    expect(assertion).rejects.toThrow(/size 2.*clock did not advance/u);
-    await assertion.catch(() => {});
+    expect(error).toBeInstanceOf(TypeError);
+    expect(String(error)).toMatch(/size 2.*clock did not advance/u);
   });
 
   test("rejects an asynchronous run when the clock does not advance", async () => {
-    const assertion = linearScalingTestInternals.expectLinearScalingWithClock(
-      { run: async () => {}, sizes: [2, 4] },
-      { minimumSampleDurationMs: 5, now: () => 10 },
+    const error = await rejectionOf(
+      linearScalingTestInternals.expectLinearScalingWithClock(
+        { run: async () => {}, sizes: [2, 8] },
+        { minimumSampleDurationMs: 5, now: () => 10 },
+      ),
     );
-    expect(assertion).rejects.toThrow(TypeError);
-    expect(assertion).rejects.toThrow(/size 2.*clock did not advance/u);
-    await assertion.catch(() => {});
+    expect(error).toBeInstanceOf(TypeError);
+    expect(String(error)).toMatch(/size 2.*clock did not advance/u);
   });
 
   test("rejects zero-duration samples and names the size", async () => {
-    const assertion = linearScalingTestInternals.expectLinearScalingWithClock(
-      { run: () => {}, sizes: [2, 4] },
-      { minimumSampleDurationMs: 0, now: () => 10 },
+    const error = await rejectionOf(
+      linearScalingTestInternals.expectLinearScalingWithClock(
+        { run: () => {}, sizes: [2, 8] },
+        { minimumSampleDurationMs: 0, now: () => 10 },
+      ),
     );
-    expect(assertion).rejects.toThrow(TypeError);
-    expect(assertion).rejects.toThrow("size 2");
-    await assertion.catch(() => {});
+    expect(error).toBeInstanceOf(TypeError);
+    expect(String(error)).toContain("size 2");
   });
 
   test("calibration exposes quadratic growth below clock resolution", async () => {
     let work = 0;
     const calls = new Map<number, number>();
-    const assertion = linearScalingTestInternals.expectLinearScalingWithClock(
-      {
-        sizes: [1, 2, 4],
-        repeats: 3,
-        maxGrowthFactor: 1.5,
-        run: (size) => {
-          calls.set(size, (calls.get(size) ?? 0) + 1);
-          work += size * size;
+    const error = await rejectionOf(
+      linearScalingTestInternals.expectLinearScalingWithClock(
+        {
+          sizes: [1, 2, 4],
+          repeats: 3,
+          maxGrowthFactor: 1.5,
+          run: (size) => {
+            calls.set(size, (calls.get(size) ?? 0) + 1);
+            work += size * size;
+          },
         },
-      },
-      { minimumSampleDurationMs: 5, now: () => Math.floor(work / 100) },
+        { minimumSampleDurationMs: 5, now: () => Math.floor(work / 100) },
+      ),
     );
-    expect(assertion).rejects.toThrow(/size 1 .*size 2/u);
-    await assertion.catch(() => {});
+    expect(error).toBeInstanceOf(Error);
+    expect(String(error)).toMatch(/size 1 .*size 2/u);
     expect(calls.has(4)).toBeFalse();
   });
 
@@ -126,23 +158,25 @@ describe("expectLinearScaling", () => {
     let work = 0;
     let clockReads = 0;
     const calls = new Map<number, number>();
-    const assertion = linearScalingTestInternals.expectLinearScalingWithClock(
-      {
-        sizes: [1, 2, 4],
-        repeats: 3,
-        maxGrowthFactor: 1.5,
-        run: (size) => {
-          calls.set(size, (calls.get(size) ?? 0) + 1);
-          work += size * size;
+    const error = await rejectionOf(
+      linearScalingTestInternals.expectLinearScalingWithClock(
+        {
+          sizes: [1, 2, 4],
+          repeats: 3,
+          maxGrowthFactor: 1.5,
+          run: (size) => {
+            calls.set(size, (calls.get(size) ?? 0) + 1);
+            work += size * size;
+          },
         },
-      },
-      {
-        minimumSampleDurationMs: 1_000,
-        now: () => work + clockReads++ * 100,
-      },
+        {
+          minimumSampleDurationMs: 1_000,
+          now: () => work + clockReads++ * 100,
+        },
+      ),
     );
-    expect(assertion).rejects.toThrow(/size 1 .*size 2/u);
-    await assertion.catch(() => {});
+    expect(error).toBeInstanceOf(Error);
+    expect(String(error)).toMatch(/size 1 .*size 2/u);
     expect(calls.has(4)).toBeFalse();
   });
 });

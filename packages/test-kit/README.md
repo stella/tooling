@@ -29,10 +29,12 @@ bun add -d @stll/test-kit
 
 Assert how work scales instead of requiring it to finish before an absolute
 deadline. The helper warms up each size, calibrates every sample over a measurable window,
-and compares per-call medians, so overall machine speed cancels out. Choose sizes
-for the slowest engine where the code runs: a quadratic implementation should show
-its growth in the ratio before any single call becomes slow. For example, a Stella
-citation extractor can measure successively longer citation-shaped strings:
+and compares per-call medians, so overall machine speed cancels out. Each consecutive
+size ratio must be greater than `maxGrowthFactor` (2.5 by default); this ensures
+quadratic growth exceeds the allowed linear-growth threshold. Choose sizes for the
+slowest engine where the code runs: a quadratic implementation should show its growth
+in the ratio before any single call becomes slow. For example, a Stella citation
+extractor can measure successively longer citation-shaped strings:
 
 ```ts
 import { expectLinearScaling } from "@stll/test-kit";
