@@ -513,7 +513,11 @@ const runDependencyState = (command: string) =>
   withRepository((root) => {
     writeFileSync(join(root, "bun.lock"), "original\n");
     const state = join(root, "state");
-    const functions = dependencyStateFunctions(generate(declaration));
+    mkdirSync(state);
+    const { uid } = statSync(state);
+    const functions = dependencyStateFunctions(generate(declaration))
+      .replaceAll("== 0:755", `== ${uid}:755`)
+      .replaceAll("== 0:644", `== ${uid}:644`);
     const result = Bun.spawnSync(
       [
         "bash",
@@ -554,14 +558,16 @@ sync_dependencies
   expect(result.exitCode).toBe(0);
 });
 
-test("a failed changed-lockfile reinstall fails start without restamping", () => {
-  const outcome = runDependencyState(`install_dependencies
-before="$(cat "$DEPENDENCY_STAMP")"
+test("a failed changed-lockfile reinstall clears the stamp so start retries", () => {
+  const { result } = runDependencyState(`install_dependencies
 printf 'changed\\n' > bun.lock
-INSTALL_FAIL=1 sync_dependencies
-[[ "$(cat "$DEPENDENCY_STAMP")" == "$before" ]]`);
-  expect(outcome.result.exitCode).toBe(1);
-  expect(outcome.result.stderr.toString()).toContain(
+if (INSTALL_FAIL=1 sync_dependencies); then fail 'Expected installation failure'; fi
+[[ ! -e "$DEPENDENCY_STAMP" ]]
+sync_dependencies
+[[ "$(wc -l < "$FIXTURE_ROOT/installs")" == 3 ]]
+[[ "$(cat "$DEPENDENCY_STAMP")" == "$(sha256sum bun.lock | cut -d ' ' -f1)" ]]`);
+  expect(result.exitCode).toBe(0);
+  expect(result.stderr.toString()).toContain(
     "cloud-setup: bun.lock mismatch; dependency installation failed",
   );
 });

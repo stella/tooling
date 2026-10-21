@@ -293,6 +293,8 @@ write_dependency_stamp() {
   mv -f -- "$temporary" "$DEPENDENCY_STAMP"
 }
 install_dependencies() {
+  prepare_dependency_state
+  rm -f -- "$DEPENDENCY_STAMP"
   dependency_install
   write_dependency_stamp
 }
@@ -302,6 +304,7 @@ sync_dependencies() {
   expected="$(dependency_hash)"
   if [[ -f "$DEPENDENCY_STAMP" ]]; then IFS= read -r installed < "$DEPENDENCY_STAMP" || true; fi
   [[ "$installed" == "$expected" ]] && return
+  rm -f -- "$DEPENDENCY_STAMP"
   dependency_install || fail 'bun.lock mismatch; dependency installation failed'
   write_dependency_stamp
 }
