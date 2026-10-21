@@ -80,10 +80,10 @@ const environmentParts = (generated: string) => {
   return { assignment, marker, functions: generated.slice(start, end) };
 };
 
-const withRepository = (run: (root: string) => void) => {
+const withRepository = <Result>(run: (root: string) => Result): Result => {
   const root = mkdtempSync(join(tmpdir(), "cloud-environment-test-"));
   try {
-    run(root);
+    return run(root);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -497,6 +497,75 @@ dependency_install`,
   });
 }, 15_000);
 
+const dependencyStateFunctions = (generated: string) => {
+  const start = generated.indexOf("\ndependency_hash() {");
+  const serviceInstall = generated.indexOf("\nservice_account_ready()", start);
+  const boundary =
+    serviceInstall < 0
+      ? generated.indexOf("\ninstall_services()", start)
+      : serviceInstall;
+  if (start < 0 || boundary <= start)
+    throw new Error("Missing emitted dependency state functions");
+  return generated.slice(start, boundary);
+};
+
+const runDependencyState = (command: string) =>
+  withRepository((root) => {
+    writeFileSync(join(root, "bun.lock"), "original\n");
+    const state = join(root, "state");
+    const functions = dependencyStateFunctions(generate(declaration));
+    const result = Bun.spawnSync(
+      [
+        "bash",
+        "-eu",
+        "-c",
+        `fail() { echo "cloud-setup: $*" >&2; exit 1; }
+REPO_ROOT="$FIXTURE_ROOT"
+DEPENDENCY_STATE_ROOT="$FIXTURE_ROOT/state"
+DEPENDENCY_STAMP="$DEPENDENCY_STATE_ROOT/dependencies.sha256"
+dependency_install() { printf 'install\\n' >> "$FIXTURE_ROOT/installs"; [[ "\${INSTALL_FAIL:-}" != 1 ]]; }
+${functions}
+${command}`,
+      ],
+      { cwd: root, env: { ...process.env, FIXTURE_ROOT: root } },
+    );
+    return { root, state, result };
+  });
+
+test("an equal dependency stamp skips installation", () => {
+  const { result } = runDependencyState(`install_dependencies
+: > "$FIXTURE_ROOT/installs"
+sync_dependencies
+[[ ! -s "$FIXTURE_ROOT/installs" ]]`);
+  expect(result.exitCode).toBe(0);
+});
+
+test("a changed bun.lock reinstalls once and records the new stamp", () => {
+  expect(generate(declaration)).toMatch(
+    /start_environment\(\) \{[\s\S]*step dependencies sync_dependencies[\s\S]*\n\}/,
+  );
+  const { result } = runDependencyState(`install_dependencies
+: > "$FIXTURE_ROOT/installs"
+printf 'changed\\n' > bun.lock
+sync_dependencies
+sync_dependencies
+[[ "$(wc -l < "$FIXTURE_ROOT/installs")" == 1 ]]
+[[ "$(cat "$DEPENDENCY_STAMP")" == "$(sha256sum bun.lock | cut -d ' ' -f1)" ]]`);
+  expect(result.exitCode).toBe(0);
+});
+
+test("a failed changed-lockfile reinstall fails start without restamping", () => {
+  const outcome = runDependencyState(`install_dependencies
+before="$(cat "$DEPENDENCY_STAMP")"
+printf 'changed\\n' > bun.lock
+INSTALL_FAIL=1 sync_dependencies
+[[ "$(cat "$DEPENDENCY_STAMP")" == "$before" ]]`);
+  expect(outcome.result.exitCode).toBe(1);
+  expect(outcome.result.stderr.toString()).toContain(
+    "cloud-setup: bun.lock mismatch; dependency installation failed",
+  );
+});
+
 const bunRuntimeFunctions = (generated: string) => {
   const start = generated.indexOf("\nbun_route() {");
   const end = generated.indexOf("\ninstall_runtimes() (", start);
@@ -532,11 +601,9 @@ test("runtime installation replaces image Bun executables and verifies every res
     const minimal = join(root, "minimal-bin");
     for (const directory of [oldInstall, shims, other, pinned, minimal])
       mkdirSync(directory, { recursive: true });
-    writeFileSync(
-      join(pinned, "bun"),
-      `#!/bin/sh\necho '${policy.bun}'\n`,
-      { mode: 0o755 },
-    );
+    writeFileSync(join(pinned, "bun"), `#!/bin/sh\necho '${policy.bun}'\n`, {
+      mode: 0o755,
+    });
     for (const executable of [
       "bash",
       "env",
@@ -597,7 +664,7 @@ done`,
     expect(generated).toContain(
       'minimal_path="$(printenv STLL_CLOUD_TEST_MINIMAL_PATH || true)"',
     );
-    expect(generated).toContain('bash -l');
+    expect(generated).toContain("bash -l");
   });
 }, 30_000);
 
@@ -666,7 +733,9 @@ test("the declared install command is rendered verbatim into the pinned install"
 
 test("every lifecycle phase runs through the timed step logger", () => {
   const generated = generate(declaration);
-  const body = generated.slice(generated.indexOf('if [[ "$MODE" == install ]]'));
+  const body = generated.slice(
+    generated.indexOf('if [[ "$MODE" == install ]]'),
+  );
   const start = generated.indexOf("start_environment() {");
   const end = generated.indexOf(
     '\n}\nif [[ "$MODE" == session ]]; then',
@@ -679,8 +748,9 @@ test("every lifecycle phase runs through the timed step logger", () => {
     "install_runtimes",
     "install_services",
     "install_tools",
-    "dependency_install",
+    "install_dependencies",
     "runtime_ready",
+    "sync_dependencies",
     "verify_tools",
     "verify_shell_environment",
     "prepare_state",
@@ -695,9 +765,7 @@ test("every lifecycle phase runs through the timed step logger", () => {
     "prepare_state",
     "start_services",
   ])
-    expect(startFunction).toMatch(
-      new RegExp(`^ *step [a-z-]+ ${phase}$`, "m"),
-    );
+    expect(startFunction).toMatch(new RegExp(`^ *step [a-z-]+ ${phase}$`, "m"));
   expect(generated).toContain(
     'if [[ "$MODE" == session ]]; then\n  start_environment >&2\nelse\n  start_environment\nfi',
   );
@@ -787,7 +855,9 @@ test("a prepare script runs once after dependencies, offline and time-bounded", 
   const install = generated.slice(
     generated.indexOf('if [[ "$MODE" == install ]]; then'),
   );
-  const dependencies = install.indexOf("step dependencies dependency_install");
+  const dependencies = install.indexOf(
+    "step dependencies install_dependencies",
+  );
   const prepare = install.indexOf("step prepare prepare_sources");
   expect(dependencies).toBeGreaterThan(-1);
   expect(prepare).toBeGreaterThan(dependencies);
@@ -814,7 +884,9 @@ test("a prepare script must be a root package script", () => {
   ]) {
     expect(() =>
       generatePrepared({ "package.json": JSON.stringify({ scripts }) }),
-    ).toThrow("cloud.prepare.script generate:cloud is not a root package script");
+    ).toThrow(
+      "cloud.prepare.script generate:cloud is not a root package script",
+    );
   }
 }, 15_000);
 
