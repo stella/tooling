@@ -186,7 +186,7 @@ const commandLines = (commands: readonly string[]) =>
   commands.flatMap((command) =>
     command
       .replace(/\\\r?\n/gu, " ")
-      .split(/\r?\n|&&|\|\||;/u)
+      .split(/\r?\n|&&|;/u)
       .map((line) => line.trim()),
   );
 

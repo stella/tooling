@@ -244,6 +244,7 @@ test("hooks format staged files and CI checks the whole repository", () => {
     "pre-commit:\n  commands:\n    format:\n      run: bun fmt --staged {staged_files}\n",
     "pre-commit:\n  commands:\n    format:\n      run: bun fmt\n",
     "pre-push:\n  commands:\n    format:\n      run: bun fmt --staged\n",
+    "pre-commit:\n  commands:\n    format:\n      run: bun fmt --staged || true\n",
   ])
     expect(check({ "lefthook.yml": hook })).toEqual([
       "lefthook.yml: lefthook pre-commit must run bun fmt --staged",
@@ -254,7 +255,12 @@ test("hooks format staged files and CI checks the whole repository", () => {
         "pre-commit:\n  jobs:\n    - run: bun run guard && bun fmt --staged\n",
     }),
   ).toEqual([]);
-  for (const step of ["bun fmt --check src", "bun fmt", "bun run format"])
+  for (const step of [
+    "bun fmt --check src",
+    "bun fmt",
+    "bun run format",
+    "bun fmt --check || true",
+  ])
     expect(
       check({
         ".github/workflows/ci.yml": workflow.replace("bun fmt --check", step),
