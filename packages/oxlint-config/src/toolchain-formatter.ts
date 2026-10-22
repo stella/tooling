@@ -237,41 +237,42 @@ const packageSourceProbes = [
 ] as const;
 
 /**
- * Ignore-file matching: a pattern matches a path itself or, when it matches an
- * ancestor directory, excludes everything below it. A leading or inner slash
- * anchors it at the root; otherwise it matches at any depth.
+ * Ignore-file matching at one path level: a trailing slash limits a pattern to
+ * directories, and a leading or inner slash anchors it at the root; otherwise
+ * it matches at any depth.
  */
-const ignoreMatch = (pattern: string, file: string) => {
+const matchesLevel = (pattern: string, path: string, directory: boolean) => {
+  if (pattern.endsWith("/") && !directory) return false;
   const anchored = pattern.replace(/\/+$/u, "").includes("/");
   const body = pattern.replace(/^\/+|\/+$/gu, "");
-  if (body === "") return "directory";
+  if (body === "") return true;
   const globs = anchored ? [body] : [body, `**/${body}`];
-  const parts = file.split("/");
-  for (const [index] of parts.entries()) {
-    const prefix = parts.slice(0, index + 1).join("/");
-    if (globs.some((glob) => picomatch.isMatch(prefix, glob, { dot: true })))
-      return index === parts.length - 1 ? "file" : "directory";
-  }
-  return undefined;
+  return globs.some((glob) => picomatch.isMatch(path, glob, { dot: true }));
 };
 
 /**
- * The positive patterns that leave a path ignored. Patterns apply in order: a
- * later negation re-includes the path, except below an excluded directory.
+ * The positive patterns that leave a path ignored. Each level (every ancestor
+ * directory, then the file) applies the patterns in order, and a negation only
+ * re-includes the level it matches; an excluded directory excludes everything
+ * below it.
  */
 const ignoringPatterns = (patterns: readonly string[], file: string) => {
-  const active: string[] = [];
-  let directoryExcluded = false;
-  for (const pattern of patterns) {
-    const negated = pattern.startsWith("!");
-    const match = ignoreMatch(negated ? pattern.slice(1) : pattern, file);
-    if (match === undefined) continue;
-    if (!negated) {
-      active.push(pattern);
-      directoryExcluded ||= match === "directory";
-    } else if (!directoryExcluded) active.length = 0;
+  const parts = file.split("/");
+  const culprits = new Set<string>();
+  for (const [index] of parts.entries()) {
+    const level = parts.slice(0, index + 1).join("/");
+    const directory = index < parts.length - 1;
+    const active: string[] = [];
+    for (const pattern of patterns) {
+      const negated = pattern.startsWith("!");
+      if (!matchesLevel(negated ? pattern.slice(1) : pattern, level, directory))
+        continue;
+      if (negated) active.length = 0;
+      else active.push(pattern);
+    }
+    for (const pattern of active) culprits.add(pattern);
   }
-  return active;
+  return [...culprits];
 };
 
 const checkFormatConfig = (
