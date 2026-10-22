@@ -1298,8 +1298,8 @@ const generatedHtmlSinkCorpus = (): {
       code: `importedDocument.${method}(rawHtml);`,
     });
     addCase({
-      kind: "clean",
-      label: `${method} accepts an instance of an imported non-document class`,
+      kind: "invalid",
+      label: `${method} treats an instance of an imported class as a document`,
       code: `{ const matcher = new StreamMatcher(); matcher.${method}(rawHtml); }`,
     });
     addCase({
@@ -1479,7 +1479,7 @@ test("HTML sink fixtures keep their invalid and clean outcomes across equivalent
   );
   const expectedHtmlSinkInvalidCount =
     REACT_HTML_PROPS.length * htmlSinkFactories.length +
-    DOCUMENT_WRITE_METHODS.size * 22 +
+    DOCUMENT_WRITE_METHODS.size * 23 +
     HTML_ATTRIBUTE_SINKS.length * 2 +
     HTML_ATTRIBUTE_SINKS.filter((sink) => sink.namespaceIndex !== null).length *
       ATTRIBUTE_NAMESPACE_CASES.filter((entry) => entry.kind === "invalid")

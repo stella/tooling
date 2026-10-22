@@ -117,13 +117,6 @@ export const HTML_ATTRIBUTE_SINKS = [
   { name: "setAttribute", namespaceIndex: null, nameIndex: 0, valueIndex: 1 },
   { name: "setAttributeNS", namespaceIndex: 0, nameIndex: 1, valueIndex: 2 },
 ] as const;
-// Constructors whose instances are documents, however they are imported
-// (DOM shims such as happy-dom or jsdom export them under these names).
-const DOCUMENT_CONSTRUCTORS: ReadonlySet<string> = new Set([
-  "Document",
-  "HTMLDocument",
-  "XMLDocument",
-]);
 const DOCUMENT_MEMBERS: ReadonlySet<string> = new Set([
   "contentDocument",
   "document",
@@ -598,36 +591,13 @@ export default eslintCompatPlugin({
           }
           if (variable === undefined || variable.defs.length !== 1) return true;
           const definition = variable.defs.at(0);
-          // Proven non-documents: an object literal, or an instance of an
-          // imported class that is not a DOM document constructor.
-          const isProvenNonDocument = (init: unknown): boolean => {
-            const value = unwrapExpression(init);
-            if (value?.type === "ObjectExpression") return true;
-            if (value?.type !== "NewExpression" || !isIdentifier(value.callee))
-              return false;
-            const constructor = variableFor(value.callee, scope);
-            const binding = constructor?.defs.at(0);
-            if (
-              constructor?.defs.length !== 1 ||
-              binding?.type !== "ImportBinding"
-            )
-              return false;
-            const imported =
-              binding.node.type === "ImportSpecifier" &&
-              binding.node.imported.type === "Identifier"
-                ? binding.node.imported.name
-                : value.callee.name;
-            return (
-              !DOCUMENT_CONSTRUCTORS.has(imported) &&
-              !DOCUMENT_CONSTRUCTORS.has(value.callee.name)
-            );
-          };
           if (
             definition?.type !== "Variable" ||
             definition.node.type !== "VariableDeclarator" ||
             definition.node.id.type !== "Identifier" ||
             definition.node.init === null ||
-            !isProvenNonDocument(definition.node.init) ||
+            unwrapExpression(definition.node.init)?.type !==
+              "ObjectExpression" ||
             definition.node.parent.type !== "VariableDeclaration" ||
             definition.node.parent.kind !== "const" ||
             variable.scope.variableScope !== scope.variableScope ||
