@@ -237,20 +237,41 @@ const packageSourceProbes = [
 ] as const;
 
 /**
- * Over-approximate ignore semantics: a pattern covers a path when it matches
- * the path or any ancestor directory. A leading or inner slash anchors it at
- * the root; otherwise it matches at any depth.
+ * Ignore-file matching: a pattern matches a path itself or, when it matches an
+ * ancestor directory, excludes everything below it. A leading or inner slash
+ * anchors it at the root; otherwise it matches at any depth.
  */
-const ignoresPath = (pattern: string, file: string) => {
+const ignoreMatch = (pattern: string, file: string) => {
   const anchored = pattern.replace(/\/+$/u, "").includes("/");
   const body = pattern.replace(/^\/+|\/+$/gu, "");
-  if (body === "") return true;
+  if (body === "") return "directory";
   const globs = anchored ? [body] : [body, `**/${body}`];
   const parts = file.split("/");
-  return parts.some((_, index) => {
+  for (const [index] of parts.entries()) {
     const prefix = parts.slice(0, index + 1).join("/");
-    return globs.some((glob) => picomatch.isMatch(prefix, glob, { dot: true }));
-  });
+    if (globs.some((glob) => picomatch.isMatch(prefix, glob, { dot: true })))
+      return index === parts.length - 1 ? "file" : "directory";
+  }
+  return undefined;
+};
+
+/**
+ * The positive patterns that leave a path ignored. Patterns apply in order: a
+ * later negation re-includes the path, except below an excluded directory.
+ */
+const ignoringPatterns = (patterns: readonly string[], file: string) => {
+  const active: string[] = [];
+  let directoryExcluded = false;
+  for (const pattern of patterns) {
+    const negated = pattern.startsWith("!");
+    const match = ignoreMatch(negated ? pattern.slice(1) : pattern, file);
+    if (match === undefined) continue;
+    if (!negated) {
+      active.push(pattern);
+      directoryExcluded ||= match === "directory";
+    } else if (!directoryExcluded) active.length = 0;
+  }
+  return active;
 };
 
 const checkFormatConfig = (
@@ -290,22 +311,24 @@ const checkFormatConfig = (
     );
   // Ignores are for generated or vendored paths; one that covers a workspace
   // package silently drops its sources from bun fmt --check.
-  for (const pattern of ignored) {
-    if (
-      typeof pattern !== "string" ||
-      pattern.startsWith("!") ||
-      policy.ignorePatterns.includes(pattern)
-    )
-      continue;
-    const covered = packageRoots.filter(
-      (root) =>
-        packageSourceProbes.some((probe) =>
-          ignoresPath(pattern, `${root}/${probe}`),
-        ),
-    );
-    if (covered.length > 0)
+  const patterns = ignored.filter(
+    (pattern): pattern is string => typeof pattern === "string",
+  );
+  const covered = new Map<string, string[]>();
+  for (const root of packageRoots)
+    for (const probe of packageSourceProbes) {
+      for (const pattern of ignoringPatterns(patterns, `${root}/${probe}`)) {
+        if (policy.ignorePatterns.includes(pattern)) continue;
+        const roots = covered.get(pattern) ?? [];
+        if (!roots.includes(root)) roots.push(root);
+        covered.set(pattern, roots);
+      }
+    }
+  for (const pattern of patterns) {
+    const roots = covered.get(pattern);
+    if (roots !== undefined)
       errors.push(
-        `bunfig.toml [fmt] ignorePatterns entry ${pattern} covers workspace packages (${covered.join(", ")}); ignore only their generated or vendored paths`,
+        `bunfig.toml [fmt] ignorePatterns entry ${pattern} covers workspace packages (${roots.join(", ")}); ignore only their generated or vendored paths`,
       );
   }
   for (const [key, value] of Object.entries(policy.style))
