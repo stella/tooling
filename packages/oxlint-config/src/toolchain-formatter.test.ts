@@ -200,7 +200,9 @@ test("bunfig.toml [fmt] carries the one shared style", () => {
   const styleError = `bunfig.toml: bunfig.toml [fmt] {key} must equal the shared style:\n${sharedTables}`;
   const shared = (replacement: readonly [string, string]) =>
     check({ "bunfig.toml": bunfig.replace(...replacement) });
-  expect(shared(["[fmt]\n", "[format]\n"])).toEqual([
+  expect(
+    check({ "bunfig.toml": bunfig.replaceAll("[fmt", "[format") }),
+  ).toEqual([
     `bunfig.toml: bunfig.toml requires a [fmt] table: bun fmt reads its configuration only from there; start from:\n${sharedTables}`,
   ]);
   expect(check({ "bunfig.toml": `[install]\n\n${sharedTables}` })).toEqual([]);

@@ -8,6 +8,10 @@ import path from "node:path";
 
 import toolchain from "../toolchain.json";
 import { synchronizeRepositoryQuarantine } from "./quarantine-policy";
+import {
+  parseFormatterPolicy,
+  sharedFormatTables,
+} from "./toolchain-formatter";
 
 const packageJson = (properties: Record<string, unknown>) =>
   JSON.stringify(properties, null, 2);
@@ -43,9 +47,9 @@ describe("consumer toolchain guard CLI", () => {
       expect(missingQuarantine.stderr).toContain("stll-quarantine --sync");
       writeFileSync(
         path.join(root, "bunfig.toml"),
-        synchronizeRepositoryQuarantine({
+        `${synchronizeRepositoryQuarantine({
           files: { "package.json": manifest },
-        }),
+        })}\n${sharedFormatTables(parseFormatterPolicy(toolchain.formatter))}`,
       );
       execFileSync("git", ["add", "bunfig.toml"], { cwd: root });
       const passing = run([]);
