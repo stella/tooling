@@ -121,16 +121,18 @@ verify_bun_routes() {
   [[ -n "$minimal_path" ]] || minimal_path=/usr/local/bin:/usr/bin:/bin
   root_mise="$(printenv STLL_CLOUD_TEST_ROOT_MISE || true)"
   [[ -n "$root_mise" ]] || root_mise=/root/.local/share/mise
-  bun_route 'the setup PATH' env PATH="$PATH" sh
-  bun_route 'sh -c' sh
+  # An absolute shell: a PATH entry such as a user-writable mise shims
+  # directory must never supply the program that root runs.
+  bun_route 'the setup PATH' env PATH="$PATH" /bin/sh
+  bun_route 'sh -c' /bin/sh
   bun_route 'bash -lc' "$login_shell" -l
-  bun_route 'the minimal system PATH' env -i PATH="$minimal_path" sh
+  bun_route 'the minimal system PATH' env -i PATH="$minimal_path" /bin/sh
   configured_mise="$(printenv MISE_DATA_DIR || true)"
   for mise_root in "$configured_mise" "$OUTPUT_HOME/.local/share/mise" "$root_mise"; do
     [[ -n "$mise_root" ]] || continue
     shims="$mise_root/shims"
     [[ -d "$shims" ]] || continue
-    bun_route "mise shims PATH $shims" env PATH="$shims:$PATH" sh
+    bun_route "mise shims PATH $shims" env PATH="$shims:$PATH" /bin/sh
   done
 }
 replace_image_buns() {
@@ -271,7 +273,8 @@ sync_dependencies() {
   prepare_dependency_state
   expected="$(dependency_hash)"
   if [[ -f "$DEPENDENCY_STAMP" ]]; then IFS= read -r installed < "$DEPENDENCY_STAMP" || true; fi
-  [[ "$installed" == "$expected" ]] && return
+  # The stamp describes an installation; without node_modules there is none.
+  [[ "$installed" == "$expected" && -d "$REPO_ROOT/node_modules" ]] && return
   rm -f -- "$DEPENDENCY_STAMP"
   dependency_install || fail 'bun.lock mismatch; dependency installation failed'
   write_dependency_stamp

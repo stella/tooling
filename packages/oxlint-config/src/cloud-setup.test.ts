@@ -618,7 +618,7 @@ const runDependencyState = (command: string) =>
 REPO_ROOT="$FIXTURE_ROOT"
 DEPENDENCY_STATE_ROOT="$FIXTURE_ROOT/state"
 DEPENDENCY_STAMP="$DEPENDENCY_STATE_ROOT/dependencies.sha256"
-dependency_install() { printf 'install\\n' >> "$FIXTURE_ROOT/installs"; [[ "\${INSTALL_FAIL:-}" != 1 ]]; }
+dependency_install() { printf 'install\\n' >> "$FIXTURE_ROOT/installs"; mkdir -p "$FIXTURE_ROOT/node_modules"; [[ "\${INSTALL_FAIL:-}" != 1 ]]; }
 ${functions}
 ${command}`,
       ],
@@ -632,6 +632,16 @@ test("an equal dependency stamp skips installation", () => {
 : > "$FIXTURE_ROOT/installs"
 sync_dependencies
 [[ ! -s "$FIXTURE_ROOT/installs" ]]`);
+  expect(result.exitCode).toBe(0);
+});
+
+test("an equal stamp without node_modules reinstalls", () => {
+  const { result } = runDependencyState(`install_dependencies
+: > "$FIXTURE_ROOT/installs"
+rm -rf -- "$FIXTURE_ROOT/node_modules"
+sync_dependencies
+[[ "$(wc -l < "$FIXTURE_ROOT/installs")" == 1 ]]
+[[ -d "$FIXTURE_ROOT/node_modules" ]]`);
   expect(result.exitCode).toBe(0);
 });
 
