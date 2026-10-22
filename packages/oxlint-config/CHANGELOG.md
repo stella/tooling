@@ -1,5 +1,17 @@
 # @stll/oxlint-config
 
+## 1.7.0
+
+### Minor Changes
+
+- [#202](https://github.com/stella/tooling/pull/202) [`d60e3a5`](https://github.com/stella/tooling/commit/d60e3a5f902e635496ab27d603da8a3766f9c3d9) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Adopt Bun 1.4.4 and make `bun fmt` the only formatter. The shared toolchain drops the oxfmt pin and adds a `formatter` policy: the new `formatter-policy` rule rejects oxfmt, Prettier, Biome and dprint dependencies, commands and configuration files, requires the shared style in the root `bunfig.toml` `[fmt]` table, `bun fmt --staged` in lefthook `pre-commit`, and a whole-repository `bun fmt --check` workflow step.
+
+### Patch Changes
+
+- [#198](https://github.com/stella/tooling/pull/198) [`ade664a`](https://github.com/stella/tooling/commit/ade664a2140ad1b5482661545ee4b7398638cb4a) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Reinstall cloud dependencies when the checked-out Bun lockfile differs from the cached environment.
+
+- [#201](https://github.com/stella/tooling/pull/201) [`b61d1f0`](https://github.com/stella/tooling/commit/b61d1f0b255b47373a11ac5f3737cd6a667139f1) Thanks [@jan-kubica](https://github.com/jan-kubica)! - The generated setup script checks the locked wasm-bindgen version instead of the whole lockfile.
+
 ## 1.6.2
 
 ### Patch Changes
