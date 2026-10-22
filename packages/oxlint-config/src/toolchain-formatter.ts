@@ -10,6 +10,7 @@ import {
   isLefthookConfigPath,
   isShellScript,
 } from "./toolchain-inputs";
+import { workspaceContains } from "./toolchain-workspaces";
 
 export const formatterRule = "formatter-policy" as const;
 
@@ -192,7 +193,7 @@ const isBunFormat = (line: string, flag: "--check" | "--staged") => {
   );
 };
 
-/** Directories of the package manifests the root workspaces globs select. */
+/** Package directories that the root workspaces patterns select. */
 const workspacePackageRoots = (files: Record<string, string>) => {
   let manifest: unknown;
   try {
@@ -202,23 +203,20 @@ const workspacePackageRoots = (files: Record<string, string>) => {
   }
   if (!record(manifest)) return [];
   const declared = manifest["workspaces"];
-  const globs: unknown[] = Array.isArray(declared)
-    ? declared
-    : record(declared) && Array.isArray(declared["packages"])
-      ? declared["packages"]
-      : [];
-  const patterns = globs.filter(
-    (glob): glob is string =>
-      typeof glob === "string" && !glob.startsWith("!"),
-  );
+  // Bun accepts the array form and the { packages } object form.
+  const patterns = record(declared) ? declared["packages"] : declared;
   return Object.keys(files)
-    .filter((file) => file.endsWith("/package.json"))
-    .map((file) => path.posix.dirname(file))
-    .filter((directory) =>
-      patterns.some((pattern) =>
-        picomatch.isMatch(directory, pattern.replace(/\/+$/u, "")),
-      ),
-    );
+    .filter(
+      (file) =>
+        file.endsWith("/package.json") &&
+        workspaceContains({
+          directory: ".",
+          file,
+          patterns,
+          rootMembership: "patterns",
+        }),
+    )
+    .map((file) => path.posix.dirname(file));
 };
 
 /**
