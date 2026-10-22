@@ -312,7 +312,6 @@ test("an ignore pattern that covers a workspace package is rejected", () => {
     "vendor/",
     "**/dist/**",
     "npm/",
-    "!packages/mcp/keep.ts",
   ];
   expect(workspace(["packages/*"], narrow)).toEqual([]);
   expect(workspace({ packages: ["packages/*"] }, narrow)).toEqual([]);
@@ -329,36 +328,12 @@ test("an ignore pattern that covers a workspace package is rejected", () => {
     "bunfig.toml: bunfig.toml [fmt] ignorePatterns entry packages/*/lib/** covers workspace packages (packages/mcp, packages/benchmark); ignore only their generated or vendored paths",
     "bunfig.toml: bunfig.toml [fmt] ignorePatterns entry **/*.tsx covers workspace packages (packages/mcp, packages/benchmark); ignore only their generated or vendored paths",
   ]);
-  // Patterns apply in order: a later negation re-includes sources, but not
-  // below an excluded directory.
+  // Negations are refused: every repository pattern only removes files.
   expect(
     workspace(["packages/*"], ["packages/**/*.ts", "!packages/mcp/**/*.ts"]),
   ).toEqual([
-    "bunfig.toml: bunfig.toml [fmt] ignorePatterns entry packages/**/*.ts covers workspace packages (packages/benchmark); ignore only their generated or vendored paths",
-  ]);
-  expect(
-    workspace(["packages/*"], ["packages/mcp/", "!packages/mcp/src/index.ts"]),
-  ).toEqual([
-    "bunfig.toml: bunfig.toml [fmt] ignorePatterns entry packages/mcp/ covers workspace packages (packages/mcp); ignore only their generated or vendored paths",
-  ]);
-  // A negation re-includes only the level it matches: negating a directory
-  // keeps file patterns below it in force.
-  expect(
-    workspace(["packages/*"], ["packages/*/src/**/*.ts", "!packages/mcp/src/"]),
-  ).toEqual([
-    "bunfig.toml: bunfig.toml [fmt] ignorePatterns entry packages/*/src/**/*.ts covers workspace packages (packages/mcp, packages/benchmark); ignore only their generated or vendored paths",
-  ]);
-  expect(
-    workspace(
-      ["packages/*"],
-      ["packages/mcp/src/index.ts", "!packages/mcp/src/"],
-    ),
-  ).toEqual([
-    "bunfig.toml: bunfig.toml [fmt] ignorePatterns entry packages/mcp/src/index.ts covers workspace packages (packages/mcp); ignore only their generated or vendored paths",
-  ]);
-  // An empty negation matches nothing, so the broad ignore stays in force.
-  expect(workspace(["packages/*"], ["packages/**", "!"])).toEqual([
-    "bunfig.toml: bunfig.toml [fmt] ignorePatterns entry packages/** covers workspace packages (packages/mcp, packages/benchmark); ignore only their generated or vendored paths",
+    "bunfig.toml: bunfig.toml [fmt] ignorePatterns entry !packages/mcp/**/*.ts re-includes files; list only generated or vendored paths",
+    "bunfig.toml: bunfig.toml [fmt] ignorePatterns entry packages/**/*.ts covers workspace packages (packages/mcp, packages/benchmark); ignore only their generated or vendored paths",
   ]);
   // A negated workspace pattern leaves that directory outside the workspace.
   expect(

@@ -245,35 +245,24 @@ const matchesLevel = (pattern: string, level: string, directory: boolean) => {
   if (pattern.endsWith("/") && !directory) return false;
   const anchored = pattern.replace(/\/+$/u, "").includes("/");
   const body = pattern.replace(/^\/+|\/+$/gu, "");
-  // An empty pattern (a bare "!" or "/") matches nothing.
+  // An empty pattern ("/") matches nothing.
   if (body === "") return false;
   const globs = anchored ? [body] : [body, `**/${body}`];
   return globs.some((glob) => picomatch.isMatch(level, glob, { dot: true }));
 };
 
-/**
- * The positive patterns that leave a path ignored. Each level (every ancestor
- * directory, then the file) applies the patterns in order, and a negation only
- * re-includes the level it matches; an excluded directory excludes everything
- * below it.
- */
+/** The patterns that match a path or one of its directories. */
 const ignoringPatterns = (patterns: readonly string[], file: string) => {
   const parts = file.split("/");
-  const culprits = new Set<string>();
-  for (const [index] of parts.entries()) {
-    const level = parts.slice(0, index + 1).join("/");
-    const directory = index < parts.length - 1;
-    const active: string[] = [];
-    for (const pattern of patterns) {
-      const negated = pattern.startsWith("!");
-      if (!matchesLevel(negated ? pattern.slice(1) : pattern, level, directory))
-        continue;
-      if (negated) active.length = 0;
-      else active.push(pattern);
-    }
-    for (const pattern of active) culprits.add(pattern);
-  }
-  return [...culprits];
+  return patterns.filter((pattern) =>
+    parts.some((_, index) =>
+      matchesLevel(
+        pattern,
+        parts.slice(0, index + 1).join("/"),
+        index < parts.length - 1,
+      ),
+    ),
+  );
 };
 
 const checkFormatConfig = (
@@ -312,14 +301,21 @@ const checkFormatConfig = (
       `bunfig.toml [fmt] ignorePatterns must include the shared generated files: ${missing.join(", ")}`,
     );
   // Ignores are for generated or vendored paths; one that covers a workspace
-  // package silently drops its sources from bun fmt --check.
+  // package silently drops its sources from bun fmt --check. Negations are not
+  // accepted, so every listed pattern only ever removes files.
   const patterns = ignored.filter(
     (pattern): pattern is string => typeof pattern === "string",
   );
+  for (const pattern of patterns)
+    if (pattern.startsWith("!"))
+      errors.push(
+        `bunfig.toml [fmt] ignorePatterns entry ${pattern} re-includes files; list only generated or vendored paths`,
+      );
+  const positives = patterns.filter((pattern) => !pattern.startsWith("!"));
   const covered = new Map<string, string[]>();
   for (const root of packageRoots)
     for (const probe of packageSourceProbes) {
-      for (const pattern of ignoringPatterns(patterns, `${root}/${probe}`)) {
+      for (const pattern of ignoringPatterns(positives, `${root}/${probe}`)) {
         if (policy.ignorePatterns.includes(pattern)) continue;
         const roots = covered.get(pattern) ?? [];
         if (!roots.includes(root)) roots.push(root);
