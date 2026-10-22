@@ -278,6 +278,10 @@ export const parseToolchainPolicy = (input: unknown) => {
       ignoredPackages: [
         ...new Set([
           ...Object.keys(packages),
+          // The consumer package managers move only with a reviewed
+          // consumerNpm or consumerPnpm change.
+          "npm",
+          "pnpm",
           ...typescriptInstallLayouts.flatMap((layout) =>
             layout.type === "direct"
               ? [layout.compilerPackage]
