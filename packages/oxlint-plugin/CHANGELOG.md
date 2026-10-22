@@ -1,5 +1,11 @@
 # @stll/oxlint-plugin
 
+## 0.6.2
+
+### Patch Changes
+
+- [#217](https://github.com/stella/tooling/pull/217) [`8dd7c9b`](https://github.com/stella/tooling/commit/8dd7c9b6d6e998d1cc14767c286d6ac0eb851dcd) Thanks [@jan-kubica](https://github.com/jan-kubica)! - `no-unsafe-inner-html` checks each branch of a conditional or logical `Object.assign` source instead of treating the whole expression as opaque, so `Object.assign(target, ready ? {} : { handler })` and a `null` or `undefined` branch pass while an HTML key or an opaque value in either branch is still reported.
+
 ## 0.6.1
 
 ### Patch Changes
