@@ -47,7 +47,7 @@ Schema version 1 contains these fields:
 | `node`, `python`, `rust`                                                          | Runtime selectors and version-manager pins. Node selects the policy major (`26.x`); static minor and patch selectors within that major are allowed. A Python minor pin preserves existing patch selectors within that release series; a patch policy requires the exact patch. Rust selects one exact stable release across toolchain files, commands, workflow selectors and images. |
 | `actions`                                                                         | Approved action names mapped to full `sha` and `version` comment.                                                                                                                                                                                                                                                                                                                     |
 | `dependabot`                                                                      | Shared schedule, cooldown and groups. Package and action ignores derive from the owned pins.                                                                                                                                                                                                                                                                                          |
-| `formatter`                                                                       | `bun fmt` is the only formatter. The `sortImports` `newlinesBetween` and `customGroups` are the shared style every Bun repository's root `bunfig.toml` `[fmt]` table repeats; repository-specific keys stay free.                                                                                                                                                                     |
+| `formatter`                                                                       | `bun fmt` is the only formatter. `style` is the one `[fmt]` style (line width, import groups) every Bun repository's root `bunfig.toml` repeats exactly; `ignorePatterns` lists the generated files every repository leaves to their generators. A repository adds only its own ignore patterns and, where it uses Tailwind, `sortTailwindcss`.                                       |
 
 The `formatter-policy` rule makes `bun fmt` the only formatter. It fails on an
 oxfmt, Prettier, Biome or dprint dependency, catalog entry, script or command
@@ -56,7 +56,9 @@ anywhere in the repository; on `.oxfmtrc*`, `oxfmt.config.*`, `.prettierrc*`,
 on a `prettier` key in `package.json`; on a package script named `fmt` (it
 would shadow `bun fmt`); and on a changesets `format` other than `false`. In a
 Bun repository the root `bunfig.toml` holds the only formatter configuration in
-its `[fmt]` table, with the shared style from `toolchain.json`; lefthook
+its `[fmt]` table: exactly the shared style from `toolchain.json`, the shared
+ignore patterns, and nothing repository-specific beyond extra ignores and
+`sortTailwindcss`; lefthook
 `pre-commit` runs `bun fmt --staged`, and a workflow runs `bun fmt --check`
 without path operands, so CI always checks the whole repository.
 

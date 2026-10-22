@@ -7,14 +7,48 @@
   "oxlint-tsgolint": "7.0.2003",
   "formatter": {
     "command": "bun fmt",
-    "sortImports": {
-      "newlinesBetween": true,
-      "customGroups": [
-        {
-          "groupName": "stella",
-          "elementNamePattern": ["@stll/**"]
-        }
-      ]
+    "ignorePatterns": [
+      ".ai/shared/**",
+      ".agents/skills/**",
+      ".claude/skills/**",
+      "**/AGENTS.md",
+      "**/GEMINI.md",
+      "**/CLAUDE.md",
+      ".github/dependabot.yml"
+    ],
+    "style": {
+      "printWidth": 80,
+      "sortImports": {
+        "customGroups": [
+          {
+            "groupName": "react",
+            "elementNamePattern": ["react", "react-dom", "react-dom/**"]
+          },
+          {
+            "groupName": "stella",
+            "elementNamePattern": ["@stll/**"]
+          },
+          {
+            "groupName": "aliases",
+            "elementNamePattern": ["@/**"]
+          }
+        ],
+        "groups": [
+          "react",
+          ["builtin", "external", "type-builtin", "type-external"],
+          "stella",
+          "aliases",
+          [
+            "parent",
+            "sibling",
+            "index",
+            "type-parent",
+            "type-sibling",
+            "type-index"
+          ]
+        ],
+        "newlinesBetween": true
+      }
     }
   },
   "typescriptInstallLayouts": [

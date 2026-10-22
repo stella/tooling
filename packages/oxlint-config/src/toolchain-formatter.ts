@@ -19,79 +19,103 @@ type Diagnostic = {
   message: string;
 };
 
-type ImportGroup = { groupName: string; elementNamePattern: string[] };
+export type FormatterStyle = Readonly<Record<string, unknown>>;
 
 export type FormatterPolicy = {
   command: "bun fmt";
-  sortImports: {
-    newlinesBetween: boolean;
-    customGroups: ImportGroup[];
-  };
+  style: FormatterStyle;
+  /** Generated files every repository leaves to their generators. */
+  ignorePatterns: readonly string[];
 };
+
+/** Repository-owned [fmt] keys: what to skip, and the Tailwind entry point. */
+export const repositoryFormatKeys = [
+  "ignorePatterns",
+  "sortTailwindcss",
+] as const;
 
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-const strings = (value: unknown): value is string[] =>
-  Array.isArray(value) &&
-  value.length > 0 &&
-  value.every((entry) => typeof entry === "string" && entry !== "");
-
-const importGroup = (value: unknown): value is ImportGroup =>
-  record(value) &&
-  typeof value["groupName"] === "string" &&
-  value["groupName"] !== "" &&
-  strings(value["elementNamePattern"]);
-
-/** The shared style is closed: every consumer must carry each key verbatim. */
+/** One style for every repository; only repository-owned keys may differ. */
 export const parseFormatterPolicy = (input: unknown): FormatterPolicy => {
   if (
     !record(input) ||
-    Object.keys(input).some((key) => key !== "command" && key !== "sortImports")
+    Object.keys(input).some(
+      (key) => key !== "command" && key !== "style" && key !== "ignorePatterns",
+    )
   )
     throw new Error(
-      "toolchain.json formatter accepts only command and sortImports",
+      "toolchain.json formatter accepts only command, style and ignorePatterns",
     );
   if (input["command"] !== "bun fmt")
     throw new Error("toolchain.json formatter command must be bun fmt");
-  const sortImports = input["sortImports"];
+  const style = input["style"];
+  if (!record(style) || Object.keys(style).length === 0)
+    throw new Error("toolchain.json formatter style must be a nonempty table");
+  for (const key of Object.keys(style))
+    if (repositoryFormatKeys.some((owned) => owned === key))
+      throw new Error(
+        `toolchain.json formatter style cannot own the repository key ${key}`,
+      );
+  const ignorePatterns = input["ignorePatterns"];
   if (
-    !record(sortImports) ||
-    typeof sortImports["newlinesBetween"] !== "boolean" ||
-    !Array.isArray(sortImports["customGroups"]) ||
-    !sortImports["customGroups"].every(importGroup)
+    !Array.isArray(ignorePatterns) ||
+    !ignorePatterns.every(
+      (pattern): pattern is string =>
+        typeof pattern === "string" && pattern !== "",
+    )
   )
     throw new Error(
-      "toolchain.json formatter sortImports requires newlinesBetween and customGroups",
+      "toolchain.json formatter ignorePatterns must be nonempty strings",
     );
-  return {
-    command: "bun fmt",
-    sortImports: {
-      newlinesBetween: sortImports["newlinesBetween"],
-      customGroups: sortImports["customGroups"],
-    },
-  };
+  return { command: "bun fmt", style, ignorePatterns };
 };
 
-/** Render the smallest bunfig.toml [fmt] tables that satisfy the shared style. */
-export const sharedFormatTables = (policy: FormatterPolicy) => {
-  const { customGroups, newlinesBetween } = policy.sortImports;
-  const groups = customGroups
-    .map(
-      ({ groupName, elementNamePattern }) =>
-        `{ groupName = ${JSON.stringify(groupName)}, elementNamePattern = ${JSON.stringify(elementNamePattern)} }`,
-    )
-    .join(", ");
-  const order = [
-    "builtin",
-    "external",
-    ...customGroups.map((group) => group.groupName),
-    "parent",
-    "sibling",
-    "index",
-  ];
-  return `[fmt]\n\n[fmt.sortImports]\ncustomGroups = [${groups}]\ngroups = ${JSON.stringify(order)}\nnewlinesBetween = ${String(newlinesBetween)}\n`;
+const tomlValue = (value: unknown): string => {
+  if (Array.isArray(value)) return `[${value.map(tomlValue).join(", ")}]`;
+  if (record(value))
+    return `{ ${Object.entries(value)
+      .map(([key, entry]) => `${key} = ${tomlValue(entry)}`)
+      .join(", ")} }`;
+  return JSON.stringify(value);
 };
+
+/** Render the shared bunfig.toml [fmt] tables. */
+export const sharedFormatTables = (policy: FormatterPolicy) => {
+  const scalars = Object.entries(policy.style).filter(
+    ([, value]) => !record(value),
+  );
+  const tables = Object.entries(policy.style).filter(([, value]) =>
+    record(value),
+  );
+  return [
+    [
+      "[fmt]",
+      ...scalars.map(([key, value]) => `${key} = ${tomlValue(value)}`),
+      `ignorePatterns = ${tomlValue(policy.ignorePatterns)}`,
+    ],
+    ...tables.map(([name, table]) => [
+      `[fmt.${name}]`,
+      ...Object.entries(table as Record<string, unknown>).map(
+        ([key, value]) => `${key} = ${tomlValue(value)}`,
+      ),
+    ]),
+  ]
+    .map((lines) => `${lines.join("\n")}\n`)
+    .join("\n");
+};
+
+const stableJson = (value: unknown): string =>
+  JSON.stringify(value, (_key, entry: unknown) =>
+    record(entry)
+      ? Object.fromEntries(
+          Object.entries(entry).toSorted(([left], [right]) =>
+            left.localeCompare(right),
+          ),
+        )
+      : entry,
+  );
 
 // Every alternative formatter is rejected, not only the one being replaced.
 const formatterPackage = (name: string) =>
@@ -177,21 +201,6 @@ const isBunFormat = (line: string, flag: "--check" | "--staged") => {
   );
 };
 
-const sameGroup = (left: ImportGroup, right: unknown) =>
-  importGroup(right) &&
-  left.groupName === right.groupName &&
-  left.elementNamePattern.length === right.elementNamePattern.length &&
-  left.elementNamePattern.every((pattern) =>
-    right.elementNamePattern.includes(pattern),
-  );
-
-const groupNames = (value: unknown): string[] =>
-  Array.isArray(value)
-    ? value.flatMap((entry) =>
-        typeof entry === "string" ? [entry] : groupNames(entry),
-      )
-    : [];
-
 const checkFormatConfig = (
   bunfig: string,
   policy: FormatterPolicy,
@@ -208,30 +217,29 @@ const checkFormatConfig = (
       `bunfig.toml requires a [fmt] table: bun fmt reads its configuration only from there; start from:\n${sharedFormatTables(policy)}`,
     ];
   const errors: string[] = [];
-  const sortImports = fmt["sortImports"];
-  if (!record(sortImports))
-    return [
-      ...errors,
-      "bunfig.toml requires a [fmt.sortImports] table with the shared import groups",
-    ];
-  if (sortImports["newlinesBetween"] !== policy.sortImports.newlinesBetween)
-    errors.push(
-      `bunfig.toml [fmt.sortImports] newlinesBetween must equal the shared ${String(policy.sortImports.newlinesBetween)}`,
-    );
-  const customGroups = Array.isArray(sortImports["customGroups"])
-    ? sortImports["customGroups"]
+  for (const key of Object.keys(fmt))
+    if (
+      !Object.hasOwn(policy.style, key) &&
+      !repositoryFormatKeys.some((owned) => owned === key)
+    )
+      errors.push(
+        `bunfig.toml [fmt] ${key} is not part of the shared style; every repository formats alike`,
+      );
+  const ignored = Array.isArray(fmt["ignorePatterns"])
+    ? fmt["ignorePatterns"]
     : [];
-  const ordered = groupNames(sortImports["groups"]);
-  for (const group of policy.sortImports.customGroups) {
-    if (!customGroups.some((candidate) => sameGroup(group, candidate)))
+  const missing = policy.ignorePatterns.filter(
+    (pattern) => !ignored.includes(pattern),
+  );
+  if (missing.length > 0)
+    errors.push(
+      `bunfig.toml [fmt] ignorePatterns must include the shared generated files: ${missing.join(", ")}`,
+    );
+  for (const [key, value] of Object.entries(policy.style))
+    if (stableJson(fmt[key]) !== stableJson(value))
       errors.push(
-        `bunfig.toml [fmt.sortImports] customGroups must include the shared ${group.groupName} group (${group.elementNamePattern.join(", ")})`,
+        `bunfig.toml [fmt] ${key} must equal the shared style:\n${sharedFormatTables(policy)}`,
       );
-    if (!ordered.includes(group.groupName))
-      errors.push(
-        `bunfig.toml [fmt.sortImports] groups must place the shared ${group.groupName} group`,
-      );
-  }
   return errors;
 };
 

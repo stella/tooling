@@ -10,21 +10,11 @@ import { toolchainInputKind } from "./toolchain-inputs";
 
 const policy = parseFormatterPolicy(toolchain.formatter);
 
+const sharedTables = sharedFormatTables(policy);
 const bunfig = `[install]
 minimumReleaseAge = 432000
 
-[fmt]
-printWidth = 80
-ignorePatterns = ["dist/"]
-
-[fmt.sortImports]
-customGroups = [
-  { groupName = "react", elementNamePattern = ["react"] },
-  { groupName = "stella", elementNamePattern = ["@stll/**"] },
-]
-groups = ["react", ["builtin", "external"], "stella", ["parent", "sibling"]]
-newlinesBetween = true
-`;
+${sharedTables.replace("ignorePatterns = [", 'ignorePatterns = ["dist/", ')}`;
 
 const workflow = `on: pull_request
 jobs:
@@ -87,6 +77,15 @@ test("the shared policy is closed and names bun fmt", () => {
   expect(() =>
     parseFormatterPolicy({ ...toolchain.formatter, semi: false }),
   ).toThrow("accepts only");
+  expect(() =>
+    parseFormatterPolicy({
+      ...toolchain.formatter,
+      style: { ...toolchain.formatter.style, ignorePatterns: [] },
+    }),
+  ).toThrow("repository key ignorePatterns");
+  expect(() =>
+    parseFormatterPolicy({ ...toolchain.formatter, ignorePatterns: [""] }),
+  ).toThrow("ignorePatterns");
 });
 
 test("every alternative formatter dependency fails, wherever it is declared", () => {
@@ -197,34 +196,45 @@ test("changesets must not run a formatter", () => {
   expect(check({ ".changeset/config.json": "{}" })).toHaveLength(1);
 });
 
-test("bunfig.toml [fmt] carries the shared style", () => {
+test("bunfig.toml [fmt] carries the one shared style", () => {
+  const styleError = `bunfig.toml: bunfig.toml [fmt] {key} must equal the shared style:\n${sharedTables}`;
   const shared = (replacement: [string, string]) =>
     check({ "bunfig.toml": bunfig.replace(...replacement) });
   expect(shared(["[fmt]\n", "[format]\n"])).toEqual([
-    `bunfig.toml: bunfig.toml requires a [fmt] table: bun fmt reads its configuration only from there; start from:\n${sharedFormatTables(policy)}`,
+    `bunfig.toml: bunfig.toml requires a [fmt] table: bun fmt reads its configuration only from there; start from:\n${sharedTables}`,
   ]);
-  expect(
-    check({ "bunfig.toml": `[install]\n\n${sharedFormatTables(policy)}` }),
-  ).toEqual([]);
-  // Line width stays a repository choice.
-  expect(shared(["printWidth = 80", "printWidth = 60"])).toEqual([]);
-  expect(shared(["newlinesBetween = true", "newlinesBetween = false"])).toEqual(
-    [
-      "bunfig.toml: bunfig.toml [fmt.sortImports] newlinesBetween must equal the shared true",
-    ],
-  );
-  expect(shared(['["@stll/**"]', '["@stll/*"]'])).toEqual([
-    "bunfig.toml: bunfig.toml [fmt.sortImports] customGroups must include the shared stella group (@stll/**)",
+  expect(check({ "bunfig.toml": `[install]\n\n${sharedTables}` })).toEqual([]);
+  // No repository keeps its own line width or import order.
+  expect(shared(["printWidth = 80", "printWidth = 100"])).toEqual([
+    styleError.replace("{key}", "printWidth"),
   ]);
-  expect(shared(['"stella", ["parent"', '["parent"'])).toEqual([
-    "bunfig.toml: bunfig.toml [fmt.sortImports] groups must place the shared stella group",
+  for (const replacement of [
+    ["newlinesBetween = true", "newlinesBetween = false"],
+    ['["@stll/**"]', '["@stll/*"]'],
+    ['"stella", "aliases"', '"aliases", "stella"'],
+  ] as const)
+    expect(shared(replacement)).toEqual([
+      styleError.replace("{key}", "sortImports"),
+    ]);
+  // Style keys outside the shared table are not repository choices either.
+  expect(shared(["printWidth = 80", "printWidth = 80\nsemi = false"])).toEqual([
+    "bunfig.toml: bunfig.toml [fmt] semi is not part of the shared style; every repository formats alike",
   ]);
   expect(
     check({
-      "bunfig.toml": "[install]\n\n[fmt]\nprintWidth = 80\n",
+      "bunfig.toml": `${bunfig}\n[[fmt.overrides]]\nfiles = ["a.ts"]\n`,
     }),
   ).toEqual([
-    "bunfig.toml: bunfig.toml requires a [fmt.sortImports] table with the shared import groups",
+    "bunfig.toml: bunfig.toml [fmt] overrides is not part of the shared style; every repository formats alike",
+  ]);
+  // Repository-owned keys: extra ignores and the Tailwind entry point.
+  expect(
+    check({
+      "bunfig.toml": `${bunfig}\n[fmt.sortTailwindcss]\nfunctions = ["cn"]\n`,
+    }),
+  ).toEqual([]);
+  expect(shared(['".github/dependabot.yml"', '"dist/**"'])).toEqual([
+    "bunfig.toml: bunfig.toml [fmt] ignorePatterns must include the shared generated files: .github/dependabot.yml",
   ]);
 });
 
