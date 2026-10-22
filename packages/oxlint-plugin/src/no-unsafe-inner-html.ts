@@ -128,6 +128,17 @@ const FILE_SYSTEM_MODULES: ReadonlySet<string> = new Set([
   "node:fs",
   "node:fs/promises",
 ]);
+const CHILD_PROCESS_MODULES: ReadonlySet<string> = new Set([
+  "child_process",
+  "node:child_process",
+]);
+// Calls that return a ChildProcess, whose stdin is a writable stream.
+const CHILD_PROCESS_FACTORIES: ReadonlySet<string> = new Set([
+  "exec",
+  "execFile",
+  "fork",
+  "spawn",
+]);
 const HTML_SANITIZER_LEAF_RE =
   /^(?:escape(?:html|xml)|sanitize(?:html|dom)|purify(?:html|dom)|dompurify)$/iu;
 const SANITIZER_RESULT_MEMBERS = new Set(["value", "data", "html"]);
@@ -414,6 +425,22 @@ export default eslintCompatPlugin({
             if (seen.has(variable)) return null;
             seen.add(variable);
             const definition = variable.defs.at(0);
+            // A never-reassigned class or function declaration holds a
+            // function, which is neither an element nor a document.
+            if (
+              variable.defs.length === 1 &&
+              (definition?.type === "ClassName" ||
+                definition?.type === "FunctionName") &&
+              (definition.node.type === "ClassDeclaration" ||
+                definition.node.type === "FunctionDeclaration") &&
+              !variable.references.some((reference) => reference.isWrite())
+            ) {
+              return {
+                kind: "expression",
+                node: unwrapExpression(definition.node),
+                scope,
+              };
+            }
             if (
               variable.defs.length !== 1 ||
               definition?.type !== "Variable" ||
@@ -500,15 +527,53 @@ export default eslintCompatPlugin({
               FILE_SYSTEM_MODULES.has(definition.parent.source.value)
             );
           };
+          // A const bound once to a child process factory call: a node
+          // child_process import or the unshadowed Bun.spawn.
+          const isChildProcess = (identifier: unknown): boolean => {
+            if (!isIdentifier(identifier)) return false;
+            const variable = variableFor(identifier, scope);
+            const definition = variable?.defs.at(0);
+            if (
+              variable?.defs.length !== 1 ||
+              definition?.type !== "Variable" ||
+              definition.node.type !== "VariableDeclarator" ||
+              definition.node.id.type !== "Identifier" ||
+              definition.node.parent.type !== "VariableDeclaration" ||
+              definition.node.parent.kind !== "const"
+            )
+              return false;
+            const init = unwrapExpression(definition.node.init);
+            if (init?.type !== "CallExpression") return false;
+            const callee = unwrapExpression(init.callee);
+            if (callee?.type === "MemberExpression")
+              return (
+                memberPropertyName(callee) === "spawn" &&
+                isUnshadowedGlobal(unwrapExpression(callee.object), "Bun")
+              );
+            if (!isIdentifier(callee)) return false;
+            const factory = variableFor(callee, scope);
+            const binding = factory?.defs.at(0);
+            return (
+              factory?.defs.length === 1 &&
+              binding?.type === "ImportBinding" &&
+              binding.node.type === "ImportSpecifier" &&
+              binding.node.imported.type === "Identifier" &&
+              CHILD_PROCESS_FACTORIES.has(binding.node.imported.name) &&
+              binding.parent?.type === "ImportDeclaration" &&
+              CHILD_PROCESS_MODULES.has(binding.parent.source.value)
+            );
+          };
           const root = unwrapExpression(node);
           if (isUnshadowedGlobal(root, "Bun") || isFileSystemImport(root)) {
             return true;
           }
+          if (root?.type !== "MemberExpression") return false;
+          const stream = memberPropertyName(root);
+          const owner = unwrapExpression(root.object);
           return (
-            root?.type === "MemberExpression" &&
-            (memberPropertyName(root) === "stdout" ||
-              memberPropertyName(root) === "stderr") &&
-            isUnshadowedGlobal(unwrapExpression(root.object), "process")
+            ((stream === "stdout" || stream === "stderr") &&
+              isUnshadowedGlobal(owner, "process")) ||
+            (stream === "stdin" && isChildProcess(owner))
           );
         };
         const isDocumentReceiver = (node: unknown, scope: Scope): boolean => {

@@ -1134,6 +1134,25 @@ const producerCorpus = (): {
     );
   }
   lines.push(
+    "{",
+    "class Factory {}",
+    `// expect-clean: ${ruleId} -- a class declaration holds a function, not a DOM target`,
+    "Object.assign(Factory, payload);",
+    "}",
+    "{",
+    "function factory() {}",
+    `// expect-clean: ${ruleId} -- a function declaration holds a function, not a DOM target`,
+    "Object.assign(factory, payload);",
+    "}",
+    "{",
+    "class Reassigned {}",
+    "Reassigned = document.body;",
+    `// oxlint-disable-next-line ${ruleId} -- a reassigned class binding may hold a DOM target`,
+    "Object.assign(Reassigned, payload);",
+    "}",
+  );
+  invalidCount += 1;
+  lines.push(
     "// safe-html: fixture waiver is consumed by the first, statically safe write",
     'document.write(""); document.write(rawHtml); // oxlint-disable-line ' +
       `${ruleId} -- second same-line document.write sink is intentionally opaque`,
@@ -1174,6 +1193,10 @@ const generatedHtmlSinkCorpus = (): {
     'import { promises as fsPromises } from "node:fs";',
     'import fsPromisesDefault from "fs/promises";',
     'import otherWriter from "other-writer";',
+    'import { StreamMatcher } from "./stream";',
+    'import { Document as ShimDocument } from "happy-dom";',
+    'import { spawn } from "node:child_process";',
+    'import { spawn as otherSpawn } from "other-process";',
     "declare const rawHtml: string;",
     "const config = { write(..._values: string[]) {}, writeln(..._values: string[]) {} };",
     "declare function createElement(type: string, props: object): unknown;",
@@ -1292,6 +1315,51 @@ const generatedHtmlSinkCorpus = (): {
       kind: "invalid",
       label: `${method} treats an imported receiver as a document`,
       code: `importedDocument.${method}(rawHtml);`,
+    });
+    addCase({
+      kind: "invalid",
+      label: `${method} treats an instance of an imported class as a document`,
+      code: `{ const matcher = new StreamMatcher(); matcher.${method}(rawHtml); }`,
+    });
+    addCase({
+      kind: "invalid",
+      label: `${method} treats an aliased imported Document instance as a document`,
+      code: `{ const doc = new ShimDocument(); doc.${method}(rawHtml); }`,
+    });
+    addCase({
+      kind: "invalid",
+      label: `${method} treats a global Document instance as a document`,
+      code: `{ const doc = new Document(); doc.${method}(rawHtml); }`,
+    });
+    addCase({
+      kind: "invalid",
+      label: `${method} treats a reassigned class instance as a document`,
+      code: `{ let matcher = new StreamMatcher(); matcher = document; matcher.${method}(rawHtml); }`,
+    });
+    addCase({
+      kind: "clean",
+      label: `${method} accepts the stdin of a node child process`,
+      code: `{ const child = spawn("cat"); const send = () => child.stdin.${method}(rawHtml); send(); }`,
+    });
+    addCase({
+      kind: "clean",
+      label: `${method} accepts the stdin of a Bun child process`,
+      code: `{ const child = Bun.spawn(["cat"]); child.stdin?.${method}(rawHtml); }`,
+    });
+    addCase({
+      kind: "invalid",
+      label: `${method} treats the stdin of a reassignable binding as a document`,
+      code: `{ let child = spawn("cat"); child = { stdin: document }; child.stdin.${method}(rawHtml); }`,
+    });
+    addCase({
+      kind: "invalid",
+      label: `${method} treats the stdin of another module's call as a document`,
+      code: `{ const child = otherSpawn("cat"); child.stdin.${method}(rawHtml); }`,
+    });
+    addCase({
+      kind: "invalid",
+      label: `${method} treats the stdin of a shadowed Bun spawn as a document`,
+      code: `{ const Bun = { spawn: () => ({ stdin: document }) }; const child = Bun.spawn(); child.stdin.${method}(rawHtml); }`,
     });
     addCase({
       kind: "invalid",
@@ -1430,7 +1498,7 @@ test("HTML sink fixtures keep their invalid and clean outcomes across equivalent
   );
   const expectedHtmlSinkInvalidCount =
     REACT_HTML_PROPS.length * htmlSinkFactories.length +
-    DOCUMENT_WRITE_METHODS.size * 16 +
+    DOCUMENT_WRITE_METHODS.size * 23 +
     HTML_ATTRIBUTE_SINKS.length * 2 +
     HTML_ATTRIBUTE_SINKS.filter((sink) => sink.namespaceIndex !== null).length *
       ATTRIBUTE_NAMESPACE_CASES.filter((entry) => entry.kind === "invalid")
