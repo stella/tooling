@@ -308,7 +308,9 @@ test("remote Claude SessionStart resolves the setup script from the project root
     expect(readFileSync(join(root, "calls"), "utf8")).toBe(
       `session ${realpathSync(subdirectory)}\n`,
     );
-    expect(readFileSync(environment, "utf8")).toBe(`\n${exports}`);
+    expect(readFileSync(environment, "utf8")).toBe(
+      `# >>> stll cloud session >>>\n${exports}# <<< stll cloud session <<<\n`,
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -350,6 +352,7 @@ test("Claude SessionStart persists literal pinned exports after start while reta
       profile,
     );
     const original = "export KEEP=retained";
+    const block = `# >>> stll cloud session >>>\nexport DATABASE_URL='postgres://stll_cloud:fixture-secret@127.0.0.1:55432/cloud_test'\n${exports}# <<< stll cloud session <<<\n`;
     const env = {
       ...process.env,
       PATH: [...inherited, "/usr/bin", "/bin"].join(":"),
@@ -367,13 +370,25 @@ test("Claude SessionStart persists literal pinned exports after start while reta
       expect(result.stdout).toBe("");
       expect(result.stderr).toBe("");
       expect(readFileSync(environment, "utf8")).toBe(
-        remote === "true"
-          ? `${original}\nexport DATABASE_URL='postgres://stll_cloud:fixture-secret@127.0.0.1:55432/cloud_test'\n${exports}`
-          : original,
+        remote === "true" ? `${original}\n${block}` : original,
       );
       expect(result.stdout).not.toContain("fixture-secret");
       expect(result.stderr).not.toContain("fixture-secret");
     }
+    // A later start (resume, clear, compact) replaces its block in place.
+    writeFileSync(
+      environment,
+      `${readFileSync(environment, "utf8")}export LATER=kept\n`,
+    );
+    const rerun = spawnSync("/bin/bash", ["-c", command], {
+      cwd: root,
+      env: { ...env, CLAUDE_CODE_REMOTE: "true" },
+      encoding: "utf8",
+    });
+    expect(rerun.status).toBe(0);
+    expect(readFileSync(environment, "utf8")).toBe(
+      `${original}\nexport LATER=kept\n${block}`,
+    );
     const persisted = readFileSync(environment, "utf8");
     expect(persisted).toContain("$PATH");
     for (const directory of inherited)
@@ -394,7 +409,9 @@ test("Claude SessionStart persists literal pinned exports after start while reta
       `${pinned}:${env.PATH}`,
       "",
     ]);
-    expect(readFileSync(join(root, "calls"), "utf8")).toBe("session\n");
+    expect(readFileSync(join(root, "calls"), "utf8")).toBe(
+      "session\nsession\n",
+    );
 
     writeFileSync(environment, original);
     const failed = spawnSync("/bin/bash", ["-c", command], {
@@ -469,6 +486,10 @@ test("SessionStart reads, writes and replacement fail visibly without changing e
     );
     const failures = [
       { failure: "cat() { return 74; }", reason: "could not be read" },
+      {
+        failure: "awk() { return 74; }",
+        reason: "session environment could not be read",
+      },
       {
         failure:
           'printf() { if [[ -n "${cloud_env_temporary:-}" && /dev/fd/1 -ef "$cloud_env_temporary" ]]; then return 73; fi; builtin printf "$@"; }',
