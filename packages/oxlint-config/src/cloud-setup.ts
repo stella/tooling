@@ -373,6 +373,41 @@ emit_session_environment() {
 
 const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 
+const renderWasmBindgenLockValidation = (version: string) =>
+  `[[ -f 'Cargo.lock' && ! -L 'Cargo.lock' ]] && awk -v expected=${shellQuote(version)} '${String.raw`
+function validate_package() {
+  if (in_package && name == "wasm-bindgen") {
+    count++
+    if (version != expected) mismatch = 1
+  }
+}
+/^\[\[package\]\][[:space:]]*$/ {
+  validate_package()
+  in_package = 1
+  name = ""
+  version = ""
+  next
+}
+/^\[/ {
+  validate_package()
+  in_package = 0
+  next
+}
+in_package && /^[[:space:]]*name[[:space:]]*=/ {
+  name = $0
+  sub(/^[^=]*=[[:space:]]*"/, "", name)
+  sub(/"[[:space:]]*$/, "", name)
+}
+in_package && /^[[:space:]]*version[[:space:]]*=/ {
+  version = $0
+  sub(/^[^=]*=[[:space:]]*"/, "", version)
+  sub(/"[[:space:]]*$/, "", version)
+}
+END {
+  validate_package()
+  exit !(count >= 1 && !mismatch)
+}`}' 'Cargo.lock' || fail 'Cargo.lock wasm-bindgen version changed; regenerate cloud-setup.sh'`;
+
 // Offline and time-bounded: stdin is closed so a prompt cannot hold the
 // snapshot. timeout leads its own process group (its pid), but it stops
 // escalating once its direct child exits, so whatever is left in that group
@@ -451,13 +486,7 @@ export const generateCloudSetup = ({
     ],
     [
       "@INPUT_VALIDATION@",
-      [
-        "rust-toolchain.toml",
-        "rust-toolchain",
-        ...(selected.tools?.["wasm-bindgen-cli"] === undefined
-          ? []
-          : ["Cargo.lock"]),
-      ]
+      ["rust-toolchain.toml", "rust-toolchain"]
         .flatMap((file) => {
           const content = files[file];
           if (content === undefined)
@@ -469,6 +498,15 @@ export const generateCloudSetup = ({
             `[[ -f ${shellQuote(file)} && ! -L ${shellQuote(file)} ]] && [[ "$(sha256sum -- ${shellQuote(file)} | cut -d ' ' -f1)" == ${shellQuote(hash)} ]] || fail ${shellQuote(`${file} changed; regenerate cloud-setup.sh`)}`,
           ];
         })
+        .concat(
+          selected.tools?.["wasm-bindgen-cli"] === undefined
+            ? []
+            : [
+                renderWasmBindgenLockValidation(
+                  selected.tools["wasm-bindgen-cli"],
+                ),
+              ],
+        )
         .join("\n"),
     ],
     ["@BUN@", policy.bun],

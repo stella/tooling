@@ -17,6 +17,7 @@ import { join } from "node:path";
 
 import policyInput from "../toolchain.json";
 import { cloudEnvironmentMarker, generateCloudSetup } from "./cloud-setup";
+import { cloudSetupArtifacts } from "./cloud-setup-artifacts";
 import {
   cloudInstallCommand,
   cloudServices,
@@ -39,6 +40,96 @@ const postgresAndValkeyDeclaration = {
   ...declaration,
   services: ["postgres", "valkey"],
 };
+
+const wasmBindgenVersion = cloudSetupArtifacts["wasm-bindgen-cli"].version;
+const wasmLock = (versions: readonly string[], development = "1.0.0") =>
+  `version = 4\n\n[[package]]\nname = "development-only"\nversion = "${development}"\n\n${versions.map((version) => `[[package]]\nname = "wasm-bindgen"\nversion = "${version}"\n`).join("\n")}`;
+const generateWasmSetup = (lock: string) => {
+  const cloud = parseCloudSetup({
+    install: cloudInstallCommand,
+    tools: { "wasm-bindgen-cli": wasmBindgenVersion },
+  });
+  if (cloud === undefined) throw new Error("Missing cloud declaration");
+  return generateCloudSetup({
+    policy,
+    cloud,
+    nodeVersion: "26.10.0",
+    files: { "Cargo.lock": lock },
+  });
+};
+
+test("wasm-bindgen validation derives only the locked crate version", () => {
+  const original = generateWasmSetup(wasmLock([wasmBindgenVersion]));
+  const unrelatedUpdate = generateWasmSetup(
+    wasmLock([wasmBindgenVersion], "2.0.0"),
+  );
+  expect(unrelatedUpdate).toBe(original);
+  expect(original).not.toContain("sha256sum -- 'Cargo.lock'");
+
+  const start = original.indexOf("[[ ! -e 'rust-toolchain.toml'");
+  const end = original.indexOf('\n\nif [[ "$MODE" == install', start);
+  if (start < 0 || end <= start)
+    throw new Error("Missing generated input validation boundary");
+  const validation = original.slice(start, end);
+  const run = (lock: string | undefined) =>
+    withRepository((root) => {
+      if (lock !== undefined) writeFileSync(join(root, "Cargo.lock"), lock);
+      return Bun.spawnSync(
+        [
+          "bash",
+          "-eu",
+          "-c",
+          `fail() { echo "$*" >&2; exit 1; }\n${validation}`,
+        ],
+        { cwd: root },
+      );
+    });
+
+  expect(run(wasmLock([wasmBindgenVersion])).exitCode).toBe(0);
+  expect(
+    run(wasmLock([wasmBindgenVersion, wasmBindgenVersion])).exitCode,
+  ).toBe(0);
+  expect(
+    run(
+      `${wasmLock([wasmBindgenVersion])}\n[[patch.unused]]\nname = "wasm-bindgen"\nversion = "0.1.0"\n`,
+    ).exitCode,
+  ).toBe(0);
+  expect(
+    run(
+      `${wasmLock([])}\n[[patch.unused]]\nname = "wasm-bindgen"\nversion = "${wasmBindgenVersion}"\n`,
+    ).exitCode,
+  ).toBe(1);
+  expect(
+    run(
+      `${wasmLock([wasmBindgenVersion])}\n[metadata]\nname = "unrelated"\nversion = "0.1.0"\n`,
+    ).exitCode,
+  ).toBe(0);
+  for (const lock of [
+    wasmLock(["0.1.0"]),
+    wasmLock([wasmBindgenVersion, "0.1.0"]),
+    wasmLock([]),
+    undefined,
+  ]) {
+    const result = run(lock);
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain(
+      "Cargo.lock wasm-bindgen version changed; regenerate cloud-setup.sh",
+    );
+  }
+  withRepository((root) => {
+    const target = join(root, "outside.lock");
+    writeFileSync(target, wasmLock([wasmBindgenVersion]));
+    symlinkSync(target, join(root, "Cargo.lock"));
+    const result = Bun.spawnSync(
+      ["bash", "-eu", "-c", `fail() { echo "$*" >&2; exit 1; }\n${validation}`],
+      { cwd: root },
+    );
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain(
+      "Cargo.lock wasm-bindgen version changed; regenerate cloud-setup.sh",
+    );
+  });
+}, 15_000);
 
 test("generated lifecycle comments describe the portable phase contract", () => {
   const generated = generate(declaration);
