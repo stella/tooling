@@ -236,10 +236,7 @@ export const parseToolchainPolicy = (input: unknown) => {
     throw new Error("missing Dependabot action groups");
   const actionGroups: Record<string, { patterns: string[] }> = {};
   for (const [name, group] of Object.entries(actionGroupsInput)) {
-    if (
-      !record(group) ||
-      Object.keys(group).some((key) => key !== "patterns")
-    )
+    if (!record(group) || Object.keys(group).some((key) => key !== "patterns"))
       throw new Error(`invalid Dependabot action group: ${name}`);
     actionGroups[name] = { patterns: strings(group["patterns"]) };
   }

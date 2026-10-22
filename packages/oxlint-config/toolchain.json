@@ -168,9 +168,7 @@
     },
     "actionGroups": {
       "stella-shared": {
-        "patterns": [
-          "stella/.github/*"
-        ]
+        "patterns": ["stella/.github/*"]
       }
     },
     "groups": {
