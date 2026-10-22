@@ -848,6 +848,13 @@ export default eslintCompatPlugin({
               );
               continue;
             }
+            // Object.assign skips null and undefined sources.
+            if (
+              (expression?.type === "Literal" && expression.value === null) ||
+              isIdentifier(expression, "undefined")
+            ) {
+              continue;
+            }
             if (expression?.type === "LogicalExpression") {
               checkHtmlPropertySources(
                 expression.operator === "&&"

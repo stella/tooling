@@ -294,6 +294,14 @@ export const SafeObjectAssignConditionalSources = (
     preconnect === undefined ? {} : { preconnect },
   );
   Object.assign(document.createElement("div"), preconnect && { preconnect });
+  Object.assign(
+    document.createElement("div"),
+    preconnect === undefined ? null : { preconnect },
+  );
+  Object.assign(
+    document.createElement("div"),
+    preconnect === undefined ? undefined : { preconnect },
+  );
 };
 
 export const UnsafeObjectAssignConditionalSources = (useHtml: boolean) => {
