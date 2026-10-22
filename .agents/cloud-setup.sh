@@ -191,7 +191,8 @@ replace_image_buns() {
       [[ -d "$candidate" ]] && continue
       [[ "$(readlink -f -- "$candidate")" == "$(readlink -f -- "$BUN_DIR/bun")" ]] || ln -sfnT -- "$BUN_DIR/bun" "$candidate"
     done
-  done < <(printf '%s' "$PATH" | tr : '\n')
+  # The trailing newline lets read return the last PATH entry too.
+  done < <(printf '%s\n' "$PATH" | tr : '\n')
 }
 install_runtimes() (
   if [[ ! -s /etc/ssl/certs/ca-certificates.crt ]]; then
@@ -231,7 +232,6 @@ install_runtimes() (
   ln -sfnT -- "$NODE_DIR/bin/npx" /usr/local/bin/npx
   ln -sfnT -- "$BUN_DIR/bun" /usr/local/bin/bun
   replace_image_buns
-  verify_bun_routes
 )
 
 dependency_install() {
@@ -562,6 +562,8 @@ if [[ "$MODE" == install ]]; then
   step services install_services
   step tools install_tools
   step shell install_shell_environment
+  # Login routes read the installed profile, so they are checked after it.
+  step routes verify_bun_routes
   step dependencies install_dependencies
 
   exit 0
