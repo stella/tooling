@@ -22,6 +22,7 @@ const policy = {
     timezone: "Europe/Prague",
   },
   cooldown: { defaultDays: 5 },
+  actionGroups: { "stella-shared": { patterns: ["stella/.github/*"] } },
   groups: {
     dependencies: { patterns: ["*"], updateTypes: ["minor", "patch"] },
   },

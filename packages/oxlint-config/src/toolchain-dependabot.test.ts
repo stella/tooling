@@ -981,7 +981,7 @@ describe("Dependabot policy", () => {
     const workflow = { ".github/workflows/ci.yml": "on: push\njobs: {}\n" };
     const actions = (groups: unknown) =>
       check(config([{ ...update("github-actions"), groups }]), workflow).some(
-        ({ rule }) => rule === "groups",
+        ({ message }) => message.includes("groups must match"),
       );
     const shared = { patterns: ["stella/.github/*"] };
     const semver = { patterns: ["*"], "update-types": ["minor", "patch"] };
@@ -1008,7 +1008,7 @@ describe("Dependabot policy", () => {
             groups: { "stella-shared": shared, dependencies: semver },
           },
         ]),
-      ).some(({ rule }) => rule === "groups"),
+      ).some(({ message }) => message.includes("groups must match")),
     ).toBe(true);
   });
 
