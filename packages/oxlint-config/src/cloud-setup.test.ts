@@ -86,6 +86,21 @@ test("wasm-bindgen validation derives only the locked crate version", () => {
     });
 
   expect(run(wasmLock([wasmBindgenVersion])).exitCode).toBe(0);
+  expect(
+    run(
+      `${wasmLock([wasmBindgenVersion])}\n[[patch.unused]]\nname = "wasm-bindgen"\nversion = "0.1.0"\n`,
+    ).exitCode,
+  ).toBe(0);
+  expect(
+    run(
+      `${wasmLock([])}\n[[patch.unused]]\nname = "wasm-bindgen"\nversion = "${wasmBindgenVersion}"\n`,
+    ).exitCode,
+  ).toBe(1);
+  expect(
+    run(
+      `${wasmLock([wasmBindgenVersion])}\n[metadata]\nname = "unrelated"\nversion = "0.1.0"\n`,
+    ).exitCode,
+  ).toBe(0);
   for (const lock of [
     wasmLock(["0.1.0"]),
     wasmLock([wasmBindgenVersion, wasmBindgenVersion]),

@@ -388,6 +388,11 @@ function validate_package() {
   version = ""
   next
 }
+/^\[/ {
+  validate_package()
+  in_package = 0
+  next
+}
 in_package && /^[[:space:]]*name[[:space:]]*=/ {
   name = $0
   sub(/^[^=]*=[[:space:]]*"/, "", name)
