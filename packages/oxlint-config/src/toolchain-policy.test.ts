@@ -17,7 +17,7 @@ describe("shared toolchain policy", () => {
   test("keeps every Bun pin equal to the shared policy", async () => {
     const rootPackage = await readJson("package.json");
     const toolchain = await readJson("packages/oxlint-config/toolchain.json");
-    expect(toolchain).toEqual(expect.objectContaining({ bun: "1.4.3" }));
+    expect(toolchain).toEqual(expect.objectContaining({ bun: "1.4.4" }));
     expect(rootPackage).toEqual(
       expect.objectContaining({
         packageManager: `bun@${toolchainPolicy.bun}`,

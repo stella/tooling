@@ -2,6 +2,29 @@
 # 5-day quarantine: reject fresh package versions to reduce supply-chain risk.
 minimumReleaseAge = 432000
 # stll-quarantine --sync maintains exact permanent first-party exemptions.
+# bun-types ships only declarations and must match the pinned Bun runtime.
 minimumReleaseAgeExcludes = [
   "@stll/time", # quarantine-excluded-since: 2026-10-17T13:44:24.000Z
+  "bun-types", # quarantine-expires: 2026-10-27T10:17:50.170Z
 ]
+
+[fmt]
+printWidth = 80
+ignorePatterns = [
+  "dist/",
+  "node_modules/",
+  ".ai/",
+  ".agents/",
+  ".claude/",
+  "/AGENTS.md",
+  "/GEMINI.md",
+]
+
+[fmt.sortImports]
+customGroups = [{ groupName = "stella", elementNamePattern = ["@stll/**"] }]
+groups = [
+  ["builtin", "external", "type-builtin", "type-external"],
+  "stella",
+  ["parent", "sibling", "index", "type-parent", "type-sibling", "type-index"],
+]
+newlinesBetween = true

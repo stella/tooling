@@ -28,6 +28,7 @@ import {
   consumerRunnerVersion,
 } from "./toolchain-consumer-checks";
 import type { DependabotIgnoreDeclaration } from "./toolchain-dependabot";
+import { sharedFormatTables } from "./toolchain-formatter";
 import {
   checkToolchain,
   parseToolchainConfiguration,
@@ -41,7 +42,8 @@ const policy = parseToolchainPolicy(toolchain);
 const validBunQuarantine = `[install]
 minimumReleaseAge = ${REQUIRED_RELEASE_AGE_SECONDS}
 minimumReleaseAgeExcludes = []
-`;
+
+${sharedFormatTables(policy.formatter)}`;
 
 test("large tracked file lists preserve all paths and toolchain diagnostics", () => {
   const root = mkdtempSync(path.join(tmpdir(), "stll-large-file-list-"));

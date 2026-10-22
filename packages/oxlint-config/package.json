@@ -126,8 +126,7 @@
   "scripts": {
     "build": "tsdown",
     "typecheck": "bun check",
-    "test": "bun test",
-    "format": "oxfmt ."
+    "test": "bun test"
   },
   "dependencies": {
     "@changesets/assemble-release-plan": "7.0.0",
@@ -146,7 +145,6 @@
     "@stll/typescript-config": "workspace:*",
     "@types/picomatch": "4.0.3",
     "@types/semver": "7.8.0",
-    "oxfmt": "0.72.0",
     "oxlint": "1.87.0",
     "typescript": "7.0.2",
     "unplugin-dts": "1.0.3",

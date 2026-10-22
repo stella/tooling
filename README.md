@@ -42,11 +42,23 @@ Schema version 1 contains these fields:
 | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `schemaVersion`                                                                            | Supported policy schema version (`1`).                                                                                                                                                                                                                                                                                                                                                |
 | `bun`                                                                                      | Exact `packageManager`, `bun-types`, image and manager pin.                                                                                                                                                                                                                                                                                                                           |
-| `oxlint`, `oxlint-tsgolint`, `@oxlint/plugins`, `@stll/oxlint-plugin`, `oxfmt`, `lefthook` | Exact dependency and catalog pins. Declared local workspace packages must resolve to the same version.                                                                                                                                                                                                                                                                                |
+| `oxlint`, `oxlint-tsgolint`, `@oxlint/plugins`, `@stll/oxlint-plugin`, `lefthook`          | Exact dependency and catalog pins. Declared local workspace packages must resolve to the same version.                                                                                                                                                                                                                                                                                |
 | `typescript`, `typescriptInstallLayouts`, `typescript6Compatibility`                       | Exact compiler pins and complete direct or split install layouts; the optional compatibility alias is exact too.                                                                                                                                                                                                                                                                      |
 | `node`, `python`, `rust`                                                                   | Runtime selectors and version-manager pins. Node selects the policy major (`26.x`); static minor and patch selectors within that major are allowed. A Python minor pin preserves existing patch selectors within that release series; a patch policy requires the exact patch. Rust selects one exact stable release across toolchain files, commands, workflow selectors and images. |
 | `actions`                                                                                  | Approved action names mapped to full `sha` and `version` comment.                                                                                                                                                                                                                                                                                                                     |
 | `dependabot`                                                                               | Shared schedule, cooldown and groups. Package and action ignores derive from the owned pins.                                                                                                                                                                                                                                                                                          |
+| `formatter`                                                                                | `bun fmt` is the only formatter. `printWidth` and the `sortImports` `newlinesBetween` and `customGroups` are the shared style every Bun repository's root `bunfig.toml` `[fmt]` table repeats; repository-specific keys stay free.                                                                                                                                                    |
+
+The `formatter-policy` rule makes `bun fmt` the only formatter. It fails on an
+oxfmt, Prettier, Biome or dprint dependency, catalog entry, script or command
+anywhere in the repository; on `.oxfmtrc*`, `oxfmt.config.*`, `.prettierrc*`,
+`prettier.config.*`, `.prettierignore`, `biome.json` and `dprint.json` files and
+on a `prettier` key in `package.json`; on a package script named `fmt` (it
+would shadow `bun fmt`); and on a changesets `format` other than `false`. In a
+Bun repository the root `bunfig.toml` holds the only formatter configuration in
+its `[fmt]` table, with the shared style from `toolchain.json`; lefthook
+`pre-commit` runs `bun fmt --staged`, and a workflow runs `bun fmt --check`
+without path operands, so CI always checks the whole repository.
 
 Configure `oven-sh/setup-bun` with `bun-version-file: package.json` and a
 matching `packageManager`. Configure setup-node/setup-python with
@@ -290,7 +302,7 @@ TypeScript 6 is compatibility-only. Use the split layout only for a command
 that loads one of the peer blockers listed in `toolchain.json`, or for code
 that imports the TypeScript compiler API. Remove the compatibility install when
 the blocker accepts TypeScript 7. The shared config's peer range accepts both
-layouts. Both layouts use `bun check` with Bun 1.4.3 for typechecking; retain
+layouts. Both layouts use `bun check` with the pinned Bun for typechecking; retain
 TypeScript wherever a tool needs its compiler API or declaration generation.
 `stll-typecheck-parity` runs from a consumer repository root. It uses that repo's
 TypeScript compiler (including the declared split layout), compares repository
@@ -851,7 +863,7 @@ Workflows with no declared trust job retain their existing fork-CI policy.
 
 The comparison includes Bun declarations, Node selectors and support ranges,
 resolved TypeScript compiler versions (including workspace and compatibility
-aliases), oxlint, oxlint-tsgolint, oxfmt, and shared tooling pins. Lockfile
+aliases), oxlint, oxlint-tsgolint, and shared tooling pins. Lockfile
 resolutions determine installed package versions; manifest ranges alone do not.
 Resolution locations and importer bindings are retained: swapping compiler
 versions between workspaces cannot look unchanged. Compiler specifier changes

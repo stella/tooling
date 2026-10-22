@@ -175,14 +175,12 @@
   },
   "scripts": {
     "build": "tsdown",
-    "typecheck": "bun check",
-    "format": "oxfmt ."
+    "typecheck": "bun check"
   },
   "devDependencies": {
     "@oxlint/plugins": "1.87.0",
     "@stll/typescript-config": "workspace:*",
     "@types/node": "26.6.5",
-    "oxfmt": "0.72.0",
     "typescript": "7.0.2"
   },
   "peerDependencies": {

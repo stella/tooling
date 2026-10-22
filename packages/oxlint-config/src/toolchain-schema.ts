@@ -1,5 +1,6 @@
 import { valid } from "semver";
 
+import { parseFormatterPolicy } from "./toolchain-formatter";
 import { nodePolicyValid } from "./toolchain-node";
 
 export const packagePinKeys = [
@@ -7,7 +8,6 @@ export const packagePinKeys = [
   "oxlint-tsgolint",
   "@oxlint/plugins",
   "@stll/oxlint-plugin",
-  "oxfmt",
   "lefthook",
 ] as const;
 
@@ -240,6 +240,7 @@ export const parseToolchainPolicy = (input: unknown) => {
   }
   return {
     bun,
+    formatter: parseFormatterPolicy(input["formatter"]),
     typescript,
     node,
     postgres,

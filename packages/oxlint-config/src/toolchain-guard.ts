@@ -39,6 +39,7 @@ import {
   resolveEngineFloor,
   type ResolvedEngineFloor,
 } from "./toolchain-engine-floors";
+import { checkFormatter, formatterRule } from "./toolchain-formatter";
 import { toolchainInputKind } from "./toolchain-inputs";
 import { checkNodeProjects, nodeProjectRule } from "./toolchain-node-projects";
 import { checkPackageFiles, packageRules } from "./toolchain-packages";
@@ -56,6 +57,7 @@ export const toolchainRules = [
     ...runtimeRules,
     ...dependabotRules,
     nodeProjectRule,
+    formatterRule,
     "cloud-setup-drift",
     "quarantine-policy",
   ] as const),
@@ -370,6 +372,9 @@ export const checkToolchain = ({
       return false;
     }
   });
+  diagnostics.push(
+    ...checkFormatter({ files, policy: policy.formatter, usesBun }),
+  );
   if (usesBun || files["bunfig.toml"] !== undefined) {
     try {
       if (files["bunfig.toml"] === undefined)

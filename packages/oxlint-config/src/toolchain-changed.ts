@@ -690,7 +690,6 @@ const inventory = () =>
     typescript: new Set<string>(),
     oxlint: new Set<string>(),
     "oxlint-tsgolint": new Set<string>(),
-    oxfmt: new Set<string>(),
     shared: new Set<string>(),
   }) satisfies Record<ToolchainChangedTool, Set<string>>;
 const installedFields = [

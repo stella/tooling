@@ -45,7 +45,7 @@ service_run() (
   done
   exec runuser -u stll-cloud -- "$@"
 )
-BUN_VERSION='1.4.3'
+BUN_VERSION='1.4.4'
 NODE_VERSION='26.10.0'
 NODE_DIR="/opt/stll-cloud/node/$NODE_VERSION"
 BUN_DIR="/opt/stll-cloud/bun/$BUN_VERSION"
@@ -495,12 +495,12 @@ while :; do
     *) _stll_cloud_part="$_stll_cloud_remaining"; _stll_cloud_more=no ;;
   esac
   case "$_stll_cloud_part" in
-    '/opt/stll-cloud/node/26.10.0/bin'|'/opt/stll-cloud/bun/1.4.3'|/usr/local/bin) ;;
+    '/opt/stll-cloud/node/26.10.0/bin'|'/opt/stll-cloud/bun/1.4.4'|/usr/local/bin) ;;
     *) _stll_cloud_result="$_stll_cloud_result$_stll_cloud_separator$_stll_cloud_part"; _stll_cloud_separator=: ;;
   esac
   [ "$_stll_cloud_more" = yes ] || break
 done
-export PATH='/opt/stll-cloud/node/26.10.0/bin:/opt/stll-cloud/bun/1.4.3:/usr/local/bin'"${_stll_cloud_separator:+:}$_stll_cloud_result"
+export PATH='/opt/stll-cloud/node/26.10.0/bin:/opt/stll-cloud/bun/1.4.4:/usr/local/bin'"${_stll_cloud_separator:+:}$_stll_cloud_result"
 unset _stll_cloud_remaining _stll_cloud_result _stll_cloud_separator _stll_cloud_part _stll_cloud_more
 export RUSTUP_HOME=/opt/stll-cloud/rustup
 export CARGO_HOME=/opt/stll-cloud/cargo
@@ -541,7 +541,7 @@ done
 )
 verify_shell_environment() {
   [[ -f '/etc/profile.d/stll-cloud.sh' && ! -L '/etc/profile.d/stll-cloud.sh' && "$(stat -c '%h:%u' '/etc/profile.d/stll-cloud.sh')" == 1:0 ]] || fail 'Managed shell environment is unavailable; run install'
-  [[ "$(sha256sum -- '/etc/profile.d/stll-cloud.sh' | cut -d ' ' -f1)" == '056727e845ab7ff91ead2816d447c2c56c18249546768769d36468d7b38dc595' ]] || fail 'Managed shell environment differs; run install'
+  [[ "$(sha256sum -- '/etc/profile.d/stll-cloud.sh' | cut -d ' ' -f1)" == '2e96da10364dade2b051fb77195abb3c42a3e848804b86ef26ada7aa6d392858' ]] || fail 'Managed shell environment differs; run install'
 }
 
 
