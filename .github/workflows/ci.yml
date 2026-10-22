@@ -69,7 +69,21 @@ jobs:
         run: bash scripts/verify-release.sh
 
       - name: Check formatting
+        id: format
         run: bun fmt --check
+
+      # A contributor without the pinned Bun applies this patch instead of
+      # reformatting by hand.
+      - name: Produce the formatting patch
+        if: failure() && steps.format.outcome == 'failure'
+        run: bun fmt && git diff --binary > bun-fmt.patch
+
+      - name: Upload the formatting patch
+        if: failure() && steps.format.outcome == 'failure'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bun-fmt-patch
+          path: bun-fmt.patch
 
       - name: Typecheck diagnostic parity
         run: bun run check:typecheck-parity --changed-since "$TOOLCHAIN_BASE"
