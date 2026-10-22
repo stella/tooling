@@ -286,6 +286,29 @@ export const UnsafeObjectAssignCyclicAliases = () => {
   Object.assign(first, unsafeDomProperties);
 };
 
+export const SafeObjectAssignConditionalSources = (
+  preconnect: (() => void) | undefined,
+) => {
+  Object.assign(
+    document.createElement("div"),
+    preconnect === undefined ? {} : { preconnect },
+  );
+  Object.assign(document.createElement("div"), preconnect && { preconnect });
+};
+
+export const UnsafeObjectAssignConditionalSources = (useHtml: boolean) => {
+  Object.assign(
+    document.createElement("div"),
+    // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- either branch of a conditional source is copied
+    useHtml ? { innerHTML: rawHtml } : {},
+  );
+  Object.assign(
+    document.createElement("div"),
+    // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- an opaque branch reaching a DOM target stays unproven
+    useHtml ? unsafeDomProperties : {},
+  );
+};
+
 export const UnsafeConservativeObjectAssignReassignedTarget = () => {
   let element: object = document.createElement("div");
   Object.assign(element, { textContent: "initial" });
