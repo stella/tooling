@@ -392,9 +392,7 @@ export const declarationHookParts = (
 ): { handler: unknown; filter?: DeclarationHookFilter } => {
   if (typeof value === "function") return { handler: value };
   if (!record(value)) throw new Error("Invalid reviewed declaration hook");
-  const parts = Object.fromEntries(
-    dataEntries(value, ["handler", "filter"]),
-  );
+  const parts = Object.fromEntries(dataEntries(value, ["handler", "filter"]));
   const filter = parts["filter"];
   if (filter === undefined) return { handler: parts["handler"] };
   if (!record(filter)) throw new Error("Invalid reviewed declaration hook");
