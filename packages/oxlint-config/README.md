@@ -686,7 +686,7 @@ including `engines`, are rejected. Real npm and pnpm pack tests compare the
 modeled contract with each tarball manifest.
 
 Build adapters use the installed configuration loaders and bind their behavior to
-tsdown 0.22.9, Vite 8.1.5, or @nuxt/module-builder 1.0.3 (unbuild 3.6.1 and
+tsdown 0.23.1, Vite 8.3.4, or @nuxt/module-builder 1.0.3 (unbuild 3.6.1 and
 mkdist 2.4.1). They record final transform targets, including separate Nuxt module
 and runtime entries. No syntax lowering records `esnext`.
 Only exact single build invocations (`tsdown`, `vite build`, or
@@ -715,8 +715,8 @@ export default {
 };
 ```
 
-This adapter requires consumer-installed `vite-plugin-dts` 5.0.3 and its
-`unplugin-dts` 1.0.3 implementation. Its dependency scope must provide TypeScript
+This adapter requires consumer-installed `vite-plugin-dts` 5.1.2 and its
+`unplugin-dts` 1.1.2 implementation. Its dependency scope must provide TypeScript
 6.0.3 as `typescript` or the plugin's `@typescript/typescript6` fallback.
 Unsupported versions fail explicitly.
 The resolver proves a direct helper import and call in a literal plugin array;
