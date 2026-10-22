@@ -8,11 +8,11 @@ import { fileURLToPath } from "node:url";
 
 import {
   library,
+  type LibraryOptions,
   libraryPlugins,
   libraryRules,
   reactCompilerRules,
   reactRules,
-  type LibraryOptions,
 } from "./index";
 
 describe("React Compiler rules", () => {

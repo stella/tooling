@@ -948,7 +948,7 @@ Workflows with no declared trust job retain their existing fork-CI policy.
 
 The comparison includes Bun declarations, Node selectors and support ranges,
 resolved TypeScript compiler versions (including workspace and compatibility
-aliases), oxlint, oxlint-tsgolint, oxfmt, and shared tooling pins. Lockfile
+aliases), oxlint, oxlint-tsgolint, and shared tooling pins. Lockfile
 resolutions determine installed package versions; manifest ranges alone do not.
 Resolution locations and importer bindings are retained: swapping compiler
 versions between workspaces cannot look unchanged. Compiler specifier changes

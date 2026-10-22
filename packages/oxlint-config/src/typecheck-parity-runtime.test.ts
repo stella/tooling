@@ -3,16 +3,16 @@
 import { expect, spyOn, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import {
-  mkdtemp,
-  mkdir,
-  readFile,
-  readdir,
-  rm,
-  writeFile,
   access,
   chmod,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
   realpath,
+  rm,
   symlink,
+  writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -21,9 +21,9 @@ import {
   bunCheckArgs,
   compareDiagnosticSets,
   compareRepository,
-  discoverConfigGroups,
-  diagnosticSet,
   diagnosticCodes,
+  diagnosticSet,
+  discoverConfigGroups,
   fixtureCompilerOptions,
   fixturePackageContext,
   fixtureParity,

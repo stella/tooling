@@ -3,12 +3,6 @@
   "compilerOptions": {
     "allowImportingTsExtensions": true
   },
-  "include": [
-    "src/**/*.ts",
-    "tsdown.config.ts"
-  ],
-  "exclude": [
-    "node_modules",
-    "dist"
-  ]
+  "include": ["src/**/*.ts", "tsdown.config.ts"],
+  "exclude": ["node_modules", "dist"]
 }

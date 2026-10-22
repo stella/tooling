@@ -4,8 +4,8 @@ import { expect, test } from "bun:test";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
   chmod,
-  mkdir,
   link,
+  mkdir,
   mkdtemp,
   readFile,
   rm,
@@ -20,8 +20,8 @@ import { fileURLToPath } from "node:url";
 import policyInput from "../toolchain.json";
 import { cloudSetupPath, generateCloudSetup } from "./cloud-setup";
 import {
-  cloudClaudeSettingsPath,
   cloudAttributionFix,
+  cloudClaudeSettingsPath,
   cloudSessionStartFix,
   hasCloudAttribution,
   hasCloudSessionStartHook,

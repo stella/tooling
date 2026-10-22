@@ -2,11 +2,11 @@
 import { expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import {
-  mkdtempSync,
-  writeFileSync,
   mkdirSync,
+  mkdtempSync,
   rmSync,
   symlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -14,9 +14,9 @@ import path from "node:path";
 import toolchain from "../toolchain.json";
 import { cloudSetupPath, generateCloudSetup } from "./cloud-setup";
 import {
-  cloudClaudeSettingsPath,
   cloudAttribution,
   cloudAttributionFix,
+  cloudClaudeSettingsPath,
   cloudSessionStartHook,
   mergeCloudClaudeSettings,
 } from "./cloud-setup-claude";
@@ -28,6 +28,7 @@ import {
   consumerRunnerVersion,
 } from "./toolchain-consumer-checks";
 import type { DependabotIgnoreDeclaration } from "./toolchain-dependabot";
+import { sharedFormatTables } from "./toolchain-formatter";
 import {
   checkToolchain,
   parseToolchainConfiguration,
@@ -41,7 +42,8 @@ const policy = parseToolchainPolicy(toolchain);
 const validBunQuarantine = `[install]
 minimumReleaseAge = ${REQUIRED_RELEASE_AGE_SECONDS}
 minimumReleaseAgeExcludes = []
-`;
+
+${sharedFormatTables(policy.formatter)}`;
 
 test("large tracked file lists preserve all paths and toolchain diagnostics", () => {
   const root = mkdtempSync(path.join(tmpdir(), "stll-large-file-list-"));

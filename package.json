@@ -11,7 +11,7 @@
     "build": "bun --filter @stll/oxlint-config build && bun --filter @stll/oxlint-plugin build && bun --filter @stll/time build && bun --filter @stll/test-kit build",
     "changeset": "changeset",
     "generate:dependabot": "bun packages/oxlint-config/src/dependabot-cli.ts --config stll-dependabot.json",
-    "changeset:version": "bun scripts/ensure-toolchain-release.ts && changeset version && bun scripts/check-lockfile-workspace-versions.ts --write && bun install --frozen-lockfile",
+    "changeset:version": "bun scripts/ensure-toolchain-release.ts && changeset version && bun scripts/check-lockfile-workspace-versions.ts --write && bun fmt && bun install --frozen-lockfile",
     "check:lockfile-versions": "bun scripts/check-lockfile-workspace-versions.ts",
     "check:registry-versions": "bun scripts/check-registry-versions.ts",
     "typecheck": "bun check -p packages/oxlint-config && bun check -p packages/oxlint-plugin && bun check -p packages/time && bun check -p packages/test-kit",
@@ -19,7 +19,6 @@
     "test:rust-lints": "cargo test --manifest-path rust-lints/stella_source_lint/Cargo.toml --locked",
     "lint": "bun run build && bun --bun oxlint -c oxlint.config.ts --report-unused-disable-directives-severity=error --deny-warnings --type-aware .",
     "lint:fix": "bun --bun oxlint -c oxlint.config.ts --type-aware --fix .",
-    "format": "oxfmt . \"!.ai/**\" \"!.agents/**\" \"!.claude/**\" \"!AGENTS.md\" \"!GEMINI.md\"",
     "publint": "publint --pack npm packages/typescript-config && publint --pack npm packages/oxlint-config && publint --pack npm packages/oxlint-plugin && publint --pack npm packages/time && publint --pack npm packages/test-kit",
     "pack:dry-run": "bun run build && (cd packages/typescript-config && npm pack --dry-run) && (cd packages/oxlint-config && npm pack --dry-run) && (cd packages/oxlint-plugin && npm pack --dry-run) && (cd packages/time && npm pack --dry-run) && (cd packages/test-kit && npm pack --dry-run)",
     "prepack": "bun run build && bun run typecheck",
@@ -34,8 +33,7 @@
     "@changesets/cli": "3.0.3",
     "@stll/oxlint-config": "workspace:*",
     "@stll/oxlint-plugin": "workspace:*",
-    "bun-types": "1.4.3",
-    "oxfmt": "0.72.0",
+    "bun-types": "1.4.4",
     "oxlint": "1.87.0",
     "oxlint-tsgolint": "7.0.2003",
     "pnpm": "12.9.1",
@@ -46,5 +44,5 @@
   "overrides": {
     "js-yaml": "3.15.1"
   },
-  "packageManager": "bun@1.4.3"
+  "packageManager": "bun@1.4.4"
 }

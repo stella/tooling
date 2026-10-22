@@ -6,10 +6,10 @@ import {
   getCloudSetupPackage,
 } from "./cloud-setup-artifacts";
 import {
+  type CloudExtraTool,
   cloudExtraTools,
   isCloudPackageTool,
   parseCloudRustNames,
-  type CloudExtraTool,
 } from "./cloud-setup-schema";
 import type { parseCloudSetup } from "./cloud-setup-schema";
 import type { RustException } from "./toolchain-rust";

@@ -6,10 +6,10 @@ import { parseDocument, stringify } from "yaml";
 import {
   checkDependabot,
   declaredIgnoreConflicts,
+  type DependabotIgnoreDeclaration,
   dependabotIgnoreUpdateTypes,
   generateDependabotConfig,
   parseDependabotIgnores,
-  type DependabotIgnoreDeclaration,
 } from "./toolchain-dependabot";
 import { ownedDockerImageAliases } from "./toolchain-images";
 

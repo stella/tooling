@@ -58,7 +58,9 @@ const member = (
     [object, property],
   );
 
-const literal = (value: string | null): ESTree.StringLiteral | ESTree.NullLiteral =>
+const literal = (
+  value: string | null,
+): ESTree.StringLiteral | ESTree.NullLiteral =>
   value === null
     ? {
         ...nodeSpan(0, 1),
@@ -409,9 +411,7 @@ test("apply forwards static arrays and fails closed for opaque HTML arguments", 
     runCallVisitor(
       applyInsert(
         array({
-          elements: [
-            spread({ argument: identifier("arguments") }),
-          ],
+          elements: [spread({ argument: identifier("arguments") })],
         }),
       ),
     ),
@@ -424,18 +424,10 @@ test("apply forwards static arrays and fails closed for opaque HTML arguments", 
       argumentsValue,
     ]);
   expect(
-    runCallVisitor(
-      applyWrite(
-        array({ elements: [identifier("rawHtml")] }),
-      ),
-    ),
+    runCallVisitor(applyWrite(array({ elements: [identifier("rawHtml")] }))),
   ).toHaveLength(1);
   expect(
-    runCallVisitor(
-      applyWrite(
-        array({ elements: [literal("<p>Static</p>")] }),
-      ),
-    ),
+    runCallVisitor(applyWrite(array({ elements: [literal("<p>Static</p>")] }))),
   ).toHaveLength(0);
   expect(
     runCallVisitor(applyWrite(identifier("unknownArguments"))),
@@ -468,9 +460,7 @@ test("Object.assign checks opaque sources only for known DOM targets", () => {
       assign(
         createElement,
         objectLiteral({
-          properties: [
-            spread({ argument: identifier("payload") }),
-          ],
+          properties: [spread({ argument: identifier("payload") })],
         }),
       ),
     ),

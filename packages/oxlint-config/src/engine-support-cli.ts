@@ -57,17 +57,20 @@ const basePackage = (root: string, base: string, pkg: Package) => {
     .split(path.sep)
     .join(path.posix.sep);
   if (
-    git(root, ["ls-tree", "--name-only", base, "--", relativeManifest]).trim() ===
-    ""
+    git(root, [
+      "ls-tree",
+      "--name-only",
+      base,
+      "--",
+      relativeManifest,
+    ]).trim() === ""
   )
     return undefined;
   const packageJson = JSON.parse(
     git(root, ["show", `${base}:${relativeManifest}`]),
   );
   if (typeof packageJson !== "object" || packageJson === null)
-    throw new Error(
-      `Invalid package manifest at ${base}:${relativeManifest}`,
-    );
+    throw new Error(`Invalid package manifest at ${base}:${relativeManifest}`);
   return { ...pkg, packageJson };
 };
 

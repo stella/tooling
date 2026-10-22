@@ -3,8 +3,8 @@
 import { expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import {
-  mkdtemp,
   mkdir,
+  mkdtemp,
   readFile,
   rm,
   symlink,

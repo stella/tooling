@@ -4,9 +4,9 @@ import tls from "node:tls";
 
 import { setProcessEnvironment } from "./environment-support.ts";
 import {
-  NetworkAccessError,
   installNetworkGuard,
   isLoopbackHost,
+  NetworkAccessError,
 } from "./network.ts";
 import { rejectionOf } from "./rejection-support.ts";
 

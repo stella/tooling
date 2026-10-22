@@ -3,18 +3,18 @@
 import { expect, test } from "bun:test";
 import {
   existsSync,
-  statSync,
-  readFileSync,
-  mkdtempSync,
   mkdirSync,
+  mkdtempSync,
+  readFileSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { cloudServices, type CloudService } from "./cloud-setup-schema";
+import { type CloudService, cloudServices } from "./cloud-setup-schema";
 import { renderCloudServiceStart } from "./cloud-setup-services";
 
 const policy = { postgres: "18", valkey: "9.1.1" };
@@ -83,7 +83,7 @@ test("PostgreSQL uses authenticated private state and checks endpoint identity",
     "cloud_test",
     "POSTGRES_HOST='127.0.0.1:55432'",
     "POSTGRES_USER='stll_cloud'",
-    "POSTGRES_PASSWORD=\"$pg_password\"",
+    'POSTGRES_PASSWORD="$pg_password"',
     "POSTGRES_DB_NAME='cloud_test'",
     "POSTGRES_ADDITIONAL_CONNECTION_DATA=''",
     'DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST/$POSTGRES_DB_NAME$POSTGRES_ADDITIONAL_CONNECTION_DATA"',

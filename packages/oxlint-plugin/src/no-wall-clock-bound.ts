@@ -4,9 +4,9 @@ import {
   createBindingResolver,
   identifierName,
   isNode,
+  type Node,
   propertyName,
   testOnlyPlugin,
-  type Node,
 } from "./test-rule-utils";
 
 const timerModules = new Set([

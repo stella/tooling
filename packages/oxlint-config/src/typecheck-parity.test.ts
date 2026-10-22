@@ -3,8 +3,8 @@
 import { expect, test } from "bun:test";
 import {
   chmod,
-  mkdtemp,
   mkdir,
+  mkdtemp,
   realpath,
   rm,
   writeFile,
@@ -13,22 +13,22 @@ import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 
 import {
-  assertUnshadowedCheck,
   assertBunVersion,
+  assertUnshadowedCheck,
   compareDiagnosticSets,
   diagnosticCodes,
+  diagnosticExitStatus,
+  diagnosticParity,
   diagnosticSet,
-  fixtureParity as compareFixtureParity,
   fixtureCompilerOptions,
   fixtureInputs,
+  fixtureParity as compareFixtureParity,
   fixtureRunPassed,
-  groupCompilerConfigs,
-  diagnosticParity,
   fixtures,
+  groupCompilerConfigs,
+  repositoryDiagnosticComparison,
   resolveCompiler,
   sourceDiagnosticSet,
-  repositoryDiagnosticComparison,
-  diagnosticExitStatus,
 } from "./typecheck-parity";
 
 const repo = resolve("/consumer-repo");

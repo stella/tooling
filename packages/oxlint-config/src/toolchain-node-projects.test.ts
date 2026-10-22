@@ -682,7 +682,8 @@ test("workspace lint tasks read pnpm-workspace.yaml membership and exclusions", 
       }),
     });
     const files = {
-      "pnpm-workspace.yaml": "packages:\n  - 'packages/*'\n  - '!packages/skipped'\n",
+      "pnpm-workspace.yaml":
+        "packages:\n  - 'packages/*'\n  - '!packages/skipped'\n",
       ...member("a"),
       ...member("skipped"),
     };
@@ -836,7 +837,10 @@ test("filtered Bun build preparation cannot hide selected workspace lifecycle ho
         trackedFiles,
       }).map(({ path: file, message }) => [file, message]),
     ).toEqual([
-      ["package.json", "root lint scripts contain no supported oxlint invocation"],
+      [
+        "package.json",
+        "root lint scripts contain no supported oxlint invocation",
+      ],
     ]);
     writeFileSync(
       path.join(root, "packages/a/orphan.mjs"),

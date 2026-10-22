@@ -187,7 +187,11 @@ network_run github.com 120 fixture-command
 }, 15_000);
 
 test("APT refreshes indexes unless the install downloads nothing", () => {
-  const stub = (uris: string, status: number, network = "printf 'refresh:%s\\n' \"$*\"") => `
+  const stub = (
+    uris: string,
+    status: number,
+    network = "printf 'refresh:%s\\n' \"$*\"",
+  ) => `
 apt-get() {
   [[ "$1" == --print-uris && "$2" == -qq && "$3" == -y ]] || exit 91
   printf '%b' '${uris}'
@@ -203,7 +207,10 @@ echo after
   // Cached indexes resolve, but the install would download: a stale index
   // could name a file the mirror no longer serves, so refresh first.
   const downloads = run(
-    stub("http://archive.ubuntu.com/ubuntu/pool/main/c/curl/curl.deb curl.deb 1 SHA256:00\\n", 0),
+    stub(
+      "http://archive.ubuntu.com/ubuntu/pool/main/c/curl/curl.deb curl.deb 1 SHA256:00\\n",
+      0,
+    ),
   );
   expect(downloads.exitCode).toBe(0);
   expect(downloads.stdout.toString()).toBe("refresh:update\nafter\n");

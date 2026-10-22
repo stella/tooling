@@ -19,13 +19,13 @@ import {
   cloudSetupPackages,
 } from "./cloud-setup-artifacts";
 import {
+  type CloudArtifactTool,
   cloudArtifactTools,
   cloudExtraTools,
   cloudInstallCommand,
   cloudPackageTools,
   cloudRustComponentBinaries,
   parseCloudSetup,
-  type CloudArtifactTool,
 } from "./cloud-setup-schema";
 import { resolveCloudToolchains } from "./cloud-setup-toolchains";
 import { renderCloudToolInstall } from "./cloud-setup-tools-install";

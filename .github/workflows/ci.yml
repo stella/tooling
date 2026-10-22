@@ -68,6 +68,9 @@ jobs:
       - name: Verify release from clean build outputs
         run: bash scripts/verify-release.sh
 
+      - name: Check formatting
+        run: bun fmt --check
+
       - name: Typecheck diagnostic parity
         run: bun run check:typecheck-parity --changed-since "$TOOLCHAIN_BASE"
 
@@ -146,7 +149,8 @@ jobs:
 
   ci-result:
     if: always()
-    needs: [changeset, build-checks, engine-floor, rust-lints, hawk-compatibility]
+    needs:
+      [changeset, build-checks, engine-floor, rust-lints, hawk-compatibility]
     runs-on: ubuntu-24.04
     steps:
       - name: Require every validation job to succeed

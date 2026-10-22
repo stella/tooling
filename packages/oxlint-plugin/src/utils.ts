@@ -172,7 +172,8 @@ export const EXPRESSION_WRAPPER_TYPES = [
 export const unwrapExpression = (node: unknown): AstNode | null => {
   while (isAstNode(node)) {
     const { type } = node;
-    if (!EXPRESSION_WRAPPER_TYPES.some((wrapper) => wrapper === type)) return node;
+    if (!EXPRESSION_WRAPPER_TYPES.some((wrapper) => wrapper === type))
+      return node;
     node = node.expression;
   }
   return null;

@@ -1,10 +1,10 @@
 import { describe, expect, spyOn, test } from "bun:test";
 
 import {
-  MAX_TIMER_MS,
-  TEST_CLOCK_START,
   createTestClock,
+  MAX_TIMER_MS,
   systemClock,
+  TEST_CLOCK_START,
 } from "./clock.ts";
 import { rejectionOf } from "./rejection-support.ts";
 

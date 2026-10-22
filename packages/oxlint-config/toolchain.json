@@ -1,11 +1,60 @@
 {
   "schemaVersion": 1,
-  "bun": "1.4.3",
+  "bun": "1.4.4",
   "typescript": "7.0.2",
   "oxlint": "1.87.0",
   "@oxlint/plugins": "1.87.0",
-  "oxfmt": "0.72.0",
   "oxlint-tsgolint": "7.0.2003",
+  "formatter": {
+    "command": "bun fmt",
+    "ignorePatterns": [
+      ".ai/shared/**",
+      ".agents/skills/**",
+      ".claude/skills/**",
+      "**/AGENTS.md",
+      "**/GEMINI.md",
+      "**/CLAUDE.md",
+      ".github/dependabot.yml",
+      "**/fixtures/**",
+      "**/__fixtures__/**",
+      "**/testdata/**",
+      "**/__snapshots__/**"
+    ],
+    "style": {
+      "printWidth": 80,
+      "sortImports": {
+        "customGroups": [
+          {
+            "groupName": "react",
+            "elementNamePattern": ["react", "react-dom", "react-dom/**"]
+          },
+          {
+            "groupName": "stella",
+            "elementNamePattern": ["@stll/**"]
+          },
+          {
+            "groupName": "aliases",
+            "elementNamePattern": ["@/**"]
+          }
+        ],
+        "groups": [
+          "react",
+          ["builtin", "external", "type-builtin", "type-external"],
+          "stella",
+          "aliases",
+          [
+            "parent",
+            "sibling",
+            "index",
+            "type-parent",
+            "type-sibling",
+            "type-index"
+          ]
+        ],
+        "newlinesBetween": true
+      }
+    }
+  },
   "typescriptInstallLayouts": [
     {
       "type": "direct",
@@ -25,9 +74,7 @@
   "typescript6Compatibility": {
     "version": "6.0.3",
     "packageAlias": "typescript-compat",
-    "apiConsumers": [
-      "TypeScript compiler API"
-    ],
+    "apiConsumers": ["TypeScript compiler API"],
     "peerBlockers": [
       "@astrojs/check",
       "@typescript-eslint/utils",
@@ -121,13 +168,8 @@
     },
     "groups": {
       "dependencies": {
-        "patterns": [
-          "*"
-        ],
-        "updateTypes": [
-          "minor",
-          "patch"
-        ]
+        "patterns": ["*"],
+        "updateTypes": ["minor", "patch"]
       }
     }
   },

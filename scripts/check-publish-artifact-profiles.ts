@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import {
-  mkdtempSync,
   mkdirSync,
+  mkdtempSync,
   rmSync,
   symlinkSync,
   writeFileSync,

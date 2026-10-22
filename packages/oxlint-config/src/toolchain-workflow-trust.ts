@@ -1,7 +1,7 @@
 import {
   decodeShellWord,
-  shellTokens,
   shellCommandSegments,
+  shellTokens,
 } from "./toolchain-packages";
 
 const record = (value: unknown): value is Record<string, unknown> =>
