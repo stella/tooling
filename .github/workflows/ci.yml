@@ -65,11 +65,11 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Check formatting
-        run: bun fmt --check
-
       - name: Verify release from clean build outputs
         run: bash scripts/verify-release.sh
+
+      - name: Check formatting
+        run: bun fmt --check
 
       - name: Typecheck diagnostic parity
         run: bun run check:typecheck-parity --changed-since "$TOOLCHAIN_BASE"
