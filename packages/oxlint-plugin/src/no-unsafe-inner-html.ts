@@ -435,7 +435,11 @@ export default eslintCompatPlugin({
                 definition.node.type === "FunctionDeclaration") &&
               !variable.references.some((reference) => reference.isWrite())
             ) {
-              return { kind: "expression", node: definition.node, scope };
+              return {
+                kind: "expression",
+                node: unwrapExpression(definition.node),
+                scope,
+              };
             }
             if (
               variable.defs.length !== 1 ||
