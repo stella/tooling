@@ -674,7 +674,7 @@ Bun runtime/compiler requirements are rejected. JSON and declaration-only packag
 record `{"type":"types-only"}` explicitly.
 
 Build adapters use the installed configuration loaders and bind their behavior to
-tsdown 0.22.9, Vite 8.1.5, or @nuxt/module-builder 1.0.3 (unbuild 3.6.1 and
+tsdown 0.23.1, Vite 8.3.4, or @nuxt/module-builder 1.0.3 (unbuild 3.6.1 and
 mkdist 2.4.1). They record final transform targets, including separate Nuxt module
 and runtime entries. No syntax lowering records `esnext`.
 Only exact single build invocations (`tsdown`, `vite build`, or
