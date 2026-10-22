@@ -1,4 +1,6 @@
 {
   "extends": "../../typescript-config/bun.json",
-  "include": ["**/*"]
+  "include": [
+    "**/*"
+  ]
 }

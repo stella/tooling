@@ -27,9 +27,9 @@ declare const opaqueOptions: {
 declare const opaqueArguments: unknown[];
 
 // The inline route options retain their position through a literal spread.
-export const Route = createFileRoute("/__fixture/no-loader")(
-  ...[{ component: NoLoaderComponent }],
-);
+export const Route = createFileRoute("/__fixture/no-loader")(...[
+  { component: NoLoaderComponent },
+]);
 
 function NoLoaderComponent() {
   // Factory-call argument, no loader — MUST flag.

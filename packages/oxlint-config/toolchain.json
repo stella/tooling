@@ -14,7 +14,11 @@
       "**/AGENTS.md",
       "**/GEMINI.md",
       "**/CLAUDE.md",
-      ".github/dependabot.yml"
+      ".github/dependabot.yml",
+      "**/fixtures/**",
+      "**/__fixtures__/**",
+      "**/testdata/**",
+      "**/__snapshots__/**"
     ],
     "style": {
       "printWidth": 80,

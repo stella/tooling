@@ -7,8 +7,8 @@
 
 import * as ReactQuery from "@tanstack/react-query";
 import {
-  useQuery as readQuery,
   useQuery,
+  useQuery as readQuery,
   useQueryClient,
 } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
