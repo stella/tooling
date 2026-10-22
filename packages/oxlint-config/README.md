@@ -75,10 +75,12 @@ Shared-pin Dependabot ignores must contain only `dependency-name` and
 `version-update:semver-minor`, and `version-update:semver-patch`. This ignores
 version updates while preserving security update pull requests.
 
-Set `packageManager` to `bun@` followed by the policy's `bun` value, and pin
-`bun-types` to that same value. Dependency pins can live in default or named
-catalogs, including Bun's `workspaces` catalogs. Bun image tags, version
-files, and mise/asdf entries also inherit the policy pin.
+The policy's `bun` value is the minimum Bun. Set `packageManager` to `bun@`
+followed by one exact release at or above it, and pin `bun-types` to that same
+release. Dependency pins can live in default or named catalogs, including
+Bun's `workspaces` catalogs. Bun image tags, version files, and mise/asdf
+entries also inherit the repository's pin, so a repository can take a newer
+Bun without a policy release.
 
 Configure `oven-sh/setup-bun` with a tracked manifest as its version source:
 

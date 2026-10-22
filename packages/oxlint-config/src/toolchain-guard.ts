@@ -20,6 +20,7 @@ import {
 import { parseCloudSetup } from "./cloud-setup-schema";
 import { readGitTrackedOutput } from "./git-tracked-output";
 import { checkRepositoryQuarantine } from "./quarantine-policy";
+import { repositoryBun } from "./toolchain-bun";
 import {
   checkConsumerChecks,
   parseConsumerChecks,
@@ -247,7 +248,7 @@ type CheckSharedToolchainOptions = {
 
 export const checkToolchain = ({
   root,
-  policy,
+  policy: sharedPolicy,
   onDelegated,
   onWarning,
   now,
@@ -255,6 +256,12 @@ export const checkToolchain = ({
   const { files, trackedFiles, diagnostics } = readToolchainInputs(root, {
     bunLock: "content",
   });
+  // Every Bun reference follows the repository's own pin, which must be at
+  // or above the shared minimum.
+  const policy = {
+    ...sharedPolicy,
+    bun: repositoryBun(sharedPolicy.bun, files["package.json"]),
+  };
   let repository: string | undefined;
   try {
     const origin = execFileSync("git", ["remote", "get-url", "origin"], {
