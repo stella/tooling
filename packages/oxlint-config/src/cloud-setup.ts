@@ -405,7 +405,7 @@ in_package && /^[[:space:]]*version[[:space:]]*=/ {
 }
 END {
   validate_package()
-  exit !(count == 1 && !mismatch)
+  exit !(count >= 1 && !mismatch)
 }`}' 'Cargo.lock' || fail 'Cargo.lock wasm-bindgen version changed; regenerate cloud-setup.sh'`;
 
 // Offline and time-bounded: stdin is closed so a prompt cannot hold the
