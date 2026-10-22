@@ -20,9 +20,9 @@ import {
   githubAutomationFileKind,
   isDependabotGithubActionsPath,
   isDockerDefinitionPath,
-  pythonDependencyManifestKind,
   isPythonDependencyManifest,
   javascriptDependencyLockfiles,
+  pythonDependencyManifestKind,
   toolchainInputKind,
 } from "./toolchain-inputs";
 import { parseToolchainPolicy } from "./toolchain-schema";

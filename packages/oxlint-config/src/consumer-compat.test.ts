@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
-  mkdtemp,
   mkdir,
-  readFile,
+  mkdtemp,
   readdir,
+  readFile,
   realpath,
   rm,
   writeFile,
@@ -18,35 +18,35 @@ import { parse, stringify } from "yaml";
 
 import policy from "../toolchain.json";
 import {
-  consumerCommandEnvironment,
-  assertConsumerPackedNodeSupport,
-  resolveInstalledManagerBin,
-  consumerReservedToolBins,
   assertConsumerFixtureFiles,
+  assertConsumerInstalledToolBins,
+  assertConsumerPackedNodeSupport,
+  consumerCommandEnvironment,
   consumerFixtureCommands,
-  verifyConsumerNodeArchive,
-  writeConsumerToolWrappers,
+  consumerReservedToolBins,
+  resolveInstalledManagerBin,
   runConsumerCompat,
   stageConsumerWorkspace,
-  assertConsumerInstalledToolBins,
+  verifyConsumerNodeArchive,
+  writeConsumerToolWrappers,
 } from "./consumer-compat";
 import { parseConsumerCompatArguments } from "./consumer-compat-arguments";
 import {
-  consumerRecord,
-  consumerPackageClosure,
-  consumerPublishedDependencyFields,
-  consumerBundledDependencyFields,
+  assertConsumerFixtureKind,
+  assertConsumerFixtureSelection,
   assertConsumerPublishableManifest,
-  consumerStagingPaths,
-  consumerPackRootManifest,
   bindConsumerManifest,
+  consumerBundledDependencyFields,
+  type ConsumerFixture,
+  consumerPackageClosure,
+  consumerPackRootManifest,
+  consumerPublishedDependencyFields,
+  consumerRecord,
+  consumerStagingPaths,
   discoverConsumerManifests,
   discoverConsumerPackages,
   oldestPublishedConsumerVersion,
   parseConsumerFixtures,
-  type ConsumerFixture,
-  assertConsumerFixtureKind,
-  assertConsumerFixtureSelection,
 } from "./consumer-compat-config";
 
 describe("consumer compatibility declarations", () => {

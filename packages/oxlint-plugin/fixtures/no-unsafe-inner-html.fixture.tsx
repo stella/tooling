@@ -181,7 +181,7 @@ export const UnsafeStaticTemplateSrcdocAttribute = () => {
 export const UnsafeWrappedStaticSrcdocAttribute = () => {
   const frame = document.createElement("iframe");
   // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html -- TypeScript wrapper preserves the static srcdoc name
-  frame.setAttribute(("srcdoc" as const), rawHtml);
+  frame.setAttribute("srcdoc" as const, rawHtml);
   return frame;
 };
 
@@ -406,7 +406,9 @@ export const UnsafeObjectAssignLiteralSpreadTailAfterOpaqueSource = () => {
 
 export const SafeObjectAssignStaticHtmlSpread = () => {
   // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
-  Object.assign(...[document.createElement("div"), { innerHTML: "<p>safe</p>" }]);
+  Object.assign(
+    ...[document.createElement("div"), { innerHTML: "<p>safe</p>" }],
+  );
 };
 
 declare const opaqueObjectAssignArguments: [object, ...object[]];
@@ -537,18 +539,21 @@ export const UnsafeSecondSinkOnWaivedLine = (frame: HTMLIFrameElement) => {
 
 export const SafeThenUnsafeSameLine = (element: HTMLElement) => {
   // safe-html: fixture waiver is consumed by the first, statically safe assignment
-  element.innerHTML = ""; element.outerHTML = rawHtml; // oxlint-disable-line no-unsafe-inner-html/no-unsafe-inner-html -- the safe first sink cannot transfer its waiver
+  element.innerHTML = "";
+  element.outerHTML = rawHtml; // oxlint-disable-line no-unsafe-inner-html/no-unsafe-inner-html -- the safe first sink cannot transfer its waiver
 };
 
 export const UnsafeThenSafeSameLine = (element: HTMLElement) => {
   // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
   // safe-html: fixture waiver applies to the first assignment only
-  element.innerHTML = rawHtml; element.outerHTML = "";
+  element.innerHTML = rawHtml;
+  element.outerHTML = "";
 };
 
 export const TwoUnsafeSameLine = (element: HTMLElement) => {
   // safe-html: fixture waiver applies to the first assignment only
-  element.innerHTML = rawHtml; element.outerHTML = rawHtml; // oxlint-disable-line no-unsafe-inner-html/no-unsafe-inner-html -- second same-line sink is intentionally raw
+  element.innerHTML = rawHtml;
+  element.outerHTML = rawHtml; // oxlint-disable-line no-unsafe-inner-html/no-unsafe-inner-html -- second same-line sink is intentionally raw
 };
 
 // --- Cases the rule MUST NOT flag ---
@@ -624,7 +629,9 @@ export const SafeObjectAssignComputedTemplate = () =>
 // The equivalence corpus derives the static bracket spelling from this case.
 export const SafeSanitizerResultAccess = () => (
   // expect-clean: no-unsafe-inner-html/no-unsafe-inner-html
-  <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(rawHtml).value }} />
+  <div
+    dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(rawHtml).value }}
+  />
 );
 
 export const SafeApplyStaticDocumentWrite = () =>
@@ -654,9 +661,7 @@ fs.write(fd, rawHtml, () => {});
   Bun.write(rawHtml);
 }
 
-export const UnsafeShadowedProcess = (
-  process: { stdout: Document },
-): void => {
+export const UnsafeShadowedProcess = (process: { stdout: Document }): void => {
   // oxlint-disable-next-line no-unsafe-inner-html/no-unsafe-inner-html
   process.stdout.write(rawHtml);
 };

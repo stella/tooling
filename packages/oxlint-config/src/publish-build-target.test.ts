@@ -2,8 +2,8 @@ import { expect, test } from "bun:test";
 import assert from "node:assert/strict";
 import {
   existsSync,
-  mkdtempSync,
   mkdirSync,
+  mkdtempSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -13,12 +13,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import {
-  assetOnlyTarget,
   assertTsdownBuildExtensions,
+  assetOnlyTarget,
+  publishBuildLifecycleScripts,
   resolvedTsdownTarget,
   resolvePublishBuildTarget,
   supportedPublishBuildCommand,
-  publishBuildLifecycleScripts,
 } from "./publish-build-target";
 import {
   checkPublishContract,

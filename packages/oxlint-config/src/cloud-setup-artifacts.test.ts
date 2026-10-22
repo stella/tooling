@@ -7,15 +7,15 @@ import policyInput from "../toolchain.json";
 import { generateCloudSetup } from "./cloud-setup";
 import {
   cloudSetupArtifacts,
+  type CloudSetupArtifactTool,
   cloudSetupArtifactVersions,
   cloudSetupPackages,
   getCloudSetupArtifact,
   getCloudSetupPackage,
-  type CloudSetupArtifactTool,
 } from "./cloud-setup-artifacts";
 import {
-  cloudInstallCommand,
   cloudExtraTools,
+  cloudInstallCommand,
   isCloudPackageTool,
   parseCloudSetup,
 } from "./cloud-setup-schema";

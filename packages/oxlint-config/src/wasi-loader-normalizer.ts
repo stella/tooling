@@ -168,7 +168,8 @@ const LOADER_KINDS_BY_SUFFIX = {
   ".wasi.cjs": "commonjs",
 } as const;
 
-type LoaderKind = (typeof LOADER_KINDS_BY_SUFFIX)[keyof typeof LOADER_KINDS_BY_SUFFIX];
+type LoaderKind =
+  (typeof LOADER_KINDS_BY_SUFFIX)[keyof typeof LOADER_KINDS_BY_SUFFIX];
 
 const BOTH_LOADERS = { browser: 1, commonjs: 1 } as const;
 const BROWSER_LOADER = { browser: 1, commonjs: 0 } as const;

@@ -58,10 +58,7 @@ const repository: Record<string, string> = {
   "lefthook.yml": lefthook,
 };
 
-const check = (
-  files: Record<string, string | undefined>,
-  usesBun = true,
-) =>
+const check = (files: Record<string, string | undefined>, usesBun = true) =>
   checkFormatter({
     files: Object.fromEntries(
       Object.entries({ ...repository, ...files }).filter(
@@ -166,9 +163,9 @@ test("commands that run another formatter fail in scripts, workflows, hooks, ima
     ).toEqual([
       "scripts/format.sh: command runs another formatter; use bun fmt",
     ]);
-    expect(
-      check({ Dockerfile: `FROM scratch\nRUN ${command}\n` }),
-    ).toEqual(["Dockerfile: command runs another formatter; use bun fmt"]);
+    expect(check({ Dockerfile: `FROM scratch\nRUN ${command}\n` })).toEqual([
+      "Dockerfile: command runs another formatter; use bun fmt",
+    ]);
   }
   // Mentioning a formatter is not running it.
   expect(
@@ -176,7 +173,9 @@ test("commands that run another formatter fail in scripts, workflows, hooks, ima
       "package.json": manifest({ scripts: { docs: "echo prettier-free" } }),
     }),
   ).toEqual([]);
-  expect(check({ "package.json": manifest({ scripts: { lint: "biome lint ." } }) })).toEqual([]);
+  expect(
+    check({ "package.json": manifest({ scripts: { lint: "biome lint ." } }) }),
+  ).toEqual([]);
 });
 
 test("a package script named fmt would shadow bun fmt", () => {
@@ -184,7 +183,9 @@ test("a package script named fmt would shadow bun fmt", () => {
     check({
       "packages/a/package.json": manifest({ scripts: { fmt: "bun fmt" } }),
     }),
-  ).toEqual(["packages/a/package.json: a package script named fmt shadows bun fmt; remove it"]);
+  ).toEqual([
+    "packages/a/package.json: a package script named fmt shadows bun fmt; remove it",
+  ]);
 });
 
 test("changesets must not run a formatter", () => {

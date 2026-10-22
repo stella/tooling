@@ -8,9 +8,9 @@ import { pathToFileURL } from "node:url";
 import { resolveNuxtPublishTarget } from "./publish-build-target-nuxt";
 import { resolveVitePublishTarget } from "./publish-build-target-vite";
 import {
-  resolveManifestContract,
   type PublishPacker,
   type PublishTarget,
+  resolveManifestContract,
 } from "./publish-contract";
 
 const supportedTsdownVersion = "0.22.9";

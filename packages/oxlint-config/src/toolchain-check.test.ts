@@ -2,7 +2,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -43,7 +43,9 @@ describe("consumer toolchain guard CLI", () => {
       expect(missingQuarantine.stderr).toContain("stll-quarantine --sync");
       writeFileSync(
         path.join(root, "bunfig.toml"),
-        synchronizeRepositoryQuarantine({ files: { "package.json": manifest } }),
+        synchronizeRepositoryQuarantine({
+          files: { "package.json": manifest },
+        }),
       );
       execFileSync("git", ["add", "bunfig.toml"], { cwd: root });
       const passing = run([]);

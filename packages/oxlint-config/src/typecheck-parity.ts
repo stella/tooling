@@ -1,16 +1,16 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import {
-  mkdtemp,
   mkdir,
+  mkdtemp,
   readFile,
   rm,
-  writeFile,
   symlink,
+  writeFile,
 } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { resolve, join, relative, dirname, basename } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { stripVTControlCharacters } from "node:util";
 

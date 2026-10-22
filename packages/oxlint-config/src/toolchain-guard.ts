@@ -3,8 +3,8 @@ import {
   closeSync,
   lstatSync,
   openSync,
-  readSync,
   readFileSync,
+  readSync,
   realpathSync,
 } from "node:fs";
 import path from "node:path";
@@ -31,13 +31,13 @@ import {
   parseDependabotIgnores,
 } from "./toolchain-dependabot";
 import {
-  parseDynamicSelectors,
   type DynamicSelector,
+  parseDynamicSelectors,
 } from "./toolchain-dynamic-selectors";
 import {
   parseEngineFloors,
-  resolveEngineFloor,
   type ResolvedEngineFloor,
+  resolveEngineFloor,
 } from "./toolchain-engine-floors";
 import { checkFormatter, formatterRule } from "./toolchain-formatter";
 import { toolchainInputKind } from "./toolchain-inputs";
@@ -45,8 +45,8 @@ import { checkNodeProjects, nodeProjectRule } from "./toolchain-node-projects";
 import { checkPackageFiles, packageRules } from "./toolchain-packages";
 import {
   checkRuntimeFile,
-  runtimeRules,
   type RuntimeDelegation,
+  runtimeRules,
 } from "./toolchain-runtime";
 import { parseRustExceptions } from "./toolchain-rust";
 import { parseToolchainPolicy } from "./toolchain-schema";

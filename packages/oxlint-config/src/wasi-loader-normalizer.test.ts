@@ -6,9 +6,9 @@ import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  WASI_LOADER_TRANSFORMATIONS,
   normalizeGeneratedLoader,
   runWasiLoaderNormalizer,
+  WASI_LOADER_TRANSFORMATIONS,
 } from "./wasi-loader-normalizer";
 
 const fixtures = fileURLToPath(
@@ -140,10 +140,7 @@ test("CLI rejects a loader without a supported file-name suffix", async () => {
   const commonjsPath = join(root, loaderNames[1]);
   try {
     await Promise.all([
-      writeFile(
-        path,
-        await readFile(join(fixtures, loaderNames[0]), "utf8"),
-      ),
+      writeFile(path, await readFile(join(fixtures, loaderNames[0]), "utf8")),
       writeFile(
         commonjsPath,
         await readFile(join(fixtures, loaderNames[1]), "utf8"),

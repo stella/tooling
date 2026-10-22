@@ -4,8 +4,8 @@ import { expect, test } from "bun:test";
 import {
   chmodSync,
   existsSync,
-  mkdtempSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   rmSync,
   statSync,
@@ -86,9 +86,9 @@ test("wasm-bindgen validation derives only the locked crate version", () => {
     });
 
   expect(run(wasmLock([wasmBindgenVersion])).exitCode).toBe(0);
-  expect(
-    run(wasmLock([wasmBindgenVersion, wasmBindgenVersion])).exitCode,
-  ).toBe(0);
+  expect(run(wasmLock([wasmBindgenVersion, wasmBindgenVersion])).exitCode).toBe(
+    0,
+  );
   expect(
     run(
       `${wasmLock([wasmBindgenVersion])}\n[[patch.unused]]\nname = "wasm-bindgen"\nversion = "0.1.0"\n`,

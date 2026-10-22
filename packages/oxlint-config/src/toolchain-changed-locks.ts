@@ -25,8 +25,7 @@ export const changedPackageTool = (
   name: string,
 ): ToolchainChangedTool | undefined => {
   if (isCompilerPackage(name)) return "typescript";
-  if (name === "oxlint" || name === "oxlint-tsgolint")
-    return name;
+  if (name === "oxlint" || name === "oxlint-tsgolint") return name;
   if (
     name.startsWith("@stll/") ||
     name === "@oxlint/plugins" ||

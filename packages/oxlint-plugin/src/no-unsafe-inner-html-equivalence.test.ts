@@ -1,11 +1,12 @@
 /// <reference types="bun-types" />
 
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import type { ESTree } from "@oxlint/plugins";
+import { expect, test } from "bun:test";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { expect, test } from "bun:test";
-import type { ESTree } from "@oxlint/plugins";
+
 import {
   DOCUMENT_WRITE_METHODS,
   DOM_ELEMENT_PRODUCERS,
@@ -26,7 +27,10 @@ const invalidDirective = new RegExp(
   `//\\s*oxlint-disable(?:-next-line|-line)?\\s+${ruleId.replaceAll("/", "\\/")}\\b`,
   "gu",
 );
-const cleanMarker = new RegExp(`expect-clean:\\s*${ruleId.replaceAll("/", "\\/")}\\b`, "gu");
+const cleanMarker = new RegExp(
+  `expect-clean:\\s*${ruleId.replaceAll("/", "\\/")}\\b`,
+  "gu",
+);
 type ExpressionBearingNode = Extract<ESTree.Node, { expression: ESTree.Node }>;
 const expressionWrapperPolicies = {
   ArrayExpression: {
@@ -308,8 +312,7 @@ const isEdit = (value: unknown): value is Edit => {
   }
   if (value.kind === "jsx-inventory") {
     return (
-      typeof value.file === "string" &&
-      typeof value.elementCount === "number"
+      typeof value.file === "string" && typeof value.elementCount === "number"
     );
   }
   if (value.kind === "dom-target-inventory") {
@@ -638,7 +641,8 @@ export default {
 };
 `;
 
-const domTargetCollectorPlugin = `import {
+const domTargetCollectorPlugin =
+  `import {
   invokedCallee,
   isAstNode,
   isIdentifier,
@@ -647,7 +651,8 @@ const domTargetCollectorPlugin = `import {
   unwrapExpression,
 } from ${JSON.stringify(pathToFileURL(join(repositoryRoot, "packages/oxlint-plugin/src/utils.ts")).href)};
 const htmlMethods = new Set(${JSON.stringify(htmlMethodNames)});
-` + String.raw`
+` +
+  String.raw`
 const htmlProperties = new Set(["innerHTML", "outerHTML", "srcdoc"]);
 const staticMemberName = (node) => memberPropertyName(node);
 const isObjectAssign = (node) =>
@@ -790,7 +795,9 @@ const applyEdits = (
   let lastStart = Number.POSITIVE_INFINITY;
   for (const edit of ordered) {
     if (edit.end > lastStart) {
-      throw new Error(`Overlapping equivalence edits at ${edit.start}:${edit.end}`);
+      throw new Error(
+        `Overlapping equivalence edits at ${edit.start}:${edit.end}`,
+      );
     }
     output = `${output.slice(0, edit.start)}${edit.text}${output.slice(edit.end)}`;
     lastStart = edit.start;
@@ -802,7 +809,8 @@ const hasDiagnostics = (value: unknown): boolean => {
   if (Array.isArray(value)) return value.some(hasDiagnostics);
   if (!isRecord(value)) return false;
   if (Array.isArray(value.messages) && value.messages.length > 0) return true;
-  if (Array.isArray(value.diagnostics) && value.diagnostics.length > 0) return true;
+  if (Array.isArray(value.diagnostics) && value.diagnostics.length > 0)
+    return true;
   return Object.values(value).some(hasDiagnostics);
 };
 
@@ -815,8 +823,14 @@ const runOxlint = async ({
   configPath,
   filePaths,
   extraArgs = [],
-}: RunOxlintOptions): Promise<{ exitCode: number; stdout: string; stderr: string }> => {
-  const outputDirectory = await mkdtemp(join(tmpdir(), "html-equivalence-output-"));
+}: RunOxlintOptions): Promise<{
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+}> => {
+  const outputDirectory = await mkdtemp(
+    join(tmpdir(), "html-equivalence-output-"),
+  );
   const stdoutPath = join(outputDirectory, "stdout.json");
   const stderrPath = join(outputDirectory, "stderr.txt");
   try {
@@ -857,7 +871,10 @@ type MemberEditOptions = {
   spelling: (typeof BRACKET_SPELLINGS)[number];
 };
 
-const memberEdits = (source: string, { edits, spelling }: MemberEditOptions) => {
+const memberEdits = (
+  source: string,
+  { edits, spelling }: MemberEditOptions,
+) => {
   const replacements: Array<{ start: number; end: number; text: string }> = [];
   for (const edit of edits) {
     const gapEnd = edit.propertyStart;
@@ -971,10 +988,7 @@ const wrapperInsertions = (
   return insertions;
 };
 
-const aliasEdits = (
-  source: string,
-  edits: readonly AliasEdit[],
-): string => {
+const aliasEdits = (source: string, edits: readonly AliasEdit[]): string => {
   const replacements: Array<{ start: number; end: number; text: string }> = [];
   for (const [index, edit] of edits.entries()) {
     const name = `__equivalenceDomTarget${index}`;
@@ -1005,10 +1019,7 @@ const producerReceivers = (
     case "element":
       return ['document.createElement("div")'];
     case "either":
-      return [
-        "document",
-        'document.createElement("div")',
-      ];
+      return ["document", 'document.createElement("div")'];
     default: {
       const exhaustive: never = receiver;
       throw new Error(`Unknown DOM producer receiver: ${String(exhaustive)}`);
@@ -1042,7 +1053,9 @@ const producerExpressions = (entry: DomElementProducer): string[] => {
         expressions.push(`${receiver}.${entry.name}`);
         break;
       case "method":
-        expressions.push(`${receiver}.${entry.name}(${producerArguments[entry.name]})`);
+        expressions.push(
+          `${receiver}.${entry.name}(${producerArguments[entry.name]})`,
+        );
         break;
       case "collection": {
         const collection = `${receiver}.${entry.name}(${producerArguments[entry.name]})`;
@@ -1069,9 +1082,9 @@ const producerCorpus = (): {
   producerIds: string[];
 } => {
   const lines = [
-    'declare const payload: object;',
-    'declare const rawHtml: string;',
-    'declare const config: Record<string, unknown>;',
+    "declare const payload: object;",
+    "declare const rawHtml: string;",
+    "declare const config: Record<string, unknown>;",
     "",
   ];
   let invalidCount = 0;
@@ -1161,16 +1174,16 @@ const generatedHtmlSinkCorpus = (): {
     'import { promises as fsPromises } from "node:fs";',
     'import fsPromisesDefault from "fs/promises";',
     'import otherWriter from "other-writer";',
-    'declare const rawHtml: string;',
-    'const config = { write(..._values: string[]) {}, writeln(..._values: string[]) {} };',
-    'declare function createElement(type: string, props: object): unknown;',
-    'declare function jsx(type: string, props: object): unknown;',
-    'declare function jsxs(type: string, props: object): unknown;',
-    'declare function jsxDEV(type: string, props: object): unknown;',
-    'declare const React: { createElement: typeof createElement };',
-    'declare const unknownNamespace: string | null;',
+    "declare const rawHtml: string;",
+    "const config = { write(..._values: string[]) {}, writeln(..._values: string[]) {} };",
+    "declare function createElement(type: string, props: object): unknown;",
+    "declare function jsx(type: string, props: object): unknown;",
+    "declare function jsxs(type: string, props: object): unknown;",
+    "declare function jsxDEV(type: string, props: object): unknown;",
+    "declare const React: { createElement: typeof createElement };",
+    "declare const unknownNamespace: string | null;",
     'const namespaceAlias = "urn:example";',
-    '',
+    "",
   ];
   let invalidCount = 0;
   const reactPropIds: string[] = [];
@@ -1198,9 +1211,7 @@ const generatedHtmlSinkCorpus = (): {
     html: string,
   ): string => {
     const value =
-      prop.kind === "payload"
-        ? `{ ...{ ${prop.htmlKey}: ${html} } }`
-        : html;
+      prop.kind === "payload" ? `{ ...{ ${prop.htmlKey}: ${html} } }` : html;
     return `{ ...{ ...{ ${prop.name}: ${value} } } }`;
   };
   type RenderOptions = { factory: string; props: string };
@@ -1400,376 +1411,393 @@ const generatedHtmlSinkCorpus = (): {
   };
 };
 
-test(
-  "HTML sink fixtures keep their invalid and clean outcomes across equivalent syntax",
-  async () => {
-    const {
-      source: producerSource,
-      invalidCount: producerInvalidCount,
-      producerIds,
-    } = producerCorpus();
-    const {
-      source: htmlSinkSource,
-      invalidCount: htmlSinkInvalidCount,
-      reactPropIds,
-      attributeSinkIds,
-      documentMethodIds,
-    } = generatedHtmlSinkCorpus();
-    const htmlSinkFactories = ["JSX", ...REACT_ELEMENT_FACTORIES];
-    const expectedReactPropIds = REACT_HTML_PROPS.flatMap((prop) =>
-      htmlSinkFactories.map((factory) => `${factory}:${prop.name}`),
-    );
-    const expectedHtmlSinkInvalidCount =
-      REACT_HTML_PROPS.length * htmlSinkFactories.length +
-      DOCUMENT_WRITE_METHODS.size * 16 +
-      HTML_ATTRIBUTE_SINKS.length * 2 +
-      HTML_ATTRIBUTE_SINKS.filter((sink) => sink.namespaceIndex !== null).length *
-        ATTRIBUTE_NAMESPACE_CASES.filter((entry) => entry.kind === "invalid").length;
-    expect(htmlSinkInvalidCount).toBe(expectedHtmlSinkInvalidCount);
-    expect([...new Set(reactPropIds)].sort()).toEqual(
-      [...new Set(expectedReactPropIds)].sort(),
-    );
-    expect(reactPropIds).toHaveLength(expectedReactPropIds.length);
-    expect(attributeSinkIds).toHaveLength(HTML_ATTRIBUTE_SINKS.length);
-    expect([...new Set(attributeSinkIds)].sort()).toEqual(
-      HTML_ATTRIBUTE_SINKS.map(({ name }) => name).sort(),
-    );
-    expect(documentMethodIds).toHaveLength(DOCUMENT_WRITE_METHODS.size);
-    expect([...new Set(documentMethodIds)].sort()).toEqual(
-      [...DOCUMENT_WRITE_METHODS].sort(),
-    );
-    const expectedProducerIds = DOM_ELEMENT_PRODUCERS.map(
-      ({ receiver, kind, name }) => `${receiver}:${kind}:${name}`,
-    );
-    expect([...new Set(producerIds)].sort()).toEqual(
-      [...new Set(expectedProducerIds)].sort(),
-    );
-    expect(producerIds).toHaveLength(expectedProducerIds.length);
-    expect(new Set(producerIds).size).toBe(DOM_ELEMENT_PRODUCERS.length);
-    const tempDirectory = await mkdtemp(join(fixtureRoot, "html-equivalence-"));
-    const collectorPath = join(tempDirectory, "collector.mjs");
-    const configPrefix = `.html-equivalence-${basename(tempDirectory)}`;
-    const collectorConfigPath = join(repositoryRoot, `${configPrefix}-collector.json`);
-    const targetCollectorConfigPath = join(repositoryRoot, `${configPrefix}-targets.json`);
-    const ruleConfigPath = join(repositoryRoot, `${configPrefix}-rule.json`);
-    const producerCorpusPath = join(tempDirectory, "dom-producer-corpus.fixture.tsx");
-    const htmlSinkCorpusPath = join(tempDirectory, "html-sink-corpus.fixture.tsx");
-    const targetCollectorPath = join(tempDirectory, "target-collector.mjs");
+test("HTML sink fixtures keep their invalid and clean outcomes across equivalent syntax", async () => {
+  const {
+    source: producerSource,
+    invalidCount: producerInvalidCount,
+    producerIds,
+  } = producerCorpus();
+  const {
+    source: htmlSinkSource,
+    invalidCount: htmlSinkInvalidCount,
+    reactPropIds,
+    attributeSinkIds,
+    documentMethodIds,
+  } = generatedHtmlSinkCorpus();
+  const htmlSinkFactories = ["JSX", ...REACT_ELEMENT_FACTORIES];
+  const expectedReactPropIds = REACT_HTML_PROPS.flatMap((prop) =>
+    htmlSinkFactories.map((factory) => `${factory}:${prop.name}`),
+  );
+  const expectedHtmlSinkInvalidCount =
+    REACT_HTML_PROPS.length * htmlSinkFactories.length +
+    DOCUMENT_WRITE_METHODS.size * 16 +
+    HTML_ATTRIBUTE_SINKS.length * 2 +
+    HTML_ATTRIBUTE_SINKS.filter((sink) => sink.namespaceIndex !== null).length *
+      ATTRIBUTE_NAMESPACE_CASES.filter((entry) => entry.kind === "invalid")
+        .length;
+  expect(htmlSinkInvalidCount).toBe(expectedHtmlSinkInvalidCount);
+  expect([...new Set(reactPropIds)].sort()).toEqual(
+    [...new Set(expectedReactPropIds)].sort(),
+  );
+  expect(reactPropIds).toHaveLength(expectedReactPropIds.length);
+  expect(attributeSinkIds).toHaveLength(HTML_ATTRIBUTE_SINKS.length);
+  expect([...new Set(attributeSinkIds)].sort()).toEqual(
+    HTML_ATTRIBUTE_SINKS.map(({ name }) => name).sort(),
+  );
+  expect(documentMethodIds).toHaveLength(DOCUMENT_WRITE_METHODS.size);
+  expect([...new Set(documentMethodIds)].sort()).toEqual(
+    [...DOCUMENT_WRITE_METHODS].sort(),
+  );
+  const expectedProducerIds = DOM_ELEMENT_PRODUCERS.map(
+    ({ receiver, kind, name }) => `${receiver}:${kind}:${name}`,
+  );
+  expect([...new Set(producerIds)].sort()).toEqual(
+    [...new Set(expectedProducerIds)].sort(),
+  );
+  expect(producerIds).toHaveLength(expectedProducerIds.length);
+  expect(new Set(producerIds).size).toBe(DOM_ELEMENT_PRODUCERS.length);
+  const tempDirectory = await mkdtemp(join(fixtureRoot, "html-equivalence-"));
+  const collectorPath = join(tempDirectory, "collector.mjs");
+  const configPrefix = `.html-equivalence-${basename(tempDirectory)}`;
+  const collectorConfigPath = join(
+    repositoryRoot,
+    `${configPrefix}-collector.json`,
+  );
+  const targetCollectorConfigPath = join(
+    repositoryRoot,
+    `${configPrefix}-targets.json`,
+  );
+  const ruleConfigPath = join(repositoryRoot, `${configPrefix}-rule.json`);
+  const producerCorpusPath = join(
+    tempDirectory,
+    "dom-producer-corpus.fixture.tsx",
+  );
+  const htmlSinkCorpusPath = join(
+    tempDirectory,
+    "html-sink-corpus.fixture.tsx",
+  );
+  const targetCollectorPath = join(tempDirectory, "target-collector.mjs");
 
-    try {
-      await writeFile(producerCorpusPath, producerSource);
-      await writeFile(htmlSinkCorpusPath, htmlSinkSource);
-      const originalPaths = (await readdir(fixtureRoot))
-        .filter(
-          (name) =>
-            name.startsWith("no-unsafe-inner-html") &&
-            name.endsWith(".fixture.tsx"),
-        )
-        .sort()
-        .map((name) => join(fixtureRoot, name));
-      expect(originalPaths.length).toBeGreaterThan(0);
-      originalPaths.push(producerCorpusPath, htmlSinkCorpusPath);
-      const originals = await Promise.all(
-        originalPaths.map(async (path) => ({ path, source: await readFile(path, "utf8") })),
+  try {
+    await writeFile(producerCorpusPath, producerSource);
+    await writeFile(htmlSinkCorpusPath, htmlSinkSource);
+    const originalPaths = (await readdir(fixtureRoot))
+      .filter(
+        (name) =>
+          name.startsWith("no-unsafe-inner-html") &&
+          name.endsWith(".fixture.tsx"),
+      )
+      .sort()
+      .map((name) => join(fixtureRoot, name));
+    expect(originalPaths.length).toBeGreaterThan(0);
+    originalPaths.push(producerCorpusPath, htmlSinkCorpusPath);
+    const originals = await Promise.all(
+      originalPaths.map(async (path) => ({
+        path,
+        source: await readFile(path, "utf8"),
+      })),
+    );
+    const expectedInvalidCount = originals.reduce(
+      (count, { source }) => count + countMatches(invalidDirective, source),
+      0,
+    );
+    const expectedCleanCount = originals.reduce(
+      (count, { source }) => count + countMatches(cleanMarker, source),
+      0,
+    );
+    expect(expectedInvalidCount).toBeGreaterThan(0);
+    expect(expectedCleanCount).toBeGreaterThan(0);
+    expect(countMatches(invalidDirective, producerSource)).toBe(
+      producerInvalidCount,
+    );
+    expect(countMatches(invalidDirective, htmlSinkSource)).toBe(
+      htmlSinkInvalidCount,
+    );
+
+    await writeFile(collectorPath, collectorPlugin);
+    const collectorConfig = {
+      categories: { correctness: "off" },
+      jsPlugins: [{ name: "equivalence-collector", specifier: collectorPath }],
+      rules: { "equivalence-collector/edits": "error" },
+    };
+    const targetCollectorConfig = {
+      categories: { correctness: "off" },
+      jsPlugins: [
+        { name: "dom-target-collector", specifier: targetCollectorPath },
+      ],
+      rules: { "dom-target-collector/targets": "error" },
+    };
+    const ruleConfig = {
+      categories: { correctness: "off" },
+      jsPlugins: [{ name: "no-unsafe-inner-html", specifier: rulePath }],
+      rules: { [ruleId]: "error" },
+      overrides: [
+        {
+          files: [
+            ...originalPaths
+              .filter((path) => basename(path).includes("provenance"))
+              .map((path) => relative(repositoryRoot, path)),
+            `${relative(repositoryRoot, tempDirectory)}/**/*provenance*.tsx`,
+            `${relative(repositoryRoot, tempDirectory)}/**/*provenance*.ts`,
+          ],
+          rules: {
+            [ruleId]: ["error", { sanitizerPolicy: "provenance" }],
+          },
+        },
+      ],
+    };
+    await Promise.all([
+      writeFile(collectorConfigPath, JSON.stringify(collectorConfig)),
+      writeFile(
+        targetCollectorConfigPath,
+        JSON.stringify(targetCollectorConfig),
+      ),
+      writeFile(ruleConfigPath, JSON.stringify(ruleConfig)),
+      writeFile(targetCollectorPath, domTargetCollectorPlugin),
+    ]);
+
+    const collected = await runOxlint({
+      configPath: collectorConfigPath,
+      filePaths: originalPaths,
+    });
+    expect(collected.exitCode).toBe(1);
+    const edits = parseEdits(collected.stdout);
+    expect(edits.length).toBeGreaterThan(0);
+    expect(edits.every((edit) => originalPaths.includes(edit.file))).toBe(true);
+    const members = edits.filter(
+      (edit): edit is MemberEdit => edit.kind === "member",
+    );
+    const aliases = edits.filter(
+      (edit): edit is AliasEdit => edit.kind === "alias",
+    );
+    const spreads = edits.filter(
+      (edit): edit is SpreadEdit => edit.kind === "spread",
+    );
+    const jsxRoots = edits.filter(
+      (edit): edit is JsxEdit => edit.kind === "jsx",
+    );
+    const jsxInventory = edits.filter(
+      (edit): edit is JsxInventoryEdit => edit.kind === "jsx-inventory",
+    );
+    expect(members.length).toBeGreaterThan(0);
+    expect(aliases.length).toBeGreaterThan(0);
+    expect(spreads.length).toBeGreaterThan(0);
+    expect(jsxRoots.length).toBeGreaterThan(0);
+    expect(jsxInventory).toHaveLength(originalPaths.length);
+    expect(jsxRoots.reduce((count, edit) => count + edit.elementCount, 0)).toBe(
+      jsxInventory.reduce((count, edit) => count + edit.elementCount, 0),
+    );
+
+    const generatedPaths: string[] = [];
+    const generatedSources = new Map<string, string>();
+    const jsxFreeSources = new Map<string, string>();
+    for (const original of originals) {
+      const fixtureBasename = basename(original.path);
+      const fileMembers = members.filter((edit) => edit.file === original.path);
+      const fileAliases = aliases.filter((edit) => edit.file === original.path);
+      const fileSpreads = spreads.filter((edit) => edit.file === original.path);
+      const fileJsxRoots = jsxRoots.filter(
+        (edit) => edit.file === original.path,
       );
-      const expectedInvalidCount = originals.reduce(
-        (count, { source }) => count + countMatches(invalidDirective, source),
-        0,
+      const inventory = jsxInventory.find(
+        (edit) => edit.file === original.path,
       );
-      const expectedCleanCount = originals.reduce(
-        (count, { source }) => count + countMatches(cleanMarker, source),
-        0,
-      );
-      expect(expectedInvalidCount).toBeGreaterThan(0);
-      expect(expectedCleanCount).toBeGreaterThan(0);
+      if (inventory === undefined) {
+        throw new Error(`Missing JSX inventory for ${original.path}`);
+      }
       expect(
-        countMatches(invalidDirective, producerSource),
-      ).toBe(producerInvalidCount);
-      expect(countMatches(invalidDirective, htmlSinkSource)).toBe(
-        htmlSinkInvalidCount,
+        fileJsxRoots.reduce((count, edit) => count + edit.elementCount, 0),
+      ).toBe(inventory.elementCount);
+      const variants = [
+        ...BRACKET_SPELLINGS.map((spelling) => ({
+          name: `bracket-${spelling}`,
+          source: applyEdits(
+            original.source,
+            memberEdits(original.source, { edits: fileMembers, spelling }),
+          ),
+        })),
+        {
+          name: "alias",
+          source: aliasEdits(original.source, fileAliases),
+        },
+        {
+          name: "spread",
+          source: applyEdits(
+            original.source,
+            spreadEdits(original.source, fileSpreads),
+          ),
+        },
+        {
+          name: "react-create-element",
+          source: applyEdits(
+            original.source,
+            fileJsxRoots.map((edit) => ({
+              start: edit.start,
+              end: edit.end,
+              text: edit.reactText,
+            })),
+          ),
+        },
+        {
+          name: "jsx-call",
+          source: applyEdits(
+            original.source,
+            fileJsxRoots.map((edit) => ({
+              start: edit.start,
+              end: edit.end,
+              text: edit.jsxText,
+            })),
+          ),
+        },
+      ];
+      const reactSource = variants.find(
+        (variant) => variant.name === "react-create-element",
+      )?.source;
+      if (reactSource === undefined) throw new Error("Missing JSX-free source");
+      const jsxFreePath = join(
+        tempDirectory,
+        `${fixtureBasename.replace(".fixture.tsx", "")}-react-base.ts`,
       );
-
-      await writeFile(collectorPath, collectorPlugin);
-      const collectorConfig = {
-        categories: { correctness: "off" },
-        jsPlugins: [
-          { name: "equivalence-collector", specifier: collectorPath },
-        ],
-        rules: { "equivalence-collector/edits": "error" },
-      };
-      const targetCollectorConfig = {
-        categories: { correctness: "off" },
-        jsPlugins: [
-          { name: "dom-target-collector", specifier: targetCollectorPath },
-        ],
-        rules: { "dom-target-collector/targets": "error" },
-      };
-      const ruleConfig = {
-        categories: { correctness: "off" },
-        jsPlugins: [
-          { name: "no-unsafe-inner-html", specifier: rulePath },
-        ],
-        rules: { [ruleId]: "error" },
-        overrides: [
-          {
-            files: [
-              ...originalPaths
-                .filter((path) => basename(path).includes("provenance"))
-                .map((path) => relative(repositoryRoot, path)),
-              `${relative(repositoryRoot, tempDirectory)}/**/*provenance*.tsx`,
-              `${relative(repositoryRoot, tempDirectory)}/**/*provenance*.ts`,
-            ],
-            rules: {
-              [ruleId]: ["error", { sanitizerPolicy: "provenance" }],
-            },
-          },
-        ],
-      };
-      await Promise.all([
-        writeFile(collectorConfigPath, JSON.stringify(collectorConfig)),
-        writeFile(targetCollectorConfigPath, JSON.stringify(targetCollectorConfig)),
-        writeFile(ruleConfigPath, JSON.stringify(ruleConfig)),
-        writeFile(targetCollectorPath, domTargetCollectorPlugin),
-      ]);
-
-      const collected = await runOxlint({
-        configPath: collectorConfigPath,
-        filePaths: originalPaths,
-      });
-      expect(collected.exitCode).toBe(1);
-      const edits = parseEdits(collected.stdout);
-      expect(edits.length).toBeGreaterThan(0);
-      expect(edits.every((edit) => originalPaths.includes(edit.file))).toBe(true);
-      const members = edits.filter(
-        (edit): edit is MemberEdit => edit.kind === "member",
-      );
-      const aliases = edits.filter(
-        (edit): edit is AliasEdit => edit.kind === "alias",
-      );
-      const spreads = edits.filter(
-        (edit): edit is SpreadEdit => edit.kind === "spread",
-      );
-      const jsxRoots = edits.filter(
-        (edit): edit is JsxEdit => edit.kind === "jsx",
-      );
-      const jsxInventory = edits.filter(
-        (edit): edit is JsxInventoryEdit => edit.kind === "jsx-inventory",
-      );
-      expect(members.length).toBeGreaterThan(0);
-      expect(aliases.length).toBeGreaterThan(0);
-      expect(spreads.length).toBeGreaterThan(0);
-      expect(jsxRoots.length).toBeGreaterThan(0);
-      expect(jsxInventory).toHaveLength(originalPaths.length);
-      expect(
-        jsxRoots.reduce((count, edit) => count + edit.elementCount, 0),
-      ).toBe(
-        jsxInventory.reduce((count, edit) => count + edit.elementCount, 0),
-      );
-
-      const generatedPaths: string[] = [];
-      const generatedSources = new Map<string, string>();
-      const jsxFreeSources = new Map<string, string>();
-      for (const original of originals) {
-        const fixtureBasename = basename(original.path);
-        const fileMembers = members.filter((edit) => edit.file === original.path);
-        const fileAliases = aliases.filter((edit) => edit.file === original.path);
-        const fileSpreads = spreads.filter((edit) => edit.file === original.path);
-        const fileJsxRoots = jsxRoots.filter((edit) => edit.file === original.path);
-        const inventory = jsxInventory.find((edit) => edit.file === original.path);
-        if (inventory === undefined) {
-          throw new Error(`Missing JSX inventory for ${original.path}`);
-        }
-        expect(
-          fileJsxRoots.reduce((count, edit) => count + edit.elementCount, 0),
-        ).toBe(inventory.elementCount);
-        const variants = [
-          ...BRACKET_SPELLINGS.map((spelling) => ({
-            name: `bracket-${spelling}`,
-            source: applyEdits(
-              original.source,
-              memberEdits(original.source, { edits: fileMembers, spelling }),
-            ),
-          })),
-          {
-            name: "alias",
-            source: aliasEdits(original.source, fileAliases),
-          },
-          {
-            name: "spread",
-            source: applyEdits(
-              original.source,
-              spreadEdits(original.source, fileSpreads),
-            ),
-          },
-          {
-            name: "react-create-element",
-            source: applyEdits(
-              original.source,
-              fileJsxRoots.map((edit) => ({
-                start: edit.start,
-                end: edit.end,
-                text: edit.reactText,
-              })),
-            ),
-          },
-          {
-            name: "jsx-call",
-            source: applyEdits(
-              original.source,
-              fileJsxRoots.map((edit) => ({
-                start: edit.start,
-                end: edit.end,
-                text: edit.jsxText,
-              })),
-            ),
-          },
-        ];
-        const reactSource = variants.find(
-          (variant) => variant.name === "react-create-element",
-        )?.source;
-        if (reactSource === undefined) throw new Error("Missing JSX-free source");
-        const jsxFreePath = join(
+      jsxFreeSources.set(jsxFreePath, reactSource);
+      for (const variant of variants) {
+        const generatedPath = join(
           tempDirectory,
-          `${fixtureBasename.replace(".fixture.tsx", "")}-react-base.ts`,
+          `${fixtureBasename.replace(".fixture.tsx", "")}-${variant.name}.fixture.tsx`,
         );
-        jsxFreeSources.set(jsxFreePath, reactSource);
-        for (const variant of variants) {
-          const generatedPath = join(
-            tempDirectory,
-            `${fixtureBasename.replace(".fixture.tsx", "")}-${variant.name}.fixture.tsx`,
-          );
-          expect(countMatches(invalidDirective, variant.source)).toBe(
-            countMatches(invalidDirective, original.source),
-          );
-          expect(countMatches(cleanMarker, variant.source)).toBe(
-            countMatches(cleanMarker, original.source),
-          );
-          generatedPaths.push(generatedPath);
-          generatedSources.set(generatedPath, variant.source);
-        }
+        expect(countMatches(invalidDirective, variant.source)).toBe(
+          countMatches(invalidDirective, original.source),
+        );
+        expect(countMatches(cleanMarker, variant.source)).toBe(
+          countMatches(cleanMarker, original.source),
+        );
+        generatedPaths.push(generatedPath);
+        generatedSources.set(generatedPath, variant.source);
       }
-      expect(members.length).toBeGreaterThan(0);
-      expect(aliases.length).toBeGreaterThan(0);
-      expect(spreads.length).toBeGreaterThan(0);
-      expect(jsxRoots.length).toBeGreaterThan(0);
-      expect(generatedSources.size).toBe(generatedPaths.length);
-      await Promise.all(
-        [...generatedSources].map(([path, source]) => writeFile(path, source)),
-      );
-      await Promise.all(
-        [...jsxFreeSources].map(([path, source]) => writeFile(path, source)),
-      );
-
-      const targetCollection = await runOxlint({
-        configPath: targetCollectorConfigPath,
-        filePaths: [...jsxFreeSources.keys()],
-      });
-      expect(targetCollection.exitCode).toBe(1);
-      const collectedTargetEdits = parseEdits(targetCollection.stdout);
-      const expressionWrapperInventories = collectedTargetEdits.filter(
-        (edit): edit is ExpressionWrapperInventoryEdit =>
-          edit.kind === "expression-wrapper-inventory",
-      );
-      expect(expressionWrapperInventories).toHaveLength(jsxFreeSources.size);
-      const expectedExpressionNodeTypes = [
-        ...EXPRESSION_WRAPPER_TYPES,
-        ...Object.keys(expressionCarrierPolicies),
-      ].sort();
-      const peeledExpressionNodeTypes = Object.entries(expressionWrapperPolicies)
-        .filter(([, policy]) => policy.disposition === "peel")
-        .map(([type]) => type)
-        .sort();
-      expect(peeledExpressionNodeTypes).toEqual([...EXPRESSION_WRAPPER_TYPES].sort());
-      expect(
-        Object.values(expressionWrapperPolicies).every(
-          ({ reason }) => reason.length > 0,
-        ),
-      ).toBe(true);
-      for (const inventory of expressionWrapperInventories) {
-        expect(inventory.types).toEqual(expectedExpressionNodeTypes);
-      }
-      const targetEdits = collectedTargetEdits.filter(
-        (edit): edit is DomTargetInventoryEdit =>
-          edit.kind === "dom-target-inventory",
-      );
-      expect(targetEdits).toHaveLength(jsxFreeSources.size);
-      const targetEditsByFile = new Map<string, DomTarget[]>();
-      for (const edit of targetEdits) {
-        if (targetEditsByFile.has(edit.file)) {
-          throw new Error(`Duplicate target inventory for ${edit.file}`);
-        }
-        targetEditsByFile.set(edit.file, edit.targets);
-      }
-      const wrapperPaths: string[] = [];
-      const wrapperSources = new Map<string, string>();
-      let wrappedTargetCount = 0;
-      for (const [basePath, source] of jsxFreeSources) {
-        const targets = targetEditsByFile.get(resolve(basePath));
-        if (!targets) throw new Error(`Missing target inventory for ${basePath}`);
-        const uniqueTargets = new Set(targets.map(({ start, end }) => `${start}:${end}`));
-        expect(uniqueTargets.size).toBe(targets.length);
-        for (const wrapper of wrapperKinds) {
-          const insertions = wrapperInsertions(source, targets, wrapper);
-          expect(insertions).toHaveLength(targets.length * 2);
-          const wrapped = applyEdits(source, insertions);
-          expect(countMatches(invalidDirective, wrapped)).toBe(
-            countMatches(invalidDirective, source),
-          );
-          expect(countMatches(cleanMarker, wrapped)).toBe(
-            countMatches(cleanMarker, source),
-          );
-          const wrapperPath = join(
-            tempDirectory,
-            `${basename(basePath, ".ts")}-${wrapper}.fixture.ts`,
-          );
-          wrapperPaths.push(wrapperPath);
-          wrapperSources.set(wrapperPath, wrapped);
-          wrappedTargetCount += targets.length;
-        }
-      }
-      expect(
-        [...targetEditsByFile.values()].reduce(
-          (total, targets) => total + targets.length,
-          0,
-        ),
-      ).toBeGreaterThan(0);
-      expect(wrappedTargetCount).toBe(
-        [...targetEditsByFile.values()].reduce(
-          (total, targets) => total + targets.length * wrapperKinds.length,
-          0,
-        ),
-      );
-      expect(wrapperPaths).toHaveLength(
-        jsxFreeSources.size * wrapperKinds.length,
-      );
-      await Promise.all(
-        [...wrapperSources].map(([path, source]) => writeFile(path, source)),
-      );
-
-      const verified = await runOxlint({
-        configPath: ruleConfigPath,
-        filePaths: [...originalPaths, ...generatedPaths, ...wrapperPaths],
-        extraArgs: [
-          "--report-unused-disable-directives-severity=error",
-          "--deny-warnings",
-        ],
-      });
-      expect(verified.exitCode).toBe(0);
-      if (verified.stdout.trim() !== "") {
-        const diagnostics: unknown = JSON.parse(verified.stdout);
-        expect(hasDiagnostics(diagnostics)).toBe(false);
-      }
-    } finally {
-      await rm(tempDirectory, { recursive: true, force: true });
-      await Promise.all([
-        rm(collectorConfigPath, { force: true }),
-        rm(targetCollectorConfigPath, { force: true }),
-        rm(ruleConfigPath, { force: true }),
-      ]);
     }
-  },
-  30_000,
-);
+    expect(members.length).toBeGreaterThan(0);
+    expect(aliases.length).toBeGreaterThan(0);
+    expect(spreads.length).toBeGreaterThan(0);
+    expect(jsxRoots.length).toBeGreaterThan(0);
+    expect(generatedSources.size).toBe(generatedPaths.length);
+    await Promise.all(
+      [...generatedSources].map(([path, source]) => writeFile(path, source)),
+    );
+    await Promise.all(
+      [...jsxFreeSources].map(([path, source]) => writeFile(path, source)),
+    );
+
+    const targetCollection = await runOxlint({
+      configPath: targetCollectorConfigPath,
+      filePaths: [...jsxFreeSources.keys()],
+    });
+    expect(targetCollection.exitCode).toBe(1);
+    const collectedTargetEdits = parseEdits(targetCollection.stdout);
+    const expressionWrapperInventories = collectedTargetEdits.filter(
+      (edit): edit is ExpressionWrapperInventoryEdit =>
+        edit.kind === "expression-wrapper-inventory",
+    );
+    expect(expressionWrapperInventories).toHaveLength(jsxFreeSources.size);
+    const expectedExpressionNodeTypes = [
+      ...EXPRESSION_WRAPPER_TYPES,
+      ...Object.keys(expressionCarrierPolicies),
+    ].sort();
+    const peeledExpressionNodeTypes = Object.entries(expressionWrapperPolicies)
+      .filter(([, policy]) => policy.disposition === "peel")
+      .map(([type]) => type)
+      .sort();
+    expect(peeledExpressionNodeTypes).toEqual(
+      [...EXPRESSION_WRAPPER_TYPES].sort(),
+    );
+    expect(
+      Object.values(expressionWrapperPolicies).every(
+        ({ reason }) => reason.length > 0,
+      ),
+    ).toBe(true);
+    for (const inventory of expressionWrapperInventories) {
+      expect(inventory.types).toEqual(expectedExpressionNodeTypes);
+    }
+    const targetEdits = collectedTargetEdits.filter(
+      (edit): edit is DomTargetInventoryEdit =>
+        edit.kind === "dom-target-inventory",
+    );
+    expect(targetEdits).toHaveLength(jsxFreeSources.size);
+    const targetEditsByFile = new Map<string, DomTarget[]>();
+    for (const edit of targetEdits) {
+      if (targetEditsByFile.has(edit.file)) {
+        throw new Error(`Duplicate target inventory for ${edit.file}`);
+      }
+      targetEditsByFile.set(edit.file, edit.targets);
+    }
+    const wrapperPaths: string[] = [];
+    const wrapperSources = new Map<string, string>();
+    let wrappedTargetCount = 0;
+    for (const [basePath, source] of jsxFreeSources) {
+      const targets = targetEditsByFile.get(resolve(basePath));
+      if (!targets) throw new Error(`Missing target inventory for ${basePath}`);
+      const uniqueTargets = new Set(
+        targets.map(({ start, end }) => `${start}:${end}`),
+      );
+      expect(uniqueTargets.size).toBe(targets.length);
+      for (const wrapper of wrapperKinds) {
+        const insertions = wrapperInsertions(source, targets, wrapper);
+        expect(insertions).toHaveLength(targets.length * 2);
+        const wrapped = applyEdits(source, insertions);
+        expect(countMatches(invalidDirective, wrapped)).toBe(
+          countMatches(invalidDirective, source),
+        );
+        expect(countMatches(cleanMarker, wrapped)).toBe(
+          countMatches(cleanMarker, source),
+        );
+        const wrapperPath = join(
+          tempDirectory,
+          `${basename(basePath, ".ts")}-${wrapper}.fixture.ts`,
+        );
+        wrapperPaths.push(wrapperPath);
+        wrapperSources.set(wrapperPath, wrapped);
+        wrappedTargetCount += targets.length;
+      }
+    }
+    expect(
+      [...targetEditsByFile.values()].reduce(
+        (total, targets) => total + targets.length,
+        0,
+      ),
+    ).toBeGreaterThan(0);
+    expect(wrappedTargetCount).toBe(
+      [...targetEditsByFile.values()].reduce(
+        (total, targets) => total + targets.length * wrapperKinds.length,
+        0,
+      ),
+    );
+    expect(wrapperPaths).toHaveLength(
+      jsxFreeSources.size * wrapperKinds.length,
+    );
+    await Promise.all(
+      [...wrapperSources].map(([path, source]) => writeFile(path, source)),
+    );
+
+    const verified = await runOxlint({
+      configPath: ruleConfigPath,
+      filePaths: [...originalPaths, ...generatedPaths, ...wrapperPaths],
+      extraArgs: [
+        "--report-unused-disable-directives-severity=error",
+        "--deny-warnings",
+      ],
+    });
+    expect(verified.exitCode).toBe(0);
+    if (verified.stdout.trim() !== "") {
+      const diagnostics: unknown = JSON.parse(verified.stdout);
+      expect(hasDiagnostics(diagnostics)).toBe(false);
+    }
+  } finally {
+    await rm(tempDirectory, { recursive: true, force: true });
+    await Promise.all([
+      rm(collectorConfigPath, { force: true }),
+      rm(targetCollectorConfigPath, { force: true }),
+      rm(ruleConfigPath, { force: true }),
+    ]);
+  }
+}, 30_000);
 
 test("expression unwrapping follows the syntax wrapper policy exactly", () => {
   let nested: unknown = { type: "Identifier", range: [0, 1] };

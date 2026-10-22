@@ -5,12 +5,12 @@ import { rejectionOf } from "./rejection-support.ts";
 import {
   BUN_TEST_DEFAULT_TIMEOUT_MS,
   DEFAULT_WAIT_TIMEOUT_MS,
-  WaitTimeoutError,
   deferred,
   settledWithin,
   waitFor,
   waitForAbort,
   waitForEvent,
+  WaitTimeoutError,
 } from "./wait.ts";
 
 describe("deferred", () => {

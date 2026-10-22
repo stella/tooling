@@ -49,7 +49,8 @@ export const parseFormatterPolicy = (input: unknown): FormatterPolicy => {
   if (
     !record(input) ||
     Object.keys(input).some(
-      (key) => key !== "command" && key !== "printWidth" && key !== "sortImports",
+      (key) =>
+        key !== "command" && key !== "printWidth" && key !== "sortImports",
     )
   )
     throw new Error(
@@ -63,7 +64,9 @@ export const parseFormatterPolicy = (input: unknown): FormatterPolicy => {
     !Number.isInteger(printWidth) ||
     printWidth <= 0
   )
-    throw new Error("toolchain.json formatter printWidth must be a positive integer");
+    throw new Error(
+      "toolchain.json formatter printWidth must be a positive integer",
+    );
   const sortImports = input["sortImports"];
   if (
     !record(sortImports) ||
@@ -93,7 +96,14 @@ export const sharedFormatTables = (policy: FormatterPolicy) => {
         `{ groupName = ${JSON.stringify(groupName)}, elementNamePattern = ${JSON.stringify(elementNamePattern)} }`,
     )
     .join(", ");
-  const order = ["builtin", "external", ...customGroups.map((group) => group.groupName), "parent", "sibling", "index"];
+  const order = [
+    "builtin",
+    "external",
+    ...customGroups.map((group) => group.groupName),
+    "parent",
+    "sibling",
+    "index",
+  ];
   return `[fmt]\nprintWidth = ${policy.printWidth}\n\n[fmt.sortImports]\ncustomGroups = [${groups}]\ngroups = ${JSON.stringify(order)}\nnewlinesBetween = ${String(newlinesBetween)}\n`;
 };
 
@@ -350,7 +360,10 @@ export const checkFormatter = ({
       }
       continue;
     }
-    if (text !== "" && (isDockerDefinitionPath(file) || isShellScript(file, text)))
+    if (
+      text !== "" &&
+      (isDockerDefinitionPath(file) || isShellScript(file, text))
+    )
       for (const [index, line] of text.split(/\r?\n/u).entries())
         if (!line.trimStart().startsWith("#") && invokesFormatter(line))
           add(file, index + 1, "command runs another formatter; use bun fmt");

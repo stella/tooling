@@ -5,9 +5,7 @@
   },
   "target": {
     "type": "javascript",
-    "targets": [
-      "esnext"
-    ]
+    "targets": ["esnext"]
   },
   "entryPoints": {
     "type": "module",

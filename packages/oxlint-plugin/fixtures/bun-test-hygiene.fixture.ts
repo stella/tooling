@@ -8,8 +8,8 @@
 import * as bt from "bun:test";
 import {
   describe,
-  expect,
   expect as assertThat,
+  expect,
   it,
   test as check,
   test,

@@ -235,7 +235,9 @@ const isWaiverComment = (value: unknown): value is WaiverComment =>
   value.loc !== null;
 
 const jsxAttributeName = (node: unknown): string | null =>
-  isAstNode(node) && node.type === "JSXIdentifier" && typeof node.name === "string"
+  isAstNode(node) &&
+  node.type === "JSXIdentifier" &&
+  typeof node.name === "string"
     ? node.name
     : null;
 
@@ -524,7 +526,10 @@ export default eslintCompatPlugin({
           return name !== null && DOCUMENT_MEMBERS.has(name);
         };
 
-        const isDocumentSinkReceiver = (node: unknown, scope: Scope): boolean => {
+        const isDocumentSinkReceiver = (
+          node: unknown,
+          scope: Scope,
+        ): boolean => {
           if (isKnownNonDocumentReceiver(node, scope)) return false;
           const receiver = unwrapExpression(node);
           if (!isIdentifier(receiver)) return true;
@@ -542,7 +547,8 @@ export default eslintCompatPlugin({
             definition.node.type !== "VariableDeclarator" ||
             definition.node.id.type !== "Identifier" ||
             definition.node.init === null ||
-            unwrapExpression(definition.node.init)?.type !== "ObjectExpression" ||
+            unwrapExpression(definition.node.init)?.type !==
+              "ObjectExpression" ||
             definition.node.parent.type !== "VariableDeclaration" ||
             definition.node.parent.kind !== "const" ||
             variable.scope.variableScope !== scope.variableScope ||
@@ -599,14 +605,20 @@ export default eslintCompatPlugin({
             );
           };
           const isElementCollection = (collection: unknown): boolean =>
-            isKnownDomTarget({ node: collection, scope, seen, kind: "collection" });
+            isKnownDomTarget({
+              node: collection,
+              scope,
+              seen,
+              kind: "collection",
+            });
           if (target?.type === "MemberExpression") {
             const property = memberPropertyName(target);
             const producer = DOM_ELEMENT_PRODUCERS.find(
               (entry) =>
                 entry.kind ===
-                  (kind === "collection" ? "collection-property" : "property") &&
-                entry.name === property,
+                  (kind === "collection"
+                    ? "collection-property"
+                    : "property") && entry.name === property,
             );
             if (producer !== undefined) {
               return hasProducerReceiver(target.object, producer);
@@ -636,7 +648,8 @@ export default eslintCompatPlugin({
             }
             const producer = DOM_ELEMENT_PRODUCERS.find(
               (entry) =>
-                entry.kind === (kind === "collection" ? "collection" : "method") &&
+                entry.kind ===
+                  (kind === "collection" ? "collection" : "method") &&
                 entry.name === method,
             );
             return (
@@ -695,7 +708,10 @@ export default eslintCompatPlugin({
         // The value of a `dangerouslySetInnerHTML` prop: an inline object has
         // its `__html` checked and its spreads rejected; anything else is a
         // hoisted payload whose HTML this rule cannot see.
-        const checkDangerousPayload = (value: unknown, htmlKey: string): void => {
+        const checkDangerousPayload = (
+          value: unknown,
+          htmlKey: string,
+        ): void => {
           const expression = unwrapExpression(value);
           if (expression?.type !== "ObjectExpression") {
             reportIfUnsafe(value);
@@ -720,7 +736,10 @@ export default eslintCompatPlugin({
           }
         };
 
-        const checkReactHtmlProp = (prop: ReactHtmlProp, value: unknown): void => {
+        const checkReactHtmlProp = (
+          prop: ReactHtmlProp,
+          value: unknown,
+        ): void => {
           switch (prop.kind) {
             case "payload":
               checkDangerousPayload(value, prop.htmlKey);
@@ -741,7 +760,8 @@ export default eslintCompatPlugin({
             const key = objectPropertyKey(property);
             const prop = REACT_HTML_PROPS.find((entry) => entry.name === key);
             // Payload properties are checked once by the Property visitor.
-            if (prop?.kind === "value") checkReactHtmlProp(prop, property.value);
+            if (prop?.kind === "value")
+              checkReactHtmlProp(prop, property.value);
           }
         };
 
@@ -782,7 +802,9 @@ export default eslintCompatPlugin({
             sinks.length = 0;
           },
           "Program:exit"() {
-            sinks.sort((left, right) => left.node.range[0] - right.node.range[0]);
+            sinks.sort(
+              (left, right) => left.node.range[0] - right.node.range[0],
+            );
             for (const { node, kind } of sinks) {
               const waived = consumeWaiver(node);
               if (kind === "safe" || (kind === "unsafe" && waived)) continue;
@@ -811,7 +833,9 @@ export default eslintCompatPlugin({
             const value = unwrapExpression(node.value);
             checkReactHtmlProp(
               prop,
-              value?.type === "JSXExpressionContainer" ? value.expression : value,
+              value?.type === "JSXExpressionContainer"
+                ? value.expression
+                : value,
             );
           },
 

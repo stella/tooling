@@ -41,7 +41,10 @@ type DeclarationMutation = {
 };
 const checkoutAction =
   "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1";
-const checkoutWorkflow = (checkout: Record<string, string>, selector: string) => ({
+const checkoutWorkflow = (
+  checkout: Record<string, string>,
+  selector: string,
+) => ({
   on: { pull_request: {} },
   jobs: {
     replay: {

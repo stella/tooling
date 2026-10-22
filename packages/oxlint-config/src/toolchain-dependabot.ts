@@ -17,12 +17,12 @@ import {
 } from "./toolchain-container-inputs";
 import { ownedDockerImageAliases } from "./toolchain-images";
 import {
+  dependabotManifestEcosystem,
   isDependabotGithubActionsPath,
   isDockerDefinitionPath,
-  pythonDependencyManifestKind,
   isPythonDependencyManifest,
   javascriptDependencyLockfiles,
-  dependabotManifestEcosystem,
+  pythonDependencyManifestKind,
 } from "./toolchain-inputs";
 import { workspaceContains } from "./toolchain-workspaces";
 

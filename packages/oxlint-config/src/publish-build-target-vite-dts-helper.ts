@@ -7,9 +7,9 @@ import { compilerPackages } from "./compiler-packages";
 import {
   createDeclarationEmissionLedger,
   guardDeclarationHook,
+  type ReviewedViteDtsOptions,
   reviewedViteDtsOptions,
   reviewedViteDtsVersions,
-  type ReviewedViteDtsOptions,
 } from "./publish-build-target-vite-dts";
 
 type DeclarationOnlyDtsOptions = { directory: string } & ReviewedViteDtsOptions;

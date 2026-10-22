@@ -4,16 +4,8 @@
     "allowImportingTsExtensions": true,
     "noImplicitAny": false,
     "noPropertyAccessFromIndexSignature": false,
-    "types": [
-      "node"
-    ]
+    "types": ["node"]
   },
-  "include": [
-    "src/**/*.ts",
-    "tsdown.config.ts"
-  ],
-  "exclude": [
-    "node_modules",
-    "dist"
-  ]
+  "include": ["src/**/*.ts", "tsdown.config.ts"],
+  "exclude": ["node_modules", "dist"]
 }

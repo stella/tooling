@@ -6,15 +6,15 @@ import { parse as parseToml } from "smol-toml";
 import { parseAllDocuments, parseDocument } from "yaml";
 
 import {
-  changedPackageTool,
-  changedYarnSelectors,
   changedCompilerPatches,
+  type ChangedLock,
+  changedPackageTool,
   changedRecord,
+  changedYarnSelectors,
   parseChangedJson,
   parseChangedLock,
-  toolchainChangedTools,
-  type ChangedLock,
   type ToolchainChangedTool,
+  toolchainChangedTools,
 } from "./toolchain-changed-locks";
 import {
   containerDocumentImages,
@@ -22,8 +22,8 @@ import {
   isKubernetesDefinitionPath,
 } from "./toolchain-container-inputs";
 import {
-  isDockerDefinitionPath,
   githubAutomationFileKind,
+  isDockerDefinitionPath,
   isMiseConfigPath,
 } from "./toolchain-inputs";
 import { workspaceContains } from "./toolchain-workspaces";

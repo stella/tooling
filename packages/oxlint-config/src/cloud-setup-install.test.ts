@@ -153,7 +153,9 @@ test("service installation uses shared bounded network helpers for every downloa
       'DEBIAN_FRONTEND=noninteractive apt_network install -y --no-install-recommends --download-only "$@"\n  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --no-download "$@"\n)',
     );
     expect(rendered).not.toContain("apt_network update");
-    const refreshes = [...rendered.matchAll(/^ *apt_refresh_for (.+)\n *apt_install (.+)$/gm)];
+    const refreshes = [
+      ...rendered.matchAll(/^ *apt_refresh_for (.+)\n *apt_install (.+)$/gm),
+    ];
     expect(refreshes.length).toBe(services.length);
     for (const [, refreshed, installed] of refreshes)
       expect(refreshed).toBe(installed);

@@ -167,7 +167,8 @@ jobs:
 
   ci-result:
     if: always()
-    needs: [changeset, build-checks, engine-floor, rust-lints, hawk-compatibility]
+    needs:
+      [changeset, build-checks, engine-floor, rust-lints, hawk-compatibility]
     runs-on: ubuntu-24.04
     steps:
       - name: Require every validation job to succeed
