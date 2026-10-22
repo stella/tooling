@@ -618,7 +618,7 @@ const runDependencyState = (command: string) =>
 REPO_ROOT="$FIXTURE_ROOT"
 DEPENDENCY_STATE_ROOT="$FIXTURE_ROOT/state"
 DEPENDENCY_STAMP="$DEPENDENCY_STATE_ROOT/dependencies.sha256"
-dependency_install() { printf 'install\\n' >> "$FIXTURE_ROOT/installs"; [[ "\${INSTALL_FAIL:-}" != 1 ]]; }
+dependency_install() { printf 'install\\n' >> "$FIXTURE_ROOT/installs"; mkdir -p "$FIXTURE_ROOT/node_modules"; [[ "\${INSTALL_FAIL:-}" != 1 ]]; }
 ${functions}
 ${command}`,
       ],
@@ -632,6 +632,16 @@ test("an equal dependency stamp skips installation", () => {
 : > "$FIXTURE_ROOT/installs"
 sync_dependencies
 [[ ! -s "$FIXTURE_ROOT/installs" ]]`);
+  expect(result.exitCode).toBe(0);
+});
+
+test("an equal stamp without node_modules reinstalls", () => {
+  const { result } = runDependencyState(`install_dependencies
+: > "$FIXTURE_ROOT/installs"
+rm -rf -- "$FIXTURE_ROOT/node_modules"
+sync_dependencies
+[[ "$(wc -l < "$FIXTURE_ROOT/installs")" == 1 ]]
+[[ -d "$FIXTURE_ROOT/node_modules" ]]`);
   expect(result.exitCode).toBe(0);
 });
 
@@ -694,9 +704,10 @@ test("runtime installation replaces image Bun executables and verifies every res
     const oldInstall = join(mise, "installs/bun/1.2.14/bin");
     const shims = join(mise, "shims");
     const other = join(root, "other-bin");
+    const last = join(root, "last-bin");
     const pinned = join(root, "pinned");
     const minimal = join(root, "minimal-bin");
-    for (const directory of [oldInstall, shims, other, pinned, minimal])
+    for (const directory of [oldInstall, shims, other, last, pinned, minimal])
       mkdirSync(directory, { recursive: true });
     writeFileSync(join(pinned, "bun"), `#!/bin/sh\necho '${policy.bun}'\n`, {
       mode: 0o755,
@@ -727,6 +738,7 @@ test("runtime installation replaces image Bun executables and verifies every res
       join(shims, "bun"),
       join(shims, "bunx"),
       join(other, "bun"),
+      join(last, "bun"),
     ]) {
       writeFileSync(executable, "#!/bin/sh\necho 1.2.14\n");
       chmodSync(executable, 0o755);
@@ -745,11 +757,11 @@ export MISE_OFFLINE=1
 export STLL_CLOUD_TEST_MINIMAL_PATH="$FIXTURE_ROOT/minimal-bin"
 export STLL_CLOUD_TEST_LOGIN_SHELL="$FIXTURE_ROOT/login-shell"
 export STLL_CLOUD_TEST_ROOT_MISE="$FIXTURE_ROOT/root-mise"
-PATH="$FIXTURE_ROOT/other-bin:$BUN_DIR:$STLL_CLOUD_TEST_MINIMAL_PATH"
+PATH="$FIXTURE_ROOT/other-bin:$BUN_DIR:$STLL_CLOUD_TEST_MINIMAL_PATH:$FIXTURE_ROOT/last-bin"
 ${functions}
 replace_image_buns
 verify_bun_routes
-for executable in "$MISE_DATA_DIR/installs/bun/1.2.14/bin/bun" "$MISE_DATA_DIR/installs/bun/1.2.14/bin/bunx" "$MISE_DATA_DIR/shims/bun" "$MISE_DATA_DIR/shims/bunx" "$FIXTURE_ROOT/other-bin/bun"; do
+for executable in "$MISE_DATA_DIR/installs/bun/1.2.14/bin/bun" "$MISE_DATA_DIR/installs/bun/1.2.14/bin/bunx" "$MISE_DATA_DIR/shims/bun" "$MISE_DATA_DIR/shims/bunx" "$FIXTURE_ROOT/other-bin/bun" "$FIXTURE_ROOT/last-bin/bun"; do
   [[ "$(readlink -f -- "$executable")" == "$BUN_DIR/bun" ]] || fail "Bun was not replaced at $executable"
 done`,
       ],
@@ -757,7 +769,10 @@ done`,
     );
     expect(result.stderr.toString()).toBe("");
     expect(result.exitCode).toBe(0);
-    expect(generated).toContain("replace_image_buns\n  verify_bun_routes");
+    // Login routes read the installed profile, so they are checked after it.
+    expect(generated).toMatch(
+      /step shell install_shell_environment\n(?: {2}#[^\n]*\n)? {2}step routes verify_bun_routes/u,
+    );
     expect(generated).toContain(
       'minimal_path="$(printenv STLL_CLOUD_TEST_MINIMAL_PATH || true)"',
     );
