@@ -1452,7 +1452,7 @@ test("HTML sink fixtures keep their invalid and clean outcomes across equivalent
   );
   const expectedHtmlSinkInvalidCount =
     REACT_HTML_PROPS.length * htmlSinkFactories.length +
-    DOCUMENT_WRITE_METHODS.size * 16 +
+    DOCUMENT_WRITE_METHODS.size * 19 +
     HTML_ATTRIBUTE_SINKS.length * 2 +
     HTML_ATTRIBUTE_SINKS.filter((sink) => sink.namespaceIndex !== null).length *
       ATTRIBUTE_NAMESPACE_CASES.filter((entry) => entry.kind === "invalid")
