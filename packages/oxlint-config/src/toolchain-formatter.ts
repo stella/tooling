@@ -1,4 +1,5 @@
 import path from "node:path";
+import picomatch from "picomatch";
 import { parse as parseToml } from "smol-toml";
 import { parseDocument } from "yaml";
 
@@ -191,9 +192,54 @@ const isBunFormat = (line: string, flag: "--check" | "--staged") => {
   );
 };
 
+/** Directories of the package manifests the root workspaces globs select. */
+const workspacePackageRoots = (files: Record<string, string>) => {
+  let manifest: unknown;
+  try {
+    manifest = JSON.parse(files["package.json"] ?? "");
+  } catch {
+    return [];
+  }
+  if (!record(manifest)) return [];
+  const declared = manifest["workspaces"];
+  const globs: unknown[] = Array.isArray(declared)
+    ? declared
+    : record(declared) && Array.isArray(declared["packages"])
+      ? declared["packages"]
+      : [];
+  const patterns = globs.filter(
+    (glob): glob is string =>
+      typeof glob === "string" && !glob.startsWith("!"),
+  );
+  return Object.keys(files)
+    .filter((file) => file.endsWith("/package.json"))
+    .map((file) => path.posix.dirname(file))
+    .filter((directory) =>
+      patterns.some((pattern) =>
+        picomatch.isMatch(directory, pattern.replace(/\/+$/u, "")),
+      ),
+    );
+};
+
+/**
+ * Over-approximate ignore semantics: a pattern covers a path when it matches
+ * the path or any ancestor directory, anywhere if it has no inner slash.
+ */
+const ignoresPath = (pattern: string, file: string) => {
+  const body = pattern.replace(/^\/+|\/+$/gu, "");
+  if (body === "") return true;
+  const globs = body.includes("/") ? [body] : [body, `**/${body}`];
+  const parts = file.split("/");
+  return parts.some((_, index) => {
+    const prefix = parts.slice(0, index + 1).join("/");
+    return globs.some((glob) => picomatch.isMatch(prefix, glob, { dot: true }));
+  });
+};
+
 const checkFormatConfig = (
   bunfig: string,
   policy: FormatterPolicy,
+  packageRoots: readonly string[],
 ): string[] => {
   let parsed: Record<string, unknown>;
   try {
@@ -225,6 +271,25 @@ const checkFormatConfig = (
     errors.push(
       `bunfig.toml [fmt] ignorePatterns must include the shared generated files: ${missing.join(", ")}`,
     );
+  // Ignores are for generated or vendored paths; one that covers a workspace
+  // package silently drops its sources from bun fmt --check.
+  for (const pattern of ignored) {
+    if (
+      typeof pattern !== "string" ||
+      pattern.startsWith("!") ||
+      policy.ignorePatterns.includes(pattern)
+    )
+      continue;
+    const covered = packageRoots.filter(
+      (root) =>
+        ignoresPath(pattern, `${root}/package.json`) ||
+        ignoresPath(pattern, `${root}/src/index.ts`),
+    );
+    if (covered.length > 0)
+      errors.push(
+        `bunfig.toml [fmt] ignorePatterns entry ${pattern} covers workspace packages (${covered.join(", ")}); ignore only their generated or vendored paths`,
+      );
+  }
   for (const [key, value] of Object.entries(policy.style))
     if (stableJson(fmt[key]) !== stableJson(value))
       errors.push(
@@ -351,7 +416,11 @@ export const checkFormatter = ({
   if (!usesBun) return diagnostics;
   const bunfig = files["bunfig.toml"];
   if (bunfig !== undefined)
-    for (const message of checkFormatConfig(bunfig, policy))
+    for (const message of checkFormatConfig(
+      bunfig,
+      policy,
+      workspacePackageRoots(files),
+    ))
       add("bunfig.toml", lineOf(bunfig, "[fmt"), message);
   const hasWorkflows = Object.keys(files).some(
     (file) => githubAutomationFileKind(file) === "workflow",
