@@ -325,9 +325,7 @@ test("an ignore pattern that covers a workspace package is rejected", () => {
   ]);
   // A leading slash anchors the pattern at the repository root.
   expect(workspace(["packages/*"], ["/mcp/"])).toEqual([]);
-  expect(
-    workspace(["packages/*"], ["packages/*/lib/**", "**/*.tsx"]),
-  ).toEqual([
+  expect(workspace(["packages/*"], ["packages/*/lib/**", "**/*.tsx"])).toEqual([
     "bunfig.toml: bunfig.toml [fmt] ignorePatterns entry packages/*/lib/** covers workspace packages (packages/mcp, packages/benchmark); ignore only their generated or vendored paths",
     "bunfig.toml: bunfig.toml [fmt] ignorePatterns entry **/*.tsx covers workspace packages (packages/mcp, packages/benchmark); ignore only their generated or vendored paths",
   ]);
