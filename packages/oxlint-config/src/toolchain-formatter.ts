@@ -81,29 +81,19 @@ const tomlValue = (value: unknown): string => {
   return JSON.stringify(value);
 };
 
+const tomlLines = (entries: readonly (readonly [string, unknown])[]) =>
+  entries.map(([key, value]) => `${key} = ${tomlValue(value)}\n`).join("");
+
 /** Render the shared bunfig.toml [fmt] tables. */
 export const sharedFormatTables = (policy: FormatterPolicy) => {
-  const scalars = Object.entries(policy.style).filter(
-    ([, value]) => !record(value),
-  );
-  const tables = Object.entries(policy.style).filter(([, value]) =>
-    record(value),
-  );
-  return [
-    [
-      "[fmt]",
-      ...scalars.map(([key, value]) => `${key} = ${tomlValue(value)}`),
-      `ignorePatterns = ${tomlValue(policy.ignorePatterns)}`,
-    ],
-    ...tables.map(([name, table]) => [
-      `[fmt.${name}]`,
-      ...Object.entries(table as Record<string, unknown>).map(
-        ([key, value]) => `${key} = ${tomlValue(value)}`,
-      ),
-    ]),
-  ]
-    .map((lines) => `${lines.join("\n")}\n`)
-    .join("\n");
+  const entries = Object.entries(policy.style);
+  let output = `[fmt]\n${tomlLines(
+    entries.filter(([, value]) => !record(value)),
+  )}ignorePatterns = ${tomlValue(policy.ignorePatterns)}\n`;
+  for (const [name, table] of entries)
+    if (record(table))
+      output += `\n[fmt.${name}]\n${tomlLines(Object.entries(table))}`;
+  return output;
 };
 
 const stableJson = (value: unknown): string =>
