@@ -1,6 +1,6 @@
 [install]
 # 5-day quarantine: reject fresh package versions to reduce supply-chain risk.
-minimumReleaseAge = 432_000
+minimumReleaseAge = 432000
 # stll-quarantine --sync maintains exact permanent first-party exemptions.
 minimumReleaseAgeExcludes = [
   "@stll/time", # quarantine-excluded-since: 2026-10-17T13:44:24.000Z

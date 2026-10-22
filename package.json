@@ -6,6 +6,7 @@
   "workspaces": [
     "packages/*"
   ],
+  "trustedDependencies": [],
   "scripts": {
     "build": "bun --filter @stll/oxlint-config build && bun --filter @stll/oxlint-plugin build && bun --filter @stll/time build && bun --filter @stll/test-kit build",
     "changeset": "changeset",
