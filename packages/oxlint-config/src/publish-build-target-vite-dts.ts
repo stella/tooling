@@ -400,10 +400,10 @@ export const declarationHookParts = (
   if (!record(filter)) throw new Error("Invalid reviewed declaration hook");
   const id = Object.fromEntries(dataEntries(filter, ["id"]))["id"];
   if (!record(id)) throw new Error("Invalid reviewed declaration hook");
-  const patterns = Object.fromEntries(dataEntries(id, ["include", "exclude"]));
+  const idFilter = Object.fromEntries(dataEntries(id, ["include", "exclude"]));
   const ids: DeclarationHookFilter["id"] = {};
-  const include = idPattern(patterns["include"]);
-  const exclude = idPattern(patterns["exclude"]);
+  const include = idPattern(idFilter["include"]);
+  const exclude = idPattern(idFilter["exclude"]);
   if (include !== undefined) ids.include = include;
   if (exclude !== undefined) ids.exclude = exclude;
   return { handler: parts["handler"], filter: { id: ids } };
