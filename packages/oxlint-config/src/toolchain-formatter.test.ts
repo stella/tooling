@@ -293,3 +293,54 @@ test("repositories without Bun only get the formatter bans", () => {
   ).toEqual([]);
   expect(check({ ".prettierrc": "" }, false)).toHaveLength(1);
 });
+
+test("an ignore pattern that covers a workspace package is rejected", () => {
+  const workspace = (workspaces: unknown, patterns: string[]) =>
+    check({
+      "package.json": manifest({ workspaces }),
+      "packages/mcp/package.json": manifest({ name: "mcp" }),
+      "packages/benchmark/package.json": manifest({ name: "benchmark" }),
+      "npm/linux-x64/package.json": manifest({ name: "binary" }),
+      "bunfig.toml": bunfig.replace(
+        "ignorePatterns = [",
+        `ignorePatterns = [${patterns.map((pattern) => JSON.stringify(pattern)).join(", ")}, `,
+      ),
+    });
+  const narrow = [
+    "packages/benchmark/vendor/**",
+    "packages/benchmark/results/**",
+    "vendor/",
+    "**/dist/**",
+    "npm/",
+  ];
+  expect(workspace(["packages/*"], narrow)).toEqual([]);
+  expect(workspace({ packages: ["packages/*"] }, narrow)).toEqual([]);
+  expect(
+    workspace(["packages/*"], ["packages/", "packages/benchmark/**", "**"]),
+  ).toEqual([
+    "bunfig.toml: bunfig.toml [fmt] ignorePatterns entry packages/ covers workspace packages (packages/mcp, packages/benchmark); ignore only their generated or vendored paths",
+    "bunfig.toml: bunfig.toml [fmt] ignorePatterns entry packages/benchmark/** covers workspace packages (packages/benchmark); ignore only their generated or vendored paths",
+    "bunfig.toml: bunfig.toml [fmt] ignorePatterns entry ** covers workspace packages (packages/mcp, packages/benchmark); ignore only their generated or vendored paths",
+  ]);
+  // A leading slash anchors the pattern at the repository root.
+  expect(workspace(["packages/*"], ["/mcp/"])).toEqual([]);
+  expect(workspace(["packages/*"], ["packages/*/lib/**", "**/*.tsx"])).toEqual([
+    "bunfig.toml: bunfig.toml [fmt] ignorePatterns entry packages/*/lib/** covers workspace packages (packages/mcp, packages/benchmark); ignore only their generated or vendored paths",
+    "bunfig.toml: bunfig.toml [fmt] ignorePatterns entry **/*.tsx covers workspace packages (packages/mcp, packages/benchmark); ignore only their generated or vendored paths",
+  ]);
+  // Negations are refused: every repository pattern only removes files.
+  expect(
+    workspace(["packages/*"], ["packages/**/*.ts", "!packages/mcp/**/*.ts"]),
+  ).toEqual([
+    "bunfig.toml: bunfig.toml [fmt] ignorePatterns entry !packages/mcp/**/*.ts re-includes files; list only generated or vendored paths",
+    "bunfig.toml: bunfig.toml [fmt] ignorePatterns entry packages/**/*.ts covers workspace packages (packages/mcp, packages/benchmark); ignore only their generated or vendored paths",
+  ]);
+  // A negated workspace pattern leaves that directory outside the workspace.
+  expect(
+    workspace(["packages/*", "!packages/benchmark"], ["packages/benchmark/"]),
+  ).toEqual([]);
+  expect(workspace(["packages/*"], ["mcp/", "packages/*/src/**"])).toEqual([
+    "bunfig.toml: bunfig.toml [fmt] ignorePatterns entry mcp/ covers workspace packages (packages/mcp); ignore only their generated or vendored paths",
+    "bunfig.toml: bunfig.toml [fmt] ignorePatterns entry packages/*/src/** covers workspace packages (packages/mcp, packages/benchmark); ignore only their generated or vendored paths",
+  ]);
+});
