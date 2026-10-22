@@ -297,7 +297,7 @@ test("Rust and tool input changes cannot silently retain a clean cloud drift che
     const policy = parseToolchainPolicy(policyInput);
     const rustSource = `[toolchain]\nchannel = "${policy.rust}"\nprofile = "minimal"\ncomponents = ["clippy"]\ntargets = ["wasm32-unknown-unknown"]\n`;
     const lockSource =
-      'version = 4\n[[package]]\nname = "wasm-bindgen"\nversion = "0.2.126"\n';
+      'version = 4\n[[package]]\nname = "fixture-dev"\nversion = "1.0.0"\n[[package]]\nname = "wasm-bindgen"\nversion = "0.2.126"\n';
     const configuration = {
       cloud: {
         ...declaration,
@@ -320,6 +320,12 @@ test("Rust and tool input changes cannot silently retain a clean cloud drift che
         ({ rule }) => rule === "cloud-setup-drift",
       );
     expect(drift()).toEqual([]);
+    await writeFile(
+      join(root, "Cargo.lock"),
+      lockSource.replace('version = "1.0.0"', 'version = "2.0.0"'),
+    );
+    expect(drift()).toEqual([]);
+    await writeFile(join(root, "Cargo.lock"), lockSource);
     const mutations = [
       {
         file: "rust-toolchain.toml",
