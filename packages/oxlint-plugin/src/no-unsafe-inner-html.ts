@@ -425,6 +425,18 @@ export default eslintCompatPlugin({
             if (seen.has(variable)) return null;
             seen.add(variable);
             const definition = variable.defs.at(0);
+            // A never-reassigned class or function declaration holds a
+            // function, which is neither an element nor a document.
+            if (
+              variable.defs.length === 1 &&
+              (definition?.type === "ClassName" ||
+                definition?.type === "FunctionName") &&
+              (definition.node.type === "ClassDeclaration" ||
+                definition.node.type === "FunctionDeclaration") &&
+              !variable.references.some((reference) => reference.isWrite())
+            ) {
+              return { kind: "expression", node: definition.node, scope };
+            }
             if (
               variable.defs.length !== 1 ||
               definition?.type !== "Variable" ||

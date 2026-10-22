@@ -1134,6 +1134,25 @@ const producerCorpus = (): {
     );
   }
   lines.push(
+    "{",
+    "class Factory {}",
+    `// expect-clean: ${ruleId} -- a class declaration holds a function, not a DOM target`,
+    "Object.assign(Factory, payload);",
+    "}",
+    "{",
+    "function factory() {}",
+    `// expect-clean: ${ruleId} -- a function declaration holds a function, not a DOM target`,
+    "Object.assign(factory, payload);",
+    "}",
+    "{",
+    "class Reassigned {}",
+    "Reassigned = document.body;",
+    `// oxlint-disable-next-line ${ruleId} -- a reassigned class binding may hold a DOM target`,
+    "Object.assign(Reassigned, payload);",
+    "}",
+  );
+  invalidCount += 1;
+  lines.push(
     "// safe-html: fixture waiver is consumed by the first, statically safe write",
     'document.write(""); document.write(rawHtml); // oxlint-disable-line ' +
       `${ruleId} -- second same-line document.write sink is intentionally opaque`,
