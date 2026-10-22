@@ -9,7 +9,8 @@
 //     JSX attribute value or a property of any object literal (props passed
 //     to `createElement` / `jsx()`, or spread into JSX).
 //   • assignment to `innerHTML`, `outerHTML` or `srcdoc`, dot or static
-//     bracket notation, and the same keys in an `Object.assign` source.
+//     bracket notation, and the same keys in an `Object.assign` source
+//     (either branch of a conditional or logical source).
 //   • the JSX `srcDoc` attribute.
 //   • `insertAdjacentHTML`, `setHTMLUnsafe`, `createContextualFragment`,
 //     `setAttribute("srcdoc", …)` / `setAttributeNS(…, "srcdoc", …)`,
@@ -836,6 +837,33 @@ export default eslintCompatPlugin({
         ): void => {
           for (const source of sources) {
             const expression = unwrapExpression(source);
+            // Each branch of a conditional or logical expression may be the
+            // value Object.assign copies from; the condition itself is not,
+            // and the left side of `&&` is copied only when falsy, so never
+            // as an object.
+            if (expression?.type === "ConditionalExpression") {
+              checkHtmlPropertySources(
+                [expression.consequent, expression.alternate],
+                domTarget,
+              );
+              continue;
+            }
+            // Object.assign skips null and undefined sources.
+            if (
+              (expression?.type === "Literal" && expression.value === null) ||
+              isIdentifier(expression, "undefined")
+            ) {
+              continue;
+            }
+            if (expression?.type === "LogicalExpression") {
+              checkHtmlPropertySources(
+                expression.operator === "&&"
+                  ? [expression.right]
+                  : [expression.left, expression.right],
+                domTarget,
+              );
+              continue;
+            }
             if (expression?.type !== "ObjectExpression") {
               if (domTarget) {
                 reportIfUnsafe(source);
