@@ -55,6 +55,13 @@ describe("consumer toolchain guard CLI", () => {
       const passing = run([]);
       expect(passing.status, passing.stderr).toBe(0);
       expect(passing.stderr).toBe("");
+      // The shared Bun is a minimum: a later exact release passes.
+      writeFileSync(
+        path.join(root, "package.json"),
+        packageJson({ packageManager: "bun@99.0.0" }),
+      );
+      const newer = run([]);
+      expect(newer.status, newer.stderr).toBe(0);
       writeFileSync(
         path.join(root, "package.json"),
         packageJson({ packageManager: "bun@1.4.1" }),

@@ -1023,7 +1023,7 @@ export const checkPackageFiles = ({
         rule: "bun-pins",
         key: "packageManager",
         value: manager,
-        message: `packageManager Bun version must be ${policy.bun}, found ${JSON.stringify(manager)}`,
+        message: `packageManager Bun version must be ${policy.bun} (one exact release at or above the shared minimum, the same in every manifest), found ${JSON.stringify(manager)}`,
       });
     const checkEntries = (
       entries: unknown,
