@@ -1174,6 +1174,8 @@ const generatedHtmlSinkCorpus = (): {
     'import { promises as fsPromises } from "node:fs";',
     'import fsPromisesDefault from "fs/promises";',
     'import otherWriter from "other-writer";',
+    'import { StreamMatcher } from "./stream";',
+    'import { Document as ShimDocument } from "happy-dom";',
     "declare const rawHtml: string;",
     "const config = { write(..._values: string[]) {}, writeln(..._values: string[]) {} };",
     "declare function createElement(type: string, props: object): unknown;",
@@ -1292,6 +1294,26 @@ const generatedHtmlSinkCorpus = (): {
       kind: "invalid",
       label: `${method} treats an imported receiver as a document`,
       code: `importedDocument.${method}(rawHtml);`,
+    });
+    addCase({
+      kind: "clean",
+      label: `${method} accepts an instance of an imported non-document class`,
+      code: `{ const matcher = new StreamMatcher(); matcher.${method}(rawHtml); }`,
+    });
+    addCase({
+      kind: "invalid",
+      label: `${method} treats an aliased imported Document instance as a document`,
+      code: `{ const doc = new ShimDocument(); doc.${method}(rawHtml); }`,
+    });
+    addCase({
+      kind: "invalid",
+      label: `${method} treats a global Document instance as a document`,
+      code: `{ const doc = new Document(); doc.${method}(rawHtml); }`,
+    });
+    addCase({
+      kind: "invalid",
+      label: `${method} treats a reassigned class instance as a document`,
+      code: `{ let matcher = new StreamMatcher(); matcher = document; matcher.${method}(rawHtml); }`,
     });
     addCase({
       kind: "invalid",
