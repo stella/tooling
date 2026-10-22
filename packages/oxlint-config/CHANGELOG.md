@@ -1,5 +1,13 @@
 # @stll/oxlint-config
 
+## 1.9.0
+
+### Minor Changes
+
+- [#215](https://github.com/stella/tooling/pull/215) [`a21ab62`](https://github.com/stella/tooling/commit/a21ab628bbbfa1920a054608084584a42bf7b1b9) Thanks [@jan-kubica](https://github.com/jan-kubica)! - The shared `bun` value is a minimum. A repository pins one exact Bun release at or above it in its root `packageManager`, and `bun-types`, setup-bun selectors, images, version files and the generated cloud setup must equal that release, so a repository can take a newer Bun without a policy release.
+
+- [#212](https://github.com/stella/tooling/pull/212) [`ddd6275`](https://github.com/stella/tooling/commit/ddd62757a05571c9c97920d3472759709b266a6d) Thanks [@jan-kubica](https://github.com/jan-kubica)! - The formatter policy rejects a repository `ignorePatterns` entry in `bunfig.toml [fmt]` that covers a workspace package, so `bun fmt --check` cannot silently skip package sources, and it rejects negated entries, so every listed pattern only removes files. Patterns for generated or vendored paths inside a package stay allowed.
+
 ## 1.8.0
 
 ### Minor Changes
