@@ -23,7 +23,6 @@ type ImportGroup = { groupName: string; elementNamePattern: string[] };
 
 export type FormatterPolicy = {
   command: "bun fmt";
-  printWidth: number;
   sortImports: {
     newlinesBetween: boolean;
     customGroups: ImportGroup[];
@@ -48,25 +47,13 @@ const importGroup = (value: unknown): value is ImportGroup =>
 export const parseFormatterPolicy = (input: unknown): FormatterPolicy => {
   if (
     !record(input) ||
-    Object.keys(input).some(
-      (key) =>
-        key !== "command" && key !== "printWidth" && key !== "sortImports",
-    )
+    Object.keys(input).some((key) => key !== "command" && key !== "sortImports")
   )
     throw new Error(
-      "toolchain.json formatter accepts only command, printWidth and sortImports",
+      "toolchain.json formatter accepts only command and sortImports",
     );
   if (input["command"] !== "bun fmt")
     throw new Error("toolchain.json formatter command must be bun fmt");
-  const printWidth = input["printWidth"];
-  if (
-    typeof printWidth !== "number" ||
-    !Number.isInteger(printWidth) ||
-    printWidth <= 0
-  )
-    throw new Error(
-      "toolchain.json formatter printWidth must be a positive integer",
-    );
   const sortImports = input["sortImports"];
   if (
     !record(sortImports) ||
@@ -79,7 +66,6 @@ export const parseFormatterPolicy = (input: unknown): FormatterPolicy => {
     );
   return {
     command: "bun fmt",
-    printWidth,
     sortImports: {
       newlinesBetween: sortImports["newlinesBetween"],
       customGroups: sortImports["customGroups"],
@@ -104,7 +90,7 @@ export const sharedFormatTables = (policy: FormatterPolicy) => {
     "sibling",
     "index",
   ];
-  return `[fmt]\nprintWidth = ${policy.printWidth}\n\n[fmt.sortImports]\ncustomGroups = [${groups}]\ngroups = ${JSON.stringify(order)}\nnewlinesBetween = ${String(newlinesBetween)}\n`;
+  return `[fmt]\n\n[fmt.sortImports]\ncustomGroups = [${groups}]\ngroups = ${JSON.stringify(order)}\nnewlinesBetween = ${String(newlinesBetween)}\n`;
 };
 
 // Every alternative formatter is rejected, not only the one being replaced.
@@ -222,10 +208,6 @@ const checkFormatConfig = (
       `bunfig.toml requires a [fmt] table: bun fmt reads its configuration only from there; start from:\n${sharedFormatTables(policy)}`,
     ];
   const errors: string[] = [];
-  if (fmt["printWidth"] !== policy.printWidth)
-    errors.push(
-      `bunfig.toml [fmt] printWidth must equal the shared ${policy.printWidth}`,
-    );
   const sortImports = fmt["sortImports"];
   if (!record(sortImports))
     return [

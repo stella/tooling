@@ -87,9 +87,6 @@ test("the shared policy is closed and names bun fmt", () => {
   expect(() =>
     parseFormatterPolicy({ ...toolchain.formatter, semi: false }),
   ).toThrow("accepts only");
-  expect(() =>
-    parseFormatterPolicy({ ...toolchain.formatter, printWidth: 0 }),
-  ).toThrow("printWidth");
 });
 
 test("every alternative formatter dependency fails, wherever it is declared", () => {
@@ -209,9 +206,8 @@ test("bunfig.toml [fmt] carries the shared style", () => {
   expect(
     check({ "bunfig.toml": `[install]\n\n${sharedFormatTables(policy)}` }),
   ).toEqual([]);
-  expect(shared(["printWidth = 80", "printWidth = 100"])).toEqual([
-    "bunfig.toml: bunfig.toml [fmt] printWidth must equal the shared 80",
-  ]);
+  // Line width stays a repository choice.
+  expect(shared(["printWidth = 80", "printWidth = 60"])).toEqual([]);
   expect(shared(["newlinesBetween = true", "newlinesBetween = false"])).toEqual(
     [
       "bunfig.toml: bunfig.toml [fmt.sortImports] newlinesBetween must equal the shared true",

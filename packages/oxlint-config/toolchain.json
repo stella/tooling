@@ -7,7 +7,6 @@
   "oxlint-tsgolint": "7.0.2003",
   "formatter": {
     "command": "bun fmt",
-    "printWidth": 80,
     "sortImports": {
       "newlinesBetween": true,
       "customGroups": [
