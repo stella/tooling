@@ -241,13 +241,14 @@ const packageSourceProbes = [
  * directories, and a leading or inner slash anchors it at the root; otherwise
  * it matches at any depth.
  */
-const matchesLevel = (pattern: string, path: string, directory: boolean) => {
+const matchesLevel = (pattern: string, level: string, directory: boolean) => {
   if (pattern.endsWith("/") && !directory) return false;
   const anchored = pattern.replace(/\/+$/u, "").includes("/");
   const body = pattern.replace(/^\/+|\/+$/gu, "");
-  if (body === "") return true;
+  // An empty pattern (a bare "!" or "/") matches nothing.
+  if (body === "") return false;
   const globs = anchored ? [body] : [body, `**/${body}`];
-  return globs.some((glob) => picomatch.isMatch(path, glob, { dot: true }));
+  return globs.some((glob) => picomatch.isMatch(level, glob, { dot: true }));
 };
 
 /**
