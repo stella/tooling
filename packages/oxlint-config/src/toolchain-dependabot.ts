@@ -72,6 +72,7 @@ const isDependabotEcosystem = (value: string): value is DependabotEcosystem =>
 type DependabotPolicy = {
   schedule: { interval: string; day: string; time: string; timezone: string };
   cooldown: { defaultDays: number };
+  actionGroups: Record<string, { patterns: readonly string[] }>;
   groups: Record<
     string,
     { patterns: readonly string[]; updateTypes: readonly string[] }
@@ -80,6 +81,22 @@ type DependabotPolicy = {
   ignoredActions: readonly string[];
   ignoredImages: readonly string[];
 };
+
+type DependabotGroup = {
+  patterns: readonly string[];
+  updateTypes?: readonly string[] | undefined;
+};
+
+/** Ordered groups for one ecosystem: GitHub Actions first gathers first-party refs. */
+const groupsFor = (
+  ecosystem: string,
+  policy: DependabotPolicy,
+): [string, DependabotGroup][] => [
+  ...(ecosystem === "github-actions"
+    ? Object.entries(policy.actionGroups)
+    : []),
+  ...Object.entries(policy.groups),
+];
 
 type Diagnostic = {
   rule: (typeof dependabotRules)[number];
@@ -803,9 +820,11 @@ export const generateDependabotConfig = ({
         },
         cooldown: { "default-days": policy.cooldown.defaultDays },
         groups: Object.fromEntries(
-          Object.entries(policy.groups).map(([name, group]) => [
+          groupsFor(ecosystem, policy).map(([name, group]) => [
             name,
-            { patterns: group.patterns, "update-types": group.updateTypes },
+            group.updateTypes === undefined
+              ? { patterns: group.patterns }
+              : { patterns: group.patterns, "update-types": group.updateTypes },
           ]),
         ),
         ignore: ignore.length > 0 ? ignore : undefined,
@@ -1000,16 +1019,21 @@ export const checkDependabot = ({
         `${ecosystem}: cooldown must contain only default-days: ${policy.cooldown.defaultDays}`,
       );
     const groups = update["groups"];
+    const expectedGroups = groupsFor(ecosystem, policy);
     if (
       !record(groups) ||
-      Object.keys(groups).length !== Object.keys(policy.groups).length ||
-      Object.entries(policy.groups).some(([name, expected]) => {
+      // Dependabot assigns an update to the first matching group.
+      JSON.stringify(Object.keys(groups)) !==
+        JSON.stringify(expectedGroups.map(([name]) => name)) ||
+      expectedGroups.some(([name, expected]) => {
         const group = groups[name];
         return (
           !record(group) ||
-          Object.keys(group).length !== 2 ||
+          Object.keys(group).length !==
+            (expected.updateTypes === undefined ? 1 : 2) ||
           !sameStrings(group["patterns"], expected.patterns) ||
-          !sameStrings(group["update-types"], expected.updateTypes)
+          (expected.updateTypes !== undefined &&
+            !sameStrings(group["update-types"], expected.updateTypes))
         );
       })
     )

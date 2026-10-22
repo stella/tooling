@@ -109,7 +109,7 @@ test("the required-check workflows handle merge groups and use the reviewed veri
     types: ["opened", "synchronize", "reopened", "ready_for_review"],
   });
   expect(cla["jobs"]["cla"]["uses"]).toBe(
-    "stella/.github/.github/workflows/cla.yml@caa3ee1c2d02ef807994fdd3907c55ba104aff00",
+    "stella/.github/.github/workflows/cla.yml@a98150379a0659f9ff603970a06dbdee56f7c4cb",
   );
   expect(cla["jobs"]["cla"]["if"]).toContain(
     "github.event_name == 'merge_group'",

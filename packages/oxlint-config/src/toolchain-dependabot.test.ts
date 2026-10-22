@@ -23,6 +23,7 @@ const policy = {
     timezone: "Europe/Prague",
   },
   cooldown: { defaultDays: 5 },
+  actionGroups: { "stella-shared": { patterns: ["stella/.github/*"] } },
   groups: {
     dependencies: { patterns: ["*"], updateTypes: ["minor", "patch"] },
   },
@@ -45,12 +46,18 @@ const update = (ecosystem = "npm", directory = "/") => {
     directory,
     schedule: policy.schedule,
     cooldown: { "default-days": policy.cooldown.defaultDays },
-    groups: Object.fromEntries(
-      Object.entries(policy.groups).map(([name, group]) => [
+    groups: Object.fromEntries([
+      ...(ecosystem === "github-actions"
+        ? Object.entries(policy.actionGroups).map(([name, group]) => [
+            name,
+            { patterns: group.patterns },
+          ])
+        : []),
+      ...Object.entries(policy.groups).map(([name, group]) => [
         name,
         { patterns: group.patterns, "update-types": group.updateTypes },
       ]),
-    ),
+    ]),
     ignore:
       ignored.length > 0
         ? ignored.map((name) => ({
@@ -968,6 +975,41 @@ describe("Dependabot policy", () => {
       for (const diagnostic of diagnostics) exercised.add(diagnostic.rule);
     }
     expect([...exercised].sort()).toEqual([...dependabotRules].sort());
+  });
+
+  test("first-party reusable workflow refs form one ordered GitHub Actions group", () => {
+    const workflow = { ".github/workflows/ci.yml": "on: push\njobs: {}\n" };
+    const actions = (groups: unknown) =>
+      check(config([{ ...update("github-actions"), groups }]), workflow).some(
+        ({ rule }) => rule === "groups",
+      );
+    const shared = { patterns: ["stella/.github/*"] };
+    const semver = { patterns: ["*"], "update-types": ["minor", "patch"] };
+    expect(actions({ "stella-shared": shared, dependencies: semver })).toBe(
+      false,
+    );
+    // Dependabot assigns an update to the first matching group.
+    expect(actions({ dependencies: semver, "stella-shared": shared })).toBe(
+      true,
+    );
+    expect(actions({ dependencies: semver })).toBe(true);
+    expect(
+      actions({
+        "stella-shared": { ...shared, "update-types": ["minor"] },
+        dependencies: semver,
+      }),
+    ).toBe(true);
+    // Other ecosystems keep only the shared semver groups.
+    expect(
+      check(
+        config([
+          {
+            ...update(),
+            groups: { "stella-shared": shared, dependencies: semver },
+          },
+        ]),
+      ).some(({ rule }) => rule === "groups"),
+    ).toBe(true);
   });
 
   test("infers GitHub Actions from root action metadata", () => {

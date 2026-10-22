@@ -88,6 +88,9 @@ updates:
     cooldown:
       default-days: 5
     groups:
+      stella-shared:
+        patterns:
+          - stella/.github/*
       dependencies:
         patterns:
           - "*"
