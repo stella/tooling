@@ -185,8 +185,11 @@ test("the emission ledger rejects deferred JavaScript and foreign asset updates"
     emitChunk: () => {
       throw new Error("Unknown API reached host");
     },
+    getNativeBuildContext: () => ({ framework: "webpack" }),
   };
   const context = ledger.wrapContext(host);
+  // The native bundler context is withheld, not forwarded.
+  expect(Reflect.get(context, "getNativeBuildContext")).toBeUndefined();
   const emit = context["emitFile"];
   if (typeof emit !== "function") throw new Error("Missing fixture emitFile");
   expect(() =>

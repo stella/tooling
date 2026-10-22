@@ -197,6 +197,9 @@ export const assertDeclarationOnlyOutput = ({
   }
 };
 
+// Optional capabilities the plugin probes and handles as absent: withholding
+// the native bundler context keeps it on its bundler-neutral path.
+const withheldContextCapabilities = new Set(["getNativeBuildContext"]);
 const passiveContextMethods = new Set([
   "warn",
   "error",
@@ -317,6 +320,7 @@ export const createDeclarationEmissionLedger = () => {
           methods.set(key, forwarded);
           return forwarded;
         }
+        if (withheldContextCapabilities.has(key)) return undefined;
         const value: unknown = receiver[key];
         if (key === "meta") return contextData(value);
         if (
