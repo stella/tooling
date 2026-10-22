@@ -219,14 +219,33 @@ const workspacePackageRoots = (files: Record<string, string>) => {
     .map((file) => path.posix.dirname(file));
 };
 
+// Representative package files: the manifest and common source layouts and
+// extensions. An ignore that matches any of them drops package sources.
+const packageSourceProbes = [
+  "package.json",
+  "index.ts",
+  "index.js",
+  "src/index.ts",
+  "src/index.tsx",
+  "src/index.js",
+  "src/index.mjs",
+  "src/main.ts",
+  "src/nested/module.ts",
+  "src/nested/component.tsx",
+  "lib/index.ts",
+  "lib/index.js",
+] as const;
+
 /**
  * Over-approximate ignore semantics: a pattern covers a path when it matches
- * the path or any ancestor directory, anywhere if it has no inner slash.
+ * the path or any ancestor directory. A leading or inner slash anchors it at
+ * the root; otherwise it matches at any depth.
  */
 const ignoresPath = (pattern: string, file: string) => {
+  const anchored = pattern.replace(/\/+$/u, "").includes("/");
   const body = pattern.replace(/^\/+|\/+$/gu, "");
   if (body === "") return true;
-  const globs = body.includes("/") ? [body] : [body, `**/${body}`];
+  const globs = anchored ? [body] : [body, `**/${body}`];
   const parts = file.split("/");
   return parts.some((_, index) => {
     const prefix = parts.slice(0, index + 1).join("/");
@@ -280,8 +299,9 @@ const checkFormatConfig = (
       continue;
     const covered = packageRoots.filter(
       (root) =>
-        ignoresPath(pattern, `${root}/package.json`) ||
-        ignoresPath(pattern, `${root}/src/index.ts`),
+        packageSourceProbes.some((probe) =>
+          ignoresPath(pattern, `${root}/${probe}`),
+        ),
     );
     if (covered.length > 0)
       errors.push(
