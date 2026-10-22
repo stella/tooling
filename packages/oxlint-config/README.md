@@ -715,8 +715,8 @@ export default {
 };
 ```
 
-This adapter requires consumer-installed `vite-plugin-dts` 5.0.3 and its
-`unplugin-dts` 1.0.3 implementation. Its dependency scope must provide TypeScript
+This adapter requires consumer-installed `vite-plugin-dts` 5.1.2 and its
+`unplugin-dts` 1.1.2 implementation. Its dependency scope must provide TypeScript
 6.0.3 as `typescript` or the plugin's `@typescript/typescript6` fallback.
 Unsupported versions fail explicitly.
 The resolver proves a direct helper import and call in a literal plugin array;

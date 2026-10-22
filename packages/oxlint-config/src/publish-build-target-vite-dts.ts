@@ -3,8 +3,8 @@ import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 export const reviewedViteDtsVersions = {
-  "vite-plugin-dts": "5.0.3",
-  "unplugin-dts": "1.0.3",
+  "vite-plugin-dts": "5.1.2",
+  "unplugin-dts": "1.1.2",
 } as const;
 
 const record = (value: unknown): value is Record<string, unknown> =>
