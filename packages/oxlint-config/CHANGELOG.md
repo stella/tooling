@@ -1,5 +1,15 @@
 # @stll/oxlint-config
 
+## 1.10.0
+
+### Minor Changes
+
+- [#182](https://github.com/stella/tooling/pull/182) [`0376007`](https://github.com/stella/tooling/commit/0376007873c84e2f31b6c1bfc799940783798abc) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Cloud setup accepts `cloud.submodules`: the networked install phase synchronizes and shallow-initializes Git submodules before dependency installation.
+
+### Patch Changes
+
+- [#218](https://github.com/stella/tooling/pull/218) [`5314e44`](https://github.com/stella/tooling/commit/5314e44aa0765a02ed507f3cd99aeee886008f54) Thanks [@jan-kubica](https://github.com/jan-kubica)! - The generated cloud setup runs the frozen dependency install at every start instead of skipping it on a lockfile stamp. The install reads every input the package manager uses and changes nothing on a current tree, so a manifest or patch edit without a regenerated lockfile is refused and a deleted or replaced `node_modules` is reinstalled.
+
 ## 1.9.0
 
 ### Minor Changes
