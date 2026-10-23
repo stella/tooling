@@ -236,78 +236,13 @@ process.stdout.write([...hosts].sort().join(","));
   network_run "$download_hosts" 240 runuser -u "$OUTPUT_USER" -- env HOME="$OUTPUT_HOME" BUN_INSTALL_CACHE_DIR="$BUN_CACHE" PATH="$PATH" BUN_CONFIG_HTTP_IDLE_TIMEOUT=20 "$BUN_DIR/bun" @INSTALL_ARGS@
 }
 
-as_output_user() { runuser -u "$OUTPUT_USER" -- "$@"; }
-
-# Patch files the manifests on stdin (NUL-separated) reference through
-# patchedDependencies, as NUL-separated repository paths.
-patched_dependency_files() {
-  as_output_user "$BUN_DIR/bun" -e '
-const fs = require("node:fs");
-const path = require("node:path");
-const files = [];
-for (const manifest of fs.readFileSync(0, "utf8").split("\0").filter(Boolean)) {
-  let patched;
-  try { patched = JSON.parse(fs.readFileSync(manifest, "utf8")).patchedDependencies; } catch { continue; }
-  if (patched === null || typeof patched !== "object") continue;
-  for (const file of Object.values(patched)) {
-    if (typeof file !== "string") continue;
-    const resolved = "./" + path.relative(".", path.resolve(path.dirname(manifest), file));
-    if (fs.statSync(resolved, { throwIfNoEntry: false })?.isFile()) files.push(resolved + "\0");
-  }
-}
-process.stdout.write(files.join(""));
-'
-}
-# Every install input: the lockfile, each workspace manifest, the patches they
-# reference and the install configuration. A manifest or patch edit without a
-# regenerated lockfile changes this, so the frozen install runs and refuses the
-# inconsistency instead of being skipped.
-dependency_hash() {
-  local config manifests patches
-  [[ -f bun.lock && ! -L bun.lock ]] || fail 'A regular root bun.lock is required'
-  manifests="$(mktemp)"
-  patches="$(mktemp)"
-  find . \( -name node_modules -o -name .git \) -prune -o -name package.json -type f -print0 > "$manifests"
-  patched_dependency_files < "$manifests" > "$patches" || fail 'Patched dependency files could not be read'
-  {
-    printf '%s\0' ./bun.lock
-    for config in ./bunfig.toml ./.npmrc; do
-      if [[ -f "$config" ]]; then printf '%s\0' "$config"; fi
-    done
-    cat -- "$manifests" "$patches"
-  } | sort -zu | xargs -0 sha256sum -- | sha256sum | cut -d ' ' -f1
-  rm -f -- "$manifests" "$patches"
-}
-# The stamp lives inside the installed tree and is written only after a
-# successful install, so it disappears with that tree: a deleted or replaced
-# node_modules can never match.
-installed_dependency_stamp() {
-  local stamp="$REPO_ROOT/node_modules/.stll-cloud-setup-stamp" value=''
-  if [[ ! -L "$REPO_ROOT/node_modules" && -f "$stamp" && ! -L "$stamp" ]]; then
-    IFS= read -r value < "$stamp" || true
-  fi
-  printf '%s\n' "$value"
-}
-write_dependency_stamp() {
-  as_output_user sh -c 'mkdir -p "$1" && printf "%s\n" "$2" > "$1/.stll-cloud-setup-stamp.tmp" && mv -f "$1/.stll-cloud-setup-stamp.tmp" "$1/.stll-cloud-setup-stamp"' sh "$REPO_ROOT/node_modules" "$1" || fail 'The dependency stamp could not be written'
-}
-clear_dependency_stamp() {
-  as_output_user rm -f -- "$REPO_ROOT/node_modules/.stll-cloud-setup-stamp"
-}
+# The frozen install is the check: it reads every input the package manager
+# uses and changes nothing on a current tree, so no stamp stands in for it.
 install_dependencies() {
-  local expected
-  expected="$(dependency_hash)"
-  clear_dependency_stamp
   dependency_install
-  write_dependency_stamp "$expected"
 }
 sync_dependencies() {
-  local expected
-  expected="$(dependency_hash)"
-  [[ "$(installed_dependency_stamp)" == "$expected" ]] && return
-  clear_dependency_stamp
   dependency_install || fail 'bun.lock mismatch; dependency installation failed'
-  write_dependency_stamp "$expected"
 }
 
 @SERVICE_INSTALL@

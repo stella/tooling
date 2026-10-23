@@ -589,7 +589,7 @@ dependency_install`,
 }, 15_000);
 
 const dependencyStateFunctions = (generated: string) => {
-  const start = generated.indexOf("\npatched_dependency_files() {");
+  const start = generated.indexOf("\ninstall_dependencies() {");
   const serviceInstall = generated.indexOf("\nservice_account_ready()", start);
   const boundary =
     serviceInstall < 0
@@ -599,8 +599,6 @@ const dependencyStateFunctions = (generated: string) => {
     throw new Error("Missing emitted dependency state functions");
   return generated.slice(start, boundary);
 };
-
-const STAMP = '"$FIXTURE_ROOT/node_modules/.stll-cloud-setup-stamp"';
 
 const runDependencyState = (command: string) =>
   withRepository((root) => {
@@ -612,10 +610,7 @@ const runDependencyState = (command: string) =>
         "-eu",
         "-c",
         `fail() { echo "cloud-setup: $*" >&2; exit 1; }
-REPO_ROOT="$FIXTURE_ROOT"
-BUN_DIR="$(dirname "$(command -v bun)")"
-as_output_user() { "$@"; }
-dependency_install() { printf 'install\\n' >> "$FIXTURE_ROOT/installs"; mkdir -p "$FIXTURE_ROOT/node_modules"; : > "$FIXTURE_ROOT/node_modules/.installed"; [[ "\${INSTALL_FAIL:-}" != 1 ]]; }
+dependency_install() { printf 'install\\n' >> "$FIXTURE_ROOT/installs"; [[ "\${INSTALL_FAIL:-}" != 1 ]]; }
 ${functions}
 ${command}`,
       ],
@@ -627,90 +622,26 @@ ${command}`,
 // An integer on every platform (BSD wc pads its count).
 const installs = '"$(( $(wc -l < "$FIXTURE_ROOT/installs") ))"';
 
-test("an equal dependency stamp skips installation", () => {
-  const { result } = runDependencyState(`install_dependencies
-: > "$FIXTURE_ROOT/installs"
-sync_dependencies
-[[ ! -s "$FIXTURE_ROOT/installs" ]]
-[[ "$(cat ${STAMP})" == "$(dependency_hash)" ]]`);
-  expect(result.exitCode).toBe(0);
-});
-
-test("a deleted node_modules reinstalls whatever the new tree's filesystem identity", () => {
-  const { result } = runDependencyState(`install_dependencies
-: > "$FIXTURE_ROOT/installs"
-rm -rf -- "$FIXTURE_ROOT/node_modules"
-mkdir "$FIXTURE_ROOT/node_modules"
-: > "$FIXTURE_ROOT/node_modules/stray"
-sync_dependencies
-[[ ${installs} == 1 ]]
-rm -rf -- "$FIXTURE_ROOT/node_modules"
-sync_dependencies
-[[ ${installs} == 2 ]]`);
-  expect(result.exitCode).toBe(0);
-});
-
-test("a manifest change with an unchanged bun.lock runs the frozen install", () => {
-  const { result } = runDependencyState(`printf '{"name":"root"}\\n' > package.json
-mkdir -p packages/a
-printf '{"name":"a"}\\n' > packages/a/package.json
-install_dependencies
-: > "$FIXTURE_ROOT/installs"
-printf '{"name":"a","dependencies":{"b":"1.0.0"}}\\n' > packages/a/package.json
-if (INSTALL_FAIL=1 sync_dependencies); then fail 'Expected the frozen install to refuse the manifest'; fi
-[[ ${installs} == 1 ]]
-[[ ! -e ${STAMP} ]]`);
-  expect(result.exitCode).toBe(0);
-  expect(result.stderr.toString()).toContain(
-    "cloud-setup: bun.lock mismatch; dependency installation failed",
-  );
-});
-
-test("editing only a referenced patch file reinstalls", () => {
-  const { result } = runDependencyState(`mkdir -p fixes
-printf 'one\\n' > fixes/left-pad.diff
-printf '{"name":"root","patchedDependencies":{"left-pad@1.3.0":"fixes/left-pad.diff"}}\\n' > package.json
-install_dependencies
-: > "$FIXTURE_ROOT/installs"
-sync_dependencies
-[[ ! -s "$FIXTURE_ROOT/installs" ]]
-printf 'two\\n' > fixes/left-pad.diff
-sync_dependencies
-[[ ${installs} == 1 ]]`);
-  expect(result.exitCode).toBe(0);
-});
-
-test("manifests inside node_modules are not install inputs", () => {
-  const { result } = runDependencyState(`install_dependencies
-: > "$FIXTURE_ROOT/installs"
-printf '{"name":"dep"}\\n' > "$FIXTURE_ROOT/node_modules/package.json"
-sync_dependencies
-[[ ! -s "$FIXTURE_ROOT/installs" ]]`);
-  expect(result.exitCode).toBe(0);
-});
-
-test("a changed bun.lock reinstalls once and records the new stamp", () => {
+test("every start runs the frozen install, which observes every install input", () => {
   expect(generate(declaration)).toMatch(
     /start_environment\(\) \{[\s\S]*step dependencies sync_dependencies[\s\S]*\n\}/,
   );
+  // Nothing can skip it: the function is the install and its failure.
+  expect(generate(declaration)).toMatch(
+    /\nsync_dependencies\(\) \{\n {2}dependency_install \|\| fail '[^'\n]*'\n\}\n/,
+  );
   const { result } = runDependencyState(`install_dependencies
-: > "$FIXTURE_ROOT/installs"
-printf 'changed\\n' > bun.lock
 sync_dependencies
 sync_dependencies
-[[ ${installs} == 1 ]]
-[[ "$(cat ${STAMP})" == "$(dependency_hash)" ]]`);
+[[ ${installs} == 3 ]]`);
   expect(result.exitCode).toBe(0);
 });
 
-test("a failed changed-lockfile reinstall clears the stamp so start retries", () => {
+test("a refused frozen install fails the start", () => {
   const { result } = runDependencyState(`install_dependencies
-printf 'changed\\n' > bun.lock
 if (INSTALL_FAIL=1 sync_dependencies); then fail 'Expected installation failure'; fi
-[[ ! -e ${STAMP} ]]
 sync_dependencies
-[[ ${installs} == 3 ]]
-[[ "$(cat ${STAMP})" == "$(dependency_hash)" ]]`);
+[[ ${installs} == 3 ]]`);
   expect(result.exitCode).toBe(0);
   expect(result.stderr.toString()).toContain(
     "cloud-setup: bun.lock mismatch; dependency installation failed",
