@@ -618,7 +618,7 @@ const runDependencyState = (command: string) =>
 REPO_ROOT="$FIXTURE_ROOT"
 DEPENDENCY_STATE_ROOT="$FIXTURE_ROOT/state"
 DEPENDENCY_STAMP="$DEPENDENCY_STATE_ROOT/dependencies.sha256"
-dependency_install() { printf 'install\\n' >> "$FIXTURE_ROOT/installs"; mkdir -p "$FIXTURE_ROOT/node_modules"; [[ "\${INSTALL_FAIL:-}" != 1 ]]; }
+dependency_install() { printf 'install\\n' >> "$FIXTURE_ROOT/installs"; mkdir -p "$FIXTURE_ROOT/node_modules"; : > "$FIXTURE_ROOT/node_modules/.installed"; [[ "\${INSTALL_FAIL:-}" != 1 ]]; }
 ${functions}
 ${command}`,
       ],
@@ -645,6 +645,61 @@ sync_dependencies
   expect(result.exitCode).toBe(0);
 });
 
+test("a node_modules recreated after deletion reinstalls", () => {
+  const { result } = runDependencyState(`install_dependencies
+: > "$FIXTURE_ROOT/installs"
+rm -rf -- "$FIXTURE_ROOT/node_modules"
+mkdir "$FIXTURE_ROOT/node_modules"
+: > "$FIXTURE_ROOT/node_modules/stray"
+sync_dependencies
+[[ "$(wc -l < "$FIXTURE_ROOT/installs")" == 1 ]]`);
+  expect(result.exitCode).toBe(0);
+});
+
+test("an emptied node_modules reinstalls", () => {
+  const { result } = runDependencyState(`install_dependencies
+: > "$FIXTURE_ROOT/installs"
+find "$FIXTURE_ROOT/node_modules" -mindepth 1 -delete
+sync_dependencies
+[[ "$(wc -l < "$FIXTURE_ROOT/installs")" == 1 ]]`);
+  expect(result.exitCode).toBe(0);
+});
+
+test("a stamp that names only the lockfile reinstalls once", () => {
+  const { result } = runDependencyState(`install_dependencies
+: > "$FIXTURE_ROOT/installs"
+sha256sum bun.lock | cut -d ' ' -f1 > "$DEPENDENCY_STAMP"
+sync_dependencies
+sync_dependencies
+[[ "$(wc -l < "$FIXTURE_ROOT/installs")" == 1 ]]`);
+  expect(result.exitCode).toBe(0);
+});
+
+test("a manifest change with an unchanged bun.lock runs the frozen install", () => {
+  const { result } = runDependencyState(`printf '{"name":"root"}\\n' > package.json
+mkdir -p packages/a
+printf '{"name":"a"}\\n' > packages/a/package.json
+install_dependencies
+: > "$FIXTURE_ROOT/installs"
+printf '{"name":"a","dependencies":{"b":"1.0.0"}}\\n' > packages/a/package.json
+if (INSTALL_FAIL=1 sync_dependencies); then fail 'Expected the frozen install to refuse the manifest'; fi
+[[ "$(wc -l < "$FIXTURE_ROOT/installs")" == 1 ]]
+[[ ! -e "$DEPENDENCY_STAMP" ]]`);
+  expect(result.exitCode).toBe(0);
+  expect(result.stderr.toString()).toContain(
+    "cloud-setup: bun.lock mismatch; dependency installation failed",
+  );
+});
+
+test("manifests inside node_modules are not install inputs", () => {
+  const { result } = runDependencyState(`install_dependencies
+: > "$FIXTURE_ROOT/installs"
+printf '{"name":"dep"}\\n' > "$FIXTURE_ROOT/node_modules/package.json"
+sync_dependencies
+[[ ! -s "$FIXTURE_ROOT/installs" ]]`);
+  expect(result.exitCode).toBe(0);
+});
+
 test("a changed bun.lock reinstalls once and records the new stamp", () => {
   expect(generate(declaration)).toMatch(
     /start_environment\(\) \{[\s\S]*step dependencies sync_dependencies[\s\S]*\n\}/,
@@ -655,7 +710,7 @@ printf 'changed\\n' > bun.lock
 sync_dependencies
 sync_dependencies
 [[ "$(wc -l < "$FIXTURE_ROOT/installs")" == 1 ]]
-[[ "$(cat "$DEPENDENCY_STAMP")" == "$(sha256sum bun.lock | cut -d ' ' -f1)" ]]`);
+[[ "$(cut -d ' ' -f1 "$DEPENDENCY_STAMP")" == "$(dependency_hash)" ]]`);
   expect(result.exitCode).toBe(0);
 });
 
@@ -666,7 +721,7 @@ if (INSTALL_FAIL=1 sync_dependencies); then fail 'Expected installation failure'
 [[ ! -e "$DEPENDENCY_STAMP" ]]
 sync_dependencies
 [[ "$(wc -l < "$FIXTURE_ROOT/installs")" == 3 ]]
-[[ "$(cat "$DEPENDENCY_STAMP")" == "$(sha256sum bun.lock | cut -d ' ' -f1)" ]]`);
+[[ "$(cut -d ' ' -f1 "$DEPENDENCY_STAMP")" == "$(dependency_hash)" ]]`);
   expect(result.exitCode).toBe(0);
   expect(result.stderr.toString()).toContain(
     "cloud-setup: bun.lock mismatch; dependency installation failed",

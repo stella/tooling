@@ -238,9 +238,19 @@ process.stdout.write([...hosts].sort().join(","));
   network_run "$download_hosts" 240 runuser -u "$OUTPUT_USER" -- env HOME="$OUTPUT_HOME" BUN_INSTALL_CACHE_DIR="$BUN_CACHE" PATH="$PATH" BUN_CONFIG_HTTP_IDLE_TIMEOUT=20 "$BUN_DIR/bun" @INSTALL_ARGS@
 }
 
+# Every install input: the lockfile, each workspace manifest and the install
+# configuration. A manifest edit without a regenerated lockfile changes this, so
+# the frozen install runs and refuses the inconsistency instead of skipping it.
 dependency_hash() {
+  local config
   [[ -f bun.lock && ! -L bun.lock ]] || fail 'A regular root bun.lock is required'
-  sha256sum -- bun.lock | cut -d ' ' -f1
+  {
+    printf '%s\0' ./bun.lock
+    for config in ./bunfig.toml ./.npmrc; do
+      if [[ -f "$config" ]]; then printf '%s\0' "$config"; fi
+    done
+    find . \( -name node_modules -o -name .git \) -prune -o -name package.json -type f -print0
+  } | sort -z | xargs -0 sha256sum -- | sha256sum | cut -d ' ' -f1
 }
 prepare_dependency_state() {
   [[ ! -L "$DEPENDENCY_STATE_ROOT" ]] || fail 'Dependency state root must not be a symlink'
@@ -254,12 +264,26 @@ prepare_dependency_state() {
     [[ -f "$DEPENDENCY_STAMP" && "$(stat -c '%u:%a' "$DEPENDENCY_STAMP")" == 0:644 ]] || fail 'Invalid dependency stamp'
   fi
 }
+# The stamp names the install inputs and the installed tree it was written for, so it
+# can never stand in for a tree it did not observe: a deleted, replaced or empty
+# node_modules no longer matches.
+dependency_tree_identity() {
+  local tree="$REPO_ROOT/node_modules"
+  if [[ -d "$tree" && ! -L "$tree" && -n "$(ls -A -- "$tree")" ]]; then
+    stat -c '%d:%i' -- "$tree"
+  else
+    printf 'none\n'
+  fi
+}
+dependency_state() {
+  printf '%s %s\n' "$(dependency_hash)" "$(dependency_tree_identity)"
+}
 write_dependency_stamp() {
   local temporary
   prepare_dependency_state
   temporary="$(mktemp "$DEPENDENCY_STATE_ROOT/.dependencies.XXXXXX")"
   chmod 644 "$temporary"
-  dependency_hash > "$temporary"
+  dependency_state > "$temporary"
   mv -f -- "$temporary" "$DEPENDENCY_STAMP"
 }
 install_dependencies() {
@@ -271,10 +295,9 @@ install_dependencies() {
 sync_dependencies() {
   local expected installed=''
   prepare_dependency_state
-  expected="$(dependency_hash)"
+  expected="$(dependency_state)"
   if [[ -f "$DEPENDENCY_STAMP" ]]; then IFS= read -r installed < "$DEPENDENCY_STAMP" || true; fi
-  # The stamp describes an installation; without node_modules there is none.
-  [[ "$installed" == "$expected" && -d "$REPO_ROOT/node_modules" ]] && return
+  [[ "$installed" == "$expected" && "$expected" != *' none' ]] && return
   rm -f -- "$DEPENDENCY_STAMP"
   dependency_install || fail 'bun.lock mismatch; dependency installation failed'
   write_dependency_stamp
