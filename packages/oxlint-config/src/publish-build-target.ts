@@ -8,12 +8,12 @@ import { pathToFileURL } from "node:url";
 import { resolveNuxtPublishTarget } from "./publish-build-target-nuxt";
 import { resolveVitePublishTarget } from "./publish-build-target-vite";
 import {
-  resolveManifestContract,
   type PublishPacker,
   type PublishTarget,
+  resolveManifestContract,
 } from "./publish-contract";
 
-const supportedTsdownVersion = "0.22.9";
+const supportedTsdownVersion = "0.23.1";
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 

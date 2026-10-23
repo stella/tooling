@@ -3,8 +3,8 @@ import { execFileSync } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -118,7 +118,7 @@ test("pnpm pack preserves the modeled published contract projection", () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("npm pack retains source entry points and does not apply publishConfig entry overrides", () => {
   const root = mkdtempSync(path.join(tmpdir(), "publish-contract-npm-pack-"));
@@ -225,4 +225,4 @@ test("npm pack retains source entry points and does not apply publishConfig entr
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, 15_000);

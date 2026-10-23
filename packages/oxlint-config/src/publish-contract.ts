@@ -4,14 +4,10 @@ import { lte, parse, satisfies } from "semver";
 import { consumerNodeSupportMatches } from "./consumer-node-support";
 
 export type PublishTarget =
-  | { type: "javascript"; targets: readonly string[] }
-  | { type: "types-only" };
+  { type: "javascript"; targets: readonly string[] } | { type: "types-only" };
 
 type ExportTarget =
-  | string
-  | null
-  | ExportTarget[]
-  | { [condition: string]: ExportTarget };
+  string | null | ExportTarget[] | { [condition: string]: ExportTarget };
 
 type EntryPoints = {
   type?: "module" | "commonjs";

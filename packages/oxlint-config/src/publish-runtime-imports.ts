@@ -80,12 +80,7 @@ const patternNames = (value: unknown): string[] => {
   }
 };
 type Binding =
-  | "other"
-  | "require"
-  | "factory"
-  | "module"
-  | "module-api"
-  | "filename";
+  "other" | "require" | "factory" | "module" | "module-api" | "filename";
 type Scope = Map<string, Binding>;
 const bindingScope = (scopes: readonly Scope[], name: string) =>
   scopes.findLast((scope) => scope.has(name));

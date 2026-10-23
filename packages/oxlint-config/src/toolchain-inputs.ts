@@ -86,6 +86,22 @@ export const isDockerDefinitionPath = (file: string) => {
   return /^(?:[^./]+\.)*(?:dockerfile|containerfile)(?:\.[^./]+)*$/i.test(name);
 };
 
+export const isFormatterConfigPath = (file: string) => {
+  const name = file.split("/").at(-1) ?? "";
+  return (
+    /^\.oxfmtrc(?:\.jsonc?)?$/.test(name) ||
+    /^oxfmt\.config\.[cm]?[jt]s$/.test(name) ||
+    /^\.prettierrc(?:\.[^/]+)?$/.test(name) ||
+    /^prettier\.config\.[cm]?[jt]s$/.test(name) ||
+    name === ".prettierignore" ||
+    /^biome\.jsonc?$/.test(name) ||
+    /^\.?dprint\.jsonc?$/.test(name)
+  );
+};
+
+export const isLefthookConfigPath = (file: string) =>
+  /^\.?lefthook(?:-local)?\.ya?ml$/.test(file);
+
 /** Executable shell files may have no suffix; the interpreter is then their discriminator. */
 export const isShellScript = (file: string, text = "") =>
   !excludedInputPath(file) &&
@@ -100,7 +116,9 @@ export const toolchainInputKind = (file: string, text = "") => {
     file === "bunfig.toml" ||
     file === cloudSetupPath ||
     file === cloudClaudeSettingsPath ||
-    file === "Cargo.lock"
+    file === "Cargo.lock" ||
+    file === ".changeset/config.json" ||
+    isLefthookConfigPath(file)
   )
     return "config";
   if (githubAutomationFileKind(file) !== undefined) return "config";
@@ -111,7 +129,8 @@ export const toolchainInputKind = (file: string, text = "") => {
     javascriptDependencyLockfiles.some(
       (name) => file.split("/").at(-1) === name,
     ) ||
-    /(?:^|\/)uv\.lock$/.test(file)
+    /(?:^|\/)uv\.lock$/.test(file) ||
+    isFormatterConfigPath(file)
   )
     return "presence";
   if (

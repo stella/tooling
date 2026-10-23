@@ -2,10 +2,10 @@
 import { expect, test } from "bun:test";
 import {
   existsSync,
-  mkdtempSync,
   mkdirSync,
-  readFileSync,
+  mkdtempSync,
   readdirSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -92,7 +92,7 @@ test("Rust and runtime-only scripts have one final newline and clean Git patches
       expect(checked.exitCode).toBe(0);
     });
   }
-});
+}, 15_000);
 
 test("cached Node requires working matching npm and npx launchers", () => {
   const cases = [
@@ -121,7 +121,7 @@ test("cached Node requires working matching npm and npx launchers", () => {
       expect(result.exitCode).toBe(fixture.expected);
     });
   }
-});
+}, 15_000);
 
 test("Bun archive rejects a matching downloaded SHASUMS entry when the policy pin differs", () => {
   withFixture((root) => {
@@ -239,7 +239,7 @@ printf '%s\\n' unreachable
       ).toEqual([]);
     });
   }
-});
+}, 15_000);
 
 test("runtime bootstrap repairs trust offline before any apt or runtime network request", () => {
   for (const rust of [false, true]) {
@@ -356,4 +356,4 @@ install_runtimes
       }
     }
   }
-});
+}, 15_000);

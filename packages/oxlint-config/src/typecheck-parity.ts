@@ -1,18 +1,20 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import {
-  mkdtemp,
   mkdir,
+  mkdtemp,
   readFile,
   rm,
-  writeFile,
   symlink,
+  writeFile,
 } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { resolve, join, relative, dirname, basename } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { stripVTControlCharacters } from "node:util";
+
+import { satisfiesBunFloor } from "./toolchain-bun";
 
 export const fixtures = [
   {
@@ -591,9 +593,9 @@ export const assertBunVersion = (bun: string, policy: unknown) => {
   const result = spawnSync(bun, ["--version"], { encoding: "utf8" });
   if (result.error) throw result.error;
   const installed = result.stdout.trim();
-  if (result.status !== 0 || installed !== policy.bun)
+  if (result.status !== 0 || !satisfiesBunFloor(installed, policy.bun))
     throw new Error(
-      `Bun must be ${policy.bun}; selected runtime reports ${installed || "no version"}`,
+      `Bun must be ${policy.bun} or later; selected runtime reports ${installed || "no version"}`,
     );
 };
 

@@ -14,7 +14,7 @@ jobs:
   changeset:
     name: Changeset present for published package changes
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
@@ -33,7 +33,7 @@ jobs:
 
       - name: Enforce release intent
         # The repository owner publishes this versioned shared contract.
-        uses: stella/.github/.github/actions/changeset-policy@8f19eb7220047e5b06f6e75f0b9f908bfd01f5f6
+        uses: stella/.github/.github/actions/changeset-policy@a98150379a0659f9ff603970a06dbdee56f7c4cb
         with:
           release-paths: ${{ steps.release-packages.outputs.release-paths }}
           generated-paths: ${{ steps.release-packages.outputs.generated-paths }}
@@ -42,7 +42,7 @@ jobs:
 
   build-checks:
     name: Shared tooling checks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       TOOLCHAIN_BASE: ${{ (github.event_name == 'pull_request' && github.event.pull_request.base.sha) || (github.event_name == 'merge_group' && github.event.merge_group.base_sha) || (github.event_name == 'push' && github.event.before) || 'unavailable-toolchain-base' }}
     steps:
@@ -53,7 +53,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
 
@@ -67,6 +67,23 @@ jobs:
 
       - name: Verify release from clean build outputs
         run: bash scripts/verify-release.sh
+
+      - name: Check formatting
+        id: format
+        run: bun fmt --check
+
+      # A contributor without the pinned Bun applies this patch instead of
+      # reformatting by hand.
+      - name: Produce the formatting patch
+        if: failure() && steps.format.outcome == 'failure'
+        run: bun fmt && git diff --binary > bun-fmt.patch
+
+      - name: Upload the formatting patch
+        if: failure() && steps.format.outcome == 'failure'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bun-fmt-patch
+          path: bun-fmt.patch
 
       - name: Typecheck diagnostic parity
         run: bun run check:typecheck-parity --changed-since "$TOOLCHAIN_BASE"
@@ -106,7 +123,7 @@ jobs:
         run: bun scripts/check-release-selector-contract.ts check .shared-policy/.github/actions/release-policy/check.ts
 
       - name: Upload built shared commands
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: shared-commands
           path: packages/oxlint-config/dist
@@ -115,7 +132,7 @@ jobs:
   engine-floor:
     name: Published package Node floor
     needs: build-checks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -123,7 +140,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up published package Node floor
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 20.19.0
 
@@ -136,7 +153,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Download built shared commands
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: shared-commands
           path: packages/oxlint-config/dist
@@ -144,21 +161,33 @@ jobs:
       - name: Check built publish target CLI on Node floor
         run: node scripts/check-publish-target-node-floor.mjs
 
-  checks:
+  ci-result:
     if: always()
-    needs: [build-checks, engine-floor, rust-lints, hawk-compatibility]
-    runs-on: ubuntu-latest
+    needs:
+      [changeset, build-checks, engine-floor, rust-lints, hawk-compatibility]
+    runs-on: ubuntu-24.04
     steps:
       - name: Require every validation job to succeed
         env:
+          EVENT_NAME: ${{ github.event_name }}
+          CHANGESET_RESULT: ${{ needs.changeset.result }}
           BUILD_RESULT: ${{ needs.build-checks.result }}
           FLOOR_RESULT: ${{ needs.engine-floor.result }}
           RUST_RESULT: ${{ needs.rust-lints.result }}
           HAWK_RESULT: ${{ needs.hawk-compatibility.result }}
-        run: test "$BUILD_RESULT" = success && test "$FLOOR_RESULT" = success && test "$RUST_RESULT" = success && test "$HAWK_RESULT" = success
+        run: |
+          if [ "$EVENT_NAME" = pull_request ]; then
+            test "$CHANGESET_RESULT" = success
+          else
+            test "$CHANGESET_RESULT" = skipped
+          fi
+          test "$BUILD_RESULT" = success
+          test "$FLOOR_RESULT" = success
+          test "$RUST_RESULT" = success
+          test "$HAWK_RESULT" = success
 
   rust-lints:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -175,7 +204,7 @@ jobs:
 
   hawk-compatibility:
     name: Hawk compiler compatibility
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - name: Check out consumer crate

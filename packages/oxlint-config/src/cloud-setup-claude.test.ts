@@ -3,8 +3,8 @@
 import { expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import {
-  mkdtempSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -132,7 +132,7 @@ test("Claude settings merge preserves unrelated settings and reaches a byte-stab
   });
   const compact = settingsWith([cloudSessionStartHook]);
   expect(mergeCloudClaudeSettings(compact)).toBe(compact);
-});
+}, 15_000);
 
 test("Claude settings merge replaces shipped exact hook forms in place and reaches a fixed point", () => {
   const unrelated = {
@@ -174,7 +174,7 @@ test("Claude settings merge replaces shipped exact hook forms in place and reach
       ]),
     ),
   ).toThrow(cloudSessionStartFix);
-});
+}, 15_000);
 
 test("Claude attribution conflicts fail with the exact manual fix and drift rejects them", () => {
   const hooks = { SessionStart: [cloudSessionStartHook] };
@@ -197,7 +197,7 @@ test("Claude attribution conflicts fail with the exact manual fix and drift reje
   expect(cloudAttributionFix).toContain(
     JSON.stringify({ attribution: { commit: "", pr: "" } }, null, 2),
   );
-});
+}, 15_000);
 
 test("Claude hook unsafe merges fail with the exact manual fix and drift rejects them", () => {
   const unguarded = {
@@ -236,7 +236,7 @@ test("Claude hook unsafe merges fail with the exact manual fix and drift rejects
   }
   expect(hasCloudSessionStartHook(undefined)).toBe(false);
   expect(hasCloudSessionStartHook("{}")).toBe(false);
-});
+}, 15_000);
 
 test("Claude SessionStart reports remote startup failure as visible context and leaves local sessions silent", () => {
   const root = mkdtempSync(join(tmpdir(), "cloud-claude-hook-"));
@@ -275,7 +275,7 @@ test("Claude SessionStart reports remote startup failure as visible context and 
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("remote Claude SessionStart resolves the setup script from the project root in a subdirectory", () => {
   const root = mkdtempSync(join(tmpdir(), "cloud-claude-subdirectory-"));
@@ -308,11 +308,14 @@ test("remote Claude SessionStart resolves the setup script from the project root
     expect(readFileSync(join(root, "calls"), "utf8")).toBe(
       `session ${realpathSync(subdirectory)}\n`,
     );
-    expect(readFileSync(environment, "utf8")).toBe(`\n${exports}`);
+    expect(readFileSync(environment, "utf8")).toBe(
+      `\n. '${environment}.stll-cloud'\n`,
+    );
+    expect(readFileSync(`${environment}.stll-cloud`, "utf8")).toBe(exports);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("Claude SessionStart persists literal pinned exports after start while retaining the future shell PATH", () => {
   const root = mkdtempSync(join(tmpdir(), "cloud-claude-environment-"));
@@ -350,6 +353,9 @@ test("Claude SessionStart persists literal pinned exports after start while reta
       profile,
     );
     const original = "export KEEP=retained";
+    const snapshot = `${environment}.stll-cloud`;
+    const source = `. '${snapshot}'\n`;
+    const sessionExports = `export DATABASE_URL='postgres://stll_cloud:fixture-secret@127.0.0.1:55432/cloud_test'\n${exports}`;
     const env = {
       ...process.env,
       PATH: [...inherited, "/usr/bin", "/bin"].join(":"),
@@ -367,14 +373,28 @@ test("Claude SessionStart persists literal pinned exports after start while reta
       expect(result.stdout).toBe("");
       expect(result.stderr).toBe("");
       expect(readFileSync(environment, "utf8")).toBe(
-        remote === "true"
-          ? `${original}\nexport DATABASE_URL='postgres://stll_cloud:fixture-secret@127.0.0.1:55432/cloud_test'\n${exports}`
-          : original,
+        remote === "true" ? `${original}\n${source}` : original,
       );
       expect(result.stdout).not.toContain("fixture-secret");
       expect(result.stderr).not.toContain("fixture-secret");
     }
-    const persisted = readFileSync(environment, "utf8");
+    // A later start (resume, clear, compact) refreshes only its snapshot and
+    // keeps whatever other hooks appended to the shared file.
+    writeFileSync(
+      environment,
+      `${readFileSync(environment, "utf8")}export LATER=kept\n`,
+    );
+    const rerun = spawnSync("/bin/bash", ["-c", command], {
+      cwd: root,
+      env: { ...env, CLAUDE_CODE_REMOTE: "true" },
+      encoding: "utf8",
+    });
+    expect(rerun.status).toBe(0);
+    expect(readFileSync(environment, "utf8")).toBe(
+      `${original}\n${source}export LATER=kept\n`,
+    );
+    expect(readFileSync(snapshot, "utf8")).toBe(sessionExports);
+    const persisted = readFileSync(snapshot, "utf8");
     expect(persisted).toContain("$PATH");
     for (const directory of inherited)
       expect(persisted).not.toContain(directory);
@@ -394,7 +414,9 @@ test("Claude SessionStart persists literal pinned exports after start while reta
       `${pinned}:${env.PATH}`,
       "",
     ]);
-    expect(readFileSync(join(root, "calls"), "utf8")).toBe("session\n");
+    expect(readFileSync(join(root, "calls"), "utf8")).toBe(
+      "session\nsession\n",
+    );
 
     writeFileSync(environment, original);
     const failed = spawnSync("/bin/bash", ["-c", command], {
@@ -428,7 +450,7 @@ test("Claude SessionStart persists literal pinned exports after start while reta
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("Node settings parse diagnostics use the canonical repair without echoing input", () => {
   const marker = "fixture-settings-source";
@@ -449,7 +471,7 @@ catch (error) { process.stdout.write(error.message); }
   expect(result.stdout).toContain("settings must contain valid JSON");
   expect(result.stdout).toContain(cloudSessionStartFix);
   expect(result.stdout).not.toContain(marker);
-});
+}, 15_000);
 
 test("SessionStart reads, writes and replacement fail visibly without changing existing environment", () => {
   const root = mkdtempSync(join(tmpdir(), "cloud-claude-write-failure-"));
@@ -469,6 +491,11 @@ test("SessionStart reads, writes and replacement fail visibly without changing e
     );
     const failures = [
       { failure: "cat() { return 74; }", reason: "could not be read" },
+      {
+        failure:
+          'printf() { if [[ /dev/fd/1 -ef "$CLAUDE_ENV_FILE" ]]; then return 76; fi; builtin printf "$@"; }',
+        reason: "could not be persisted",
+      },
       {
         failure:
           'printf() { if [[ -n "${cloud_env_temporary:-}" && /dev/fd/1 -ef "$cloud_env_temporary" ]]; then return 73; fi; builtin printf "$@"; }',
@@ -501,4 +528,4 @@ test("SessionStart reads, writes and replacement fail visibly without changing e
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, 15_000);

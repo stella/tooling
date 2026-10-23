@@ -45,19 +45,21 @@ service_run() (
   done
   exec runuser -u stll-cloud -- "$@"
 )
-BUN_VERSION='1.4.3'
+BUN_VERSION='1.4.4'
 NODE_VERSION='26.10.0'
 NODE_DIR="/opt/stll-cloud/node/$NODE_VERSION"
 BUN_DIR="/opt/stll-cloud/bun/$BUN_VERSION"
 export PATH="$NODE_DIR/bin:$BUN_DIR:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 BUN_CACHE="/var/cache/stll-cloud/bun/$OUTPUT_UID"
+DEPENDENCY_STATE_ROOT=/var/lib/stll-cloud
+DEPENDENCY_STAMP="$DEPENDENCY_STATE_ROOT/dependencies-$(printf '%s' "$REPO_ROOT" | sha256sum | cut -d' ' -f1).sha256"
 
 [[ -f "$REPO_ROOT/.node-version" && ! -L "$REPO_ROOT/.node-version" ]] || fail 'A regular root .node-version is required'
 [[ "$(awk 'NF { if (++count > 1 || NF != 1) exit 1; value=$1 } END { if (count != 1) exit 1; print value }' "$REPO_ROOT/.node-version")" == "$NODE_VERSION" ]] || fail 'Node selector changed; regenerate cloud-setup.sh'
 cd -- "$REPO_ROOT"
 case "$(uname -m)" in
-  x86_64) ARCH=amd64; NODE_ARCH=x64; BUN_ARCH=x64; NODE_SHA256='ca70e9e349de048b9522abb3adc05b3bd6f43c5ffd3ec57916c7da292f59f022'; BUN_SHA256='3e730528d89775f03f87f05c06787c4df4099d0a37f3f252e7b829cb23816e18' ;;
-  aarch64|arm64) ARCH=arm64; NODE_ARCH=arm64; BUN_ARCH=aarch64; NODE_SHA256='7a6353f63eb3d04765004b4adf172616243e4522434635cb1d26288658b04ab5'; BUN_SHA256='efa9813da5ed72423bf847f916e8d2c47c0d776add972354026a75e10da9aa21' ;;
+  x86_64) ARCH=amd64; NODE_ARCH=x64; BUN_ARCH=x64; NODE_SHA256='ca70e9e349de048b9522abb3adc05b3bd6f43c5ffd3ec57916c7da292f59f022'; BUN_SHA256='bf8ccbfb2b0b80159e0f9a6d15c55317add8077534dbc6130a3edb52fccb395c' ;;
+  aarch64|arm64) ARCH=arm64; NODE_ARCH=arm64; BUN_ARCH=aarch64; NODE_SHA256='7a6353f63eb3d04765004b4adf172616243e4522434635cb1d26288658b04ab5'; BUN_SHA256='baa6bb36f51d6e58561e02bbea825038a9df454f673d6d776e8bbf86f8c7850e' ;;
   *) fail 'Only amd64 and arm64 are supported' ;;
 esac
 
@@ -135,6 +137,63 @@ runtime_ready() {
   node_ready || fail 'Pinned Node, npm or npx is unavailable; run install'
   [[ -x "$BUN_DIR/bun" && "$($BUN_DIR/bun --version)" == "$BUN_VERSION" ]] || fail 'Pinned Bun is unavailable; run install'
 }
+bun_route() {
+  local label="$1" resolved version
+  shift
+  resolved="$("$@" -c 'command -v bun')" || fail "Bun is unavailable through $label"
+  version="$("$@" -c 'bun --version')" || fail "Bun at $resolved failed through $label"
+  [[ "$version" == "$BUN_VERSION" ]] || fail "Bun at $resolved resolves version $version through $label; expected $BUN_VERSION"
+}
+verify_bun_routes() {
+  local configured_mise login_shell minimal_path mise_root root_mise shims
+  # Test-only overrides keep route executables and image locations inside fixtures.
+  login_shell="$(printenv STLL_CLOUD_TEST_LOGIN_SHELL || true)"
+  [[ -n "$login_shell" ]] || login_shell=bash
+  minimal_path="$(printenv STLL_CLOUD_TEST_MINIMAL_PATH || true)"
+  [[ -n "$minimal_path" ]] || minimal_path=/usr/local/bin:/usr/bin:/bin
+  root_mise="$(printenv STLL_CLOUD_TEST_ROOT_MISE || true)"
+  [[ -n "$root_mise" ]] || root_mise=/root/.local/share/mise
+  # An absolute shell: a PATH entry such as a user-writable mise shims
+  # directory must never supply the program that root runs.
+  bun_route 'the setup PATH' env PATH="$PATH" /bin/sh
+  bun_route 'sh -c' /bin/sh
+  bun_route 'bash -lc' "$login_shell" -l
+  bun_route 'the minimal system PATH' env -i PATH="$minimal_path" /bin/sh
+  configured_mise="$(printenv MISE_DATA_DIR || true)"
+  for mise_root in "$configured_mise" "$OUTPUT_HOME/.local/share/mise" "$root_mise"; do
+    [[ -n "$mise_root" ]] || continue
+    shims="$mise_root/shims"
+    [[ -d "$shims" ]] || continue
+    bun_route "mise shims PATH $shims" env PATH="$shims:$PATH" /bin/sh
+  done
+}
+replace_image_buns() {
+  local candidate configured_mise directory mise_root root_mise
+  configured_mise="$(printenv MISE_DATA_DIR || true)"
+  root_mise="$(printenv STLL_CLOUD_TEST_ROOT_MISE || true)"
+  [[ -n "$root_mise" ]] || root_mise=/root/.local/share/mise
+  for mise_root in "$configured_mise" "$OUTPUT_HOME/.local/share/mise" "$root_mise"; do
+    [[ -n "$mise_root" ]] || continue
+    if [[ -d "$mise_root/installs/bun" ]]; then
+      while IFS= read -r -d '' candidate; do
+        [[ -d "$candidate" ]] || ln -sfnT -- "$BUN_DIR/bun" "$candidate"
+      done < <(find "$mise_root/installs/bun" \( -type f -o -type l \) \( -name bun -o -name bunx \) -print0)
+    fi
+    for candidate in "$mise_root/shims/bun" "$mise_root/shims/bunx"; do
+      [[ -e "$candidate" || -L "$candidate" ]] || continue
+      [[ -d "$candidate" ]] || ln -sfnT -- "$BUN_DIR/bun" "$candidate"
+    done
+  done
+  while IFS= read -r directory; do
+    [[ -n "$directory" ]] || directory=.
+    for candidate in "$directory/bun" "$directory/bunx"; do
+      [[ -e "$candidate" || -L "$candidate" ]] || continue
+      [[ -d "$candidate" ]] && continue
+      [[ "$(readlink -f -- "$candidate")" == "$(readlink -f -- "$BUN_DIR/bun")" ]] || ln -sfnT -- "$BUN_DIR/bun" "$candidate"
+    done
+  # The trailing newline lets read return the last PATH entry too.
+  done < <(printf '%s\n' "$PATH" | tr : '\n')
+}
 install_runtimes() (
   if [[ ! -s /etc/ssl/certs/ca-certificates.crt ]]; then
     command -v update-ca-certificates >/dev/null || fail 'System CA certificate bundle is missing; restore ca-certificates in the base image offline before install'
@@ -174,6 +233,7 @@ install_runtimes() (
   ln -sfnT -- "$NODE_DIR/bin/npm" /usr/local/bin/npm
   ln -sfnT -- "$NODE_DIR/bin/npx" /usr/local/bin/npx
   ln -sfnT -- "$BUN_DIR/bun" /usr/local/bin/bun
+  replace_image_buns
 )
 
 dependency_install() {
@@ -212,6 +272,48 @@ process.stdout.write([...hosts].sort().join(","));
   network_run "$download_hosts" 240 runuser -u "$OUTPUT_USER" -- env HOME="$OUTPUT_HOME" BUN_INSTALL_CACHE_DIR="$BUN_CACHE" PATH="$PATH" BUN_CONFIG_HTTP_IDLE_TIMEOUT=20 "$BUN_DIR/bun" install --frozen-lockfile
 }
 
+dependency_hash() {
+  [[ -f bun.lock && ! -L bun.lock ]] || fail 'A regular root bun.lock is required'
+  sha256sum -- bun.lock | cut -d ' ' -f1
+}
+prepare_dependency_state() {
+  [[ ! -L "$DEPENDENCY_STATE_ROOT" ]] || fail 'Dependency state root must not be a symlink'
+  if [[ -e "$DEPENDENCY_STATE_ROOT" ]]; then
+    [[ -d "$DEPENDENCY_STATE_ROOT" && "$(stat -c '%u:%a' "$DEPENDENCY_STATE_ROOT")" == 0:755 ]] || fail 'Invalid dependency state root'
+  else
+    install -d -m 755 -o root -g root "$DEPENDENCY_STATE_ROOT"
+  fi
+  [[ ! -L "$DEPENDENCY_STAMP" ]] || fail 'Dependency stamp must not be a symlink'
+  if [[ -e "$DEPENDENCY_STAMP" ]]; then
+    [[ -f "$DEPENDENCY_STAMP" && "$(stat -c '%u:%a' "$DEPENDENCY_STAMP")" == 0:644 ]] || fail 'Invalid dependency stamp'
+  fi
+}
+write_dependency_stamp() {
+  local temporary
+  prepare_dependency_state
+  temporary="$(mktemp "$DEPENDENCY_STATE_ROOT/.dependencies.XXXXXX")"
+  chmod 644 "$temporary"
+  dependency_hash > "$temporary"
+  mv -f -- "$temporary" "$DEPENDENCY_STAMP"
+}
+install_dependencies() {
+  prepare_dependency_state
+  rm -f -- "$DEPENDENCY_STAMP"
+  dependency_install
+  write_dependency_stamp
+}
+sync_dependencies() {
+  local expected installed=''
+  prepare_dependency_state
+  expected="$(dependency_hash)"
+  if [[ -f "$DEPENDENCY_STAMP" ]]; then IFS= read -r installed < "$DEPENDENCY_STAMP" || true; fi
+  # The stamp describes an installation; without node_modules there is none.
+  [[ "$installed" == "$expected" && -d "$REPO_ROOT/node_modules" ]] && return
+  rm -f -- "$DEPENDENCY_STAMP"
+  dependency_install || fail 'bun.lock mismatch; dependency installation failed'
+  write_dependency_stamp
+}
+
 
 # Prevent package maintainer scripts from starting unmanaged system services.
 apt_install() (
@@ -248,8 +350,17 @@ apt_install() (
   local package
   for package in "$@"; do
     if [[ "$package" == */* ]]; then
-      # Local archives are already downloaded and verified; never put dpkg,
-      # package triggers, or maintainer scripts under a network deadline.
+      # Local archives are already downloaded and verified, but their
+      # dependencies may not be: --print-uris names what is missing without
+      # contacting any server, the network deadline covers only fetching it,
+      # and dpkg, package triggers and maintainer scripts run offline.
+      local missing
+      missing="$(set -o pipefail; DEBIAN_FRONTEND=noninteractive apt-get --print-uris -qq -y --no-install-recommends install "$@" | awk '{ name = $2; sub(/_.*/, "", name); print name }')"
+      if [[ -n "$missing" ]]; then
+        # Debian package names never contain whitespace: split one per word.
+        # shellcheck disable=SC2086
+        DEBIAN_FRONTEND=noninteractive apt_network install -y --no-install-recommends --download-only $missing
+      fi
       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --no-download "$@"
       return
     fi
@@ -396,12 +507,12 @@ while :; do
     *) _stll_cloud_part="$_stll_cloud_remaining"; _stll_cloud_more=no ;;
   esac
   case "$_stll_cloud_part" in
-    '/opt/stll-cloud/node/26.10.0/bin'|'/opt/stll-cloud/bun/1.4.3'|/usr/local/bin) ;;
+    '/opt/stll-cloud/node/26.10.0/bin'|'/opt/stll-cloud/bun/1.4.4'|/usr/local/bin) ;;
     *) _stll_cloud_result="$_stll_cloud_result$_stll_cloud_separator$_stll_cloud_part"; _stll_cloud_separator=: ;;
   esac
   [ "$_stll_cloud_more" = yes ] || break
 done
-export PATH='/opt/stll-cloud/node/26.10.0/bin:/opt/stll-cloud/bun/1.4.3:/usr/local/bin'"${_stll_cloud_separator:+:}$_stll_cloud_result"
+export PATH='/opt/stll-cloud/node/26.10.0/bin:/opt/stll-cloud/bun/1.4.4:/usr/local/bin'"${_stll_cloud_separator:+:}$_stll_cloud_result"
 unset _stll_cloud_remaining _stll_cloud_result _stll_cloud_separator _stll_cloud_part _stll_cloud_more
 export RUSTUP_HOME=/opt/stll-cloud/rustup
 export CARGO_HOME=/opt/stll-cloud/cargo
@@ -442,7 +553,7 @@ done
 )
 verify_shell_environment() {
   [[ -f '/etc/profile.d/stll-cloud.sh' && ! -L '/etc/profile.d/stll-cloud.sh' && "$(stat -c '%h:%u' '/etc/profile.d/stll-cloud.sh')" == 1:0 ]] || fail 'Managed shell environment is unavailable; run install'
-  [[ "$(sha256sum -- '/etc/profile.d/stll-cloud.sh' | cut -d ' ' -f1)" == '056727e845ab7ff91ead2816d447c2c56c18249546768769d36468d7b38dc595' ]] || fail 'Managed shell environment differs; run install'
+  [[ "$(sha256sum -- '/etc/profile.d/stll-cloud.sh' | cut -d ' ' -f1)" == '2e96da10364dade2b051fb77195abb3c42a3e848804b86ef26ada7aa6d392858' ]] || fail 'Managed shell environment differs; run install'
 }
 
 
@@ -460,13 +571,16 @@ if [[ "$MODE" == install ]]; then
   step services install_services
   step tools install_tools
   step shell install_shell_environment
-  step dependencies dependency_install
+  # Login routes read the installed profile, so they are checked after it.
+  step routes verify_bun_routes
+  step dependencies install_dependencies
 
   exit 0
 fi
 
 start_environment() {
   step runtime-check runtime_ready
+  step dependencies sync_dependencies
   step tool-check verify_tools
   step shell install_shell_environment
   step shell-check verify_shell_environment

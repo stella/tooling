@@ -3,21 +3,23 @@ name: CLA Assistant
 on:
   issue_comment:
     types: [created]
+  merge_group:
+    types: [checks_requested]
   pull_request_target: # zizmor: ignore[dangerous-triggers] delegates to pinned reusable CLA workflow; never check out PR code here
-    types: [opened, synchronize, reopened, closed]
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
-  actions: write
   contents: read
   issues: write
-  pull-requests: write
-  statuses: write
+  pull-requests: read
+  checks: write # Reports the contributor check on PR and merge-group heads.
 
 jobs:
   cla:
     if: >-
       (
         github.event_name == 'pull_request_target'
+        || github.event_name == 'merge_group'
       ) || (
         github.event_name == 'issue_comment'
         && github.event.issue.pull_request
@@ -26,7 +28,7 @@ jobs:
           || github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA'
         )
       )
-    uses: stella/.github/.github/workflows/cla.yml@8f19eb7220047e5b06f6e75f0b9f908bfd01f5f6
+    uses: stella/.github/.github/workflows/cla.yml@a98150379a0659f9ff603970a06dbdee56f7c4cb
     with:
       allowlist: dependabot[bot],renovate[bot],github-actions[bot],stella-provenance-updater[bot],google-labs-jules[bot],cursoragent
     secrets:

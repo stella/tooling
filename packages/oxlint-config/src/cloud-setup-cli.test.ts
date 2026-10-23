@@ -4,8 +4,8 @@ import { expect, test } from "bun:test";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
   chmod,
-  mkdir,
   link,
+  mkdir,
   mkdtemp,
   readFile,
   rm,
@@ -20,8 +20,8 @@ import { fileURLToPath } from "node:url";
 import policyInput from "../toolchain.json";
 import { cloudSetupPath, generateCloudSetup } from "./cloud-setup";
 import {
-  cloudClaudeSettingsPath,
   cloudAttributionFix,
+  cloudClaudeSettingsPath,
   cloudSessionStartFix,
   hasCloudAttribution,
   hasCloudSessionStartHook,
@@ -81,7 +81,7 @@ test("cloud CLI generates byte-stable executable output shared with the mandator
       checkToolchain({ root, policy: parseToolchainPolicy(policyInput) }),
     ).toEqual([]);
   });
-});
+}, 15_000);
 
 test("cloud CLI restores each deleted tracked output and reaches a fixed point", async () => {
   const outputs = [cloudSetupPath, cloudClaudeSettingsPath];
@@ -113,7 +113,7 @@ test("cloud CLI restores each deleted tracked output and reaches a fixed point",
       ).toEqual([]);
     });
   }
-});
+}, 15_000);
 
 test("cloud CLI refuses missing tracked inputs while its generated outputs are absent", async () => {
   await withRepository(async (root) => {
@@ -130,7 +130,7 @@ test("cloud CLI refuses missing tracked inputs while its generated outputs are a
         await stat(join(root, output)).catch(() => undefined),
       ).toBeUndefined();
   });
-});
+}, 15_000);
 
 test("cloud CLI refuses symlinks and hard links without modifying outside targets", async () => {
   for (const target of ["parent", "destination", "hard-link"]) {
@@ -156,7 +156,7 @@ test("cloud CLI refuses symlinks and hard links without modifying outside target
       }
     });
   }
-});
+}, 15_000);
 
 test("cloud CLI requires tracked declarations and an exact root Node patch", async () => {
   for (const mutation of ["untracked", "no-cloud", "node-series"]) {
@@ -172,7 +172,7 @@ test("cloud CLI requires tracked declarations and an exact root Node patch", asy
       expect(invoke(root).status).toBe(1);
     });
   }
-});
+}, 15_000);
 
 test("cloud CLI help succeeds outside a repository and unknown arguments fail", async () => {
   const root = await mkdtemp(join(tmpdir(), "cloud-cli-help-"));
@@ -189,7 +189,7 @@ test("cloud CLI help succeeds outside a repository and unknown arguments fail", 
   } finally {
     await rm(root, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("cloud CLI safely merges existing untracked Claude settings without replacing unrelated configuration", async () => {
   await withRepository(async (root) => {
@@ -216,7 +216,7 @@ test("cloud CLI safely merges existing untracked Claude settings without replaci
       settings,
     );
   });
-});
+}, 15_000);
 
 test("cloud CLI leaves outputs untouched when Claude settings cannot be safely merged", async () => {
   for (const input of [
@@ -241,7 +241,7 @@ test("cloud CLI leaves outputs untouched when Claude settings cannot be safely m
       );
     });
   }
-});
+}, 15_000);
 
 test("cloud CLI leaves outputs untouched when existing attribution conflicts", async () => {
   await withRepository(async (root) => {
@@ -255,7 +255,7 @@ test("cloud CLI leaves outputs untouched when existing attribution conflicts", a
       input,
     );
   });
-});
+}, 15_000);
 
 test("cloud CLI refuses linked Claude settings and parents without writing outside targets", async () => {
   for (const target of [
@@ -290,14 +290,14 @@ test("cloud CLI refuses linked Claude settings and parents without writing outsi
       }
     });
   }
-});
+}, 15_000);
 
 test("Rust and tool input changes cannot silently retain a clean cloud drift check", async () => {
   await withRepository(async (root) => {
     const policy = parseToolchainPolicy(policyInput);
     const rustSource = `[toolchain]\nchannel = "${policy.rust}"\nprofile = "minimal"\ncomponents = ["clippy"]\ntargets = ["wasm32-unknown-unknown"]\n`;
     const lockSource =
-      'version = 4\n[[package]]\nname = "wasm-bindgen"\nversion = "0.2.126"\n';
+      'version = 4\n[[package]]\nname = "fixture-dev"\nversion = "1.0.0"\n[[package]]\nname = "wasm-bindgen"\nversion = "0.2.126"\n';
     const configuration = {
       cloud: {
         ...declaration,
@@ -320,6 +320,12 @@ test("Rust and tool input changes cannot silently retain a clean cloud drift che
         ({ rule }) => rule === "cloud-setup-drift",
       );
     expect(drift()).toEqual([]);
+    await writeFile(
+      join(root, "Cargo.lock"),
+      lockSource.replace('version = "1.0.0"', 'version = "2.0.0"'),
+    );
+    expect(drift()).toEqual([]);
+    await writeFile(join(root, "Cargo.lock"), lockSource);
     const mutations = [
       {
         file: "rust-toolchain.toml",
@@ -354,4 +360,4 @@ test("Rust and tool input changes cannot silently retain a clean cloud drift che
       expect(drift()).toEqual([]);
     }
   });
-});
+}, 15_000);

@@ -38,15 +38,29 @@ introduce requirements.
 
 Schema version 1 contains these fields:
 
-| Fields                                                                                     | Contract                                                                                                                                                                                                                                                                                                                                                                              |
-| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schemaVersion`                                                                            | Supported policy schema version (`1`).                                                                                                                                                                                                                                                                                                                                                |
-| `bun`                                                                                      | Exact `packageManager`, `bun-types`, image and manager pin.                                                                                                                                                                                                                                                                                                                           |
-| `oxlint`, `oxlint-tsgolint`, `@oxlint/plugins`, `@stll/oxlint-plugin`, `oxfmt`, `lefthook` | Exact dependency and catalog pins. Declared local workspace packages must resolve to the same version.                                                                                                                                                                                                                                                                                |
-| `typescript`, `typescriptInstallLayouts`, `typescript6Compatibility`                       | Exact compiler pins and complete direct or split install layouts; the optional compatibility alias is exact too.                                                                                                                                                                                                                                                                      |
-| `node`, `python`, `rust`                                                                   | Runtime selectors and version-manager pins. Node selects the policy major (`26.x`); static minor and patch selectors within that major are allowed. A Python minor pin preserves existing patch selectors within that release series; a patch policy requires the exact patch. Rust selects one exact stable release across toolchain files, commands, workflow selectors and images. |
-| `actions`                                                                                  | Approved action names mapped to full `sha` and `version` comment.                                                                                                                                                                                                                                                                                                                     |
-| `dependabot`                                                                               | Shared schedule, cooldown and groups. Package and action ignores derive from the owned pins.                                                                                                                                                                                                                                                                                          |
+| Fields                                                                            | Contract                                                                                                                                                                                                                                                                                                                                                                              |
+| --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schemaVersion`                                                                   | Supported policy schema version (`1`).                                                                                                                                                                                                                                                                                                                                                |
+| `bun`                                                                             | Minimum Bun; the repository pins one exact release at or above it everywhere.                                                                                                                                                                                                                                                                                                         |
+| `oxlint`, `oxlint-tsgolint`, `@oxlint/plugins`, `@stll/oxlint-plugin`, `lefthook` | Exact dependency and catalog pins. Declared local workspace packages must resolve to the same version.                                                                                                                                                                                                                                                                                |
+| `typescript`, `typescriptInstallLayouts`, `typescript6Compatibility`              | Exact compiler pins and complete direct or split install layouts; the optional compatibility alias is exact too.                                                                                                                                                                                                                                                                      |
+| `node`, `python`, `rust`                                                          | Runtime selectors and version-manager pins. Node selects the policy major (`26.x`); static minor and patch selectors within that major are allowed. A Python minor pin preserves existing patch selectors within that release series; a patch policy requires the exact patch. Rust selects one exact stable release across toolchain files, commands, workflow selectors and images. |
+| `actions`                                                                         | Approved action names mapped to full `sha` and `version` comment.                                                                                                                                                                                                                                                                                                                     |
+| `dependabot`                                                                      | Shared schedule, cooldown and groups. Package and action ignores derive from the owned pins. `actionGroups` come first in every GitHub Actions entry, so first-party reusable workflows that move by commit arrive as one update.                                                                                                                                                     |
+| `formatter`                                                                       | `bun fmt` is the only formatter. `style` is the one `[fmt]` style (line width, import groups) every Bun repository's root `bunfig.toml` repeats exactly; `ignorePatterns` lists the generated files every repository leaves to their generators. A repository adds only its own ignore patterns and, where it uses Tailwind, `sortTailwindcss`.                                       |
+
+The `formatter-policy` rule makes `bun fmt` the only formatter. It fails on an
+oxfmt, Prettier, Biome or dprint dependency, catalog entry, script or command
+anywhere in the repository; on `.oxfmtrc*`, `oxfmt.config.*`, `.prettierrc*`,
+`prettier.config.*`, `.prettierignore`, `biome.json` and `dprint.json` files and
+on a `prettier` key in `package.json`; on a package script named `fmt` (it
+would shadow `bun fmt`); and on a changesets `format` other than `false`. In a
+Bun repository the root `bunfig.toml` holds the only formatter configuration in
+its `[fmt]` table: exactly the shared style from `toolchain.json`, the shared
+ignore patterns, and nothing repository-specific beyond extra ignores and
+`sortTailwindcss`; lefthook
+`pre-commit` runs `bun fmt --staged`, and a workflow runs `bun fmt --check`
+without path operands, so CI always checks the whole repository.
 
 Configure `oven-sh/setup-bun` with `bun-version-file: package.json` and a
 matching `packageManager`. Configure setup-node/setup-python with
@@ -209,7 +223,9 @@ repository root; the command reads tracked declarations and writes canonical
 rejects missing coverage and policy drift. Use `stll-dependabot --check` in CI for
 read-only byte drift detection. Pass `--config stll-dependabot.json` to declare
 ecosystems and directories explicitly; the declaration cannot change shared
-schedule, cooldown, groups, or owned-tool ignores. See the
+schedule, cooldown, groups, or owned-tool ignores. Repository holds on other
+dependencies go in `stll-toolchain.json` `dependabotIgnores`, each with a reason;
+they cannot name or match a shared pin. See the
 [package guide](packages/oxlint-config/README.md#generate-dependency-update-configuration)
 for the input format. The published `@stll/oxlint-config/dependabot` subpath exports
 `generateDependabotConfig` and `parseToolchainPolicy` for programmatic generation. Owned package pins follow
@@ -288,7 +304,7 @@ TypeScript 6 is compatibility-only. Use the split layout only for a command
 that loads one of the peer blockers listed in `toolchain.json`, or for code
 that imports the TypeScript compiler API. Remove the compatibility install when
 the blocker accepts TypeScript 7. The shared config's peer range accepts both
-layouts. Both layouts use `bun check` with Bun 1.4.3 for typechecking; retain
+layouts. Both layouts use `bun check` with the pinned Bun for typechecking; retain
 TypeScript wherever a tool needs its compiler API or declaration generation.
 `stll-typecheck-parity` runs from a consumer repository root. It uses that repo's
 TypeScript compiler (including the declared split layout), compares repository
@@ -365,7 +381,6 @@ Import-extension rewriting, symlink preservation, incremental compilation, and
 `tsBuildInfoFile` placement remain explicit consumer options: they depend on
 emit requirements, module identity, and cache ownership. The shared base sets
 none of them.
-
 
 Node scripts need an explicit TypeScript project when the library project's
 `include` does not cover them. Install `@types/node` as a direct development
@@ -490,9 +505,11 @@ export default defineConfig({
 `no-raw-route-query-client` requires route freshness helpers instead of raw
 TanStack Query client calls and keeps pending components synchronous.
 
-When using `no-unsafe-inner-html`, disable the blanket `react/no-danger` rule;
-the portable rule permits static and provably sanitized HTML while rejecting
-untrusted values.
+When using `no-unsafe-inner-html`, disable the blanket `react/no-danger` rule.
+Its default `sanitizerPolicy: "allowlist"` permits static HTML and calls whose
+names match the shared HTML sanitizer allowlist. Set
+`sanitizerPolicy: "provenance"` to require a `// safe-html: <provenance>`
+comment for dynamic values, including calls to sanitizer-named functions.
 
 Oxlint 1.80 replaced `react/react-compiler` with category-specific React
 Compiler rules. Enable the actionable categories explicitly with
@@ -657,7 +674,7 @@ Bun runtime/compiler requirements are rejected. JSON and declaration-only packag
 record `{"type":"types-only"}` explicitly.
 
 Build adapters use the installed configuration loaders and bind their behavior to
-tsdown 0.22.9, Vite 8.1.5, or @nuxt/module-builder 1.0.3 (unbuild 3.6.1 and
+tsdown 0.23.1, Vite 8.3.4, or @nuxt/module-builder 1.0.3 (unbuild 3.6.1 and
 mkdist 2.4.1). They record final transform targets, including separate Nuxt module
 and runtime entries. No syntax lowering records `esnext`.
 Only exact single build invocations (`tsdown`, `vite build`, or
@@ -848,7 +865,7 @@ Workflows with no declared trust job retain their existing fork-CI policy.
 
 The comparison includes Bun declarations, Node selectors and support ranges,
 resolved TypeScript compiler versions (including workspace and compatibility
-aliases), oxlint, oxlint-tsgolint, oxfmt, and shared tooling pins. Lockfile
+aliases), oxlint, oxlint-tsgolint, and shared tooling pins. Lockfile
 resolutions determine installed package versions; manifest ranges alone do not.
 Resolution locations and importer bindings are retained: swapping compiler
 versions between workspaces cannot look unchanged. Compiler specifier changes

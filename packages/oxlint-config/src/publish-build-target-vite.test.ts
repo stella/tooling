@@ -4,8 +4,8 @@ import {
   assertReviewedVitePlugins,
   assertReviewedVueOptions,
   resolvedViteTarget,
-  reviewedViteBuild,
   reviewedDtsConfiguration,
+  reviewedViteBuild,
 } from "./publish-build-target-vite";
 
 test("declaration helper configuration proves its import, call and closed options without executing TS", () => {

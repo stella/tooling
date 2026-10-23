@@ -3,8 +3,8 @@ import {
   closeSync,
   lstatSync,
   openSync,
-  readSync,
   readFileSync,
+  readSync,
   realpathSync,
 } from "node:fs";
 import path from "node:path";
@@ -20,27 +20,34 @@ import {
 import { parseCloudSetup } from "./cloud-setup-schema";
 import { readGitTrackedOutput } from "./git-tracked-output";
 import { checkRepositoryQuarantine } from "./quarantine-policy";
+import { repositoryBun } from "./toolchain-bun";
 import {
   checkConsumerChecks,
   parseConsumerChecks,
 } from "./toolchain-consumer-checks";
-import { checkDependabot, dependabotRules } from "./toolchain-dependabot";
 import {
-  parseDynamicSelectors,
+  checkDependabot,
+  declaredIgnoreConflicts,
+  dependabotRules,
+  parseDependabotIgnores,
+} from "./toolchain-dependabot";
+import {
   type DynamicSelector,
+  parseDynamicSelectors,
 } from "./toolchain-dynamic-selectors";
 import {
   parseEngineFloors,
-  resolveEngineFloor,
   type ResolvedEngineFloor,
+  resolveEngineFloor,
 } from "./toolchain-engine-floors";
+import { checkFormatter, formatterRule } from "./toolchain-formatter";
 import { toolchainInputKind } from "./toolchain-inputs";
 import { checkNodeProjects, nodeProjectRule } from "./toolchain-node-projects";
 import { checkPackageFiles, packageRules } from "./toolchain-packages";
 import {
   checkRuntimeFile,
-  runtimeRules,
   type RuntimeDelegation,
+  runtimeRules,
 } from "./toolchain-runtime";
 import { parseRustExceptions } from "./toolchain-rust";
 import { parseToolchainPolicy } from "./toolchain-schema";
@@ -51,6 +58,7 @@ export const toolchainRules = [
     ...runtimeRules,
     ...dependabotRules,
     nodeProjectRule,
+    formatterRule,
     "cloud-setup-drift",
     "quarantine-policy",
   ] as const),
@@ -80,12 +88,13 @@ export const parseToolchainConfiguration = (input: unknown) => {
         key !== "engineFloors" &&
         key !== "dynamicSelectors" &&
         key !== "consumerChecks" &&
-        key !== "rustExceptions",
+        key !== "rustExceptions" &&
+        key !== "dependabotIgnores",
     ) ||
     (input["optOuts"] !== undefined && !array(input["optOuts"]))
   )
     throw new Error(
-      "stll-toolchain.json accepts only optOuts, cloud, engineFloors, dynamicSelectors consumerChecks and rustExceptions declarations",
+      "stll-toolchain.json accepts only optOuts, cloud, engineFloors, dynamicSelectors, consumerChecks, rustExceptions and dependabotIgnores declarations",
     );
   const disabled = new Set<string>();
   const optOuts = input["optOuts"] ?? [];
@@ -136,6 +145,7 @@ export const parseToolchainConfiguration = (input: unknown) => {
     engineFloors: parseEngineFloors(input["engineFloors"]),
     dynamicSelectors: parseDynamicSelectors(input["dynamicSelectors"]),
     consumerChecks: parseConsumerChecks(input["consumerChecks"]),
+    dependabotIgnores: parseDependabotIgnores(input["dependabotIgnores"]),
   };
 };
 
@@ -238,7 +248,7 @@ type CheckSharedToolchainOptions = {
 
 export const checkToolchain = ({
   root,
-  policy,
+  policy: sharedPolicy,
   onDelegated,
   onWarning,
   now,
@@ -246,6 +256,12 @@ export const checkToolchain = ({
   const { files, trackedFiles, diagnostics } = readToolchainInputs(root, {
     bunLock: "content",
   });
+  // Every Bun reference follows the repository's own pin, which must be at
+  // or above the shared minimum.
+  const policy = {
+    ...sharedPolicy,
+    bun: repositoryBun(sharedPolicy.bun, files["package.json"]),
+  };
   let repository: string | undefined;
   try {
     const origin = execFileSync("git", ["remote", "get-url", "origin"], {
@@ -363,6 +379,9 @@ export const checkToolchain = ({
       return false;
     }
   });
+  diagnostics.push(
+    ...checkFormatter({ files, policy: policy.formatter, usesBun }),
+  );
   if (usesBun || files["bunfig.toml"] !== undefined) {
     try {
       if (files["bunfig.toml"] === undefined)
@@ -448,7 +467,24 @@ export const checkToolchain = ({
         line: 1,
         message: `dynamic selector ${entry.path}:${entry.at ?? entry.line} must match exactly one unresolved ${entry.kind} selector`,
       });
-  diagnostics.push(...checkDependabot({ files, policy: policy.dependabot }));
+  const dependabotIgnores = configuration.dependabotIgnores;
+  for (const message of declaredIgnoreConflicts({
+    ignores: dependabotIgnores,
+    policy: policy.dependabot,
+  }))
+    diagnostics.push({
+      rule: "configuration",
+      path: "stll-toolchain.json",
+      line: 1,
+      message,
+    });
+  diagnostics.push(
+    ...checkDependabot({
+      files,
+      policy: policy.dependabot,
+      ignores: dependabotIgnores,
+    }),
+  );
   return diagnostics.filter(
     (diagnostic) => !configuration.disabled.has(diagnostic.rule),
   );

@@ -6,6 +6,7 @@ import path from "node:path";
 import {
   assertDeclarationOnlyOutput,
   createDeclarationEmissionLedger,
+  declarationHookParts,
   guardDeclarationHook,
   reviewedViteDtsOptions,
   snapshotDeclarationBundle,
@@ -184,8 +185,11 @@ test("the emission ledger rejects deferred JavaScript and foreign asset updates"
     emitChunk: () => {
       throw new Error("Unknown API reached host");
     },
+    getNativeBuildContext: () => ({ framework: "webpack" }),
   };
   const context = ledger.wrapContext(host);
+  // The native bundler context is withheld, not forwarded.
+  expect(Reflect.get(context, "getNativeBuildContext")).toBeUndefined();
   const emit = context["emitFile"];
   if (typeof emit !== "function") throw new Error("Missing fixture emitFile");
   expect(() =>
@@ -287,4 +291,40 @@ test("bundle snapshots read emitted bytes and ignore output metadata getters", (
       after: snapshotDeclarationBundle(bundle),
     }),
   ).toThrow("index.js.map");
+});
+
+test("object hooks keep only a static id filter and a guarded handler", () => {
+  const handler = () => undefined;
+  expect(declarationHookParts(handler)).toEqual({ handler });
+  expect(declarationHookParts({ filter: undefined, handler })).toEqual({
+    handler,
+  });
+  const include = /\.ts$/;
+  expect(
+    declarationHookParts({ filter: { id: { include } }, handler }),
+  ).toEqual({ handler, filter: { id: { include } } });
+  expect(
+    declarationHookParts({
+      filter: { id: { include: ["a.ts", /b/], exclude: "c.ts" } },
+      handler,
+    }),
+  ).toEqual({
+    handler,
+    filter: { id: { include: ["a.ts", /b/], exclude: "c.ts" } },
+  });
+  for (const hook of [
+    { handler, order: "pre" },
+    { handler, filter: { code: { include: "x" } } },
+    { handler, filter: { id: { include: () => true } } },
+    { handler, filter: { id: { include: [/a/, 1] } } },
+    { handler, filter: { id: /a/ } },
+    "transform",
+  ])
+    expect(() => declarationHookParts(hook)).toThrow();
+  const accessor = { handler };
+  Object.defineProperty(accessor, "filter", {
+    enumerable: true,
+    get: () => ({ id: { include: /a/ } }),
+  });
+  expect(() => declarationHookParts(accessor)).toThrow("accessors");
 });

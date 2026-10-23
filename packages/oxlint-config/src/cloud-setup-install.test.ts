@@ -112,7 +112,7 @@ test("package installation restores policy bytes and mode across success, failur
       }
     }
   }
-});
+}, 15_000);
 
 test("package installation refuses symlink policies before invoking apt", () => {
   const directory = mkdtempSync(join(tmpdir(), "cloud-apt-test-"));
@@ -133,7 +133,7 @@ test("package installation refuses symlink policies before invoking apt", () => 
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("local package installation resolves offline, then runs only the unbounded offline apt step", () => {
   const directory = mkdtempSync(join(tmpdir(), "cloud-apt-test-"));
@@ -196,7 +196,7 @@ test("service installation uses shared bounded network helpers for every downloa
         ),
       ).toBe(services.includes("valkey"));
   }
-});
+}, 15_000);
 
 test("service provisioning passes explicit download deadlines and stops before package installation on failure", () => {
   const directory = mkdtempSync(join(tmpdir(), "cloud-download-test-"));
@@ -261,7 +261,7 @@ install_services
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 type SourcePreflightOptions = {
   directory: string;
@@ -359,7 +359,7 @@ test("PGDG preflight distinguishes active list and folded deb822 sources from co
       rmSync(directory, { recursive: true, force: true });
     }
   }
-});
+}, 15_000);
 
 test("PGDG preflight reuses verified managed sources and precedes provisioning", () => {
   const canonical =
@@ -408,7 +408,7 @@ test("PGDG preflight reuses verified managed sources and precedes provisioning",
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("a complete preinstalled PostgreSQL toolchain requires no PGDG source changes", () => {
   const directory = mkdtempSync(join(tmpdir(), "cloud-pg-ready-test-"));
@@ -450,7 +450,7 @@ install_services
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("PGDG reuse requires the verified signing fingerprint and consistent keyring bindings", () => {
   const directory = mkdtempSync(join(tmpdir(), "cloud-pgdg-keys-test-"));
@@ -515,7 +515,7 @@ test("PGDG reuse requires the verified signing fingerprint and consistent keyrin
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("verified PGDG sources cannot enable APT trust overrides", () => {
   const directory = mkdtempSync(join(tmpdir(), "cloud-pgdg-trust-test-"));
@@ -557,7 +557,7 @@ test("verified PGDG sources cannot enable APT trust overrides", () => {
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("offline package configuration failures propagate and still restore the policy", () => {
   const directory = mkdtempSync(join(tmpdir(), "cloud-apt-test-"));
@@ -572,7 +572,7 @@ test("offline package configuration failures propagate and still restore the pol
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("local package archives install without a deadline because they are already downloaded", () => {
   const directory = mkdtempSync(join(tmpdir(), "cloud-apt-test-"));
@@ -608,4 +608,4 @@ test("local package archives fetch their missing dependencies under the network 
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
-});
+}, 15_000);

@@ -1,11 +1,11 @@
 import { parse } from "smol-toml";
 
 import {
-  REQUIRED_RELEASE_AGE_SECONDS,
   checkQuarantinePolicy,
   isFirstPartyPackageName,
   pruneExpiredExcludes,
   readRegistryFirstPartyPackages,
+  REQUIRED_RELEASE_AGE_SECONDS,
   synchronizeFirstPartyExcludes,
 } from "./quarantine-policy-core";
 

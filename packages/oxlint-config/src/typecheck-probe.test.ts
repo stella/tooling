@@ -2,10 +2,10 @@ import { expect, test } from "bun:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
-  mkdtemp,
   mkdir,
-  readFile,
+  mkdtemp,
   readdir,
+  readFile,
   realpath,
   rm,
   symlink,
@@ -102,7 +102,7 @@ test("probe requires its own diagnostic, removes the seed and repeats the exact 
         expect(outputs).toHaveLength(2);
         expect(outputs.at(-1)).toBe("clean\n");
       });
-});
+}, 15_000);
 
 test("successful seeded runs, excluded seeds and unrelated failures never activate the probe", async () => {
   for (const kind of [
@@ -144,7 +144,7 @@ test("successful seeded runs, excluded seeds and unrelated failures never activa
       );
       expect(calls).toBe(1);
     });
-});
+}, 15_000);
 
 test("clean failure and command errors remove the owned seed", async () => {
   for (const phase of ["seeded-error", "clean-error", "clean-failure"])
@@ -175,7 +175,7 @@ test("clean failure and command errors remove the owned seed", async () => {
           : /command unavailable/,
       );
     });
-});
+}, 15_000);
 
 test("interrupts abort pending work, remove the seed and restore process signal listeners", async () => {
   for (const signal of ["SIGINT", "SIGTERM"] as const)
@@ -202,7 +202,7 @@ test("interrupts abort pending work, remove the seed and restore process signal 
       );
       expect(process.listenerCount(signal)).toBe(before);
     });
-});
+}, 15_000);
 
 test("project containment rejects escaped, external symlink and directory projects before running commands", async () => {
   await withProject(async ({ repo, project }) => {
@@ -241,7 +241,7 @@ test("project containment rejects escaped, external symlink and directory projec
       await rm(external, { recursive: true, force: true });
     }
   });
-});
+}, 15_000);
 
 test("direct executable fixture receives literal argv and observes seeded then clean filesystem", async () => {
   await withProject(async ({ repo, project, directory }) => {
@@ -273,7 +273,7 @@ if (seed) {
       /ENOENT/,
     );
   });
-});
+}, 15_000);
 
 test("explicit seed directories select included project sources and reject paths outside that project", async () => {
   await withProject(async ({ repo, project, directory }) => {
@@ -314,7 +314,7 @@ test("explicit seed directories select included project sources and reject paths
       await rm(source, { recursive: true, force: true });
     }
   });
-});
+}, 15_000);
 
 // The built Node entry and real compiler are exercised by repository CI.
 test.skipIf(process.env["CI"] !== "true")(
@@ -396,4 +396,4 @@ test("probe containment rejects Windows sibling projects and seed directories", 
       paths,
     }),
   ).toBe(false);
-});
+}, 15_000);

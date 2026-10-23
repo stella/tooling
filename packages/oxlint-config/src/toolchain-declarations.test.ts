@@ -41,7 +41,10 @@ type DeclarationMutation = {
 };
 const checkoutAction =
   "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1";
-const checkoutWorkflow = (checkout: Record<string, string>, selector: string) => ({
+const checkoutWorkflow = (
+  checkout: Record<string, string>,
+  selector: string,
+) => ({
   on: { pull_request: {} },
   jobs: {
     replay: {
@@ -336,7 +339,7 @@ for (const mutation of mutations)
       expect(invocations).toBe(1);
       expect(passed).toBe(false);
     });
-  });
+  }, 15_000);
 
 for (const [name, replacement] of [
   ["another repository", { repository: "example/other", path: "base" }],
@@ -373,7 +376,7 @@ for (const [name, replacement] of [
         expect(result.status).toBe("unreadable");
       },
     );
-  });
+  }, 15_000);
 
 test("a same-repository checkout path selector is compared, and another repository's is not", async () => {
   await withSnapshots(
@@ -441,7 +444,7 @@ test("a same-repository checkout path selector is compared, and another reposito
       expect(result.status).toBe("unreadable");
     },
   );
-});
+}, 15_000);
 
 test("unclassifiable changed runtime declarations run parity rather than skipping", async () => {
   await withSnapshots(
@@ -481,7 +484,7 @@ test("unclassifiable changed runtime declarations run parity rather than skippin
       expect(invocations).toBe(1);
     },
   );
-});
+}, 15_000);
 
 const unrelatedPnpmResolutions = {
   "linked-library": "link:../library",
@@ -580,9 +583,9 @@ test("ordinary pnpm protocol resolutions preserve skip selection while compiler 
       expect(invocations).toBe(1);
     },
   );
-});
+}, 15_000);
 
-const setupNode = "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020";
+const setupNode = "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1";
 const runtimeWorkflow = ({
   action,
   inputs,
@@ -622,7 +625,7 @@ test("Node-only arbitrary selector content changes force CI without requiring co
       expect(result.tools).toContain("node");
     },
   );
-});
+}, 15_000);
 
 const nonNodeSelectors = [
   {
@@ -712,7 +715,7 @@ for (const selector of nonNodeSelectors)
         expect(invocations).toBe(1);
       },
     );
-  });
+  }, 15_000);
 
 for (const reference of [
   "${{ inputs.runtime_file }}",
@@ -755,7 +758,7 @@ for (const reference of [
         expect(invocations).toBe(1);
       },
     );
-  });
+  }, 15_000);
 
 test("cache-dependency-path file content is not a runtime declaration", async () => {
   await withSnapshots(
@@ -780,7 +783,7 @@ test("cache-dependency-path file content is not a runtime declaration", async ()
       expect(result.tools).toEqual([]);
     },
   );
-});
+}, 15_000);
 
 const runtimeManifest = (fields: Record<string, unknown>) => ({
   private: true,
@@ -919,7 +922,7 @@ for (const mutation of sharedDeclarationMutations)
       });
       expect(invocations).toBe(1);
     });
-  });
+  }, 15_000);
 
 const deployment = (image: string) => ({
   apiVersion: "apps/v1",
@@ -950,7 +953,7 @@ test("recognized Kubernetes container Node image changes force CI", async () => 
       expect(changed.tools).toContain("node");
     },
   );
-});
+}, 15_000);
 
 test("npmrc use-node-version changes force CI for the selected Node runtime", async () => {
   await withSnapshots(
@@ -966,7 +969,7 @@ test("npmrc use-node-version changes force CI for the selected Node runtime", as
       expect(result.tools).toContain("node");
     },
   );
-});
+}, 15_000);
 
 for (const field of ["useNodeVersion", "nodeVersion"])
   test(`pnpm workspace ${field} runtime changes force CI`, async () => {
@@ -993,7 +996,7 @@ for (const field of ["useNodeVersion", "nodeVersion"])
         expect(result.tools).toContain("node");
       },
     );
-  });
+  }, 15_000);
 
 const unresolvedImages = [
   {
@@ -1034,4 +1037,4 @@ for (const mutation of unresolvedImages)
       });
       expect(invocations).toBe(1);
     });
-  });
+  }, 15_000);

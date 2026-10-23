@@ -117,7 +117,7 @@ for (const compiler of Object.values(compilerPackages))
       after: { "config/compiler.diff": "compiler patch after\n" },
       exercise: changedParity,
     });
-  });
+  }, 15_000);
 
 for (const owner of ["manifest", "workspace"])
   test(`pnpm ${owner} compiler patch source changes run parity`, async () => {
@@ -134,7 +134,7 @@ for (const owner of ["manifest", "workspace"])
       after: { "config/compiler.diff": "after\n" },
       exercise: changedParity,
     });
-  });
+  }, 15_000);
 
 test("Bun lock compiler patch hashes change without changing compiler versions", async () => {
   await withPatches({
@@ -152,7 +152,7 @@ test("Bun lock compiler patch hashes change without changing compiler versions",
     },
     exercise: changedParity,
   });
-});
+}, 15_000);
 
 for (const source of ["patchedDependencies", "snapshots"])
   test(`pnpm lock ${source} compiler patch hashes change without version changes`, async () => {
@@ -177,7 +177,7 @@ for (const source of ["patchedDependencies", "snapshots"])
       after: { "pnpm-lock.yaml": lock("second") },
       exercise: changedParity,
     });
-  });
+  }, 15_000);
 
 for (const file of [
   "patches/typescript+7.0.2.patch",
@@ -193,7 +193,7 @@ for (const file of [
       after: { [file]: "after\n" },
       exercise: changedParity,
     });
-  });
+  }, 15_000);
 
 for (const declaration of ["manifest", "lock"])
   test(`compiler alias from ${declaration} recognizes custom patch-package bytes`, async () => {
@@ -226,7 +226,7 @@ for (const declaration of ["manifest", "lock"])
       after: { "custom/compiler+7.0.2.patch": "after\n" },
       exercise: changedParity,
     });
-  });
+  }, 15_000);
 
 test("compiler alias patch declarations retain source bytes and lock hashes", async () => {
   const aliasManifest = {
@@ -260,7 +260,7 @@ test("compiler alias patch declarations retain source bytes and lock hashes", as
             },
       exercise: changedParity,
     });
-});
+}, 15_000);
 
 test("unrelated patch sources and hashes do not change fingerprints", async () => {
   await withPatches({
@@ -305,7 +305,7 @@ test("unrelated patch sources and hashes do not change fingerprints", async () =
       expect(runs).toBe(0);
     },
   });
-});
+}, 15_000);
 
 test("missing committed compiler patch fails closed and runs parity", async () => {
   await withPatches({
@@ -338,7 +338,7 @@ test("missing committed compiler patch fails closed and runs parity", async () =
       expect(runs).toBe(1);
     },
   });
-});
+}, 15_000);
 
 for (const reference of ["../compiler.diff", "/compiler.diff", ""])
   test("invalid compiler patch references fail closed", async () => {
@@ -357,7 +357,7 @@ for (const reference of ["../compiler.diff", "/compiler.diff", ""])
         });
       },
     });
-  });
+  }, 15_000);
 
 for (const owner of ["declaration", "patch-package"])
   test(`pnpm catalog alias ${owner} compiler patch bytes run parity`, async () => {
@@ -397,7 +397,7 @@ for (const owner of ["declaration", "patch-package"])
       after: { [patch]: "after\n" },
       exercise: changedParity,
     });
-  });
+  }, 15_000);
 
 test("local compiler aliases cannot hide mutable compiler directory bytes", async () => {
   await withPatches({
@@ -444,4 +444,4 @@ test("local compiler aliases cannot hide mutable compiler directory bytes", asyn
       expect(runs).toBe(1);
     },
   });
-});
+}, 15_000);

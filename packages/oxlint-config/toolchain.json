@@ -1,17 +1,66 @@
 {
   "schemaVersion": 1,
-  "bun": "1.4.3",
+  "bun": "1.4.4",
   "bunArchiveSha256": {
-    "1.4.3": {
-      "amd64": "3e730528d89775f03f87f05c06787c4df4099d0a37f3f252e7b829cb23816e18",
-      "arm64": "efa9813da5ed72423bf847f916e8d2c47c0d776add972354026a75e10da9aa21"
+    "1.4.4": {
+      "amd64": "bf8ccbfb2b0b80159e0f9a6d15c55317add8077534dbc6130a3edb52fccb395c",
+      "arm64": "baa6bb36f51d6e58561e02bbea825038a9df454f673d6d776e8bbf86f8c7850e"
     }
   },
   "typescript": "7.0.2",
   "oxlint": "1.87.0",
   "@oxlint/plugins": "1.87.0",
-  "oxfmt": "0.72.0",
   "oxlint-tsgolint": "7.0.2003",
+  "formatter": {
+    "command": "bun fmt",
+    "ignorePatterns": [
+      ".ai/shared/**",
+      ".agents/skills/**",
+      ".claude/skills/**",
+      "**/AGENTS.md",
+      "**/GEMINI.md",
+      "**/CLAUDE.md",
+      ".github/dependabot.yml",
+      "**/fixtures/**",
+      "**/__fixtures__/**",
+      "**/testdata/**",
+      "**/__snapshots__/**"
+    ],
+    "style": {
+      "printWidth": 80,
+      "sortImports": {
+        "customGroups": [
+          {
+            "groupName": "react",
+            "elementNamePattern": ["react", "react-dom", "react-dom/**"]
+          },
+          {
+            "groupName": "stella",
+            "elementNamePattern": ["@stll/**"]
+          },
+          {
+            "groupName": "aliases",
+            "elementNamePattern": ["@/**"]
+          }
+        ],
+        "groups": [
+          "react",
+          ["builtin", "external", "type-builtin", "type-external"],
+          "stella",
+          "aliases",
+          [
+            "parent",
+            "sibling",
+            "index",
+            "type-parent",
+            "type-sibling",
+            "type-index"
+          ]
+        ],
+        "newlinesBetween": true
+      }
+    }
+  },
   "typescriptInstallLayouts": [
     {
       "type": "direct",
@@ -38,7 +87,7 @@
       "dependency-cruiser"
     ]
   },
-  "@stll/oxlint-plugin": "0.2.2",
+  "@stll/oxlint-plugin": "0.6.2",
   "lefthook": "2.1.16",
   "node": "26.x",
   "nodeArchiveSha256": {
@@ -83,8 +132,8 @@
       "version": "v2.2.0"
     },
     "actions/setup-node": {
-      "sha": "820762786026740c76f36085b0efc47a31fe5020",
-      "version": "v7.0.0"
+      "sha": "949feb2413d6458794dcd2491c4babbbce0c15c1",
+      "version": "v7.1.0"
     },
     "actions/setup-python": {
       "sha": "5fda3b95a4ea91299a34e894583c3862153e4b97",
@@ -107,12 +156,12 @@
       "version": "v6.1.0"
     },
     "actions/upload-artifact": {
-      "sha": "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
-      "version": "v7.0.1"
+      "sha": "cf430e030ddbb5b0abf93d22962f4752f3646cd9",
+      "version": "v7.0.2"
     },
     "actions/download-artifact": {
-      "sha": "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
-      "version": "v8.0.1"
+      "sha": "9000827ccba6bdab643e8b6fd33ac0654aef8333",
+      "version": "v8.0.2"
     },
     "stella/.github/.github/workflows/package-consumer-compat.yml": {
       "sha": "042f4554090fd805c92e950ff3a0fd0ddd2eefbc",
@@ -128,6 +177,11 @@
     },
     "cooldown": {
       "defaultDays": 5
+    },
+    "actionGroups": {
+      "stella-shared": {
+        "patterns": ["stella/.github/*"]
+      }
     },
     "groups": {
       "dependencies": {
