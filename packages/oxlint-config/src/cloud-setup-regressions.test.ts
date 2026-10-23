@@ -18,6 +18,15 @@ import { cloudInstallCommand, parseCloudSetup } from "./cloud-setup-schema";
 import { parseToolchainPolicy } from "./toolchain-schema";
 
 const policy = parseToolchainPolicy(policyInput);
+const archivePins = (
+  releases: Readonly<Record<string, { amd64: string; arm64: string }>>,
+  version: string,
+) => {
+  const pins = releases[version];
+  if (pins === undefined)
+    throw new Error(`Missing fixture pins for ${version}`);
+  return pins;
+};
 const generate = (rust: boolean) => {
   const cloud = parseCloudSetup({ install: cloudInstallCommand });
   if (cloud === undefined) throw new Error("Cloud fixture missing");
@@ -114,6 +123,55 @@ test("cached Node requires working matching npm and npx launchers", () => {
   }
 }, 15_000);
 
+test("Bun archive rejects a matching downloaded SHASUMS entry when the policy pin differs", () => {
+  withFixture((root) => {
+    binary(join(root, "node/bin/node"), "v26.10.0");
+    binary(join(root, "node/bin/npm"), "10.1.0");
+    binary(join(root, "node/bin/npx"), "10.1.0");
+    const bundle = join(root, "ca-certificates.crt");
+    writeFileSync(bundle, "fixture certificate bundle");
+    const functions = runtimeFunctions().replaceAll(
+      "/etc/ssl/certs/ca-certificates.crt",
+      bundle,
+    );
+    const result = Bun.spawnSync(
+      [
+        "bash",
+        "-euo",
+        "pipefail",
+        "-c",
+        `
+fail() { exit 98; }
+download_file() {
+  if [[ "$1" == */SHASUMS256.txt ]]; then
+    printf '%s  %s\n' "$(printf malicious | /usr/bin/sha256sum | cut -d ' ' -f1)" bun-linux-x64.zip > "$2"
+  else
+    printf malicious > "$2"
+  fi
+}
+${functions}
+install_runtimes
+`,
+      ],
+      {
+        env: {
+          ...process.env,
+          NODE_DIR: join(root, "node"),
+          NODE_VERSION: "26.10.0",
+          NODE_ARCH: "x64",
+          NODE_SHA256: archivePins(policy.nodeArchiveSha256, "26.10.0").amd64,
+          BUN_DIR: join(root, "bun"),
+          BUN_VERSION: policy.bun,
+          BUN_ARCH: "x64",
+          BUN_SHA256: archivePins(policy.bunArchiveSha256, policy.bun).amd64,
+        },
+      },
+    );
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr.toString()).toContain("checksum did NOT match");
+  });
+});
+
 test("runtime scratch is removed when download, verification or extraction exits under errexit", () => {
   for (const phase of ["download", "checksum", "extraction"] as const) {
     withFixture((root) => {
@@ -162,9 +220,11 @@ printf '%s\\n' unreachable
             NODE_DIR: join(root, "node"),
             NODE_VERSION: "26.10.0",
             NODE_ARCH: "x64",
+            NODE_SHA256: archivePins(policy.nodeArchiveSha256, "26.10.0").amd64,
             BUN_DIR: join(root, "bun"),
             BUN_VERSION: policy.bun,
             BUN_ARCH: "x64",
+            BUN_SHA256: archivePins(policy.bunArchiveSha256, policy.bun).amd64,
           },
         },
       );

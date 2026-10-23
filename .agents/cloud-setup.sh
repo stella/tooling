@@ -58,8 +58,8 @@ DEPENDENCY_STAMP="$DEPENDENCY_STATE_ROOT/dependencies-$(printf '%s' "$REPO_ROOT"
 [[ "$(awk 'NF { if (++count > 1 || NF != 1) exit 1; value=$1 } END { if (count != 1) exit 1; print value }' "$REPO_ROOT/.node-version")" == "$NODE_VERSION" ]] || fail 'Node selector changed; regenerate cloud-setup.sh'
 cd -- "$REPO_ROOT"
 case "$(uname -m)" in
-  x86_64) ARCH=amd64; NODE_ARCH=x64; BUN_ARCH=x64 ;;
-  aarch64|arm64) ARCH=arm64; NODE_ARCH=arm64; BUN_ARCH=aarch64 ;;
+  x86_64) ARCH=amd64; NODE_ARCH=x64; BUN_ARCH=x64; NODE_SHA256='ca70e9e349de048b9522abb3adc05b3bd6f43c5ffd3ec57916c7da292f59f022'; BUN_SHA256='bf8ccbfb2b0b80159e0f9a6d15c55317add8077534dbc6130a3edb52fccb395c' ;;
+  aarch64|arm64) ARCH=arm64; NODE_ARCH=arm64; BUN_ARCH=aarch64; NODE_SHA256='7a6353f63eb3d04765004b4adf172616243e4522434635cb1d26288658b04ab5'; BUN_SHA256='baa6bb36f51d6e58561e02bbea825038a9df454f673d6d776e8bbf86f8c7850e' ;;
   *) fail 'Only amd64 and arm64 are supported' ;;
 esac
 
@@ -211,6 +211,7 @@ install_runtimes() (
   if ! node_ready; then
     node_archive="node-v$NODE_VERSION-linux-$NODE_ARCH.tar.xz"
     download_file "https://nodejs.org/dist/v$NODE_VERSION/$node_archive" "$scratch/$node_archive" 120
+    (cd "$scratch"; printf '%s  %s\n' "$NODE_SHA256" "$node_archive" | sha256sum --strict -c -)
     download_file "https://nodejs.org/dist/v$NODE_VERSION/SHASUMS256.txt" "$scratch/node-sums" 45
     (cd "$scratch"; awk -v name="$node_archive" '$2 == name { print; count++ } END { if (count != 1) exit 1 }' node-sums | sha256sum --strict -c -)
     install -d -m 755 "$NODE_DIR"
@@ -220,6 +221,7 @@ install_runtimes() (
     bun_folder="bun-linux-$BUN_ARCH"
     bun_archive="$bun_folder.zip"
     download_file "https://github.com/oven-sh/bun/releases/download/bun-v$BUN_VERSION/$bun_archive" "$scratch/$bun_archive" 120
+    (cd "$scratch"; printf '%s  %s\n' "$BUN_SHA256" "$bun_archive" | sha256sum --strict -c -)
     download_file "https://github.com/oven-sh/bun/releases/download/bun-v$BUN_VERSION/SHASUMS256.txt" "$scratch/bun-sums" 45
     (cd "$scratch"; awk -v name="$bun_archive" '$2 == name || $2 == "*" name { print $1 "  " name; count++ } END { if (count != 1) exit 1 }' bun-sums | sha256sum --strict -c -)
     unzip -q "$scratch/$bun_archive" -d "$scratch/bun"
@@ -348,11 +350,18 @@ apt_install() (
   local package
   for package in "$@"; do
     if [[ "$package" == */* ]]; then
-      # apt cannot fetch local archives with --download-only, so their installs
-      # stay one call. Package triggers can be slow on cloud filesystems; the
-      # longer whole-call deadline covers them while Acquire timeouts still
-      # bound each network request.
-      APT_DEADLINE=600 DEBIAN_FRONTEND=noninteractive apt_network install -y --no-install-recommends "$@"
+      # Local archives are already downloaded and verified, but their
+      # dependencies may not be: --print-uris names what is missing without
+      # contacting any server, the network deadline covers only fetching it,
+      # and dpkg, package triggers and maintainer scripts run offline.
+      local missing
+      missing="$(set -o pipefail; DEBIAN_FRONTEND=noninteractive apt-get --print-uris -qq -y --no-install-recommends install "$@" | awk '{ name = $2; sub(/_.*/, "", name); print name }')"
+      if [[ -n "$missing" ]]; then
+        # Debian package names never contain whitespace: split one per word.
+        # shellcheck disable=SC2086
+        DEBIAN_FRONTEND=noninteractive apt_network install -y --no-install-recommends --download-only $missing
+      fi
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --no-download "$@"
       return
     fi
   done

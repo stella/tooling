@@ -32,6 +32,7 @@ const runInstall = (
   exitCode: number,
   offlineExitCode = 0,
   packages: string[] = ["fixture-package"],
+  uris = "",
 ) => {
   expect(fragment).not.toContain("/var/lock/");
   expect(fragment).not.toContain("/usr/sbin/");
@@ -53,6 +54,11 @@ apt_network() {
 apt-get() {
   [[ "$DEBIAN_FRONTEND" == noninteractive ]]
   [[ "$(cat "$FIXTURE_POLICY")" == $'#!/bin/sh\nexit 101' ]]
+  if [[ "$1" == --print-uris ]]; then
+    printf 'resolve:%s\n' "$*" >> "$FIXTURE_CALLS"
+    printf '%s' "$FIXTURE_URIS"
+    return 0
+  fi
   printf 'offline:%s\n' "$*" >> "$FIXTURE_CALLS"
   return "$FIXTURE_OFFLINE_EXIT"
 }
@@ -71,6 +77,7 @@ apt_install "$@"
         FIXTURE_CALLS: join(directory, "apt.calls"),
         FIXTURE_EXIT: String(exitCode),
         FIXTURE_OFFLINE_EXIT: String(offlineExitCode),
+        FIXTURE_URIS: uris,
       },
     },
   );
@@ -128,6 +135,20 @@ test("package installation refuses symlink policies before invoking apt", () => 
   }
 }, 15_000);
 
+test("local package installation resolves offline, then runs only the unbounded offline apt step", () => {
+  const directory = mkdtempSync(join(tmpdir(), "cloud-apt-test-"));
+  try {
+    const result = runInstall(directory, 0, 0, ["/tmp/fixture.deb"]);
+    expect(result.exitCode).toBe(0);
+    expect(readFileSync(join(directory, "apt.calls"), "utf8")).toBe(
+      "resolve:--print-uris -qq -y --no-install-recommends install /tmp/fixture.deb\n" +
+        "offline:install -y --no-install-recommends --no-download /tmp/fixture.deb\n",
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 const pgdgFragment = renderCloudServiceInstall({
   ...parseToolchainPolicy(policy),
   services: ["postgres"],
@@ -142,13 +163,17 @@ test("service installation uses shared bounded network helpers for every downloa
       ...parseToolchainPolicy(policy),
       services,
     });
-    // The only raw apt-get is the offline install, which cannot download.
+    // Both package paths converge on the raw offline install; neither can download.
     const offline =
       '  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --no-download "$@"\n';
-    expect(rendered.split(offline)).toHaveLength(2);
-    expect(rendered.replace(offline, "")).not.toMatch(
-      /\b(?:curl|wget|apt-get)\b/,
-    );
+    // --print-uris only reads the local indexes; it never downloads.
+    const resolve =
+      `      missing="$(set -o pipefail; DEBIAN_FRONTEND=noninteractive apt-get --print-uris -qq -y --no-install-recommends install "$@" | awk '{ name = $2; sub(/_.*/, "", name); print name }')"\n`;
+    expect(rendered.split(offline)).toHaveLength(3);
+    expect(rendered.split(resolve)).toHaveLength(2);
+    expect(
+      rendered.replaceAll(offline, "").replaceAll(resolve, ""),
+    ).not.toMatch(/\b(?:curl|wget|apt-get)\b/);
     expect(rendered).toContain(
       'DEBIAN_FRONTEND=noninteractive apt_network install -y --no-install-recommends --download-only "$@"\n  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --no-download "$@"\n)',
     );
@@ -549,14 +574,35 @@ test("offline package configuration failures propagate and still restore the pol
   }
 }, 15_000);
 
-test("local package archives install in one bounded step because apt cannot pre-download them", () => {
+test("local package archives install without a deadline because they are already downloaded", () => {
   const directory = mkdtempSync(join(tmpdir(), "cloud-apt-test-"));
   try {
     const result = runInstall(directory, 0, 0, ["/tmp/a.deb", "/tmp/b.deb"]);
     expect(result.stderr.toString()).toBe("");
     expect(result.exitCode).toBe(0);
     expect(readFileSync(join(directory, "apt.calls"), "utf8")).toBe(
-      "network@600:install -y --no-install-recommends /tmp/a.deb /tmp/b.deb\n",
+      "resolve:--print-uris -qq -y --no-install-recommends install /tmp/a.deb /tmp/b.deb\n" +
+        "offline:install -y --no-install-recommends --no-download /tmp/a.deb /tmp/b.deb\n",
+    );
+    expect(existsSync(join(directory, "policy-rc.d"))).toBe(false);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("local package archives fetch their missing dependencies under the network deadline first", () => {
+  const directory = mkdtempSync(join(tmpdir(), "cloud-apt-test-"));
+  try {
+    const uris =
+      "'http://archive.test/pool/libj/libjemalloc2_5.3.0-2_amd64.deb' libjemalloc2_5.3.0-2_amd64.deb 1 SHA256:00\n" +
+      "'http://archive.test/pool/libl/liblzf1_3.6-4_amd64.deb' liblzf1_3.6-4_amd64.deb 1 SHA256:00\n";
+    const result = runInstall(directory, 0, 0, ["/tmp/a.deb"], uris);
+    expect(result.stderr.toString()).toBe("");
+    expect(result.exitCode).toBe(0);
+    expect(readFileSync(join(directory, "apt.calls"), "utf8")).toBe(
+      "resolve:--print-uris -qq -y --no-install-recommends install /tmp/a.deb\n" +
+        "network:install -y --no-install-recommends --download-only libjemalloc2 liblzf1\n" +
+        "offline:install -y --no-install-recommends --no-download /tmp/a.deb\n",
     );
     expect(existsSync(join(directory, "policy-rc.d"))).toBe(false);
   } finally {

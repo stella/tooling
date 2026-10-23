@@ -44,11 +44,18 @@ apt_install() (
   local package
   for package in "$@"; do
     if [[ "$package" == */* ]]; then
-      # apt cannot fetch local archives with --download-only, so their installs
-      # stay one call. Package triggers can be slow on cloud filesystems; the
-      # longer whole-call deadline covers them while Acquire timeouts still
-      # bound each network request.
-      APT_DEADLINE=600 DEBIAN_FRONTEND=noninteractive apt_network install -y --no-install-recommends "$@"
+      # Local archives are already downloaded and verified, but their
+      # dependencies may not be: --print-uris names what is missing without
+      # contacting any server, the network deadline covers only fetching it,
+      # and dpkg, package triggers and maintainer scripts run offline.
+      local missing
+      missing="$(set -o pipefail; DEBIAN_FRONTEND=noninteractive apt-get --print-uris -qq -y --no-install-recommends install "$@" | awk '{ name = $2; sub(/_.*/, "", name); print name }')"
+      if [[ -n "$missing" ]]; then
+        # Debian package names never contain whitespace: split one per word.
+        # shellcheck disable=SC2086
+        DEBIAN_FRONTEND=noninteractive apt_network install -y --no-install-recommends --download-only $missing
+      fi
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --no-download "$@"
       return
     fi
   done

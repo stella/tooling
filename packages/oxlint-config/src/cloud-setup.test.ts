@@ -281,6 +281,30 @@ test("cloud generation rejects every nonexact or out-of-series Node selector", (
     );
 }, 15_000);
 
+test("cloud generation requires exact Node and packageManager Bun archive pins", () => {
+  const cloud = parseCloudSetup(declaration);
+  if (cloud === undefined) throw new Error("Missing cloud declaration");
+  expect(() =>
+    generateCloudSetup({
+      policy: { ...policy, nodeArchiveSha256: {} },
+      cloud,
+      nodeVersion: "26.10.0",
+    }),
+  ).toThrow("cloud Node 26.10.0 has no archive SHA256 pins");
+  expect(() =>
+    generateCloudSetup({
+      policy,
+      cloud,
+      nodeVersion: "26.10.0",
+      files: {
+        "package.json": JSON.stringify({ packageManager: "bun@1.4.2" }),
+      },
+    }),
+  ).toThrow(
+    `cloud packageManager Bun 1.4.2 has no archive SHA256 pins; policy Bun is ${policy.bun}`,
+  );
+});
+
 test("shell quoting preserves canonical literal metacharacters through single-pass replacement", () => {
   withRepository((root) => {
     const envFile = ".env'\"$`@SERVICE_INSTALL@";
