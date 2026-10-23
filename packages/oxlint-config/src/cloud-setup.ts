@@ -77,8 +77,6 @@ NODE_DIR="/opt/stll-cloud/node/$NODE_VERSION"
 BUN_DIR="/opt/stll-cloud/bun/$BUN_VERSION"
 export PATH="$NODE_DIR/bin:$BUN_DIR:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 BUN_CACHE="/var/cache/stll-cloud/bun/$OUTPUT_UID"
-DEPENDENCY_STATE_ROOT=/var/lib/stll-cloud
-DEPENDENCY_STAMP="$DEPENDENCY_STATE_ROOT/dependencies-$(printf '%s' "$REPO_ROOT" | sha256sum | cut -d' ' -f1).sha256"
 @ENV_ASSIGNMENTS@
 [[ -f "$REPO_ROOT/.node-version" && ! -L "$REPO_ROOT/.node-version" ]] || fail 'A regular root .node-version is required'
 [[ "$(awk 'NF { if (++count > 1 || NF != 1) exit 1; value=$1 } END { if (count != 1) exit 1; print value }' "$REPO_ROOT/.node-version")" == "$NODE_VERSION" ]] || fail 'Node selector changed; regenerate cloud-setup.sh'
@@ -238,69 +236,78 @@ process.stdout.write([...hosts].sort().join(","));
   network_run "$download_hosts" 240 runuser -u "$OUTPUT_USER" -- env HOME="$OUTPUT_HOME" BUN_INSTALL_CACHE_DIR="$BUN_CACHE" PATH="$PATH" BUN_CONFIG_HTTP_IDLE_TIMEOUT=20 "$BUN_DIR/bun" @INSTALL_ARGS@
 }
 
-# Every install input: the lockfile, each workspace manifest and the install
-# configuration. A manifest edit without a regenerated lockfile changes this, so
-# the frozen install runs and refuses the inconsistency instead of skipping it.
+as_output_user() { runuser -u "$OUTPUT_USER" -- "$@"; }
+
+# Patch files the manifests on stdin (NUL-separated) reference through
+# patchedDependencies, as NUL-separated repository paths.
+patched_dependency_files() {
+  as_output_user "$BUN_DIR/bun" -e '
+const fs = require("node:fs");
+const path = require("node:path");
+const files = [];
+for (const manifest of fs.readFileSync(0, "utf8").split("\0").filter(Boolean)) {
+  let patched;
+  try { patched = JSON.parse(fs.readFileSync(manifest, "utf8")).patchedDependencies; } catch { continue; }
+  if (patched === null || typeof patched !== "object") continue;
+  for (const file of Object.values(patched)) {
+    if (typeof file !== "string") continue;
+    const resolved = "./" + path.relative(".", path.resolve(path.dirname(manifest), file));
+    if (fs.statSync(resolved, { throwIfNoEntry: false })?.isFile()) files.push(resolved + "\0");
+  }
+}
+process.stdout.write(files.join(""));
+'
+}
+# Every install input: the lockfile, each workspace manifest, the patches they
+# reference and the install configuration. A manifest or patch edit without a
+# regenerated lockfile changes this, so the frozen install runs and refuses the
+# inconsistency instead of being skipped.
 dependency_hash() {
-  local config
+  local config manifests patches
   [[ -f bun.lock && ! -L bun.lock ]] || fail 'A regular root bun.lock is required'
+  manifests="$(mktemp)"
+  patches="$(mktemp)"
+  find . \( -name node_modules -o -name .git \) -prune -o -name package.json -type f -print0 > "$manifests"
+  patched_dependency_files < "$manifests" > "$patches" || fail 'Patched dependency files could not be read'
   {
     printf '%s\0' ./bun.lock
     for config in ./bunfig.toml ./.npmrc; do
       if [[ -f "$config" ]]; then printf '%s\0' "$config"; fi
     done
-    find . \( -name node_modules -o -name .git \) -prune -o -name package.json -type f -print0
-  } | sort -z | xargs -0 sha256sum -- | sha256sum | cut -d ' ' -f1
+    cat -- "$manifests" "$patches"
+  } | sort -zu | xargs -0 sha256sum -- | sha256sum | cut -d ' ' -f1
+  rm -f -- "$manifests" "$patches"
 }
-prepare_dependency_state() {
-  [[ ! -L "$DEPENDENCY_STATE_ROOT" ]] || fail 'Dependency state root must not be a symlink'
-  if [[ -e "$DEPENDENCY_STATE_ROOT" ]]; then
-    [[ -d "$DEPENDENCY_STATE_ROOT" && "$(stat -c '%u:%a' "$DEPENDENCY_STATE_ROOT")" == 0:755 ]] || fail 'Invalid dependency state root'
-  else
-    install -d -m 755 -o root -g root "$DEPENDENCY_STATE_ROOT"
+# The stamp lives inside the installed tree and is written only after a
+# successful install, so it disappears with that tree: a deleted or replaced
+# node_modules can never match.
+installed_dependency_stamp() {
+  local stamp="$REPO_ROOT/node_modules/.stll-cloud-setup-stamp" value=''
+  if [[ ! -L "$REPO_ROOT/node_modules" && -f "$stamp" && ! -L "$stamp" ]]; then
+    IFS= read -r value < "$stamp" || true
   fi
-  [[ ! -L "$DEPENDENCY_STAMP" ]] || fail 'Dependency stamp must not be a symlink'
-  if [[ -e "$DEPENDENCY_STAMP" ]]; then
-    [[ -f "$DEPENDENCY_STAMP" && "$(stat -c '%u:%a' "$DEPENDENCY_STAMP")" == 0:644 ]] || fail 'Invalid dependency stamp'
-  fi
-}
-# The stamp names the install inputs and the installed tree it was written for, so it
-# can never stand in for a tree it did not observe: a deleted, replaced or empty
-# node_modules no longer matches.
-dependency_tree_identity() {
-  local tree="$REPO_ROOT/node_modules"
-  if [[ -d "$tree" && ! -L "$tree" && -n "$(ls -A -- "$tree")" ]]; then
-    stat -c '%d:%i' -- "$tree"
-  else
-    printf 'none\n'
-  fi
-}
-dependency_state() {
-  printf '%s %s\n' "$(dependency_hash)" "$(dependency_tree_identity)"
+  printf '%s\n' "$value"
 }
 write_dependency_stamp() {
-  local temporary
-  prepare_dependency_state
-  temporary="$(mktemp "$DEPENDENCY_STATE_ROOT/.dependencies.XXXXXX")"
-  chmod 644 "$temporary"
-  dependency_state > "$temporary"
-  mv -f -- "$temporary" "$DEPENDENCY_STAMP"
+  as_output_user sh -c 'mkdir -p "$1" && printf "%s\n" "$2" > "$1/.stll-cloud-setup-stamp.tmp" && mv -f "$1/.stll-cloud-setup-stamp.tmp" "$1/.stll-cloud-setup-stamp"' sh "$REPO_ROOT/node_modules" "$1" || fail 'The dependency stamp could not be written'
+}
+clear_dependency_stamp() {
+  as_output_user rm -f -- "$REPO_ROOT/node_modules/.stll-cloud-setup-stamp"
 }
 install_dependencies() {
-  prepare_dependency_state
-  rm -f -- "$DEPENDENCY_STAMP"
+  local expected
+  expected="$(dependency_hash)"
+  clear_dependency_stamp
   dependency_install
-  write_dependency_stamp
+  write_dependency_stamp "$expected"
 }
 sync_dependencies() {
-  local expected installed=''
-  prepare_dependency_state
-  expected="$(dependency_state)"
-  if [[ -f "$DEPENDENCY_STAMP" ]]; then IFS= read -r installed < "$DEPENDENCY_STAMP" || true; fi
-  [[ "$installed" == "$expected" && "$expected" != *' none' ]] && return
-  rm -f -- "$DEPENDENCY_STAMP"
+  local expected
+  expected="$(dependency_hash)"
+  [[ "$(installed_dependency_stamp)" == "$expected" ]] && return
+  clear_dependency_stamp
   dependency_install || fail 'bun.lock mismatch; dependency installation failed'
-  write_dependency_stamp
+  write_dependency_stamp "$expected"
 }
 
 @SERVICE_INSTALL@

@@ -589,7 +589,7 @@ dependency_install`,
 }, 15_000);
 
 const dependencyStateFunctions = (generated: string) => {
-  const start = generated.indexOf("\ndependency_hash() {");
+  const start = generated.indexOf("\npatched_dependency_files() {");
   const serviceInstall = generated.indexOf("\nservice_account_ready()", start);
   const boundary =
     serviceInstall < 0
@@ -600,15 +600,12 @@ const dependencyStateFunctions = (generated: string) => {
   return generated.slice(start, boundary);
 };
 
+const STAMP = '"$FIXTURE_ROOT/node_modules/.stll-cloud-setup-stamp"';
+
 const runDependencyState = (command: string) =>
   withRepository((root) => {
     writeFileSync(join(root, "bun.lock"), "original\n");
-    const state = join(root, "state");
-    mkdirSync(state);
-    const { uid } = statSync(state);
-    const functions = dependencyStateFunctions(generate(declaration))
-      .replaceAll("== 0:755", `== ${uid}:755`)
-      .replaceAll("== 0:644", `== ${uid}:644`);
+    const functions = dependencyStateFunctions(generate(declaration));
     const result = Bun.spawnSync(
       [
         "bash",
@@ -616,62 +613,40 @@ const runDependencyState = (command: string) =>
         "-c",
         `fail() { echo "cloud-setup: $*" >&2; exit 1; }
 REPO_ROOT="$FIXTURE_ROOT"
-DEPENDENCY_STATE_ROOT="$FIXTURE_ROOT/state"
-DEPENDENCY_STAMP="$DEPENDENCY_STATE_ROOT/dependencies.sha256"
+BUN_DIR="$(dirname "$(command -v bun)")"
+as_output_user() { "$@"; }
 dependency_install() { printf 'install\\n' >> "$FIXTURE_ROOT/installs"; mkdir -p "$FIXTURE_ROOT/node_modules"; : > "$FIXTURE_ROOT/node_modules/.installed"; [[ "\${INSTALL_FAIL:-}" != 1 ]]; }
 ${functions}
 ${command}`,
       ],
       { cwd: root, env: { ...process.env, FIXTURE_ROOT: root } },
     );
-    return { root, state, result };
+    return { root, result };
   });
+
+// An integer on every platform (BSD wc pads its count).
+const installs = '"$(( $(wc -l < "$FIXTURE_ROOT/installs") ))"';
 
 test("an equal dependency stamp skips installation", () => {
   const { result } = runDependencyState(`install_dependencies
 : > "$FIXTURE_ROOT/installs"
 sync_dependencies
-[[ ! -s "$FIXTURE_ROOT/installs" ]]`);
+[[ ! -s "$FIXTURE_ROOT/installs" ]]
+[[ "$(cat ${STAMP})" == "$(dependency_hash)" ]]`);
   expect(result.exitCode).toBe(0);
 });
 
-test("an equal stamp without node_modules reinstalls", () => {
-  const { result } = runDependencyState(`install_dependencies
-: > "$FIXTURE_ROOT/installs"
-rm -rf -- "$FIXTURE_ROOT/node_modules"
-sync_dependencies
-[[ "$(wc -l < "$FIXTURE_ROOT/installs")" == 1 ]]
-[[ -d "$FIXTURE_ROOT/node_modules" ]]`);
-  expect(result.exitCode).toBe(0);
-});
-
-test("a node_modules recreated after deletion reinstalls", () => {
+test("a deleted node_modules reinstalls whatever the new tree's filesystem identity", () => {
   const { result } = runDependencyState(`install_dependencies
 : > "$FIXTURE_ROOT/installs"
 rm -rf -- "$FIXTURE_ROOT/node_modules"
 mkdir "$FIXTURE_ROOT/node_modules"
 : > "$FIXTURE_ROOT/node_modules/stray"
 sync_dependencies
-[[ "$(wc -l < "$FIXTURE_ROOT/installs")" == 1 ]]`);
-  expect(result.exitCode).toBe(0);
-});
-
-test("an emptied node_modules reinstalls", () => {
-  const { result } = runDependencyState(`install_dependencies
-: > "$FIXTURE_ROOT/installs"
-find "$FIXTURE_ROOT/node_modules" -mindepth 1 -delete
+[[ ${installs} == 1 ]]
+rm -rf -- "$FIXTURE_ROOT/node_modules"
 sync_dependencies
-[[ "$(wc -l < "$FIXTURE_ROOT/installs")" == 1 ]]`);
-  expect(result.exitCode).toBe(0);
-});
-
-test("a stamp that names only the lockfile reinstalls once", () => {
-  const { result } = runDependencyState(`install_dependencies
-: > "$FIXTURE_ROOT/installs"
-sha256sum bun.lock | cut -d ' ' -f1 > "$DEPENDENCY_STAMP"
-sync_dependencies
-sync_dependencies
-[[ "$(wc -l < "$FIXTURE_ROOT/installs")" == 1 ]]`);
+[[ ${installs} == 2 ]]`);
   expect(result.exitCode).toBe(0);
 });
 
@@ -683,12 +658,26 @@ install_dependencies
 : > "$FIXTURE_ROOT/installs"
 printf '{"name":"a","dependencies":{"b":"1.0.0"}}\\n' > packages/a/package.json
 if (INSTALL_FAIL=1 sync_dependencies); then fail 'Expected the frozen install to refuse the manifest'; fi
-[[ "$(wc -l < "$FIXTURE_ROOT/installs")" == 1 ]]
-[[ ! -e "$DEPENDENCY_STAMP" ]]`);
+[[ ${installs} == 1 ]]
+[[ ! -e ${STAMP} ]]`);
   expect(result.exitCode).toBe(0);
   expect(result.stderr.toString()).toContain(
     "cloud-setup: bun.lock mismatch; dependency installation failed",
   );
+});
+
+test("editing only a referenced patch file reinstalls", () => {
+  const { result } = runDependencyState(`mkdir -p fixes
+printf 'one\\n' > fixes/left-pad.diff
+printf '{"name":"root","patchedDependencies":{"left-pad@1.3.0":"fixes/left-pad.diff"}}\\n' > package.json
+install_dependencies
+: > "$FIXTURE_ROOT/installs"
+sync_dependencies
+[[ ! -s "$FIXTURE_ROOT/installs" ]]
+printf 'two\\n' > fixes/left-pad.diff
+sync_dependencies
+[[ ${installs} == 1 ]]`);
+  expect(result.exitCode).toBe(0);
 });
 
 test("manifests inside node_modules are not install inputs", () => {
@@ -709,8 +698,8 @@ test("a changed bun.lock reinstalls once and records the new stamp", () => {
 printf 'changed\\n' > bun.lock
 sync_dependencies
 sync_dependencies
-[[ "$(wc -l < "$FIXTURE_ROOT/installs")" == 1 ]]
-[[ "$(cut -d ' ' -f1 "$DEPENDENCY_STAMP")" == "$(dependency_hash)" ]]`);
+[[ ${installs} == 1 ]]
+[[ "$(cat ${STAMP})" == "$(dependency_hash)" ]]`);
   expect(result.exitCode).toBe(0);
 });
 
@@ -718,10 +707,10 @@ test("a failed changed-lockfile reinstall clears the stamp so start retries", ()
   const { result } = runDependencyState(`install_dependencies
 printf 'changed\\n' > bun.lock
 if (INSTALL_FAIL=1 sync_dependencies); then fail 'Expected installation failure'; fi
-[[ ! -e "$DEPENDENCY_STAMP" ]]
+[[ ! -e ${STAMP} ]]
 sync_dependencies
-[[ "$(wc -l < "$FIXTURE_ROOT/installs")" == 3 ]]
-[[ "$(cut -d ' ' -f1 "$DEPENDENCY_STAMP")" == "$(dependency_hash)" ]]`);
+[[ ${installs} == 3 ]]
+[[ "$(cat ${STAMP})" == "$(dependency_hash)" ]]`);
   expect(result.exitCode).toBe(0);
   expect(result.stderr.toString()).toContain(
     "cloud-setup: bun.lock mismatch; dependency installation failed",
