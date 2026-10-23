@@ -10,7 +10,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 /** Stream Git's file list to disk so consumer size cannot exhaust maxBuffer. */
-export const readGitTrackedOutput = (root: string, mode: "paths" | "staged") => {
+export const readGitTrackedOutput = (
+  root: string,
+  mode: "paths" | "staged",
+) => {
   const scratch = mkdtempSync(path.join(tmpdir(), "stll-git-tracked-"));
   try {
     const output = path.join(scratch, "tracked");

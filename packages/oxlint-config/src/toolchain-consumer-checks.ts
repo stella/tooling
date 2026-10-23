@@ -3,11 +3,11 @@ import { parseDocument } from "yaml";
 
 import packageMetadata from "../package.json";
 import {
-  assertConsumerFixtureSelection,
   assertConsumerFixtureKind,
+  assertConsumerFixtureSelection,
   consumerPackageClosure,
-  parseConsumerFixtures,
   discoverConsumerPackages,
+  parseConsumerFixtures,
 } from "./consumer-compat-config";
 import { assertConsumerNodeSupport } from "./consumer-node-support";
 import { githubAutomationFileKind } from "./toolchain-inputs";

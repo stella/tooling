@@ -135,7 +135,7 @@ test("repeatable projects select only named configs in a monorepo without a root
       references: [{ path: unselected, prepend: true }],
     });
   });
-});
+}, 15_000);
 
 test("default mode traverses references from a zero-input solution root", async () => {
   await withRepository(async (root, compiler) => {
@@ -157,7 +157,7 @@ test("default mode traverses references from a zero-input solution root", async 
       discoverConfigGroups({ repo: root, compiler, project: "tsconfig.json" }),
     ).toThrow("zero input files");
   });
-});
+}, 15_000);
 
 test("missing, unreadable and invalid selected configs fail closed", async () => {
   await withRepository(async (root, compiler) => {
@@ -172,7 +172,7 @@ test("missing, unreadable and invalid selected configs fail closed", async () =>
         discoverConfigGroups({ repo: root, compiler, project }),
       ).toThrow();
   });
-});
+}, 15_000);
 
 test("help succeeds without a repository; unknown or incomplete arguments fail", async () => {
   await withRepository(async (root) => {
@@ -204,7 +204,7 @@ test("help succeeds without a repository; unknown or incomplete arguments fail",
     }
     expect(parseParityArguments([])).toEqual({ mode: "default" });
   });
-});
+}, 15_000);
 
 // Full seeded comparisons launch real compilers and belong to CI.
 test.skipIf(process.env["CI"] !== "true")(

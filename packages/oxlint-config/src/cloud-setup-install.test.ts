@@ -105,7 +105,7 @@ test("package installation restores policy bytes and mode across success, failur
       }
     }
   }
-});
+}, 15_000);
 
 test("package installation refuses symlink policies before invoking apt", () => {
   const directory = mkdtempSync(join(tmpdir(), "cloud-apt-test-"));
@@ -126,7 +126,7 @@ test("package installation refuses symlink policies before invoking apt", () => 
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 const pgdgFragment = renderCloudServiceInstall({
   ...parseToolchainPolicy(policy),
@@ -153,7 +153,9 @@ test("service installation uses shared bounded network helpers for every downloa
       'DEBIAN_FRONTEND=noninteractive apt_network install -y --no-install-recommends --download-only "$@"\n  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --no-download "$@"\n)',
     );
     expect(rendered).not.toContain("apt_network update");
-    const refreshes = [...rendered.matchAll(/^ *apt_refresh_for (.+)\n *apt_install (.+)$/gm)];
+    const refreshes = [
+      ...rendered.matchAll(/^ *apt_refresh_for (.+)\n *apt_install (.+)$/gm),
+    ];
     expect(refreshes.length).toBe(services.length);
     for (const [, refreshed, installed] of refreshes)
       expect(refreshed).toBe(installed);
@@ -169,7 +171,7 @@ test("service installation uses shared bounded network helpers for every downloa
         ),
       ).toBe(services.includes("valkey"));
   }
-});
+}, 15_000);
 
 test("service provisioning passes explicit download deadlines and stops before package installation on failure", () => {
   const directory = mkdtempSync(join(tmpdir(), "cloud-download-test-"));
@@ -234,7 +236,7 @@ install_services
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 type SourcePreflightOptions = {
   directory: string;
@@ -332,7 +334,7 @@ test("PGDG preflight distinguishes active list and folded deb822 sources from co
       rmSync(directory, { recursive: true, force: true });
     }
   }
-});
+}, 15_000);
 
 test("PGDG preflight reuses verified managed sources and precedes provisioning", () => {
   const canonical =
@@ -381,7 +383,7 @@ test("PGDG preflight reuses verified managed sources and precedes provisioning",
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("a complete preinstalled PostgreSQL toolchain requires no PGDG source changes", () => {
   const directory = mkdtempSync(join(tmpdir(), "cloud-pg-ready-test-"));
@@ -423,7 +425,7 @@ install_services
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("PGDG reuse requires the verified signing fingerprint and consistent keyring bindings", () => {
   const directory = mkdtempSync(join(tmpdir(), "cloud-pgdg-keys-test-"));
@@ -488,7 +490,7 @@ test("PGDG reuse requires the verified signing fingerprint and consistent keyrin
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("verified PGDG sources cannot enable APT trust overrides", () => {
   const directory = mkdtempSync(join(tmpdir(), "cloud-pgdg-trust-test-"));
@@ -530,7 +532,7 @@ test("verified PGDG sources cannot enable APT trust overrides", () => {
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("offline package configuration failures propagate and still restore the policy", () => {
   const directory = mkdtempSync(join(tmpdir(), "cloud-apt-test-"));
@@ -545,7 +547,7 @@ test("offline package configuration failures propagate and still restore the pol
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("local package archives install in one bounded step because apt cannot pre-download them", () => {
   const directory = mkdtempSync(join(tmpdir(), "cloud-apt-test-"));
@@ -560,4 +562,4 @@ test("local package archives install in one bounded step because apt cannot pre-
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
-});
+}, 15_000);

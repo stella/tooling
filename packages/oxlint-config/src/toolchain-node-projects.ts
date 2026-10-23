@@ -277,7 +277,9 @@ export const checkNodeProjects = ({
     commands.push(...filteredCommands);
     // Filtered builds only count once their expanded bodies invoke oxlint.
     if (commands.length === 0)
-      throw new Error("root lint scripts contain no supported oxlint invocation");
+      throw new Error(
+        "root lint scripts contain no supported oxlint invocation",
+      );
     const lintedFiles = commands.flatMap(({ cwd, args, runtime }) =>
       readCommand({
         root: cwd,

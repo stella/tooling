@@ -5,8 +5,8 @@ import {
   lstat,
   mkdir,
   mkdtemp,
-  readFile,
   readdir,
+  readFile,
   realpath,
   rm,
   writeFile,
@@ -22,29 +22,29 @@ import {
   pnpmWorkspaceState,
 } from "./consumer-catalogs";
 import {
-  consumerPackageClosure,
-  consumerStagingPaths,
-  consumerPackRootManifest,
-  assertConsumerFixtureManifest,
   assertConsumerFixtureKind,
+  assertConsumerFixtureManifest,
   assertConsumerFixtureSelection,
   bindConsumerManifest,
   consumerDependencyConfigFiles,
+  type ConsumerFixture,
+  type ConsumerPackage,
+  consumerPackageClosure,
+  consumerPackRootManifest,
   consumerRecord,
   consumerRelativePath,
+  consumerStagingPaths,
   discoverConsumerManifests,
   discoverConsumerPackages,
   parseConsumerFixtures,
-  type ConsumerFixture,
-  type ConsumerPackage,
 } from "./consumer-compat-config";
 import { assertConsumerInstalledToolBins } from "./consumer-installed-bins";
 import { assertConsumerNodeSupport } from "./consumer-node-support";
 import { selectConsumerReactVersions } from "./consumer-react";
 import {
-  resolveConsumerReleasePack,
-  consumerReleasePackArguments,
   type ConsumerReleasePack,
+  consumerReleasePackArguments,
+  resolveConsumerReleasePack,
 } from "./consumer-release-pack";
 import {
   checkPackedJavaScriptWithNode,

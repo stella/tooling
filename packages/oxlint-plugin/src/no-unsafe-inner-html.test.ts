@@ -58,7 +58,9 @@ const member = (
     [object, property],
   );
 
-const literal = (value: string | null): ESTree.StringLiteral | ESTree.NullLiteral =>
+const literal = (
+  value: string | null,
+): ESTree.StringLiteral | ESTree.NullLiteral =>
   value === null
     ? {
         ...nodeSpan(0, 1),
@@ -409,9 +411,7 @@ test("apply forwards static arrays and fails closed for opaque HTML arguments", 
     runCallVisitor(
       applyInsert(
         array({
-          elements: [
-            spread({ argument: identifier("arguments") }),
-          ],
+          elements: [spread({ argument: identifier("arguments") })],
         }),
       ),
     ),
@@ -424,18 +424,10 @@ test("apply forwards static arrays and fails closed for opaque HTML arguments", 
       argumentsValue,
     ]);
   expect(
-    runCallVisitor(
-      applyWrite(
-        array({ elements: [identifier("rawHtml")] }),
-      ),
-    ),
+    runCallVisitor(applyWrite(array({ elements: [identifier("rawHtml")] }))),
   ).toHaveLength(1);
   expect(
-    runCallVisitor(
-      applyWrite(
-        array({ elements: [literal("<p>Static</p>")] }),
-      ),
-    ),
+    runCallVisitor(applyWrite(array({ elements: [literal("<p>Static</p>")] }))),
   ).toHaveLength(0);
   expect(
     runCallVisitor(applyWrite(identifier("unknownArguments"))),
@@ -468,9 +460,7 @@ test("Object.assign checks opaque sources only for known DOM targets", () => {
       assign(
         createElement,
         objectLiteral({
-          properties: [
-            spread({ argument: identifier("payload") }),
-          ],
+          properties: [spread({ argument: identifier("payload") })],
         }),
       ),
     ),
@@ -577,4 +567,54 @@ test("Object.assign checks opaque sources only for known DOM targets", () => {
       ),
     ),
   ).toHaveLength(0);
+});
+
+test("opaque React payload diagnostics distinguish spreads and unresolved computed keys", () => {
+  const rule = getRule();
+  if (!("createOnce" in rule) || typeof rule.createOnce !== "function") {
+    throw new Error("expected an Oxlint createOnce rule");
+  }
+  expect(rule.meta?.messages?.unsafeInnerHtmlSpread).toBe(
+    "Do not spread an object in dangerouslySetInnerHTML. Keep `__html` " +
+      "inline so this rule can prove the HTML value is sanitized or escaped.",
+  );
+  expect(rule.meta?.messages?.unsafeInnerHtmlComputedKey).toBe(
+    "Do not use an unresolved computed key in dangerouslySetInnerHTML. " +
+      "Write an explicit `__html` property so this rule can " +
+      "prove the HTML value is sanitized or escaped.",
+  );
+  for (const [property, messageId] of [
+    [spread({ argument: identifier("payload") }), "unsafeInnerHtmlSpread"],
+    [
+      objectProperty({
+        key: identifier("key"),
+        value: identifier("rawHtml"),
+        computed: true,
+      }),
+      "unsafeInnerHtmlComputedKey",
+    ],
+  ] as const) {
+    const diagnostics: unknown[] = [];
+    const context = Object.create(null);
+    Object.defineProperties(context, {
+      options: { value: [] },
+      report: { value: (diagnostic: unknown) => diagnostics.push(diagnostic) },
+    });
+    const visitor = rule.createOnce(context);
+    visitor.before?.();
+    const onProperty = Reflect.get(visitor, "Property");
+    if (typeof onProperty !== "function") {
+      throw new Error("expected a Property visitor");
+    }
+    const payloadProp = objectProperty({
+      key: identifier("dangerouslySetInnerHTML"),
+      value: objectLiteral({ properties: [property] }),
+      computed: false,
+    });
+    objectLiteral({ properties: [payloadProp] });
+    onProperty(payloadProp);
+    flushProgram(visitor, fixtureProgram());
+    expect(diagnostics).toMatchObject([{ messageId }]);
+    expect(diagnostics).toHaveLength(1);
+  }
 });

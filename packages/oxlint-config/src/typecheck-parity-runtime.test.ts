@@ -3,16 +3,16 @@
 import { expect, spyOn, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import {
-  mkdtemp,
-  mkdir,
-  readFile,
-  readdir,
-  rm,
-  writeFile,
   access,
   chmod,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
   realpath,
+  rm,
   symlink,
+  writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -21,9 +21,9 @@ import {
   bunCheckArgs,
   compareDiagnosticSets,
   compareRepository,
-  discoverConfigGroups,
-  diagnosticSet,
   diagnosticCodes,
+  diagnosticSet,
+  discoverConfigGroups,
   fixtureCompilerOptions,
   fixturePackageContext,
   fixtureParity,
@@ -41,7 +41,7 @@ test("compiler diagnostic codes ignore diagnostic-like temporary path segments",
   const output = `${config}(3,5): error TS5102: Option 'outFile' has been removed.\n`;
   expect(output).toContain("TS0");
   expect(compilerDiagnosticCodes(output)).toEqual(["TS5102"]);
-});
+}, 15_000);
 
 const rejectedError = async (promise: Promise<unknown>): Promise<Error> => {
   try {

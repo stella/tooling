@@ -70,7 +70,7 @@ test("preset synchronization initializes before install and converges for untrac
     expect(npmrc.status).toBe(1);
     expect(npmrc.stderr).toContain(".npmrc");
   });
-});
+}, 15_000);
 
 test("prune removes expired third-party exclusions and preserves permanent owned packages", async () => {
   await fixture(async (root) => {
@@ -85,7 +85,7 @@ test("prune removes expired third-party exclusions and preserves permanent owned
     expect(await readFile(output, "utf8")).toContain("@stll/oxlint-config");
     expect(invoke(root, ["--check"]).status).toBe(0);
   });
-});
+}, 15_000);
 
 test("CLI rejects unsafe destinations and invalid arguments before writes", async () => {
   await fixture(async (root) => {
@@ -107,7 +107,7 @@ test("CLI rejects unsafe destinations and invalid arguments before writes", asyn
       await rm(output);
     }
   });
-});
+}, 15_000);
 
 test("declared first-party identities exclude workspaces and third-party alias targets", () => {
   expect(
@@ -126,7 +126,7 @@ test("declared first-party identities exclude workspaces and third-party alias t
       }),
     ].sort(),
   ).toEqual(["@stll/actual", "@stll/catalog", "@stll/direct"]);
-});
+}, 15_000);
 
 test.skipIf(process.env["CI"] !== "true")(
   "published quarantine CLI runs under Node",

@@ -3,8 +3,8 @@ import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 export const reviewedViteDtsVersions = {
-  "vite-plugin-dts": "5.0.3",
-  "unplugin-dts": "1.0.3",
+  "vite-plugin-dts": "5.1.2",
+  "unplugin-dts": "1.1.2",
 } as const;
 
 const record = (value: unknown): value is Record<string, unknown> =>
@@ -197,6 +197,9 @@ export const assertDeclarationOnlyOutput = ({
   }
 };
 
+// Optional capabilities the plugin probes and handles as absent: withholding
+// the native bundler context keeps it on its bundler-neutral path.
+const withheldContextCapabilities = new Set(["getNativeBuildContext"]);
 const passiveContextMethods = new Set([
   "warn",
   "error",
@@ -317,6 +320,7 @@ export const createDeclarationEmissionLedger = () => {
           methods.set(key, forwarded);
           return forwarded;
         }
+        if (withheldContextCapabilities.has(key)) return undefined;
         const value: unknown = receiver[key];
         if (key === "meta") return contextData(value);
         if (
@@ -353,6 +357,59 @@ export const createDeclarationEmissionLedger = () => {
 export type DeclarationEmissionLedger = ReturnType<
   typeof createDeclarationEmissionLedger
 >;
+
+type IdPattern = string | RegExp | (string | RegExp)[];
+type DeclarationHookFilter = {
+  id: { include?: IdPattern; exclude?: IdPattern };
+};
+
+const idPattern = (value: unknown): IdPattern | undefined => {
+  if (value === undefined || typeof value === "string") return value;
+  if (value instanceof RegExp) return value;
+  if (
+    Array.isArray(value) &&
+    value.every(
+      (entry): entry is string | RegExp =>
+        typeof entry === "string" || entry instanceof RegExp,
+    )
+  )
+    return value;
+  throw new Error("Declaration hook filters may only name static ids");
+};
+
+const dataEntries = (value: Record<string, unknown>, keys: string[]) =>
+  Reflect.ownKeys(value).map((key) => {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (typeof key !== "string" || !keys.includes(key) || !descriptor)
+      throw new Error("Invalid reviewed declaration hook");
+    if (!("value" in descriptor))
+      throw new Error("Declaration hooks cannot contain accessors");
+    return [key, descriptor.value] as const;
+  });
+
+/**
+ * Split a plugin hook into its function and the static id filter of the
+ * object form; a filter only narrows which modules reach the handler.
+ */
+export const declarationHookParts = (
+  value: unknown,
+): { handler: unknown; filter?: DeclarationHookFilter } => {
+  if (typeof value === "function") return { handler: value };
+  if (!record(value)) throw new Error("Invalid reviewed declaration hook");
+  const parts = Object.fromEntries(dataEntries(value, ["handler", "filter"]));
+  const filter = parts["filter"];
+  if (filter === undefined) return { handler: parts["handler"] };
+  if (!record(filter)) throw new Error("Invalid reviewed declaration hook");
+  const id = Object.fromEntries(dataEntries(filter, ["id"]))["id"];
+  if (!record(id)) throw new Error("Invalid reviewed declaration hook");
+  const idFilter = Object.fromEntries(dataEntries(id, ["include", "exclude"]));
+  const ids: DeclarationHookFilter["id"] = {};
+  const include = idPattern(idFilter["include"]);
+  const exclude = idPattern(idFilter["exclude"]);
+  if (include !== undefined) ids.include = include;
+  if (exclude !== undefined) ids.exclude = exclude;
+  return { handler: parts["handler"], filter: { id: ids } };
+};
 
 type GuardDeclarationHookOptions = {
   hook: unknown;

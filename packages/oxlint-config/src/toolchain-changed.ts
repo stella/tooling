@@ -6,15 +6,15 @@ import { parse as parseToml } from "smol-toml";
 import { parseAllDocuments, parseDocument } from "yaml";
 
 import {
-  changedPackageTool,
-  changedYarnSelectors,
   changedCompilerPatches,
+  type ChangedLock,
+  changedPackageTool,
   changedRecord,
+  changedYarnSelectors,
   parseChangedJson,
   parseChangedLock,
-  toolchainChangedTools,
-  type ChangedLock,
   type ToolchainChangedTool,
+  toolchainChangedTools,
 } from "./toolchain-changed-locks";
 import {
   containerDocumentImages,
@@ -22,8 +22,8 @@ import {
   isKubernetesDefinitionPath,
 } from "./toolchain-container-inputs";
 import {
-  isDockerDefinitionPath,
   githubAutomationFileKind,
+  isDockerDefinitionPath,
   isMiseConfigPath,
 } from "./toolchain-inputs";
 import { workspaceContains } from "./toolchain-workspaces";
@@ -690,7 +690,6 @@ const inventory = () =>
     typescript: new Set<string>(),
     oxlint: new Set<string>(),
     "oxlint-tsgolint": new Set<string>(),
-    oxfmt: new Set<string>(),
     shared: new Set<string>(),
   }) satisfies Record<ToolchainChangedTool, Set<string>>;
 const installedFields = [

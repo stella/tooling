@@ -1,14 +1,27 @@
 import { library } from "./packages/oxlint-config/src/index";
 import {
+  bunTestHygienePluginSpecifiers,
+  bunTestHygieneRules,
   portableSafetyPluginSpecifiers,
   portableSafetyRules,
   routeQueryPluginSpecifiers,
   routeQueryRules,
+  testReliabilityPluginSpecifiers,
+  testReliabilityRules,
 } from "./packages/oxlint-plugin/src/index";
 
 export default library({
-  ignorePatterns: ["packages/oxlint-config/dist/"],
-  jsPlugins: [...portableSafetyPluginSpecifiers, ...routeQueryPluginSpecifiers],
+  ignorePatterns: [
+    "packages/oxlint-config/dist/",
+    // Generated loader fixtures preserve upstream source as normalization data.
+    "packages/oxlint-config/src/__fixtures__/wasi-loaders/",
+  ],
+  jsPlugins: [
+    ...bunTestHygienePluginSpecifiers,
+    ...portableSafetyPluginSpecifiers,
+    ...routeQueryPluginSpecifiers,
+    ...testReliabilityPluginSpecifiers,
+  ],
   overrides: [
     {
       // Oxlint presents plugin AST nodes as intentionally untyped values.
@@ -30,8 +43,13 @@ export default library({
       // Fixtures preserve literal spreads and array holes as AST inputs for the
       // plugin rules; generic syntax-style fixes would erase those test cases.
       rules: {
+        ...bunTestHygieneRules,
         ...portableSafetyRules,
         ...routeQueryRules,
+        ...testReliabilityRules,
+        // Fixtures intentionally place Bun's void-returning registrations in
+        // expression positions to exercise conditional-branch handling.
+        "typescript/no-confusing-void-expression": "off",
         "unicorn/no-useless-spread": "off",
         "no-sparse-arrays": "off",
       },

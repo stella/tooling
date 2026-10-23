@@ -1,6 +1,6 @@
 {
   "name": "@stll/test-kit",
-  "version": "0.1.1",
+  "version": "0.3.0",
   "description": "Hermetic, deterministic test primitives for Bun: controlled time and randomness, local HTTP, isolated files, bounded waits, and a network guard.",
   "keywords": [
     "bun",
@@ -52,7 +52,7 @@
     "better-result": "3.0.1"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "0.5.8",
+    "@electric-sql/pglite": "0.5.10",
     "@stll/typescript-config": "workspace:*",
     "drizzle-orm": "1.0.0-rc.4"
   },

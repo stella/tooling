@@ -1,5 +1,6 @@
 import { valid } from "semver";
 
+import { parseFormatterPolicy } from "./toolchain-formatter";
 import { nodePolicyValid } from "./toolchain-node";
 
 export const packagePinKeys = [
@@ -7,7 +8,6 @@ export const packagePinKeys = [
   "oxlint-tsgolint",
   "@oxlint/plugins",
   "@stll/oxlint-plugin",
-  "oxfmt",
   "lefthook",
 ] as const;
 
@@ -229,6 +229,17 @@ export const parseToolchainPolicy = (input: unknown) => {
       throw new Error("Dependabot group values must be string arrays");
     return value;
   };
+  // First-party reusable workflows move by commit, without a semver update
+  // type, and must land together; they precede the shared semver groups.
+  const actionGroupsInput = dependabotInput["actionGroups"];
+  if (!record(actionGroupsInput))
+    throw new Error("missing Dependabot action groups");
+  const actionGroups: Record<string, { patterns: string[] }> = {};
+  for (const [name, group] of Object.entries(actionGroupsInput)) {
+    if (!record(group) || Object.keys(group).some((key) => key !== "patterns"))
+      throw new Error(`invalid Dependabot action group: ${name}`);
+    actionGroups[name] = { patterns: strings(group["patterns"]) };
+  }
   const groups: Record<string, { patterns: string[]; updateTypes: string[] }> =
     {};
   for (const [name, group] of Object.entries(dependabotInput["groups"])) {
@@ -240,6 +251,7 @@ export const parseToolchainPolicy = (input: unknown) => {
   }
   return {
     bun,
+    formatter: parseFormatterPolicy(input["formatter"]),
     typescript,
     node,
     postgres,
@@ -258,10 +270,15 @@ export const parseToolchainPolicy = (input: unknown) => {
     dependabot: {
       schedule,
       cooldown: { defaultDays },
+      actionGroups,
       groups,
       ignoredPackages: [
         ...new Set([
           ...Object.keys(packages),
+          // The consumer package managers move only with a reviewed
+          // consumerNpm or consumerPnpm change.
+          "npm",
+          "pnpm",
           ...typescriptInstallLayouts.flatMap((layout) =>
             layout.type === "direct"
               ? [layout.compilerPackage]

@@ -5,9 +5,7 @@
   "peerDependencies": {},
   "target": {
     "type": "javascript",
-    "targets": [
-      "node20.19.0"
-    ]
+    "targets": ["node20.19.0"]
   },
   "entryPoints": {
     "type": "module",

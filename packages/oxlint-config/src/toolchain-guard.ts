@@ -3,12 +3,11 @@ import {
   closeSync,
   lstatSync,
   openSync,
-  readSync,
   readFileSync,
+  readSync,
   realpathSync,
 } from "node:fs";
 import path from "node:path";
-import { isDeepStrictEqual } from "node:util";
 
 import { cloudSetupPath, generateCloudSetup } from "./cloud-setup";
 import {
@@ -20,29 +19,35 @@ import {
 } from "./cloud-setup-claude";
 import { parseCloudSetup } from "./cloud-setup-schema";
 import { readGitTrackedOutput } from "./git-tracked-output";
-import { parseJsonc } from "./jsonc";
 import { checkRepositoryQuarantine } from "./quarantine-policy";
+import { repositoryBun } from "./toolchain-bun";
 import {
   checkConsumerChecks,
   parseConsumerChecks,
 } from "./toolchain-consumer-checks";
-import { checkDependabot, dependabotRules } from "./toolchain-dependabot";
 import {
-  parseDynamicSelectors,
+  checkDependabot,
+  declaredIgnoreConflicts,
+  dependabotRules,
+  parseDependabotIgnores,
+} from "./toolchain-dependabot";
+import {
   type DynamicSelector,
+  parseDynamicSelectors,
 } from "./toolchain-dynamic-selectors";
 import {
   parseEngineFloors,
-  resolveEngineFloor,
   type ResolvedEngineFloor,
+  resolveEngineFloor,
 } from "./toolchain-engine-floors";
+import { checkFormatter, formatterRule } from "./toolchain-formatter";
 import { toolchainInputKind } from "./toolchain-inputs";
 import { checkNodeProjects, nodeProjectRule } from "./toolchain-node-projects";
 import { checkPackageFiles, packageRules } from "./toolchain-packages";
 import {
   checkRuntimeFile,
-  runtimeRules,
   type RuntimeDelegation,
+  runtimeRules,
 } from "./toolchain-runtime";
 import { parseRustExceptions } from "./toolchain-rust";
 import { parseToolchainPolicy } from "./toolchain-schema";
@@ -53,9 +58,9 @@ export const toolchainRules = [
     ...runtimeRules,
     ...dependabotRules,
     nodeProjectRule,
+    formatterRule,
     "cloud-setup-drift",
     "quarantine-policy",
-    "lockfile-overrides",
   ] as const),
 ] as const;
 export type ToolchainRule = (typeof toolchainRules)[number];
@@ -83,12 +88,13 @@ export const parseToolchainConfiguration = (input: unknown) => {
         key !== "engineFloors" &&
         key !== "dynamicSelectors" &&
         key !== "consumerChecks" &&
-        key !== "rustExceptions",
+        key !== "rustExceptions" &&
+        key !== "dependabotIgnores",
     ) ||
     (input["optOuts"] !== undefined && !array(input["optOuts"]))
   )
     throw new Error(
-      "stll-toolchain.json accepts only optOuts, cloud, engineFloors, dynamicSelectors consumerChecks and rustExceptions declarations",
+      "stll-toolchain.json accepts only optOuts, cloud, engineFloors, dynamicSelectors, consumerChecks, rustExceptions and dependabotIgnores declarations",
     );
   const disabled = new Set<string>();
   const optOuts = input["optOuts"] ?? [];
@@ -109,10 +115,6 @@ export const parseToolchainConfiguration = (input: unknown) => {
     if (entry["rule"] === "quarantine-policy")
       throw new Error(
         "quarantine-policy cannot be opted out; temporary third-party exclusions require expiry",
-      );
-    if (entry["rule"] === "lockfile-overrides")
-      throw new Error(
-        "lockfile-overrides cannot be opted out; bun.lock must reflect root package overrides",
       );
     if (entry["rule"] === "rust-version")
       throw new Error(
@@ -143,6 +145,7 @@ export const parseToolchainConfiguration = (input: unknown) => {
     engineFloors: parseEngineFloors(input["engineFloors"]),
     dynamicSelectors: parseDynamicSelectors(input["dynamicSelectors"]),
     consumerChecks: parseConsumerChecks(input["consumerChecks"]),
+    dependabotIgnores: parseDependabotIgnores(input["dependabotIgnores"]),
   };
 };
 
@@ -235,51 +238,6 @@ export const readToolchainInputs = (
   return { files, trackedFiles, diagnostics };
 };
 
-const checkLockfileOverrides = (
-  manifestText: string | undefined,
-  lockfileText: string | undefined,
-): SharedToolchainDiagnostic[] => {
-  if (manifestText === undefined || lockfileText === undefined) return [];
-  try {
-    const manifest = JSON.parse(manifestText);
-    if (!record(manifest)) return [];
-    const packageOverrides = record(manifest["overrides"])
-      ? manifest["overrides"]
-      : undefined;
-    const packageResolutions = record(manifest["resolutions"])
-      ? manifest["resolutions"]
-      : undefined;
-    if (packageOverrides === undefined && packageResolutions === undefined)
-      return [];
-    const expected = { ...packageResolutions, ...packageOverrides };
-    const lockfile = parseJsonc(lockfileText);
-    if (!record(lockfile)) return [];
-    const actual = record(lockfile["overrides"]) ? lockfile["overrides"] : {};
-    const differing = [
-      ...new Set([...Object.keys(expected), ...Object.keys(actual)]),
-    ]
-      .filter(
-        (key) =>
-          !Object.hasOwn(expected, key) ||
-          !Object.hasOwn(actual, key) ||
-          !isDeepStrictEqual(expected[key], actual[key]),
-      )
-      .sort();
-    if (differing.length === 0) return [];
-    return [
-      {
-        rule: "lockfile-overrides",
-        path: "bun.lock",
-        line: 1,
-        message: `bun.lock overrides differ from package.json for: ${differing.join(", ")}; run bun install to regenerate bun.lock and commit it`,
-      },
-    ];
-  } catch {
-    // Existing package and lockfile checks own malformed input diagnostics.
-    return [];
-  }
-};
-
 type CheckSharedToolchainOptions = {
   root: string;
   policy: ReturnType<typeof parseToolchainPolicy>;
@@ -290,7 +248,7 @@ type CheckSharedToolchainOptions = {
 
 export const checkToolchain = ({
   root,
-  policy,
+  policy: sharedPolicy,
   onDelegated,
   onWarning,
   now,
@@ -298,6 +256,12 @@ export const checkToolchain = ({
   const { files, trackedFiles, diagnostics } = readToolchainInputs(root, {
     bunLock: "content",
   });
+  // Every Bun reference follows the repository's own pin, which must be at
+  // or above the shared minimum.
+  const policy = {
+    ...sharedPolicy,
+    bun: repositoryBun(sharedPolicy.bun, files["package.json"]),
+  };
   let repository: string | undefined;
   try {
     const origin = execFileSync("git", ["remote", "get-url", "origin"], {
@@ -400,9 +364,6 @@ export const checkToolchain = ({
     }),
   );
   diagnostics.push(...checkPackageFiles({ files, policy }));
-  diagnostics.push(
-    ...checkLockfileOverrides(files["package.json"], files["bun.lock"]),
-  );
   const usesBun = Object.entries(files).some(([file, text]) => {
     if (path.posix.basename(file) === "bun.lock") return true;
     if (path.posix.basename(file) !== "package.json") return false;
@@ -418,6 +379,9 @@ export const checkToolchain = ({
       return false;
     }
   });
+  diagnostics.push(
+    ...checkFormatter({ files, policy: policy.formatter, usesBun }),
+  );
   if (usesBun || files["bunfig.toml"] !== undefined) {
     try {
       if (files["bunfig.toml"] === undefined)
@@ -503,7 +467,24 @@ export const checkToolchain = ({
         line: 1,
         message: `dynamic selector ${entry.path}:${entry.at ?? entry.line} must match exactly one unresolved ${entry.kind} selector`,
       });
-  diagnostics.push(...checkDependabot({ files, policy: policy.dependabot }));
+  const dependabotIgnores = configuration.dependabotIgnores;
+  for (const message of declaredIgnoreConflicts({
+    ignores: dependabotIgnores,
+    policy: policy.dependabot,
+  }))
+    diagnostics.push({
+      rule: "configuration",
+      path: "stll-toolchain.json",
+      line: 1,
+      message,
+    });
+  diagnostics.push(
+    ...checkDependabot({
+      files,
+      policy: policy.dependabot,
+      ignores: dependabotIgnores,
+    }),
+  );
   return diagnostics.filter(
     (diagnostic) => !configuration.disabled.has(diagnostic.rule),
   );

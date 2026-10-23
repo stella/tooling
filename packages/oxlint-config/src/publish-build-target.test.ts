@@ -2,8 +2,8 @@ import { expect, test } from "bun:test";
 import assert from "node:assert/strict";
 import {
   existsSync,
-  mkdtempSync,
   mkdirSync,
+  mkdtempSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -13,12 +13,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import {
-  assetOnlyTarget,
   assertTsdownBuildExtensions,
+  assetOnlyTarget,
+  publishBuildLifecycleScripts,
   resolvedTsdownTarget,
   resolvePublishBuildTarget,
   supportedPublishBuildCommand,
-  publishBuildLifecycleScripts,
 } from "./publish-build-target";
 import {
   checkPublishContract,
@@ -409,7 +409,7 @@ test("the CLI loader parser transpiles TypeScript configs and their relative imp
       type: "javascript",
       targets: ["es2022"],
     });
-    for (const unsupported of [
+    const unsupportedConfigs = [
       "{ entry: ['entry.js'], dts: false, inputOptions: () => ({ transform: { target: 'node26' } }) }",
       "{ entry: ['entry.js'], dts: false, hooks: { 'build:prepare': ({ options }) => { options.target = ['node26']; } } }",
       "{ entry: ['entry.js'], dts: false, plugins: [{ name: 'change-target', options: options => ({ ...options, transform: { target: 'node26' } }) }] }",
@@ -417,13 +417,30 @@ test("the CLI loader parser transpiles TypeScript configs and their relative imp
       "{ entry: ['entry.js'], dts: false, inputOptions: { plugins: [{ name: 'change-output', generateBundle() {} }] } }",
       "{ entry: ['entry.js'], dts: false, outputOptions: { plugins: [{ name: 'change-output', renderChunk: () => 'custom output' }] } }",
       "{ entry: ['entry.js'], dts: false, outputOptions: () => ({ banner: 'custom output' }) }",
-    ]) {
-      writeFileSync(configFile, `export default ${unsupported};\n`);
-      await assert.rejects(
-        () => resolvePublishBuildTarget(directory, "npm"),
-        /supported target resolver/,
-      );
-    }
+    ];
+    await Promise.all(
+      unsupportedConfigs.map(async (unsupported, index) => {
+        const member = path.join(directory, `unsupported-${index}`);
+        mkdirSync(member);
+        writeFileSync(
+          path.join(member, "package.json"),
+          JSON.stringify({
+            name: `unsupported-${index}`,
+            type: "module",
+            scripts: { build: "tsdown" },
+          }),
+        );
+        writeFileSync(path.join(member, "entry.js"), "export {};\n");
+        writeFileSync(
+          path.join(member, "tsdown.config.ts"),
+          `export default ${unsupported};\n`,
+        );
+        await assert.rejects(
+          () => resolvePublishBuildTarget(member, "npm"),
+          /supported target resolver/,
+        );
+      }),
+    );
     writeFileSync(
       configFile,
       [
@@ -438,7 +455,7 @@ test("the CLI loader parser transpiles TypeScript configs and their relative imp
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
-});
+}, 45_000);
 
 test("build command grammar accepts only an entire supported invocation", () => {
   for (const [command, expected] of [

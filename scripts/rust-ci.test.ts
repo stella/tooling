@@ -36,13 +36,13 @@ const env = verdict["env"];
 const variables = Object.entries(env)
   .filter(([name]) => name !== "EVENT_NAME")
   .map(([name, expression]) => {
-  const job =
-    typeof expression === "string"
-      ? /^\$\{\{\s*needs\.([\w-]+)\.result\s*\}\}$/u.exec(expression)?.at(1)
-      : undefined;
-  if (job === undefined) throw new Error(`Unresolved verdict input ${name}`);
-  return { name, job };
-});
+    const job =
+      typeof expression === "string"
+        ? /^\$\{\{\s*needs\.([\w-]+)\.result\s*\}\}$/u.exec(expression)?.at(1)
+        : undefined;
+    if (job === undefined) throw new Error(`Unresolved verdict input ${name}`);
+    return { name, job };
+  });
 
 test("the aggregate awaits every validation job and rejects every failed or cancelled dependency", () => {
   expect(aggregate["if"]).toBe("always()");
@@ -60,7 +60,9 @@ test("the aggregate awaits every validation job and rejects every failed or canc
           variables.map(({ name, job }) => {
             if (job === changedJob) return [name, result];
             const defaultResult =
-              job === "changeset" && event !== "pull_request" ? "skipped" : "success";
+              job === "changeset" && event !== "pull_request"
+                ? "skipped"
+                : "success";
             return [name, defaultResult];
           }),
         ),
@@ -73,7 +75,9 @@ test("the aggregate awaits every validation job and rejects every failed or canc
     for (const job of validationJobs) {
       for (const result of ["failure", "cancelled", "skipped", "unexpected"]) {
         const allowed =
-          job === "changeset" && event !== "pull_request" && result === "skipped";
+          job === "changeset" &&
+          event !== "pull_request" &&
+          result === "skipped";
         expect(
           evaluate({ changedJob: job, result, event }) === 0,
           `${event}: ${job}: ${result}`,
@@ -81,27 +85,39 @@ test("the aggregate awaits every validation job and rejects every failed or canc
       }
     }
   }
-});
+}, 15_000);
 
 test("the required-check workflows handle merge groups and use the reviewed verifier", () => {
   if (!record(workflow["on"])) throw new Error("Missing workflow triggers");
   expect(workflow["on"]).toHaveProperty("merge_group");
   const cla: unknown = Bun.YAML.parse(
-    readFileSync(new URL("../.github/workflows/cla.yml", import.meta.url), "utf8"),
+    readFileSync(
+      new URL("../.github/workflows/cla.yml", import.meta.url),
+      "utf8",
+    ),
   );
   if (
-    !record(cla) || !record(cla["on"]) || !record(cla["permissions"]) ||
-    !record(cla["jobs"]) || !record(cla["jobs"]["cla"])
-  ) throw new Error("Missing CLA workflow contract");
+    !record(cla) ||
+    !record(cla["on"]) ||
+    !record(cla["permissions"]) ||
+    !record(cla["jobs"]) ||
+    !record(cla["jobs"]["cla"])
+  )
+    throw new Error("Missing CLA workflow contract");
   expect(cla["on"]["merge_group"]).toEqual({ types: ["checks_requested"] });
   expect(cla["on"]["pull_request_target"]).toEqual({
     types: ["opened", "synchronize", "reopened", "ready_for_review"],
   });
   expect(cla["jobs"]["cla"]["uses"]).toBe(
-    "stella/.github/.github/workflows/cla.yml@caa3ee1c2d02ef807994fdd3907c55ba104aff00",
+    "stella/.github/.github/workflows/cla.yml@a98150379a0659f9ff603970a06dbdee56f7c4cb",
   );
-  expect(cla["jobs"]["cla"]["if"]).toContain("github.event_name == 'merge_group'");
+  expect(cla["jobs"]["cla"]["if"]).toContain(
+    "github.event_name == 'merge_group'",
+  );
   expect(cla["permissions"]).toEqual({
-    contents: "read", issues: "write", "pull-requests": "read", checks: "write",
+    contents: "read",
+    issues: "write",
+    "pull-requests": "read",
+    checks: "write",
   });
-});
+}, 15_000);

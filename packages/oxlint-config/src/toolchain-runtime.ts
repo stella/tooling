@@ -23,8 +23,8 @@ import {
 import { canonicalDockerRuntime, rustImageVersion } from "./toolchain-images";
 import {
   githubAutomationFileKind,
-  isMiseConfigPath,
   isDockerDefinitionPath,
+  isMiseConfigPath,
 } from "./toolchain-inputs";
 import { nodeSelectorMatches } from "./toolchain-node";
 import { checkRustReferences, type RustException } from "./toolchain-rust";
@@ -1843,7 +1843,10 @@ export const checkRuntimeFile = ({
     const workflow = document.toJS({ maxAliasCount: 100 });
     if (automationKind === "workflow") {
       for (const finding of checkWorkflowTrust(workflow)) {
-        const jobNode = getNode(getNode(document.contents, "jobs"), finding.job);
+        const jobNode = getNode(
+          getNode(document.contents, "jobs"),
+          finding.job,
+        );
         let source: unknown;
         switch (finding.type) {
           case "job":
@@ -1851,7 +1854,9 @@ export const checkRuntimeFile = ({
             break;
           case "step": {
             const steps = resolveNode(getNode(jobNode, "steps"));
-            const step = isSeq(steps) ? steps.items.at(finding.step) : undefined;
+            const step = isSeq(steps)
+              ? steps.items.at(finding.step)
+              : undefined;
             source = getNode(step, "run") ?? getNode(step, "uses");
             break;
           }

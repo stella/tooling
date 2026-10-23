@@ -9,10 +9,12 @@
 //     JSX attribute value or a property of any object literal (props passed
 //     to `createElement` / `jsx()`, or spread into JSX).
 //   • assignment to `innerHTML`, `outerHTML` or `srcdoc`, dot or static
-//     bracket notation, and the same keys in an `Object.assign` source.
+//     bracket notation, and the same keys in an `Object.assign` source
+//     (either branch of a conditional or logical source).
 //   • the JSX `srcDoc` attribute.
 //   • `insertAdjacentHTML`, `setHTMLUnsafe`, `createContextualFragment`,
-//     `setAttribute("srcdoc", …)`, and `write` / `writeln` on a document.
+//     `setAttribute("srcdoc", …)` / `setAttributeNS(…, "srcdoc", …)`,
+//     and `write` / `writeln` on a document.
 //
 // In the default `allowlist` policy, a value is allowed when it is:
 //   • a static string Literal or TemplateLiteral whose interpolations are all
@@ -50,7 +52,7 @@ import {
 
 type DomElementProducer = {
   name: string;
-  kind: "property" | "method" | "collection";
+  kind: "property" | "method" | "collection" | "collection-property";
   receiver: "document" | "element" | "either";
 };
 
@@ -73,6 +75,7 @@ export const DOM_ELEMENT_PRODUCERS = [
   { name: "getElementsByTagNameNS", kind: "collection", receiver: "either" },
   { name: "getElementsByName", kind: "collection", receiver: "document" },
   { name: "querySelectorAll", kind: "collection", receiver: "either" },
+  { name: "children", kind: "collection-property", receiver: "element" },
   { name: "parentElement", kind: "property", receiver: "element" },
   { name: "firstElementChild", kind: "property", receiver: "element" },
   { name: "lastElementChild", kind: "property", receiver: "element" },
@@ -90,7 +93,7 @@ export const REACT_HTML_PROPS = [
   { name: "srcdoc", kind: "value" },
 ] as const;
 type ReactHtmlProp = (typeof REACT_HTML_PROPS)[number];
-const REACT_ELEMENT_FACTORIES: ReadonlySet<string> = new Set([
+export const REACT_ELEMENT_FACTORIES: ReadonlySet<string> = new Set([
   "createElement",
   "React.createElement",
   "jsx",
@@ -107,16 +110,36 @@ const HTML_FIRST_ARGUMENT_METHODS: ReadonlySet<string> = new Set([
   "createContextualFragment",
   "setHTMLUnsafe",
 ]);
-const DOCUMENT_WRITE_METHODS: ReadonlySet<string> = new Set([
+export const DOCUMENT_WRITE_METHODS: ReadonlySet<string> = new Set([
   "write",
   "writeln",
 ]);
+export const HTML_ATTRIBUTE_SINKS = [
+  { name: "setAttribute", namespaceIndex: null, nameIndex: 0, valueIndex: 1 },
+  { name: "setAttributeNS", namespaceIndex: 0, nameIndex: 1, valueIndex: 2 },
+] as const;
 const DOCUMENT_MEMBERS: ReadonlySet<string> = new Set([
   "contentDocument",
   "document",
   "ownerDocument",
 ]);
-
+const FILE_SYSTEM_MODULES: ReadonlySet<string> = new Set([
+  "fs",
+  "fs/promises",
+  "node:fs",
+  "node:fs/promises",
+]);
+const CHILD_PROCESS_MODULES: ReadonlySet<string> = new Set([
+  "child_process",
+  "node:child_process",
+]);
+// Calls that return a ChildProcess, whose stdin is a writable stream.
+const CHILD_PROCESS_FACTORIES: ReadonlySet<string> = new Set([
+  "exec",
+  "execFile",
+  "fork",
+  "spawn",
+]);
 const HTML_SANITIZER_LEAF_RE =
   /^(?:escape(?:html|xml)|sanitize(?:html|dom)|purify(?:html|dom)|dompurify)$/iu;
 const SANITIZER_RESULT_MEMBERS = new Set(["value", "data", "html"]);
@@ -224,7 +247,9 @@ const isWaiverComment = (value: unknown): value is WaiverComment =>
   value.loc !== null;
 
 const jsxAttributeName = (node: unknown): string | null =>
-  isAstNode(node) && node.type === "JSXIdentifier" && typeof node.name === "string"
+  isAstNode(node) &&
+  node.type === "JSXIdentifier" &&
+  typeof node.name === "string"
     ? node.name
     : null;
 
@@ -280,7 +305,18 @@ const objectProperties = (node: unknown): AstNode[] => {
   ) {
     return [];
   }
-  return expression.properties.filter(isAstNode);
+  const properties: AstNode[] = [];
+  for (const property of expression.properties.filter(isAstNode)) {
+    if (
+      property.type === "SpreadElement" &&
+      unwrapExpression(property.argument)?.type === "ObjectExpression"
+    ) {
+      properties.push(...objectProperties(property.argument));
+      continue;
+    }
+    properties.push(property);
+  }
+  return properties;
 };
 
 type AppliedArguments = LiteralArgumentResolution;
@@ -322,20 +358,6 @@ const invokedArguments = (call: unknown): AppliedArguments => {
   return appliedArgumentsFor(resolved.args);
 };
 
-// `document.write`, `window.document.write`, `frame.contentDocument.write`,
-// `node.ownerDocument.write`.
-const isDocumentReceiver = (node: unknown): boolean => {
-  const receiver = unwrapExpression(node);
-  if (isIdentifier(receiver, "document")) {
-    return true;
-  }
-  if (receiver?.type !== "MemberExpression") {
-    return false;
-  }
-  const name = memberPropertyName(receiver);
-  return name !== null && DOCUMENT_MEMBERS.has(name);
-};
-
 export default eslintCompatPlugin({
   meta: { name: "no-unsafe-inner-html" },
   rules: {
@@ -362,12 +384,248 @@ export default eslintCompatPlugin({
             "Function names outside the allowlist are not proof because a " +
             "local identity function can shadow them.",
           unsafeInnerHtmlSpread:
-            "Do not spread an object into dangerouslySetInnerHTML. Keep " +
+            "Do not spread an object in dangerouslySetInnerHTML. Keep " +
             "`__html` inline so this rule can prove the HTML value is " +
             "sanitized or escaped.",
+          unsafeInnerHtmlComputedKey:
+            "Do not use an unresolved computed key in " +
+            "dangerouslySetInnerHTML. Write an explicit `__html` property " +
+            "so this rule can " +
+            "prove the HTML value is sanitized or escaped.",
         },
       },
       createOnce(context) {
+        type BindingOptions = {
+          node: unknown;
+          scope: Scope;
+          seen: Set<Variable>;
+        };
+        type BindingSource = {
+          kind: "expression" | "iteration";
+          node: AstNode | null;
+          scope: Scope;
+        };
+        // All document, element and collection checks share one stable-binding path.
+        const resolveStableBinding = ({
+          node,
+          scope,
+          seen,
+        }: BindingOptions): BindingSource | null => {
+          let target = unwrapExpression(node);
+          while (isIdentifier(target)) {
+            let current: Scope | null = scope;
+            let variable: Variable | undefined;
+            while (current !== null) {
+              variable = current.set.get(target.name);
+              if (variable !== undefined) break;
+              current = current.upper;
+            }
+            if (variable === undefined || variable.defs.length === 0) {
+              return { kind: "expression", node: target, scope };
+            }
+            if (seen.has(variable)) return null;
+            seen.add(variable);
+            const definition = variable.defs.at(0);
+            // A never-reassigned class or function declaration holds a
+            // function, which is neither an element nor a document.
+            if (
+              variable.defs.length === 1 &&
+              (definition?.type === "ClassName" ||
+                definition?.type === "FunctionName") &&
+              (definition.node.type === "ClassDeclaration" ||
+                definition.node.type === "FunctionDeclaration") &&
+              !variable.references.some((reference) => reference.isWrite())
+            ) {
+              return {
+                kind: "expression",
+                node: unwrapExpression(definition.node),
+                scope,
+              };
+            }
+            if (
+              variable.defs.length !== 1 ||
+              definition?.type !== "Variable" ||
+              definition.node.type !== "VariableDeclarator" ||
+              definition.node.id.type !== "Identifier" ||
+              variable.references.some(
+                (reference) => reference.isWrite() && !reference.init,
+              )
+            ) {
+              return null;
+            }
+            const declarator = definition.node;
+            if (declarator.init !== null) {
+              target = unwrapExpression(declarator.init);
+              scope = context.sourceCode.getScope(declarator);
+              continue;
+            }
+            const declaration = declarator.parent;
+            if (declaration.type !== "VariableDeclaration") return null;
+            const loop = declaration.parent;
+            if (loop.type !== "ForOfStatement" || loop.left !== declaration) {
+              return null;
+            }
+            return {
+              kind: "iteration",
+              node: unwrapExpression(loop.right),
+              scope: context.sourceCode.getScope(loop.right),
+            };
+          }
+          return { kind: "expression", node: target, scope };
+        };
+        const isKnownNonEmptyNamespace = (
+          namespace: unknown,
+          scope: Scope,
+        ): boolean => {
+          const source = resolveStableBinding({
+            node: namespace,
+            scope,
+            seen: new Set<Variable>(),
+          });
+          if (source?.kind !== "expression") return false;
+          const text = staticStringValue(source.node);
+          // DOM normalizes the empty namespace to null. Unknowns stay checked.
+          if (text !== null) return text !== "";
+          if (source.node?.type !== "Literal") return false;
+          const { value } = source.node;
+          return (
+            typeof value === "number" ||
+            typeof value === "boolean" ||
+            typeof value === "bigint"
+          );
+        };
+
+        const variableFor = (
+          identifier: { name: string },
+          initialScope: Scope,
+        ): Variable | undefined => {
+          let current: Scope | null = initialScope;
+          while (current !== null) {
+            const variable = current.set.get(identifier.name);
+            if (variable !== undefined) return variable;
+            current = current.upper;
+          }
+          return undefined;
+        };
+        const isKnownNonDocumentReceiver = (
+          node: unknown,
+          scope: Scope,
+        ): boolean => {
+          const isUnshadowedGlobal = (
+            identifier: unknown,
+            name: string,
+          ): boolean =>
+            isIdentifier(identifier, name) &&
+            variableFor(identifier, scope) === undefined;
+          const isFileSystemImport = (identifier: unknown): boolean => {
+            if (!isIdentifier(identifier)) return false;
+            const variable = variableFor(identifier, scope);
+            if (variable?.defs.length !== 1) return false;
+            const definition = variable.defs.at(0);
+            return (
+              definition?.type === "ImportBinding" &&
+              definition.parent?.type === "ImportDeclaration" &&
+              FILE_SYSTEM_MODULES.has(definition.parent.source.value)
+            );
+          };
+          // A const bound once to a child process factory call: a node
+          // child_process import or the unshadowed Bun.spawn.
+          const isChildProcess = (identifier: unknown): boolean => {
+            if (!isIdentifier(identifier)) return false;
+            const variable = variableFor(identifier, scope);
+            const definition = variable?.defs.at(0);
+            if (
+              variable?.defs.length !== 1 ||
+              definition?.type !== "Variable" ||
+              definition.node.type !== "VariableDeclarator" ||
+              definition.node.id.type !== "Identifier" ||
+              definition.node.parent.type !== "VariableDeclaration" ||
+              definition.node.parent.kind !== "const"
+            )
+              return false;
+            const init = unwrapExpression(definition.node.init);
+            if (init?.type !== "CallExpression") return false;
+            const callee = unwrapExpression(init.callee);
+            if (callee?.type === "MemberExpression")
+              return (
+                memberPropertyName(callee) === "spawn" &&
+                isUnshadowedGlobal(unwrapExpression(callee.object), "Bun")
+              );
+            if (!isIdentifier(callee)) return false;
+            const factory = variableFor(callee, scope);
+            const binding = factory?.defs.at(0);
+            return (
+              factory?.defs.length === 1 &&
+              binding?.type === "ImportBinding" &&
+              binding.node.type === "ImportSpecifier" &&
+              binding.node.imported.type === "Identifier" &&
+              CHILD_PROCESS_FACTORIES.has(binding.node.imported.name) &&
+              binding.parent?.type === "ImportDeclaration" &&
+              CHILD_PROCESS_MODULES.has(binding.parent.source.value)
+            );
+          };
+          const root = unwrapExpression(node);
+          if (isUnshadowedGlobal(root, "Bun") || isFileSystemImport(root)) {
+            return true;
+          }
+          if (root?.type !== "MemberExpression") return false;
+          const stream = memberPropertyName(root);
+          const owner = unwrapExpression(root.object);
+          return (
+            ((stream === "stdout" || stream === "stderr") &&
+              isUnshadowedGlobal(owner, "process")) ||
+            (stream === "stdin" && isChildProcess(owner))
+          );
+        };
+        const isDocumentReceiver = (node: unknown, scope: Scope): boolean => {
+          if (isKnownNonDocumentReceiver(node, scope)) return false;
+          const source = resolveStableBinding({
+            node,
+            scope,
+            seen: new Set<Variable>(),
+          });
+          if (source === null || source.kind !== "expression") return true;
+          const receiver = source.node;
+          if (isIdentifier(receiver, "document")) return true;
+          if (receiver?.type !== "MemberExpression") return false;
+          const name = memberPropertyName(receiver);
+          return name !== null && DOCUMENT_MEMBERS.has(name);
+        };
+
+        const isDocumentSinkReceiver = (
+          node: unknown,
+          scope: Scope,
+        ): boolean => {
+          if (isKnownNonDocumentReceiver(node, scope)) return false;
+          const receiver = unwrapExpression(node);
+          if (!isIdentifier(receiver)) return true;
+          let current: Scope | null = scope;
+          let variable: Variable | undefined;
+          while (current !== null) {
+            variable = current.set.get(receiver.name);
+            if (variable !== undefined) break;
+            current = current.upper;
+          }
+          if (variable === undefined || variable.defs.length !== 1) return true;
+          const definition = variable.defs.at(0);
+          if (
+            definition?.type !== "Variable" ||
+            definition.node.type !== "VariableDeclarator" ||
+            definition.node.id.type !== "Identifier" ||
+            definition.node.init === null ||
+            unwrapExpression(definition.node.init)?.type !==
+              "ObjectExpression" ||
+            definition.node.parent.type !== "VariableDeclaration" ||
+            definition.node.parent.kind !== "const" ||
+            variable.scope.variableScope !== scope.variableScope ||
+            variable.references.some(
+              (reference) => reference.isWrite() && !reference.init,
+            )
+          ) {
+            return true;
+          }
+          return false;
+        };
         type DomTargetOptions = {
           node: unknown;
           scope: Scope;
@@ -380,48 +638,30 @@ export default eslintCompatPlugin({
           seen = new Set<Variable>(),
           kind = "element",
         }: DomTargetOptions): boolean => {
-          const target = unwrapExpression(node);
-          if (isIdentifier(target)) {
-            let current: Scope | null = scope;
-            while (current !== null) {
-              const variable = current.set.get(target.name);
-              if (variable === undefined) {
-                current = current.upper;
-                continue;
-              }
-              if (variable.defs.length === 0) {
-                return kind === "element" && isDocumentReceiver(target);
-              }
-              if (seen.has(variable)) return false;
-              seen.add(variable);
-              const definition = variable.defs.at(0);
-              if (
-                variable.defs.length !== 1 ||
-                definition?.type !== "Variable" ||
-                definition.node.type !== "VariableDeclarator" ||
-                definition.node.id.type !== "Identifier" ||
-                definition.node.init === null ||
-                variable.references.some(
-                  (reference) => reference.isWrite() && !reference.init,
-                )
-              ) {
-                return false;
-              }
-              return isKnownDomTarget({
-                node: definition.node.init,
-                scope: context.sourceCode.getScope(definition.node),
+          const source = resolveStableBinding({ node, scope, seen });
+          // An unstable binding may have been reassigned to a DOM target. Fail
+          // closed unless the resolver can prove a stable non-DOM value.
+          if (source === null) return true;
+          if (source.kind === "iteration") {
+            return (
+              kind === "element" &&
+              isKnownDomTarget({
+                node: source.node,
+                scope: source.scope,
                 seen,
-                kind,
-              });
-            }
+                kind: "collection",
+              })
+            );
           }
+          const target = source.node;
+          scope = source.scope;
           const hasProducerReceiver = (
             receiver: unknown,
             producer: DomElementProducer,
           ): boolean => {
             if (
               producer.receiver !== "element" &&
-              isDocumentReceiver(receiver)
+              isDocumentReceiver(receiver, scope)
             ) {
               return true;
             }
@@ -431,17 +671,27 @@ export default eslintCompatPlugin({
             );
           };
           const isElementCollection = (collection: unknown): boolean =>
-            isKnownDomTarget({ node: collection, scope, seen, kind: "collection" });
-          if (kind === "element" && target?.type === "MemberExpression") {
+            isKnownDomTarget({
+              node: collection,
+              scope,
+              seen,
+              kind: "collection",
+            });
+          if (target?.type === "MemberExpression") {
             const property = memberPropertyName(target);
             const producer = DOM_ELEMENT_PRODUCERS.find(
-              (entry) => entry.kind === "property" && entry.name === property,
+              (entry) =>
+                entry.kind ===
+                  (kind === "collection"
+                    ? "collection-property"
+                    : "property") && entry.name === property,
             );
             if (producer !== undefined) {
               return hasProducerReceiver(target.object, producer);
             }
             const index = unwrapExpression(target.property);
             if (
+              kind === "element" &&
               target.computed === true &&
               index?.type === "Literal" &&
               typeof index.value === "number" &&
@@ -464,7 +714,8 @@ export default eslintCompatPlugin({
             }
             const producer = DOM_ELEMENT_PRODUCERS.find(
               (entry) =>
-                entry.kind === (kind === "collection" ? "collection" : "method") &&
+                entry.kind ===
+                  (kind === "collection" ? "collection" : "method") &&
                 entry.name === method,
             );
             return (
@@ -472,7 +723,7 @@ export default eslintCompatPlugin({
               hasProducerReceiver(callee.object, producer)
             );
           }
-          return kind === "element" && isDocumentReceiver(target);
+          return kind === "element" && isDocumentReceiver(target, scope);
         };
 
         let sanitizerPolicy: SanitizerPolicy = SANITIZER_POLICY.allowlist;
@@ -481,7 +732,11 @@ export default eslintCompatPlugin({
         const waiverLines = new Set<number>();
         type SinkObservation = {
           node: AstNode;
-          kind: "safe" | "unsafe" | "opaque-payload";
+          kind:
+            | "safe"
+            | "unsafe"
+            | "opaque-payload-spread"
+            | "opaque-payload-computed-key";
         };
         const sinks: SinkObservation[] = [];
         const observeSink = (
@@ -489,6 +744,15 @@ export default eslintCompatPlugin({
           kind: SinkObservation["kind"],
         ): void => {
           if (isAstNode(node)) sinks.push({ node, kind });
+        };
+        const messageIdFor = (kind: SinkObservation["kind"]) => {
+          if (kind === "opaque-payload-spread") {
+            return "unsafeInnerHtmlSpread";
+          }
+          if (kind === "opaque-payload-computed-key") {
+            return "unsafeInnerHtmlComputedKey";
+          }
+          return "unsafeInnerHtml";
         };
 
         const consumeWaiver = (node: unknown): boolean => {
@@ -510,7 +774,10 @@ export default eslintCompatPlugin({
         // The value of a `dangerouslySetInnerHTML` prop: an inline object has
         // its `__html` checked and its spreads rejected; anything else is a
         // hoisted payload whose HTML this rule cannot see.
-        const checkDangerousPayload = (value: unknown, htmlKey: string): void => {
+        const checkDangerousPayload = (
+          value: unknown,
+          htmlKey: string,
+        ): void => {
           const expression = unwrapExpression(value);
           if (expression?.type !== "ObjectExpression") {
             reportIfUnsafe(value);
@@ -518,7 +785,12 @@ export default eslintCompatPlugin({
           }
           for (const property of objectProperties(expression)) {
             if (isOpaqueProperty(property)) {
-              observeSink(property, "opaque-payload");
+              observeSink(
+                property,
+                property.type === "SpreadElement"
+                  ? "opaque-payload-spread"
+                  : "opaque-payload-computed-key",
+              );
               continue;
             }
             if (
@@ -530,7 +802,10 @@ export default eslintCompatPlugin({
           }
         };
 
-        const checkReactHtmlProp = (prop: ReactHtmlProp, value: unknown): void => {
+        const checkReactHtmlProp = (
+          prop: ReactHtmlProp,
+          value: unknown,
+        ): void => {
           switch (prop.kind) {
             case "payload":
               checkDangerousPayload(value, prop.htmlKey);
@@ -545,12 +820,50 @@ export default eslintCompatPlugin({
           }
         };
 
+        const checkReactProps = (value: unknown): void => {
+          for (const property of objectProperties(value)) {
+            if (property.type !== "Property") continue;
+            const key = objectPropertyKey(property);
+            const prop = REACT_HTML_PROPS.find((entry) => entry.name === key);
+            // Payload properties are checked once by the Property visitor.
+            if (prop?.kind === "value")
+              checkReactHtmlProp(prop, property.value);
+          }
+        };
+
         const checkHtmlPropertySources = (
           sources: unknown[],
           domTarget: boolean,
         ): void => {
           for (const source of sources) {
             const expression = unwrapExpression(source);
+            // Each branch of a conditional or logical expression may be the
+            // value Object.assign copies from; the condition itself is not,
+            // and the left side of `&&` is copied only when falsy, so never
+            // as an object.
+            if (expression?.type === "ConditionalExpression") {
+              checkHtmlPropertySources(
+                [expression.consequent, expression.alternate],
+                domTarget,
+              );
+              continue;
+            }
+            // Object.assign skips null and undefined sources.
+            if (
+              (expression?.type === "Literal" && expression.value === null) ||
+              isIdentifier(expression, "undefined")
+            ) {
+              continue;
+            }
+            if (expression?.type === "LogicalExpression") {
+              checkHtmlPropertySources(
+                expression.operator === "&&"
+                  ? [expression.right]
+                  : [expression.left, expression.right],
+                domTarget,
+              );
+              continue;
+            }
             if (expression?.type !== "ObjectExpression") {
               if (domTarget) {
                 reportIfUnsafe(source);
@@ -582,16 +895,15 @@ export default eslintCompatPlugin({
             sinks.length = 0;
           },
           "Program:exit"() {
-            sinks.sort((left, right) => left.node.range[0] - right.node.range[0]);
+            sinks.sort(
+              (left, right) => left.node.range[0] - right.node.range[0],
+            );
             for (const { node, kind } of sinks) {
               const waived = consumeWaiver(node);
               if (kind === "safe" || (kind === "unsafe" && waived)) continue;
               context.report({
                 node,
-                messageId:
-                  kind === "opaque-payload"
-                    ? "unsafeInnerHtmlSpread"
-                    : "unsafeInnerHtml",
+                messageId: messageIdFor(kind),
               });
             }
             sinks.length = 0;
@@ -614,12 +926,18 @@ export default eslintCompatPlugin({
             const value = unwrapExpression(node.value);
             checkReactHtmlProp(
               prop,
-              value?.type === "JSXExpressionContainer" ? value.expression : value,
+              value?.type === "JSXExpressionContainer"
+                ? value.expression
+                : value,
             );
           },
 
+          JSXSpreadAttribute(node) {
+            checkReactProps(node.argument);
+          },
+
           // Payload objects remain checked when hoisted or spread into JSX.
-          // Direct value props require a recognized factory-call context below.
+          // Direct value props use the JSX and factory props contexts.
           Property(node) {
             const key = objectPropertyKey(node);
             const prop = REACT_HTML_PROPS.find((entry) => entry.name === key);
@@ -647,15 +965,7 @@ export default eslintCompatPlugin({
             const invoked = invokedArguments(node);
             const factory = staticCalleeName(callee);
             if (factory !== null && REACT_ELEMENT_FACTORIES.has(factory)) {
-              for (const property of objectProperties(invoked.args.at(1))) {
-                if (property.type !== "Property") continue;
-                const key = objectPropertyKey(property);
-                const prop = REACT_HTML_PROPS.find((entry) => entry.name === key);
-                // Payload props are already checked by the Property visitor.
-                if (prop?.kind === "value") {
-                  checkReactHtmlProp(prop, property.value);
-                }
-              }
+              checkReactProps(invoked.args.at(1));
               return;
             }
             if (callee?.type !== "MemberExpression") {
@@ -681,20 +991,37 @@ export default eslintCompatPlugin({
               reportIfUnsafe(invoked.args.at(1));
               return;
             }
-            if (method === "setAttribute") {
+            const attributeSink = HTML_ATTRIBUTE_SINKS.find(
+              (entry) => entry.name === method,
+            );
+            if (attributeSink !== undefined) {
+              if (
+                attributeSink.namespaceIndex !== null &&
+                isKnownNonEmptyNamespace(
+                  invoked.args.at(attributeSink.namespaceIndex),
+                  context.sourceCode.getScope(node),
+                )
+              ) {
+                return;
+              }
               if (invoked.status === "opaque") {
                 reportIfUnsafe(node);
                 return;
               }
-              const attribute = staticStringValue(invoked.args.at(0));
+              const attribute = staticStringValue(
+                invoked.args.at(attributeSink.nameIndex),
+              );
               if (attribute?.toLowerCase() === "srcdoc") {
-                reportIfUnsafe(invoked.args.at(1));
+                reportIfUnsafe(invoked.args.at(attributeSink.valueIndex));
               }
               return;
             }
             if (
               DOCUMENT_WRITE_METHODS.has(method) &&
-              isDocumentReceiver(callee.object)
+              isDocumentSinkReceiver(
+                callee.object,
+                context.sourceCode.getScope(node),
+              )
             ) {
               if (invoked.status === "opaque") {
                 reportIfUnsafe(node);

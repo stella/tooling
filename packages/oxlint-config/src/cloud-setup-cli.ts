@@ -14,6 +14,7 @@ import {
   generationDiagnostics,
   writeGeneratedFile,
 } from "./generated-file";
+import { repositoryBun } from "./toolchain-bun";
 import {
   parseToolchainConfiguration,
   readToolchainInputs,
@@ -87,11 +88,15 @@ const main = async () => {
   const nodeVersion = files[".node-version"];
   if (nodeVersion === undefined)
     throw new Error("requires tracked root .node-version");
-  const policy = parseToolchainPolicy(
+  const sharedPolicy = parseToolchainPolicy(
     JSON.parse(
       await readFile(new URL("../toolchain.json", import.meta.url), "utf8"),
     ),
   );
+  const policy = {
+    ...sharedPolicy,
+    bun: repositoryBun(sharedPolicy.bun, files["package.json"]),
+  };
   const script = generateCloudSetup({
     policy,
     cloud,
