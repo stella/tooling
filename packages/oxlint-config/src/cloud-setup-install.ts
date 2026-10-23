@@ -44,8 +44,17 @@ apt_install() (
   local package
   for package in "$@"; do
     if [[ "$package" == */* ]]; then
-      # Local archives are already downloaded and verified; never put dpkg,
-      # package triggers, or maintainer scripts under a network deadline.
+      # Local archives are already downloaded and verified, but their
+      # dependencies may not be: --print-uris names what is missing without
+      # contacting any server, the network deadline covers only fetching it,
+      # and dpkg, package triggers and maintainer scripts run offline.
+      local missing
+      missing="$(set -o pipefail; DEBIAN_FRONTEND=noninteractive apt-get --print-uris -qq -y --no-install-recommends install "$@" | awk '{ name = $2; sub(/_.*/, "", name); print name }')"
+      if [[ -n "$missing" ]]; then
+        # Debian package names never contain whitespace: split one per word.
+        # shellcheck disable=SC2086
+        DEBIAN_FRONTEND=noninteractive apt_network install -y --no-install-recommends --download-only $missing
+      fi
       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --no-download "$@"
       return
     fi
