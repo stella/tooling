@@ -280,7 +280,7 @@ sync_dependencies() {
   write_dependency_stamp
 }
 
-@SERVICE_INSTALL@
+@SUBMODULE_FUNCTION@@SERVICE_INSTALL@
 @SERVICE_START@
 
 @TOOL_INSTALL@
@@ -300,7 +300,7 @@ if [[ "$MODE" == install ]]; then
   step shell install_shell_environment
   # Login routes read the installed profile, so they are checked after it.
   step routes verify_bun_routes
-  step dependencies install_dependencies
+@SUBMODULE_STEP@  step dependencies install_dependencies
 @PREPARE_STEP@
   exit 0
 fi
@@ -552,6 +552,19 @@ export const generateCloudSetup = ({
     ],
     ["@ENV_WRITE@", selected.envFile === undefined ? "" : "write_environment"],
     ["@PREPARE_FUNCTION@", renderPrepare(selected.prepare, files)],
+    [
+      "@SUBMODULE_FUNCTION@",
+      selected.submodules
+        ? String.raw`install_submodules() {
+  network_run github.com 240 runuser -u "$OUTPUT_USER" -- env HOME="$OUTPUT_HOME" git submodule sync --recursive
+  network_run github.com 240 runuser -u "$OUTPUT_USER" -- env HOME="$OUTPUT_HOME" git submodule update --init --recursive --depth 1
+}`.concat("\n\n")
+        : "",
+    ],
+    [
+      "@SUBMODULE_STEP@",
+      selected.submodules ? "  step submodules install_submodules\n" : "",
+    ],
     [
       "@PREPARE_STEP@",
       selected.prepare === undefined ? "" : "  step prepare prepare_sources",

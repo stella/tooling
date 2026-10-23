@@ -140,6 +140,39 @@ test("generated lifecycle comments describe the portable phase contract", () => 
   expect(generated).not.toMatch(/^#.*https?:\/\//m);
 }, 15_000);
 
+test("submodules are fetched only when enabled and before dependencies", () => {
+  const disabled = generate(declaration);
+  expect(disabled).not.toContain("step submodules install_submodules");
+
+  const generated = generate({ ...declaration, submodules: true });
+  expect(generated).toContain(
+    'network_run github.com 240 runuser -u "$OUTPUT_USER" -- env HOME="$OUTPUT_HOME" git submodule sync --recursive',
+  );
+  expect(generated).toContain(
+    'network_run github.com 240 runuser -u "$OUTPUT_USER" -- env HOME="$OUTPUT_HOME" git submodule update --init --recursive --depth 1',
+  );
+  const install = generated.slice(
+    generated.indexOf('if [[ "$MODE" == install ]]; then'),
+    generated.indexOf("exit 0"),
+  );
+  expect(install.indexOf("step submodules install_submodules")).toBeGreaterThan(
+    install.indexOf("step shell install_shell_environment"),
+  );
+  expect(
+    install.indexOf("step dependencies install_dependencies"),
+  ).toBeGreaterThan(install.indexOf("step submodules install_submodules"));
+  expect(
+    generated.slice(generated.indexOf("start_environment()")),
+  ).not.toContain("install_submodules");
+});
+
+test("cloud.submodules accepts only booleans", () => {
+  for (const submodules of [null, 0, "true", [], {}])
+    expect(() => parseCloudSetup({ ...declaration, submodules })).toThrow(
+      "cloud.submodules must be a boolean when provided",
+    );
+});
+
 test("generated script rejects missing or unknown modes before platform checks", () => {
   const generated = generate(declaration);
   for (const args of [[], ["unknown"], ["--help"], ["install", "start"]]) {
