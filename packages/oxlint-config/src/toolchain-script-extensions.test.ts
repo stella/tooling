@@ -45,7 +45,6 @@ test("real lint inventory reports an unowned source of every canonical extension
     devDependencies: {
       oxlint: "1.87.0",
       "oxlint-tsgolint": "7.0.2003",
-      typescript: "7.0.2",
     },
   };
   const orphanFiles = Object.keys(sourceFixtures).map(

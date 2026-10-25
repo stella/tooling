@@ -1025,9 +1025,18 @@ test("declared inventory runtimes load real configs independently of the checker
       outdir: bundleRoot,
       naming: "checker.mjs",
       target: "node",
+      // tsrs resolves at run time, from the installation the checker runs in.
+      external: ["tsrs", "tsrs/*"],
     });
     expect(build.success).toBe(true);
     withInventoryFixture((root, trackedFiles) => {
+      // The bundle sits outside the package, so tsrs resolves from the
+      // repository: link the package's own installed tsrs.
+      symlinkSync(
+        path.join(import.meta.dir, "../node_modules/tsrs"),
+        path.join(root, "node_modules/tsrs"),
+        "dir",
+      );
       writeFileSync(
         path.join(root, "scripts/owned.mjs"),
         "export const owned = true;\n",
@@ -1076,7 +1085,9 @@ test("declared inventory runtimes load real configs independently of the checker
           const result = spawnSync(
             parent,
             [
-              ...(parent === "bun" ? ["--bun"] : []),
+              // Without --no-install, Bun would satisfy the bundle's missing
+              // tsrs from its global cache instead of the repository.
+              ...(parent === "bun" ? ["--bun", "--no-install"] : []),
               path.join(bundleRoot, "checker.mjs"),
               input,
             ],

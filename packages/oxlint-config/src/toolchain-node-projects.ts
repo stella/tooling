@@ -93,8 +93,9 @@ const { API } = await import(moduleUrl);
 const api = new API({ cwd: root });
 try {
   const parsed = await api.parseConfigFile(config);
-  // TS18003 (no inputs) leaves a project without roots, as --showConfig does.
-  const errors = parsed.errors.filter((error) => error.code !== 18003);
+  // An empty files list (TS18002) or no inputs (TS18003) leaves a project
+  // without roots; only unreadable configuration fails discovery.
+  const errors = parsed.errors.filter((error) => error.code !== 18002 && error.code !== 18003);
   if (errors.length > 0) {
     process.stderr.write(errors.map((error) => "TS" + error.code + ": " + (error.text ?? error.messageText ?? "")).join("\\n"));
     process.exitCode = 1;
@@ -117,10 +118,25 @@ type ProjectConfig = {
   checkJs: boolean;
 };
 
+// The shared tooling depends on tsrs; a checker bundled outside the package
+// resolves it from the repository instead.
+const resolveProjectApi = (root: string) => {
+  for (const base of [import.meta.url, path.join(root, "package.json")])
+    try {
+      return pathToFileURL(createRequire(base).resolve("tsrs/unstable/async"))
+        .href;
+    } catch (error) {
+      const code = record(error) ? error["code"] : undefined;
+      if (code !== "MODULE_NOT_FOUND" && code !== "ERR_MODULE_NOT_FOUND")
+        throw error;
+    }
+  throw new Error(
+    "configuration discovery needs tsrs: reinstall @stll/oxlint-config, which depends on it",
+  );
+};
+
 const readProjectConfig = (root: string, config: string): ProjectConfig => {
-  const api = pathToFileURL(
-    createRequire(import.meta.url).resolve("tsrs/unstable/async"),
-  ).href;
+  const api = resolveProjectApi(root);
   const result = spawnSync(
     "node",
     [

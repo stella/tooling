@@ -220,7 +220,7 @@ describe("shared package pins", () => {
       const pins = {
         ...policy.packages,
         "bun-types": policy.bun,
-        typescript: "7.0.2",
+        typescript: policy.typescript6Compatibility.version,
       };
       const workspace = {
         packages: ["packages/*"],
@@ -231,9 +231,13 @@ describe("shared package pins", () => {
         "pnpm-workspace.yaml": stringify(workspace),
         "package.json": json({}),
         "packages/app/package.json": json({
-          devDependencies: Object.fromEntries(
-            Object.keys(pins).map((name) => [name, reference]),
-          ),
+          devDependencies: {
+            ...Object.fromEntries(
+              Object.keys(pins).map((name) => [name, reference]),
+            ),
+            // The TypeScript 6 install belongs beside its peer blocker.
+            "dependency-cruiser": "17.0.0",
+          },
         }),
       };
       expect(check(files)).toEqual([]);
@@ -773,14 +777,13 @@ describe("TypeScript installs", () => {
         const diagnostics = manifest({
           [section]: { [name]: value, "dependency-cruiser": "17.0.0" },
         });
-        expect(diagnostics).toMatchObject([
-          {
-            rule: "typescript-layout",
-            message: expect.stringContaining("bun check"),
-          },
+        expect(diagnostics.map(({ rule }) => rule)).toEqual([
+          "typescript-layout",
         ]);
-        expect(diagnostics.at(0)?.message).toContain("tsrs");
-        expect(diagnostics.at(0)?.message).toContain("oxc-parser");
+        // The message names every replacement for the removed install.
+        const message = diagnostics.at(0)?.message ?? "";
+        for (const replacement of ["bun check", "tsrs", "oxc-parser"])
+          expect(message).toContain(replacement);
       }
     expect(manifest({ devDependencies: {} })).toEqual([]);
   });
@@ -924,7 +927,7 @@ describe("TypeScript installs", () => {
         ).toMatchObject([
           {
             rule: "typescript-layout",
-            key: "typecheck",
+            path: "package.json",
             message: expect.stringContaining(
               expected.replace("tsconfig.json", "<tsconfig>"),
             ),
@@ -939,7 +942,11 @@ describe("TypeScript installs", () => {
       `"ts${continuation}c" --noEmit`,
     ])
       expect(manifest({ scripts: { typecheck: command } })).toMatchObject([
-        { rule: "typescript-layout", key: "typecheck" },
+        {
+          rule: "typescript-layout",
+          path: "package.json",
+          message: expect.stringContaining("typecheck must run"),
+        },
       ]);
     expect(
       manifest({
@@ -1007,7 +1014,11 @@ describe("TypeScript installs", () => {
         `${executable} --noEmit || ${expected}`,
       ])
         expect(manifest({ scripts: { typecheck } })).toMatchObject([
-          { rule: "typescript-layout", key: "typecheck" },
+          {
+            rule: "typescript-layout",
+            path: "package.json",
+            message: expect.stringContaining("typecheck must run"),
+          },
         ]);
   });
   test("shell grouping cannot hide compiler calls or broaden approved commands", () => {
