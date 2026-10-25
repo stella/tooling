@@ -912,6 +912,12 @@ export const checkPackageFiles = ({
     ...compatibilitySpecifiers.keys(),
     ...retiredCompilerPackages,
   ]);
+  // Peer ranges state support: `typescript` must cover the checker's release,
+  // the alias its TypeScript 6 release; retired packages have none.
+  const peerReleases = new Map<string, string>([
+    ["typescript", policy.typescript],
+    [compatibility.packageAlias, compatibility.version],
+  ]);
   const peerBlockerList = compatibility.peerBlockers.join(", ");
   const typescriptMessage = (name: string, value: unknown) => {
     const allowed = compatibilitySpecifiers.get(name);
@@ -1113,12 +1119,7 @@ export const checkPackageFiles = ({
         if (!typescriptNames.has(name)) continue;
         const range = resolve(file, name, raw);
         if (!peerRange(range)) continue;
-        const release =
-          name === "typescript"
-            ? policy.typescript
-            : compatibilitySpecifiers.has(name)
-              ? compatibility.version
-              : undefined;
+        const release = peerReleases.get(name);
         if (release === undefined) {
           add({
             file,
