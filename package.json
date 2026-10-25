@@ -14,7 +14,7 @@
     "changeset:version": "bun scripts/ensure-toolchain-release.ts && changeset version && bun scripts/check-lockfile-workspace-versions.ts --write && bun fmt && bun install --frozen-lockfile",
     "check:lockfile-versions": "bun scripts/check-lockfile-workspace-versions.ts",
     "check:registry-versions": "bun scripts/check-registry-versions.ts",
-    "typecheck": "bun check -p packages/oxlint-config && bun check -p packages/oxlint-plugin && bun check -p packages/time && bun check -p packages/test-kit",
+    "typecheck": "bun check --no-pretty --all --project=packages/oxlint-config/tsconfig.json && bun check --no-pretty --all --project=packages/oxlint-plugin/tsconfig.json && bun check --no-pretty --all --project=packages/time/tsconfig.json && bun check --no-pretty --all --project=packages/test-kit/tsconfig.json",
     "test": "bun test",
     "test:rust-lints": "cargo test --manifest-path rust-lints/stella_source_lint/Cargo.toml --locked",
     "lint": "bun run build && bun --bun oxlint -c oxlint.config.ts --report-unused-disable-directives-severity=error --deny-warnings --type-aware .",

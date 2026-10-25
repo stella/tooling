@@ -52,7 +52,6 @@
         "@types/picomatch": "4.0.3",
         "@types/semver": "7.8.0",
         "oxlint": "1.87.0",
-        "typescript": "7.0.2",
         "unplugin-dts": "1.1.2",
         "vite": "8.3.4",
         "vite-plugin-dts": "5.1.2",
@@ -73,7 +72,6 @@
         "@oxlint/plugins": "1.87.0",
         "@stll/typescript-config": "workspace:*",
         "@types/node": "26.6.5",
-        "typescript": "7.0.2",
       },
       "peerDependencies": {
         "@oxlint/plugins": ">=1.75.0 <2",
@@ -119,6 +117,7 @@
       },
     },
   },
+  "trustedDependencies": [],
   "overrides": {
     "js-yaml": "3.15.1",
   },

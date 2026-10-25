@@ -40,7 +40,7 @@
   },
   "scripts": {
     "build": "tsdown",
-    "typecheck": "bun check",
+    "typecheck": "bun check --no-pretty --all --project=tsconfig.json",
     "test": "bun test src"
   },
   "dependencies": {

@@ -125,7 +125,7 @@
   },
   "scripts": {
     "build": "tsdown",
-    "typecheck": "bun check",
+    "typecheck": "bun check --no-pretty --all --project=tsconfig.json",
     "test": "bun test"
   },
   "dependencies": {
@@ -146,7 +146,6 @@
     "@types/picomatch": "4.0.3",
     "@types/semver": "7.8.0",
     "oxlint": "1.87.0",
-    "typescript": "7.0.2",
     "unplugin-dts": "1.1.2",
     "vite": "8.3.4",
     "vite-plugin-dts": "5.1.2"

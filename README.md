@@ -291,6 +291,51 @@ newer, and oxlint-tsgolint 7.0.2003 or newer. Pin the current versions from
 `@stll/oxlint-config/toolchain.json`; do not use the deprecated
 oxlint-tsgolint 0.x line.
 
+### TypeScript toolchain
+
+Every repository that uses these configs follows one toolchain:
+
+- **Type checking is `bun check`**, Bun's built-in TypeScript 7 checker. Each
+  package's `typecheck` script runs
+  `bun check --no-pretty --all --project=<tsconfig>`; do not call `tsc --noEmit`
+  or wrap `tsc` in a custom script. `bun check` embeds the checker, so type
+  checking alone needs no `typescript` package.
+- **One root `typescript` install, no per-package copies.** Declare
+  `typescript` (or the split layout below) once, in the repository root
+  `package.json`. `stll-typecheck-parity` compares `bun check` with that
+  install's `tsc`, and declaration builds (tsdown's `dts`, `vite-plugin-dts`)
+  load it. Workspace packages do not repeat it in their own manifests. Keep an
+  extra `typescript` dependency only where a tool needs the package itself (for
+  example `astro check` or dependency-cruiser), with a note naming that tool.
+- **Compiler-API code does not import `typescript`.** Programs, the type
+  checker and tsconfig resolution use `tsrs` `0.18.0-ts7.1.0-dev.20260929`
+  through its async API only (`import { API } from "tsrs/unstable/async"`; close
+  the API with `await api.close()` on every path). Syntax-only reads (walking an
+  AST, matching node kinds) use `oxc-parser` `0.155.0` (`parseSync`). Plain
+  import scans that may ignore type-only imports use
+  `new Bun.Transpiler({ loader: "tsx" }).scanImports(text)`; otherwise read
+  oxc-parser's `module` record. Pin both packages exactly.
+
+The two shipped commands check this:
+
+- `stll-typecheck-parity` requires the root `package.json` to list `typescript`
+  (`direct`) or `@typescript/native` (`split-compatibility`, preferred when both
+  are present) in `dependencies` or `devDependencies`. The installed package
+  must expose a `tsc` binary at the pinned TypeScript 7 version; without it, the
+  command fails with "Repository must declare a compiler from
+  typescriptInstallLayouts". The root manifest must not define a `check`
+  script, and the running Bun must be at least the pinned Bun.
+- `stll-toolchain-check` (rule `typescript-layout`) checks each manifest that
+  lists `typescript`, `@typescript/native` or the `typescript-compat` alias:
+  every specifier must be one the layouts declare, and the manifest's
+  non-peer entries must form one complete layout. In a workspace package, a
+  partial layout passes only when it repeats the root layout's exact specifiers
+  as development dependencies (or, for the split layout, lists only the
+  compatibility package). A
+  `typecheck` script that runs a compiler must run `bun check` (arguments
+  allowed), and a peer range on these names must include every declared
+  release. Manifests without TypeScript entries are not checked by this rule.
+
 `toolchain.json` defines two supported TypeScript install layouts:
 
 - `direct` installs TypeScript 7 as `typescript` for compiler-API consumers
@@ -571,7 +616,7 @@ Recommended scripts:
 ```json
 {
   "scripts": {
-    "typecheck": "bun check",
+    "typecheck": "bun check --no-pretty --all --project=tsconfig.json",
     "lint": "bun --bun oxlint -c oxlint.config.ts --report-unused-disable-directives-severity=error --deny-warnings --type-aware .",
     "lint:fix": "bun --bun oxlint -c oxlint.config.ts --type-aware --fix ."
   }

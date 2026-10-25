@@ -175,13 +175,12 @@
   },
   "scripts": {
     "build": "tsdown",
-    "typecheck": "bun check"
+    "typecheck": "bun check --no-pretty --all --project=tsconfig.json"
   },
   "devDependencies": {
     "@oxlint/plugins": "1.87.0",
     "@stll/typescript-config": "workspace:*",
-    "@types/node": "26.6.5",
-    "typescript": "7.0.2"
+    "@types/node": "26.6.5"
   },
   "peerDependencies": {
     "@oxlint/plugins": ">=1.75.0 <2",
