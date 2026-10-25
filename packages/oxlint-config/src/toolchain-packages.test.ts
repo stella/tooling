@@ -825,13 +825,15 @@ describe("TypeScript installs", () => {
     ]);
   });
   test("TypeScript 6 compatibility specifiers are exact", () => {
-    for (const [name, value] of [
+    type CompatibilityName = "typescript" | "typescript-compat";
+    const inexact: readonly (readonly [CompatibilityName, string])[] = [
       ["typescript", "6.0.2"],
       ["typescript", "^6.0.3"],
       ["typescript-compat", "6.0.3"],
       ["typescript-compat", "npm:typescript@^6.0.3"],
       ["typescript-compat", "npm:other@6.0.3"],
-    ])
+    ];
+    for (const [name, value] of inexact)
       expect(
         manifest({
           devDependencies: { [name]: value, "dependency-cruiser": "17.0.0" },
