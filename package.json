@@ -25,7 +25,6 @@
     "sync-ai": "bash .ai/shared/scripts/sync-ai-skills.sh .",
     "sync-ai:check": "bash .ai/shared/scripts/sync-ai-skills.sh --check .",
     "check:toolchain": "bun packages/oxlint-config/dist/toolchain-check-cli.mjs",
-    "check:typecheck-parity": "bun packages/oxlint-config/dist/typecheck-parity-cli.mjs",
     "check:publish-contract": "node packages/oxlint-config/dist/publish-contract-cli.mjs"
   },
   "devDependencies": {
@@ -38,8 +37,7 @@
     "oxlint-tsgolint": "7.0.2003",
     "pnpm": "12.9.1",
     "publint": "0.3.25",
-    "tsdown": "0.23.1",
-    "typescript": "7.0.2"
+    "tsdown": "0.23.1"
   },
   "overrides": {
     "js-yaml": "3.15.1"

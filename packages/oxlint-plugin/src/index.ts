@@ -17,11 +17,17 @@ export const requireLoaderPrefetchPluginSpecifier =
 export const bunTestHygienePluginSpecifier =
   "@stll/oxlint-plugin/bun-test-hygiene";
 
-export const bunTestHygienePluginSpecifiers = [
+export const bunTestHygienePluginSpecifiers: string[] = [
   bunTestHygienePluginSpecifier,
 ] satisfies JsPlugins;
 
-export const bunTestHygieneRules = {
+export const bunTestHygieneRules: {
+  "bun-test-hygiene/no-disabled-tests": "error";
+  "bun-test-hygiene/no-focused-tests": "error";
+  "bun-test-hygiene/no-forced-database-drop": "error";
+  "bun-test-hygiene/no-identical-title": "error";
+  "bun-test-hygiene/no-promise-matchers": "error";
+} = {
   "bun-test-hygiene/no-disabled-tests": "error",
   "bun-test-hygiene/no-focused-tests": "error",
   "bun-test-hygiene/no-forced-database-drop": "error",
@@ -29,26 +35,34 @@ export const bunTestHygieneRules = {
   "bun-test-hygiene/no-promise-matchers": "error",
 } satisfies Rules;
 
-export const portableSafetyPluginSpecifiers = [
+export const portableSafetyPluginSpecifiers: string[] = [
   noAnyCastsPluginSpecifier,
   noDangerousTypeAssertionsPluginSpecifier,
   noPartialRecordSatisfiesPluginSpecifier,
   noUnsafeInnerHtmlPluginSpecifier,
 ] satisfies JsPlugins;
 
-export const portableSafetyRules = {
+export const portableSafetyRules: {
+  "no-any-casts/no-any-casts": "error";
+  "no-dangerous-type-assertions/no-dangerous-type-assertions": "error";
+  "no-partial-record-satisfies/no-partial-record-satisfies": "error";
+  "no-unsafe-inner-html/no-unsafe-inner-html": "error";
+} = {
   "no-any-casts/no-any-casts": "error",
   "no-dangerous-type-assertions/no-dangerous-type-assertions": "error",
   "no-partial-record-satisfies/no-partial-record-satisfies": "error",
   "no-unsafe-inner-html/no-unsafe-inner-html": "error",
 } satisfies Rules;
 
-export const routeQueryPluginSpecifiers = [
+export const routeQueryPluginSpecifiers: string[] = [
   noRawRouteQueryClientPluginSpecifier,
   requireLoaderPrefetchPluginSpecifier,
 ] satisfies JsPlugins;
 
-export const routeQueryRules = {
+export const routeQueryRules: {
+  "no-raw-route-query-client/no-raw-route-query-client": "error";
+  "require-loader-prefetch/require-loader-prefetch": "error";
+} = {
   "no-raw-route-query-client/no-raw-route-query-client": "error",
   "require-loader-prefetch/require-loader-prefetch": "error",
 } satisfies Rules;
@@ -68,7 +82,7 @@ export const noWallClockBoundPluginSpecifier =
 
 // Intentionally separate from every preset: consumers adopt these with a
 // shrink-only test baseline.
-export const testReliabilityPluginSpecifiers = [
+export const testReliabilityPluginSpecifiers: string[] = [
   noWallClockInTestsPluginSpecifier,
   noRealTimerWaitsInTestsPluginSpecifier,
   noUnseededRandomInTestsPluginSpecifier,
@@ -77,7 +91,14 @@ export const testReliabilityPluginSpecifiers = [
   noWallClockBoundPluginSpecifier,
 ] satisfies JsPlugins;
 
-export const testReliabilityRules = {
+export const testReliabilityRules: {
+  "no-wall-clock-in-tests/no-wall-clock-in-tests": "error";
+  "no-real-timer-waits-in-tests/no-real-timer-waits-in-tests": "error";
+  "no-unseeded-random-in-tests/no-unseeded-random-in-tests": "error";
+  "no-real-network-in-tests/no-real-network-in-tests": "error";
+  "no-checkout-writes-in-tests/no-checkout-writes-in-tests": "error";
+  "no-wall-clock-bound/no-wall-clock-bound": "error";
+} = {
   "no-wall-clock-in-tests/no-wall-clock-in-tests": "error",
   "no-real-timer-waits-in-tests/no-real-timer-waits-in-tests": "error",
   "no-unseeded-random-in-tests/no-unseeded-random-in-tests": "error",

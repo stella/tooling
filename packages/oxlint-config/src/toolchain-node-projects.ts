@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { lstatSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { discoverConsumerManifests } from "./consumer-compat-config";
 import { lintInventoryCommands } from "./toolchain-lint-command";
@@ -82,6 +83,81 @@ const readCommand = ({
       `configuration discovery failed: ${(result.stderr + result.stdout).trim()}`,
     );
   return result.stdout;
+};
+
+// tsrs resolves tsconfig files without a TypeScript install in the consumer;
+// its API is asynchronous, so a short-lived Node process runs it.
+const projectConfigScript = `
+const [moduleUrl, root, config] = process.argv.slice(1);
+const { API } = await import(moduleUrl);
+const api = new API({ cwd: root });
+try {
+  const parsed = await api.parseConfigFile(config);
+  // TS18003 (no inputs) leaves a project without roots, as --showConfig does.
+  const errors = parsed.errors.filter((error) => error.code !== 18003);
+  if (errors.length > 0) {
+    process.stderr.write(errors.map((error) => "TS" + error.code + ": " + (error.text ?? error.messageText ?? "")).join("\\n"));
+    process.exitCode = 1;
+  } else
+    process.stdout.write(JSON.stringify({
+      files: parsed.fileNames,
+      references: (parsed.projectReferences ?? []).map((reference) => reference.path),
+      allowJs: parsed.options.allowJs === true,
+      checkJs: parsed.options.checkJs === true,
+    }));
+} finally {
+  await api.close();
+}
+`;
+
+type ProjectConfig = {
+  files: string[];
+  references: string[];
+  allowJs: boolean;
+  checkJs: boolean;
+};
+
+const readProjectConfig = (root: string, config: string): ProjectConfig => {
+  const api = pathToFileURL(
+    createRequire(import.meta.url).resolve("tsrs/unstable/async"),
+  ).href;
+  const result = spawnSync(
+    "node",
+    [
+      "--input-type=module",
+      "-e",
+      projectConfigScript,
+      api,
+      root,
+      path.resolve(root, config),
+    ],
+    {
+      cwd: root,
+      encoding: "utf8",
+      timeout: 30_000,
+      maxBuffer: 32 * 1024 * 1024,
+    },
+  );
+  if (result.error !== undefined) throw result.error;
+  if (result.status !== 0)
+    throw new Error(
+      `configuration discovery failed: ${(result.stderr + result.stdout).trim()}`,
+    );
+  const parsed: unknown = JSON.parse(result.stdout);
+  if (
+    !record(parsed) ||
+    !stringList(parsed["files"]) ||
+    !stringList(parsed["references"]) ||
+    typeof parsed["allowJs"] !== "boolean" ||
+    typeof parsed["checkJs"] !== "boolean"
+  )
+    throw new Error("compiler configuration must list files and references");
+  return {
+    files: parsed["files"],
+    references: parsed["references"],
+    allowJs: parsed["allowJs"],
+    checkJs: parsed["checkJs"],
+  };
 };
 
 const relativePath = (root: string, file: string) =>
@@ -241,10 +317,6 @@ export const checkNodeProjects = ({
       path.dirname(require.resolve("oxlint/package.json")),
       "bin/oxlint",
     );
-    const compiler = path.join(
-      path.dirname(require.resolve("typescript/package.json")),
-      "bin/tsc",
-    );
     const commands = inventory.commands.map((command) => ({
       cwd: root,
       ...command,
@@ -317,26 +389,9 @@ export const checkNodeProjects = ({
       if (cached !== undefined) return cached;
       const result: Project = { files: new Set(), references: [] };
       try {
-        const project: unknown = JSON.parse(
-          readCommand({
-            root,
-            executable: compiler,
-            args: ["--showConfig", "--project", config],
-            runtime: "node",
-          }),
-        );
-        if (!record(project))
-          throw new Error("compiler configuration must be an object");
-        const references = project["references"] ?? [];
-        if (!Array.isArray(references))
-          throw new Error("compiler configuration references must be an array");
-        for (const reference of references) {
-          if (!record(reference) || typeof reference["path"] !== "string")
-            throw new Error("compiler project reference requires a path");
-          const target = relativePath(
-            root,
-            path.resolve(root, path.dirname(config), reference["path"]),
-          );
+        const project = readProjectConfig(root, config);
+        for (const reference of project.references) {
+          const target = relativePath(root, reference);
           const referencedConfig = target.endsWith(".json")
             ? target
             : path.posix.join(target, "tsconfig.json");
@@ -346,23 +401,14 @@ export const checkNodeProjects = ({
             );
           result.references.push(referencedConfig);
         }
-        // --showConfig omits `files` when the project owns no roots.
-        const sources = project["files"] ?? [];
-        if (!stringList(sources))
-          throw new Error(
-            "compiler configuration did not return a files array",
-          );
-        const options = project["compilerOptions"];
-        for (const file of sources) {
+        for (const file of project.files) {
           if (
             scriptSourceKind(file) === "javascript" &&
-            (!record(options) ||
-              (options["allowJs"] !== true && options["checkJs"] !== true))
+            !project.allowJs &&
+            !project.checkJs
           )
             continue;
-          result.files.add(
-            relativePath(root, path.resolve(root, path.dirname(config), file)),
-          );
+          result.files.add(relativePath(root, file));
         }
       } catch (error) {
         result.files.clear();

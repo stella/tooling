@@ -1,3 +1,5 @@
+import type { Plugin } from "@oxlint/plugins";
+
 import {
   createBindingResolver,
   identifierName,
@@ -6,7 +8,7 @@ import {
   testOnlyPlugin,
 } from "./test-rule-utils";
 
-export default testOnlyPlugin(
+const plugin: Plugin = testOnlyPlugin(
   "no-unseeded-random-in-tests",
   "noUnseededRandom",
   "Use @stll/test-kit's createSeededRandom or testSeed for test input.",
@@ -37,3 +39,5 @@ export default testOnlyPlugin(
     };
   },
 );
+
+export default plugin;

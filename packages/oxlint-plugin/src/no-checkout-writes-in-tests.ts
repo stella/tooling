@@ -1,3 +1,5 @@
+import type { Plugin } from "@oxlint/plugins";
+
 import {
   createBindingResolver,
   identifierName,
@@ -43,7 +45,7 @@ const destinationWriteNames = new Set([
   "symlinkSync",
 ]);
 
-export default testOnlyPlugin(
+const plugin: Plugin = testOnlyPlugin(
   "no-checkout-writes-in-tests",
   "noCheckoutWrite",
   "Use @stll/test-kit's withTestTmpDir instead of writing inside the checkout.",
@@ -189,3 +191,5 @@ export default testOnlyPlugin(
     };
   },
 );
+
+export default plugin;

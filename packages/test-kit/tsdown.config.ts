@@ -5,7 +5,7 @@ export default defineConfig({
   entry: ["src/index.ts", "src/db-clock.ts", "src/forbid-network.ts"],
   format: ["esm"],
   target: "esnext",
-  dts: true,
+  dts: { generator: "oxc" },
   clean: true,
   sourcemap: true,
   hash: false,

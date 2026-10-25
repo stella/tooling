@@ -37,32 +37,30 @@ test("Node policy permits canonical major series only", () => {
     );
 });
 
-test("policy retains every declared compiler command", () => {
-  expect(
-    parseToolchainPolicy(policy).typescriptInstallLayouts.map(
-      ({ typecheckCommand }) => typecheckCommand,
-    ),
-  ).toEqual(
-    policy.typescriptInstallLayouts.map(
-      ({ typecheckCommand }) => typecheckCommand,
-    ),
+test("TypeScript 6 compatibility retains its peer blockers and rejects other releases", () => {
+  expect(parseToolchainPolicy(policy).typescript6Compatibility).toEqual(
+    policy.typescript6Compatibility,
   );
-});
-
-test("each layout requires a nonempty compiler command", () => {
-  for (const [index] of policy.typescriptInstallLayouts.entries()) {
-    for (const typecheckCommand of [undefined, "", "   ", null, 42]) {
-      const mutated = {
+  for (const peerBlockers of [undefined, [], [""], [42], "dependency-cruiser"])
+    expect(() =>
+      parseToolchainPolicy({
         ...policy,
-        typescriptInstallLayouts: [
-          ...policy.typescriptInstallLayouts.slice(0, index),
-          { ...policy.typescriptInstallLayouts.at(index), typecheckCommand },
-          ...policy.typescriptInstallLayouts.slice(index + 1),
-        ],
-      };
-      expect(() => parseToolchainPolicy(mutated)).toThrow("typecheckCommand");
-    }
-  }
+        typescript6Compatibility: {
+          ...policy.typescript6Compatibility,
+          peerBlockers,
+        },
+      }),
+    ).toThrow("peer blockers");
+  for (const version of ["7.0.2", "^6.0.3", "6"])
+    expect(() =>
+      parseToolchainPolicy({
+        ...policy,
+        typescript6Compatibility: {
+          ...policy.typescript6Compatibility,
+          version,
+        },
+      }),
+    ).toThrow("TypeScript 6 release");
 });
 
 test("service policy requires a canonical PostgreSQL major and exact stable Valkey release", () => {

@@ -14,7 +14,11 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { insideProbePath, runTypecheckProbe } from "./typecheck-probe";
+import {
+  diagnosticSet,
+  insideProbePath,
+  runTypecheckProbe,
+} from "./typecheck-probe";
 
 type ProjectFixture = { repo: string; project: string; directory: string };
 const withProject = async (
@@ -397,3 +401,96 @@ test("probe containment rejects Windows sibling projects and seed directories", 
     }),
   ).toBe(false);
 }, 15_000);
+
+const consumerRepo = path.resolve("/consumer-repo");
+
+test("diagnostic sets canonicalize TypeScript and Bun locations and ignore summaries", () => {
+  const tsc = [
+    "src/input.ts(4,7): error TS2322: wrong type",
+    "src/other.ts(12,1): error TS7006: implicit any",
+    "src/input.ts(4,18): error TS2322: repeated on the same line",
+  ].join("\n");
+  const bun = [
+    `${consumerRepo}/src/other.ts(12,1): error TS7006: implicit any`,
+    "./src/input.ts(4,7): error TS2322: wrong type",
+    "Found 2 errors in 2 files, checked 17 files [24.24ms]",
+  ].join("\n");
+  const expected = ["src/input.ts:4:2322", "src/other.ts:12:7006"];
+  expect(diagnosticSet(tsc, consumerRepo)).toEqual(expected);
+  expect(diagnosticSet(bun, consumerRepo)).toEqual(expected);
+  expect(
+    diagnosticSet(
+      "\u001b[31msrc/input.ts:4:7: error TS2322: wrong type\u001b[0m",
+      consumerRepo,
+    ),
+  ).toEqual(["src/input.ts:4:2322"]);
+});
+
+test("Bun workspace prefixes preserve diagnostic identity across output formats", () => {
+  for (const prefix of [
+    "",
+    "@stll/library typecheck: ",
+    "library typecheck: ",
+    "@scope/package-name typecheck:test: ",
+    "package.name check_types-2: ",
+  ]) {
+    for (const diagnostic of [
+      "src/input.ts(4,7): error TS2322: wrong type",
+      "src/input.ts:4:7: error TS2322: wrong type",
+      "src/input.ts:4:7: warning 2322: wrong type",
+      "error TS5083: Cannot read configuration file.",
+      "warning TS5083: Cannot read configuration file.",
+    ]) {
+      const expected = diagnosticSet(diagnostic, consumerRepo);
+      expect(expected).toHaveLength(1);
+      for (const output of [
+        `${prefix}${diagnostic}`,
+        `\u001b[32m${prefix}\u001b[0m\u001b[31m${diagnostic}\u001b[0m`,
+      ])
+        expect(diagnosticSet(output, consumerRepo)).toEqual(expected);
+    }
+  }
+});
+
+test("diagnostic paths containing spaces and colons retain their complete location", () => {
+  for (const file of [
+    "src/package typecheck: input.ts",
+    "./package typecheck: input.ts",
+    "/workspace/package typecheck: input.ts",
+    "src/input file.ts",
+    "src/input:version.ts",
+  ])
+    expect(
+      diagnosticSet(`${file}(4,7): error TS2322: wrong type`, consumerRepo),
+    ).toEqual([
+      `${path.relative(consumerRepo, path.resolve(consumerRepo, file))}:4:2322`,
+    ]);
+});
+
+test("tagged agent diagnostics retain primary location independent of attribute order", () => {
+  expect(
+    diagnosticSet(
+      '<error file="src/index.ts" line="3" column="25" code="TS2322">\nwrong type\n<source>const x = 1;</source><related file="src/user.ts" line="2" column="3">related</related></error>\n<error code="TS7006" column="1" line="9" file="src/other.ts">implicit any</error>',
+      consumerRepo,
+    ),
+  ).toEqual(["src/index.ts:3:2322", "src/other.ts:9:7006"]);
+});
+
+test("configuration and standard library diagnostics keep stable identities", () => {
+  expect(
+    diagnosticSet(
+      "error TS5083: Cannot read configuration file.\nerror TS18003: No inputs were found.\nerror TS18003:   No   inputs were found.  \n",
+      consumerRepo,
+    ),
+  ).toEqual([
+    "<config>:0:18003:No inputs were found.",
+    "<config>:0:5083:Cannot read configuration file.",
+  ]);
+  const expected = ["<lib>/lib.es5.d.ts:42:2322"];
+  for (const output of [
+    `${consumerRepo}/node_modules/typescript/lib/lib.es5.d.ts(42,7): error TS2322: library error`,
+    "bundled:///libs/lib.es5.d.ts:42:7: error TS2322: library error",
+    '<error file="bundled:///libs/lib.es5.d.ts" line="42" column="7" code="TS2322">library error</error>',
+  ])
+    expect(diagnosticSet(output, consumerRepo)).toEqual(expected);
+});

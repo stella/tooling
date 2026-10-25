@@ -439,7 +439,7 @@ test("untracked and invalid opt-outs cannot conceal a failing runtime", () => {
   ).toEqual(["configuration", "node-version"]);
 }, 15_000);
 
-test("policy rejects schema drift, missing pins, inconsistent TS layouts and invalid SHAs", () => {
+test("policy rejects schema drift, missing or inexact pins and invalid SHAs", () => {
   expect(policy.packages).toEqual(
     Object.fromEntries(packagePinKeys.map((key) => [key, toolchain[key]])),
   );
@@ -460,7 +460,7 @@ test("policy rejects schema drift, missing pins, inconsistent TS layouts and inv
     parseToolchainPolicy({ ...toolchain, schemaVersion: 2 }),
   ).toThrow();
   expect(() =>
-    parseToolchainPolicy({ ...toolchain, typescript: "0.0.0" }),
+    parseToolchainPolicy({ ...toolchain, typescript: "^7.0.2" }),
   ).toThrow();
   expect(() =>
     parseToolchainPolicy({

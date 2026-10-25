@@ -43,7 +43,7 @@ Schema version 1 contains these fields:
 | `schemaVersion`                                                                   | Supported policy schema version (`1`).                                                                                                                                                                                                                                                                                                                                                |
 | `bun`                                                                             | Minimum Bun; the repository pins one exact release at or above it everywhere.                                                                                                                                                                                                                                                                                                         |
 | `oxlint`, `oxlint-tsgolint`, `@oxlint/plugins`, `@stll/oxlint-plugin`, `lefthook` | Exact dependency and catalog pins. Declared local workspace packages must resolve to the same version.                                                                                                                                                                                                                                                                                |
-| `typescript`, `typescriptInstallLayouts`, `typescript6Compatibility`              | Exact compiler pins and complete direct or split install layouts; the optional compatibility alias is exact too.                                                                                                                                                                                                                                                                      |
+| `typescript`, `typescript6Compatibility`                                          | The TypeScript release `bun check` implements, and the exact TypeScript 6 release and alias allowed beside a listed peer blocker.                                                                                                                                                                                                                                                     |
 | `node`, `python`, `rust`                                                          | Runtime selectors and version-manager pins. Node selects the policy major (`26.x`); static minor and patch selectors within that major are allowed. A Python minor pin preserves existing patch selectors within that release series; a patch policy requires the exact patch. Rust selects one exact stable release across toolchain files, commands, workflow selectors and images. |
 | `actions`                                                                         | Approved action names mapped to full `sha` and `version` comment.                                                                                                                                                                                                                                                                                                                     |
 | `dependabot`                                                                      | Shared schedule, cooldown and groups. Package and action ignores derive from the owned pins. `actionGroups` come first in every GitHub Actions entry, so first-party reusable workflows that move by commit arrive as one update.                                                                                                                                                     |
@@ -154,11 +154,10 @@ series. Python comparisons, compatible releases, wildcard exclusions,
 and comma intersections are supported for final releases; unsupported syntax
 produces a diagnostic.
 
-Direct compiler invocations in `scripts.typecheck` must use the selected
-layout command. Classification decodes shell tokens to find compiler calls;
-acceptance requires the declared command text after leading environment
-prefixes are removed, including its option spelling and quoting. Delegated wrappers and workspace runners are checked by the
-consumer typecheck parity contract rather than inferred from manifests.
+Direct compiler invocations in `scripts.typecheck` must use `bun check`.
+Classification decodes shell tokens to find compiler calls; acceptance requires
+`bun check` after leading environment prefixes are removed. Delegated wrappers
+and workspace runners are not inferred from manifests.
 
 Listed shared actions require their approved SHA and matching `# vX` comment.
 CI also checks the shared release policy's runtime selector action set against
@@ -185,13 +184,11 @@ tracked root `stll-toolchain.json` listing the rule and its reason:
 }
 ```
 
-Workspace TypeScript toolchains combine the root and declared members' devDependencies.
-An included member may declare the exact TypeScript 6 compatibility API across
-dependencies, devDependencies, and peerDependencies when that shared install uses
-the complete split layout. Ambiguous or partial layouts do not grant this allowance.
-Peer ranges declare support: they must include the policy compiler release and the
-compatibility release when the selected layout uses it. Ranges do not contribute
-to the installed compiler inventory.
+Each manifest answers for its own TypeScript install: a member that uses a
+listed peer blocker may declare the exact TypeScript 6 compatibility release in
+its dependencies or devDependencies, without a root or workspace counterpart.
+Peer ranges declare support: a `typescript` range must include the policy
+release. Ranges do not count as installs.
 
 JavaScript update roots include the repository root, declared workspace membership,
 and directories with their own `bun.lock`, `package-lock.json`, `yarn.lock`, or
@@ -283,11 +280,11 @@ callers; adopt the workflow revision that delegates to this core.
 Install the shared TypeScript and oxlint packages:
 
 ```bash
-bun add -d @stll/typescript-config @stll/oxlint-config @stll/oxlint-plugin @oxlint/plugins oxlint oxlint-tsgolint typescript
+bun add -d @stll/typescript-config @stll/oxlint-config @stll/oxlint-plugin @oxlint/plugins oxlint oxlint-tsgolint
 ```
 
-The shared defaults require TypeScript 7.0.2 or newer, oxlint 1.87.0 or
-newer, and oxlint-tsgolint 7.0.2003 or newer. Pin the current versions from
+The shared defaults require oxlint 1.87.0 or newer and oxlint-tsgolint
+7.0.2003 or newer. Pin the current versions from
 `@stll/oxlint-config/toolchain.json`; do not use the deprecated
 oxlint-tsgolint 0.x line.
 
@@ -298,94 +295,47 @@ Every repository that uses these configs follows one toolchain:
 - **Type checking is `bun check`**, Bun's built-in TypeScript 7 checker. Each
   package's `typecheck` script runs
   `bun check --no-pretty --all --project=<tsconfig>`; do not call `tsc --noEmit`
-  or wrap `tsc` in a custom script. `bun check` embeds the checker, so type
-  checking alone needs no `typescript` package.
-- **One root `typescript` install, no per-package copies.** Declare
-  `typescript` (or the split layout below) once, in the repository root
-  `package.json`. `stll-typecheck-parity` compares `bun check` with that
-  install's `tsc`, and declaration builds (tsdown's `dts`, `vite-plugin-dts`)
-  load it. Workspace packages do not repeat it in their own manifests. Keep an
-  extra `typescript` dependency only where a tool needs the package itself (for
-  example `astro check` or dependency-cruiser), with a note naming that tool.
+  or wrap `tsc` in a custom script.
+- **No `typescript` package.** `bun check` embeds the checker, oxlint-tsgolint
+  embeds its own, and `stll-toolchain-check` resolves tsconfig projects with
+  tsrs, so no manifest installs `typescript` 7 or `@typescript/native`. Keep
+  `typescript` only in a package that uses a tool which imports or peers on it
+  (the `peerBlockers` in `toolchain.json`: `@astrojs/check`,
+  `@typescript-eslint/utils`, dependency-cruiser and `vite-plugin-dts`), pinned
+  to the TypeScript 6 compatibility release, with a note naming that tool.
+- **Declarations** built with tsdown use `dts: { generator: "oxc" }`, which
+  needs explicit types on exported declarations. A package that cannot provide
+  them points tsdown at tsrs instead:
+  `dts: { generator: "tsgo", tsgo: { path: <tsrs bin> } }`.
 - **Compiler-API code does not import `typescript`.** Programs, the type
   checker and tsconfig resolution use `tsrs` `0.18.0-ts7.1.0-dev.20260929`
   through its async API only (`import { API } from "tsrs/unstable/async"`; close
-  the API with `await api.close()` on every path). Syntax-only reads (walking an
-  AST, matching node kinds) use `oxc-parser` `0.155.0` (`parseSync`). Plain
-  import scans that may ignore type-only imports use
-  `new Bun.Transpiler({ loader: "tsx" }).scanImports(text)`; otherwise read
+  the API with `await api.close()` on every path). The `tsrs` CLI accepts
+  `--noEmit`, `--pretty false`, `-p`, `--build --force`, `--listFilesOnly`,
+  `--extendedDiagnostics` and `--declaration --emitDeclarationOnly --outDir`;
+  it rejects `--showConfig`, so read configs with `api.parseConfigFile`.
+  Syntax-only reads (walking an AST, matching node kinds) use `oxc-parser`
+  `0.155.0` (`parseSync`). Plain import scans that may ignore type-only imports
+  use `new Bun.Transpiler({ loader: "tsx" }).scanImports(text)`; otherwise read
   oxc-parser's `module` record. Pin both packages exactly.
 
-The two shipped commands check this:
+`stll-toolchain-check` enforces this with the `typescript-layout` rule:
 
-- `stll-typecheck-parity` requires the root `package.json` to list `typescript`
-  (`direct`) or `@typescript/native` (`split-compatibility`, preferred when both
-  are present) in `dependencies` or `devDependencies`. The installed package
-  must expose a `tsc` binary at the pinned TypeScript 7 version; without it, the
-  command fails with "Repository must declare a compiler from
-  typescriptInstallLayouts". The root manifest must not define a `check`
-  script, and the running Bun must be at least the pinned Bun.
-- `stll-toolchain-check` (rule `typescript-layout`) checks each manifest that
-  lists `typescript`, `@typescript/native` or the `typescript-compat` alias:
-  every specifier must be one the layouts declare, and the manifest's
-  non-peer entries must form one complete layout. In a workspace package, a
-  partial layout passes only when it repeats the root layout's exact specifiers
-  as development dependencies (or, for the split layout, lists only the
-  compatibility package). A
-  `typecheck` script that runs a compiler must run `bun check` (arguments
-  allowed), and a peer range on these names must include every declared
-  release. Manifests without TypeScript entries are not checked by this rule.
+- A manifest, catalog or resolution that declares `typescript` 7,
+  `@typescript/native` or any other TypeScript specifier fails, with a message
+  pointing at `bun check`, tsrs and oxc-parser.
+- `typescript` `6.0.3` (or the `typescript-compat` alias,
+  `npm:typescript@6.0.3`) passes only in a manifest that also depends on one of
+  the listed peer blockers. The install belongs to that package; no root or
+  workspace counterpart is required.
+- A `typecheck` script that runs a compiler (`tsc`, `tsgo`, a launcher around
+  them) fails; `bun check` with any arguments passes.
+- A peer range on `typescript` must include the TypeScript release `bun check`
+  implements (`typescript` in `toolchain.json`).
 
-`toolchain.json` defines two supported TypeScript install layouts:
-
-- `direct` installs TypeScript 7 as `typescript` for compiler-API consumers
-  and declaration generation. Prefer this when every framework supports
-  TypeScript 7.
-- `split-compatibility` keeps TypeScript 6 as `typescript` for incompatible
-  compiler-API consumers, then installs TypeScript 7 as `@typescript/native`
-  for tools that explicitly require that compiler.
-
-TypeScript 6 is compatibility-only. Use the split layout only for a command
-that loads one of the peer blockers listed in `toolchain.json`, or for code
-that imports the TypeScript compiler API. Remove the compatibility install when
-the blocker accepts TypeScript 7. The shared config's peer range accepts both
-layouts. Both layouts use `bun check` with the pinned Bun for typechecking; retain
-TypeScript wherever a tool needs its compiler API or declaration generation.
-`stll-typecheck-parity` runs from a consumer repository root. It uses that repo's
-TypeScript compiler (including the declared split layout), compares repository
-diagnostics by file, line, and code, then checks 31 shipped fixture classes under
-the consumer tsconfig flags. TypeScript diagnostics determine each class's
-activation; inactive classes are identified in the table, and zero active classes
-fail the check. The command fails on diagnostic differences or lost seeded coverage and reports wall
-time and peak RSS for TypeScript and Bun. It requires Bun and `/usr/bin/time`
-on Linux or macOS, and runs with Node or Bun. Tooling invokes the same bin through
-`bun run check:typecheck-parity`. The bin invokes
-`bun check` with its dedicated project/build flags. Consumer repositories must
-not define a `check` script: it shadows Bun's checker, so the parity bin fails
-with a clear error until that script is renamed. Standalone `bun --check`
-checks the current project but does not forward these checker options.
-Without flags, the command checks the root `tsconfig.json` and uses build mode
-for project references. To check selected configs, repeat `--project`, for example
-`stll-typecheck-parity --project packages/api/tsconfig.json --project packages/web/tsconfig.json`.
-Selected configs run independently without discovering or building their references;
-reference metadata is retained for ordinary project checks. No root tsconfig is
-required in this mode, and the compiler always comes from the repository-root
-installation. Missing, unreadable, and zero-input selected configs fail the check.
-`--help` prints usage and exits successfully. In default mode, referenced
-configs are discovered recursively and grouped by effective compiler options.
-Each group copies its representative config's effective options, removes emit-only
-and build settings, and sets `noEmit` for the seeded projects. Type-checking options
-and consumer type/module resolution are preserved. Each group must
-activate at least one seeded class. The installed compiler and Bun runtime must match their selected toolchain policy versions.
-Both compilers check the same temporary project graph. TypeScript declarations
-and build metadata stay in that temporary tree; consumer files remain untouched.
-The parity bin does not validate the consumer project graph; the repository's own typecheck does.
-Source errors normalize TypeScript's diagnostic exit `2` (including declaration-only inputs) to Bun's
-diagnostic exit `1`; the report retains both raw exit codes. Other exit statuses
-compare exactly. Comparisons retain source diagnostic locations, normalize bundled standard-library
-paths, and distinguish locationless messages. Fixtures preserve the consumer package
-module context and reject configuration errors. Tagged agent diagnostics are normalized
-into the same comparison set.
+When the root manifest declares `oxlint-tsgolint`, the same command lists the
+files each lint script covers and reads every tsconfig with tsrs; the consumer
+installs no compiler for it.
 
 Use the library TypeScript preset:
 
@@ -914,25 +864,24 @@ aliases), oxlint, oxlint-tsgolint, and shared tooling pins. Lockfile
 resolutions determine installed package versions; manifest ranges alone do not.
 Resolution locations and importer bindings are retained: swapping compiler
 versions between workspaces cannot look unchanged. Compiler specifier changes
-run parity even when the resolved release version is unchanged. Unknown lock
-shapes and ambiguous resolutions report an unreadable snapshot. Supported text
-locks include Bun JSONC (schema 0/1), pnpm YAML (5.4/6/9), npm package-lock/
+report `typescript` even when the resolved release version is unchanged. Unknown
+lock shapes and ambiguous resolutions report an unreadable snapshot. Supported
+text locks include Bun JSONC (schema 0/1), pnpm YAML (5.4/6/9), npm package-lock/
 shrinkwrap (1/2/3), and bounded Yarn Classic/Berry shapes; a binary-only Bun lock
 cannot be compared without executing Bun.
 Workflow/action and Docker definition edits conservatively force full CI.
-Unrelated application dependency changes do not force compiler parity.
+Unrelated application dependency changes do not report a compiler change.
 Setup-action runtime selectors and their tracked version-file contents must
 identify an exact stable release. Floating selectors,
 ranges, expressions, empty
-values, or omitted runtime versions report an unreadable snapshot and run parity
-even when their committed text is unchanged.
+values, or omitted runtime versions report an unreadable snapshot even when
+their committed text is unchanged.
 
-On pull requests, run the repository's ordinary Bun typecheck and select
-parity with the same detector; run the probe on demand:
+On pull requests, run the repository's ordinary Bun typecheck; run the probe on
+demand:
 
 ```sh
 stll-typecheck-probe --project packages/api/tsconfig.json --seed-dir packages/api/src -- bun run typecheck
-stll-typecheck-parity --changed-since origin/main --project packages/api/tsconfig.json
 ```
 
 The probe writes an exclusive temporary TypeScript file in the declared
@@ -943,25 +892,13 @@ excluded seeds fail instead of producing a vacuous pass. Commands are argv,
 not shell expressions. Cleanup also runs on failure and handled termination.
 Repeat the probe for independently checked projects as needed.
 
-Conditional parity runs when Bun, TypeScript, or shared declarations change;
-otherwise it prints `parity skipped: toolchain unchanged since ...`. An unreadable
-reference runs full parity. Omit `--changed-since` to run full parity on demand.
-This repository runs conditional parity in CI, so a change to the compiler or
-toolchain is proven on the pull request that makes it. The probe, timed
-TypeScript checks and full parity run only through
-`.github/workflows/typecheck-proofs.yml` (`workflow_dispatch`), whose required
-`changed_since` input names the base of the change to prove: the detector
-compares the toolchain at that base with the head, so a default such as the
-previous commit could miss a change made earlier on the branch. It has no
-automatic or scheduled trigger. Node and lint-tool changes still force full CI
-through the shared detector.
-
 Workflow, composite-action, Docker, mise, and tool-version declarations are
-conservatively fingerprinted for compiler parity, including referenced tracked
+conservatively fingerprinted as `shared` changes, including referenced tracked
 setup-action version files (Node, Bun, Python, Go, Java and other runtimes).
 Rust toolchain-file selectors and conventional runtime files are included;
 cache-dependency-path is not a runtime selector. Compose and Kubernetes image
-definitions are conservatively fingerprinted alongside Dockerfiles. Catalog and unresolved declaration changes also force parity;
-an unclassifiable reference runs full parity. This may run parity for unrelated
-edits to these declaration files. Active installed compiler comparisons still
-use the owning lockfile resolutions.
+definitions are conservatively fingerprinted alongside Dockerfiles. Catalog and
+unresolved declaration changes also report a change; an unclassifiable reference
+reports an unreadable snapshot. This may report a change for unrelated edits to
+these declaration files. Installed compiler comparisons use the owning lockfile
+resolutions.
