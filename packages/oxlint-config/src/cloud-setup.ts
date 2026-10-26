@@ -6,7 +6,10 @@ import { renderCloudServiceInstall } from "./cloud-setup-install";
 import { renderCloudNetwork } from "./cloud-setup-network";
 import { cloudServices, parseCloudSetup } from "./cloud-setup-schema";
 import { renderCloudServiceStart } from "./cloud-setup-services";
-import { renderCloudShellInstall } from "./cloud-setup-shell";
+import {
+  refuseDirectoryTarget,
+  renderCloudShellInstall,
+} from "./cloud-setup-shell";
 import { resolveCloudToolchains } from "./cloud-setup-toolchains";
 import { renderCloudToolInstall } from "./cloud-setup-tools-install";
 import { nodeSelectorMatches } from "./toolchain-node";
@@ -193,6 +196,7 @@ install_runtimes() (
     (cd "$scratch"; awk -v name="$bun_archive" '$2 == name || $2 == "*" name { print $1 "  " name; count++ } END { if (count != 1) exit 1 }' bun-sums | sha256sum --strict -c -)
     unzip -q "$scratch/$bun_archive" -d "$scratch/bun"
     install -d -m 755 "$BUN_DIR"
+    ${refuseDirectoryTarget('"$BUN_DIR/bun"')}
     install -m 755 "$scratch/bun/$bun_folder/bun" "$BUN_DIR/bun"
   fi
   runtime_ready

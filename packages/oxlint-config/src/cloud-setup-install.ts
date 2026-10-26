@@ -1,4 +1,5 @@
 import type { CloudService } from "./cloud-setup-schema";
+import { refuseDirectoryTarget } from "./cloud-setup-shell";
 import type { parseToolchainPolicy } from "./toolchain-schema";
 
 type CloudServiceInstallOptions = {
@@ -187,6 +188,7 @@ const postgresInstall = String.raw`
       key_fingerprint="$(pgdg_key_fingerprint "$key")"
       [[ "$key_fingerprint" == @PGDG_FINGERPRINT@ ]] || fail 'PostgreSQL signing key mismatch'
       install -d -m 755 /usr/share/keyrings
+      ${refuseDirectoryTarget("/usr/share/keyrings/stll-pgdg.asc")}
       install -m 644 "$key" /usr/share/keyrings/stll-pgdg.asc
       rm -- "$key"
       printf '%s\n' '@PGDG_SOURCE@' > /etc/apt/sources.list.d/stll-pgdg.list

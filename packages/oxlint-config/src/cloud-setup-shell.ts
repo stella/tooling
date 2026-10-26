@@ -6,6 +6,13 @@ export const cloudShellProfilePath = "/etc/profile.d/stll-cloud.sh";
 export const cloudShellProfileSource = `. ${cloudShellProfilePath}`;
 
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+/**
+ * install, cp and mv place the file inside a target that resolves to a
+ * directory and still succeed, so every generated file publish refuses one
+ * first. `target` is the exact shell word the publish command uses.
+ */
+export const refuseDirectoryTarget = (target: string) =>
+  `[[ ! -d ${target} ]] || fail 'Install target is a directory; remove it and rerun install:' ${target}`;
 type CloudShellOptions = {
   nodeVersion: string;
   bunVersion: string;
