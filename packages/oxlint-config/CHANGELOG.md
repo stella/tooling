@@ -1,5 +1,11 @@
 # @stll/oxlint-config
 
+## 2.1.2
+
+### Patch Changes
+
+- Synchronize shared tool pins with workspace releases.
+
 ## 2.1.1
 
 ### Patch Changes

@@ -1,5 +1,11 @@
 # @stll/oxlint-plugin
 
+## 0.6.4
+
+### Patch Changes
+
+- [#228](https://github.com/stella/tooling/pull/228) [`109a8fe`](https://github.com/stella/tooling/commit/109a8fe68520c267ff35f0186ae1b52cf575d9f9) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Point the `no-promise-matchers` message at `rejectionOf` from `@stll/test-kit`, and raise the `oxlint` and `@oxlint/plugins` peer floors to 1.87.0 to match the shared toolchain policy.
+
 ## 0.6.3
 
 ### Patch Changes

@@ -1,5 +1,11 @@
 # @stll/test-kit
 
+## 0.4.0
+
+### Minor Changes
+
+- [#228](https://github.com/stella/tooling/pull/228) [`109a8fe`](https://github.com/stella/tooling/commit/109a8fe68520c267ff35f0186ae1b52cf575d9f9) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Export `rejectionOf(promise)`, which returns the reason a promise rejects with and fails the test with the resolved value when it resolves instead.
+
 ## 0.3.1
 
 ### Patch Changes
