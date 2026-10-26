@@ -1,3 +1,5 @@
+import type { Plugin } from "@oxlint/plugins";
+
 import {
   createBindingResolver,
   identifierName,
@@ -71,7 +73,7 @@ const external = (
   }
 };
 
-export default testOnlyPlugin(
+const plugin: Plugin = testOnlyPlugin(
   "no-real-network-in-tests",
   "noRealNetwork",
   "Use @stll/test-kit's withFakeServer instead of real network access in tests.",
@@ -115,3 +117,5 @@ export default testOnlyPlugin(
     };
   },
 );
+
+export default plugin;

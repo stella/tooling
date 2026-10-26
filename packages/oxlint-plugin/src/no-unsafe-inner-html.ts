@@ -35,7 +35,7 @@
 // until the codebase has a branded SafeHtml boundary.
 
 import type { Scope, Variable } from "@oxlint/plugins";
-import { eslintCompatPlugin } from "@oxlint/plugins";
+import { eslintCompatPlugin, type Plugin } from "@oxlint/plugins";
 
 import type { AstNode, LiteralArgumentResolution } from "./utils.ts";
 import {
@@ -82,7 +82,7 @@ export const DOM_ELEMENT_PRODUCERS = [
   { name: "nextElementSibling", kind: "property", receiver: "element" },
   { name: "previousElementSibling", kind: "property", receiver: "element" },
   { name: "offsetParent", kind: "property", receiver: "element" },
-] as const satisfies readonly DomElementProducer[];
+] as const;
 
 // The provenance text after the marker must be non-empty.
 const WAIVER_RE = /^\s*safe-html:\s*\S/u;
@@ -358,7 +358,7 @@ const invokedArguments = (call: unknown): AppliedArguments => {
   return appliedArgumentsFor(resolved.args);
 };
 
-export default eslintCompatPlugin({
+const plugin: Plugin = eslintCompatPlugin({
   meta: { name: "no-unsafe-inner-html" },
   rules: {
     "no-unsafe-inner-html": {
@@ -679,7 +679,9 @@ export default eslintCompatPlugin({
             });
           if (target?.type === "MemberExpression") {
             const property = memberPropertyName(target);
-            const producer = DOM_ELEMENT_PRODUCERS.find(
+            const producer = (
+              DOM_ELEMENT_PRODUCERS satisfies readonly DomElementProducer[]
+            ).find(
               (entry) =>
                 entry.kind ===
                   (kind === "collection"
@@ -1059,3 +1061,5 @@ export default eslintCompatPlugin({
     },
   },
 });
+
+export default plugin;

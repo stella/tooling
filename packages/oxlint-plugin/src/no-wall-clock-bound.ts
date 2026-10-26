@@ -1,4 +1,4 @@
-import type { Scope } from "@oxlint/plugins";
+import type { Plugin, Scope } from "@oxlint/plugins";
 
 import {
   createBindingResolver,
@@ -69,7 +69,7 @@ const enclosingFunction = (node: Node): Node | null => {
   return null;
 };
 
-export default testOnlyPlugin(
+const plugin: Plugin = testOnlyPlugin(
   "no-wall-clock-bound",
   "noWallClockBound",
   "A test must not assert on measured wall-clock time or race a timer, because such assertions fail on loaded runners; use a controlled clock or deferred for ordering.",
@@ -267,3 +267,5 @@ export default testOnlyPlugin(
     };
   },
 );
+
+export default plugin;

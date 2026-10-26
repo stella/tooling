@@ -85,9 +85,6 @@ jobs:
           name: bun-fmt-patch
           path: bun-fmt.patch
 
-      - name: Typecheck diagnostic parity
-        run: bun run check:typecheck-parity --changed-since "$TOOLCHAIN_BASE"
-
       - name: Validate actual declaration-only build profile
         run: bun scripts/check-publish-artifact-profiles.ts
 

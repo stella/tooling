@@ -9,9 +9,9 @@
 // Allows `as any` / `as unknown` (those have dedicated rules / are
 // often used as the first step of an explicit launder).
 
-import { eslintCompatPlugin } from "@oxlint/plugins";
+import { eslintCompatPlugin, type Plugin } from "@oxlint/plugins";
 
-export default eslintCompatPlugin({
+const plugin: Plugin = eslintCompatPlugin({
   meta: { name: "no-dangerous-type-assertions" },
   rules: {
     "no-dangerous-type-assertions": {
@@ -71,3 +71,5 @@ export default eslintCompatPlugin({
     },
   },
 });
+
+export default plugin;

@@ -236,11 +236,13 @@ The CLI checks tracked files, prints `path:line: [rule] message` diagnostics,
 and exits with status 1 on a mismatch. Updating the package updates the
 policy; update consumer pins and run the checker together.
 
-`typescriptInstallLayouts` declares the compiler package, exact specifier,
-and typecheck command for each supported layout. Prefer the direct layout.
-Use the split compatibility layout for the compiler-API consumers and peer
-blockers listed in `typescript6Compatibility`; it retains the current
-compiler for typechecking while providing the compatibility package.
+The `typescript-layout` rule keeps TypeScript out of manifests: type checking
+runs `bun check`, programs and checkers use tsrs, and syntax reads use
+oxc-parser. No manifest, catalog or resolution declares `typescript` 7 or
+`@typescript/native`. A package that depends on one of the `peerBlockers` in
+`typescript6Compatibility` may declare `typescript` (or the `typescript-compat`
+alias) at the exact TypeScript 6 compatibility release; no root counterpart is
+required. A `typecheck` script that runs a compiler must run `bun check`.
 
 An exception requires a tracked root `stll-toolchain.json` with the named
 rule and a nonempty reason:
@@ -251,13 +253,8 @@ rule and a nonempty reason:
 }
 ```
 
-Workspace TypeScript toolchains combine the root and declared members' devDependencies.
-An included member may declare the exact TypeScript 6 compatibility API across
-dependencies, devDependencies, and peerDependencies when that shared install uses
-the complete split layout. Ambiguous or partial layouts do not grant this allowance.
-Peer ranges declare support: they must include the policy compiler release and the
-compatibility release when the selected layout uses it. Ranges do not contribute
-to the installed compiler inventory.
+Peer ranges, exact versions included, declare support: a `typescript` range
+must include the policy release. Ranges do not count as installs.
 
 JavaScript update roots include the repository root, declared workspace membership,
 and directories with their own `bun.lock`, `package-lock.json`, `yarn.lock`, or
@@ -275,23 +272,6 @@ rules, empty reasons, and malformed configuration fail validation. See the
 [shared toolchain reference](https://github.com/stella/tooling#shared-toolchain)
 for the schema, rule list, runtime support ranges, and generated Dependabot
 template.
-
-## Typecheck parity project selection
-
-Run `stll-typecheck-parity` from the repository root. Without flags, it checks
-the root `tsconfig.json` and recursively discovers project references in build
-mode. Repeat `--project` to check exactly the selected configs:
-
-```sh
-stll-typecheck-parity --project packages/api/tsconfig.json --project packages/web/tsconfig.json
-```
-
-Selected configs run independently using the repository-root compiler
-installation; child packages need no compiler declaration and a root tsconfig
-is unnecessary. Their original reference metadata is preserved without
-discovering or building referenced projects. Missing, unreadable, and zero-input
-selected configs fail the check. `--help` prints usage and exits successfully;
-unknown arguments fail.
 
 ## Generate dependency update configuration
 
@@ -961,25 +941,25 @@ aliases), oxlint, oxlint-tsgolint, and shared tooling pins. Lockfile
 resolutions determine installed package versions; manifest ranges alone do not.
 Resolution locations and importer bindings are retained: swapping compiler
 versions between workspaces cannot look unchanged. Compiler specifier changes
-run parity even when the resolved release version is unchanged. Unknown lock
-shapes and ambiguous resolutions report an unreadable snapshot. Supported text
-locks include Bun JSONC (schema 0/1), pnpm YAML (5.4/6/9), npm package-lock/
+report `typescript` even when the resolved release version is unchanged. Unknown
+lock shapes and ambiguous resolutions report an unreadable snapshot. Supported
+text locks include Bun JSONC (schema 0/1), pnpm YAML (5.4/6/9), npm package-lock/
 shrinkwrap (1/2/3), and bounded Yarn Classic/Berry shapes; a binary-only Bun lock
 cannot be compared without executing Bun.
 Workflow/action and Docker definition edits conservatively force full CI.
-Unrelated application dependency changes do not force compiler parity.
+Unrelated application dependency changes do not report a compiler change.
 Setup-action runtime selectors and their tracked version-file contents must
 identify an exact stable release. Floating selectors,
 ranges, expressions, empty
-values, or omitted runtime versions report an unreadable snapshot and run parity
-even when their committed text is unchanged.
+values, or omitted runtime versions report an unreadable snapshot even when
+their committed text is unchanged.
 
-On pull requests, run the repository's ordinary Bun typecheck and the probe,
-then select parity using the same detector:
+On pull requests, run the repository's ordinary Bun typecheck and the probe. The
+shared `rust-napi-ci.yml` workflow runs both when called with `typecheck: true`;
+elsewhere, run:
 
 ```sh
 stll-typecheck-probe --project packages/api/tsconfig.json --seed-dir packages/api/src -- bun run typecheck
-stll-typecheck-parity --changed-since origin/main --project packages/api/tsconfig.json
 ```
 
 The probe writes an exclusive temporary TypeScript file in the declared
@@ -990,35 +970,31 @@ excluded seeds fail instead of producing a vacuous pass. Commands are argv,
 not shell expressions. Cleanup also runs on failure and handled termination.
 Repeat the probe for independently checked projects as needed.
 
-Conditional parity runs when Bun, TypeScript, or shared declarations change;
-otherwise it prints `parity skipped: toolchain unchanged since ...`. An unreadable
-reference runs full parity. Nightly jobs omit `--changed-since` to run full parity.
-Node and lint-tool changes still force full CI through the shared detector.
-
 Workflow, composite-action, Docker, mise, and tool-version declarations are
-conservatively fingerprinted for compiler parity, including referenced tracked
+conservatively fingerprinted as `shared` changes, including referenced tracked
 setup-action version files (Node, Bun, Python, Go, Java and other runtimes).
 Rust toolchain-file selectors and conventional runtime files are included;
 cache-dependency-path is not a runtime selector. Compose and Kubernetes image
-definitions are conservatively fingerprinted alongside Dockerfiles. Catalog and unresolved declaration changes also force parity;
-an unclassifiable reference runs full parity. This may run parity for unrelated
-edits to these declaration files. Active installed compiler comparisons still
-use the owning lockfile resolutions.
+definitions are conservatively fingerprinted alongside Dockerfiles. Catalog and
+unresolved declaration changes also report a change; an unclassifiable reference
+reports an unreadable snapshot. This may report a change for unrelated edits to
+these declaration files. Installed compiler comparisons use the owning lockfile
+resolutions.
 
 Compiler patch declarations, lockfile patch hashes, and their tracked patch files
 are included even when the compiler version is unchanged. Compiler patch-package
 files are included too. Missing referenced compiler patches fail closed; unrelated
-package patches do not trigger compiler parity.
+package patches do not report a compiler change.
 
 Compiler manifest specifiers and complete compiler lock entries form part of the
 change identity, including resolved URLs, integrity, commits, checksums and patch
-hashes. Changing a source at the same release version runs parity. Local compiler
-sources without an immutable byte identity fail closed; a version alone does not
-identify a local directory. Git compiler sources require a full commit identity.
-Supported text locks include Bun, npm, pnpm and bounded
-Yarn Classic/Berry shapes; unrecognized lock shapes run parity. Yarn compiler
-`patch:` protocols are unsupported and run parity because their patch bytes are
-not represented by the lock checksum alone.
+hashes. Changing a source at the same release version reports `typescript`. Local
+compiler sources without an immutable byte identity fail closed; a version alone
+does not identify a local directory. Git compiler sources require a full commit
+identity. Supported text locks include Bun, npm, pnpm and bounded
+Yarn Classic/Berry shapes; unrecognized lock shapes report an unreadable snapshot.
+Yarn compiler `patch:` protocols are unsupported and report an unreadable
+snapshot because their patch bytes are not represented by the lock checksum alone.
 
 ## Rust selectors
 

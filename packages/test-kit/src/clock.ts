@@ -39,7 +39,7 @@ const assertDuration = (milliseconds: number, what: string) => {
 };
 
 /** The longest delay a platform timer holds before it overflows. */
-export const MAX_TIMER_MS = 2 ** 31 - 1;
+export const MAX_TIMER_MS: number = 2 ** 31 - 1;
 
 const abortableTimeout = async (
   milliseconds: number,
@@ -86,7 +86,7 @@ export const systemClock: Clock = {
 };
 
 /** A fixed, readable default start so failures print stable timestamps. */
-export const TEST_CLOCK_START = Temporal.Instant.from(
+export const TEST_CLOCK_START: number = Temporal.Instant.from(
   "2026-01-01T09:00:00Z",
 ).epochMilliseconds;
 

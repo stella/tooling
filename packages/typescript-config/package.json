@@ -23,8 +23,5 @@
   },
   "publishConfig": {
     "access": "public"
-  },
-  "peerDependencies": {
-    "typescript": ">=6.0.3 <8"
   }
 }

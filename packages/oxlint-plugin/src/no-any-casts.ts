@@ -6,9 +6,9 @@
 // bypasses brand checks, discriminated-union narrowing, and every
 // other safety the type system provides.
 
-import { eslintCompatPlugin } from "@oxlint/plugins";
+import { eslintCompatPlugin, type Plugin } from "@oxlint/plugins";
 
-export default eslintCompatPlugin({
+const plugin: Plugin = eslintCompatPlugin({
   meta: { name: "no-any-casts" },
   rules: {
     "no-any-casts": {
@@ -36,3 +36,5 @@ export default eslintCompatPlugin({
     },
   },
 });
+
+export default plugin;

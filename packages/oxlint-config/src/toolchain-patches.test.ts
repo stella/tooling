@@ -7,7 +7,6 @@ import { stringify } from "yaml";
 
 import { compilerPackages } from "./compiler-packages";
 import { detectToolchainChanges } from "./toolchain-changed";
-import { runSelectedTypecheckParity } from "./typecheck-parity-selection";
 
 const manifest = {
   private: true,
@@ -79,7 +78,7 @@ const withPatches = async ({
     rmSync(repo, { recursive: true, force: true });
   }
 };
-const changedParity = async ({
+const changedCompiler = async ({
   repo,
   since,
 }: {
@@ -89,21 +88,10 @@ const changedParity = async ({
   const result = await detectToolchainChanges({ repo, since });
   expect(result.status).toBe("compared");
   expect(result.tools).toContain("typescript");
-  let runs = 0;
-  await runSelectedTypecheckParity({
-    repo,
-    since,
-    run: async () => {
-      runs++;
-      return true;
-    },
-    output: () => {},
-  });
-  expect(runs).toBe(1);
 };
 
 for (const compiler of Object.values(compilerPackages))
-  test(`${compiler} same-version declared patch content changes run parity`, async () => {
+  test(`${compiler} same-version declared patch content changes are TypeScript changes`, async () => {
     await withPatches({
       before: {
         "package.json": {
@@ -115,12 +103,12 @@ for (const compiler of Object.values(compilerPackages))
         "config/compiler.diff": "compiler patch before\n",
       },
       after: { "config/compiler.diff": "compiler patch after\n" },
-      exercise: changedParity,
+      exercise: changedCompiler,
     });
   }, 15_000);
 
 for (const owner of ["manifest", "workspace"])
-  test(`pnpm ${owner} compiler patch source changes run parity`, async () => {
+  test(`pnpm ${owner} compiler patch source changes are TypeScript changes`, async () => {
     const patchConfig = {
       patchedDependencies: { "typescript@7.0.2": "config/compiler.diff" },
     };
@@ -132,7 +120,7 @@ for (const owner of ["manifest", "workspace"])
         "config/compiler.diff": "before\n",
       },
       after: { "config/compiler.diff": "after\n" },
-      exercise: changedParity,
+      exercise: changedCompiler,
     });
   }, 15_000);
 
@@ -150,7 +138,7 @@ test("Bun lock compiler patch hashes change without changing compiler versions",
         patchedDependencies: { "typescript@7.0.2": "second-hash" },
       },
     },
-    exercise: changedParity,
+    exercise: changedCompiler,
   });
 }, 15_000);
 
@@ -175,7 +163,7 @@ for (const source of ["patchedDependencies", "snapshots"])
         "config/compiler.diff": "unchanged\n",
       },
       after: { "pnpm-lock.yaml": lock("second") },
-      exercise: changedParity,
+      exercise: changedCompiler,
     });
   }, 15_000);
 
@@ -187,11 +175,11 @@ for (const file of [
   "custom/parent++typescript+7.0.2.patch",
   "custom/@scope+parent++@typescript+native+7.0.2.dev.patch",
 ])
-  test(`patch-package ${file} committed content changes run parity`, async () => {
+  test(`patch-package ${file} committed content changes are TypeScript changes`, async () => {
     await withPatches({
       before: { [file]: "before\n" },
       after: { [file]: "after\n" },
-      exercise: changedParity,
+      exercise: changedCompiler,
     });
   }, 15_000);
 
@@ -224,7 +212,7 @@ for (const declaration of ["manifest", "lock"])
         "custom/compiler+7.0.2.patch": "before\n",
       },
       after: { "custom/compiler+7.0.2.patch": "after\n" },
-      exercise: changedParity,
+      exercise: changedCompiler,
     });
   }, 15_000);
 
@@ -258,7 +246,7 @@ test("compiler alias patch declarations retain source bytes and lock hashes", as
                 patchedDependencies: { "compiler@7.0.2": "second-hash" },
               },
             },
-      exercise: changedParity,
+      exercise: changedCompiler,
     });
 }, 15_000);
 
@@ -292,22 +280,11 @@ test("unrelated patch sources and hashes do not change fingerprints", async () =
         changed: false,
         tools: [],
       });
-      let runs = 0;
-      await runSelectedTypecheckParity({
-        repo,
-        since,
-        run: async () => {
-          runs++;
-          return true;
-        },
-        output: () => {},
-      });
-      expect(runs).toBe(0);
     },
   });
 }, 15_000);
 
-test("missing committed compiler patch fails closed and runs parity", async () => {
+test("missing committed compiler patch fails closed as unreadable", async () => {
   await withPatches({
     before: { "README.md": "before\n" },
     after: {
@@ -325,17 +302,6 @@ test("missing committed compiler patch fails closed and runs parity", async () =
         changed: true,
         error: "Missing tracked compiler patch: config/missing.diff",
       });
-      let runs = 0;
-      await runSelectedTypecheckParity({
-        repo,
-        since,
-        run: async () => {
-          runs++;
-          return true;
-        },
-        output: () => {},
-      });
-      expect(runs).toBe(1);
     },
   });
 }, 15_000);
@@ -360,7 +326,7 @@ for (const reference of ["../compiler.diff", "/compiler.diff", ""])
   }, 15_000);
 
 for (const owner of ["declaration", "patch-package"])
-  test(`pnpm catalog alias ${owner} compiler patch bytes run parity`, async () => {
+  test(`pnpm catalog alias ${owner} compiler patch bytes are TypeScript changes`, async () => {
     const patch =
       owner === "declaration"
         ? "custom/alias.diff"
@@ -395,7 +361,7 @@ for (const owner of ["declaration", "patch-package"])
         [patch]: "before\n",
       },
       after: { [patch]: "after\n" },
-      exercise: changedParity,
+      exercise: changedCompiler,
     });
   }, 15_000);
 
@@ -431,17 +397,6 @@ test("local compiler aliases cannot hide mutable compiler directory bytes", asyn
         error:
           "Tracked compiler source has no immutable artifact identity: local-compiler/package.json",
       });
-      let runs = 0;
-      await runSelectedTypecheckParity({
-        repo,
-        since,
-        run: async () => {
-          runs++;
-          return true;
-        },
-        output: () => {},
-      });
-      expect(runs).toBe(1);
     },
   });
 }, 15_000);

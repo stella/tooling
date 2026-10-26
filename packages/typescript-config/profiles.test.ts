@@ -114,15 +114,14 @@ for (const specifier of Object.keys(manifest.exports)) {
         );
         const result = spawnSync(
           process.execPath,
-          [
-            join(repositoryRoot, "node_modules/typescript/bin/tsc"),
-            "-p",
-            config,
-          ],
+          ["check", "--no-pretty", "--all", `--project=${config}`],
           { encoding: "utf8" },
         );
         expect(result.error).toBeUndefined();
-        expect(result.stdout + result.stderr).toBe("");
+        // bun check prints only its summary when the fixture has no diagnostics.
+        const output = result.stdout + result.stderr;
+        expect(output).not.toMatch(/\berror\b|\bwarning\b/);
+        expect(output).toContain("No type errors");
         expect(result.status).toBe(0);
       } finally {
         await rm(directory, { recursive: true, force: true });
