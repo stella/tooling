@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 
-import { rejectionOf } from "./rejection-support.ts";
+import { rejectionOf } from "./rejection.ts";
 import {
   createTestTmpDir,
   createTestTmpDirSlot,

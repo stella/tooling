@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { createTestClock } from "./clock.ts";
-import { rejectionOf } from "./rejection-support.ts";
+import { rejectionOf } from "./rejection.ts";
 import {
   BUN_TEST_DEFAULT_TIMEOUT_MS,
   DEFAULT_WAIT_TIMEOUT_MS,

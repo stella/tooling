@@ -24,6 +24,7 @@ bun add -d @stll/test-kit
 | Repeatable random data                             | `createSeededRandom(testSeed())`                                                    | `Math.random()`                                              |
 | Timer-driven behavior                              | `withFakeTimers()` or `createFakeTimers()`                                          | real `setTimeout()` and `setInterval()`                      |
 | HTTP dependencies                                  | `withFakeServer()`                                                                  | the internet or shared services                              |
+| Assert on a rejection                              | `expect(await rejectionOf(promise))`                                                | `expect(promise).rejects`, which can settle after the test   |
 | Explicit checked-in artifact regeneration          | `writeRegeneratedFile()` with an exact opt-in environment flag                      | accidentally overwriting fixtures during a test run          |
 
 ## Clock
@@ -40,6 +41,13 @@ Every wait takes a `description`. The hang guard (4 s by default, below
 a suite raises that timeout) fails with "waiting for <description>", so a stuck test
 says what it was waiting for. The guard is never a statement about speed: do
 not shorten it to assert that something is fast. Assert work counts instead.
+
+## Rejections
+
+`rejectionOf(promise)` awaits a promise and returns the reason it rejected
+with, so the test asserts on it with a plain `expect`. A promise that resolves
+instead fails the test with the resolved value in the message. Unlike
+`expect(promise).rejects`, the assertion cannot settle after the test ends.
 
 ## Database clock
 

@@ -183,8 +183,8 @@
     "@types/node": "26.6.5"
   },
   "peerDependencies": {
-    "@oxlint/plugins": ">=1.75.0 <2",
-    "oxlint": ">=1.75.0 <2"
+    "@oxlint/plugins": ">=1.87.0 <2",
+    "oxlint": ">=1.87.0 <2"
   },
   "engines": {
     "node": "^20.19.0 || >=22.12.0"
