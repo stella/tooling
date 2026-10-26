@@ -881,15 +881,27 @@ describe("TypeScript installs", () => {
     ).toMatchObject([{ rule: "typescript-layout" }]);
   });
   test("peer ranges declare support without installing a compiler", () => {
-    for (const range of [">=6.0.3 <8", "^7.0.0", "*"])
+    for (const range of [">=6.0.3 <8", "^7.0.0", "*", "7.0.2"])
       expect(manifest({ peerDependencies: { typescript: range } })).toEqual([]);
+    for (const range of ["^6.0.0", "6.0.3"])
+      expect(
+        manifest({ peerDependencies: { typescript: range } }),
+      ).toMatchObject([
+        {
+          rule: "typescript-layout",
+          message: `typescript peer support range must include 7.0.2, found ${range}`,
+        },
+      ]);
     expect(
-      manifest({ peerDependencies: { typescript: "^6.0.0" } }),
+      manifest({ peerDependencies: { "typescript-compat": "6.0.3" } }),
+    ).toEqual([]);
+    expect(
+      manifest({ peerDependencies: { "typescript-compat": "7.0.2" } }),
     ).toMatchObject([
       {
         rule: "typescript-layout",
         message:
-          "typescript peer support range must include 7.0.2, found ^6.0.0",
+          "typescript-compat peer support range must include 6.0.3, found 7.0.2",
       },
     ]);
     expect(

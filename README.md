@@ -187,8 +187,8 @@ tracked root `stll-toolchain.json` listing the rule and its reason:
 Each manifest answers for its own TypeScript install: a member that uses a
 listed peer blocker may declare the exact TypeScript 6 compatibility release in
 its dependencies or devDependencies, without a root or workspace counterpart.
-Peer ranges declare support: a `typescript` range must include the policy
-release. Ranges do not count as installs.
+Peer ranges, exact versions included, declare support: a `typescript` range
+must include the policy release. Ranges do not count as installs.
 
 JavaScript update roots include the repository root, declared workspace membership,
 and directories with their own `bun.lock`, `package-lock.json`, `yarn.lock`, or
@@ -877,8 +877,9 @@ ranges, expressions, empty
 values, or omitted runtime versions report an unreadable snapshot even when
 their committed text is unchanged.
 
-On pull requests, run the repository's ordinary Bun typecheck; run the probe on
-demand:
+On pull requests, run the repository's ordinary Bun typecheck and the probe. The
+shared `rust-napi-ci.yml` workflow runs both when called with `typecheck: true`;
+elsewhere, run:
 
 ```sh
 stll-typecheck-probe --project packages/api/tsconfig.json --seed-dir packages/api/src -- bun run typecheck

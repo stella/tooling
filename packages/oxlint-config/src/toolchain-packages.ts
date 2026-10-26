@@ -1,6 +1,6 @@
 import path from "node:path";
 import picomatch from "picomatch";
-import { satisfies, valid, validRange } from "semver";
+import { satisfies, validRange } from "semver";
 import { isNode, LineCounter, parseDocument } from "yaml";
 
 import { nodeSupportRangeMatches } from "./toolchain-node";
@@ -912,8 +912,9 @@ export const checkPackageFiles = ({
     ...compatibilitySpecifiers.keys(),
     ...retiredCompilerPackages,
   ]);
-  // Peer ranges state support: `typescript` must cover the checker's release,
-  // the alias its TypeScript 6 release; retired packages have none.
+  // Peer ranges, exact versions included, state support: `typescript` must
+  // cover the checker's release, the alias its TypeScript 6 release; retired
+  // packages have none.
   const peerReleases = new Map<string, string>([
     ["typescript", policy.typescript],
     [compatibility.packageAlias, compatibility.version],
@@ -926,9 +927,7 @@ export const checkPackageFiles = ({
       : `${name} ${String(value)} is not needed: ${typescriptGuidance}; only a package that uses a TypeScript 6 peer blocker (${peerBlockerList}) declares ${name} ${allowed}`;
   };
   const peerRange = (value: unknown): value is string =>
-    typeof value === "string" &&
-    valid(value) === null &&
-    validRange(value) !== null;
+    typeof value === "string" && validRange(value) !== null;
   const installSections = [
     "dependencies",
     "devDependencies",
