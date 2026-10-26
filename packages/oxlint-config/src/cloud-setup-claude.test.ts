@@ -5,9 +5,11 @@ import { spawnSync } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -524,6 +526,75 @@ test("SessionStart reads, writes and replacement fail visibly without changing e
       expect(result.stdout).not.toContain("private-value");
       expect(result.stderr).toContain(reason);
       expect(readFileSync(environment, "utf8")).toBe(original);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 15_000);
+
+test("SessionStart refuses a snapshot destination that is not a regular file instead of publishing into it", () => {
+  const root = mkdtempSync(join(tmpdir(), "cloud-claude-snapshot-target-"));
+  try {
+    mkdirSync(join(root, ".agents"));
+    writeFileSync(join(root, ".agents/cloud-setup.sh"), "exit 0\n");
+    const profile = join(root, "stll-cloud.sh");
+    writeFileSync(profile, "export FIXTURE_SNAPSHOT=ready\n");
+    const environment = join(root, "claude.env");
+    const snapshot = `${environment}.stll-cloud`;
+    const outside = join(root, "outside");
+    const original = "export KEEP=retained\n";
+    const command = cloudSessionStartHook.hooks[0].command.replaceAll(
+      cloudShellProfilePath,
+      profile,
+    );
+    const targets = [
+      { name: "directory", create: () => mkdirSync(snapshot) },
+      {
+        name: "symlink to a directory",
+        create: () => symlinkSync(outside, snapshot, "dir"),
+      },
+      {
+        name: "symlink to a file",
+        create: () => symlinkSync(join(outside, "file"), snapshot),
+      },
+    ];
+    for (const { name, create } of targets) {
+      rmSync(snapshot, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+      mkdirSync(outside);
+      writeFileSync(join(outside, "file"), "unchanged\n");
+      writeFileSync(environment, original);
+      create();
+      const result = spawnSync("bash", ["-c", command], {
+        cwd: root,
+        env: {
+          ...process.env,
+          CLAUDE_CODE_REMOTE: "true",
+          CLAUDE_PROJECT_DIR: root,
+          CLAUDE_ENV_FILE: environment,
+        },
+        encoding: "utf8",
+      });
+      expect(result.status, name).toBe(0);
+      expect(result.stdout, name).toContain(
+        "Cloud setup could not establish a verified session environment",
+      );
+      expect(result.stderr, name).toContain(
+        "session environment snapshot must be a regular file",
+      );
+      // The shared file gains no source line for a target it cannot load.
+      expect(readFileSync(environment, "utf8"), name).toBe(original);
+      expect(readdirSync(outside), name).toEqual(["file"]);
+      expect(readFileSync(join(outside, "file"), "utf8"), name).toBe(
+        "unchanged\n",
+      );
+      if (name === "directory") expect(readdirSync(snapshot), name).toEqual([]);
+      expect(
+        readdirSync(root).filter((entry) =>
+          entry.startsWith("claude.env.stll-cloud."),
+        ),
+        name,
+      ).toEqual([]);
     }
   } finally {
     rmSync(root, { recursive: true, force: true });
