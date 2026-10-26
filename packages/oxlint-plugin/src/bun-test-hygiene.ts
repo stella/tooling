@@ -37,7 +37,7 @@
 //            test ends, so its failure lands on a later test or is lost.
 //   Allowed: `expect(await promise)...` for a resolved value, and
 //            `expect(await rejectionOf(promise))...` (from
-//            `@stll/property-testing/rejection`) for a rejection. Another
+//            `@stll/test-kit`) for a rejection. Another
 //            framework's `expect` (Playwright) is not considered.
 
 import { eslintCompatPlugin, type Plugin } from "@oxlint/plugins";
@@ -589,7 +589,7 @@ const plugin: Plugin = eslintCompatPlugin({
             "`expect(...).{{property}}` can settle after the test ends when " +
             "it is not awaited. `await` the promise instead " +
             "(`expect(await promise)...`), or capture the rejection with " +
-            "`rejectionOf` from `@stll/property-testing/rejection` " +
+            "`rejectionOf` from `@stll/test-kit` " +
             "(`expect(await rejectionOf(promise))...`).",
         },
       },

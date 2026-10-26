@@ -77,6 +77,39 @@ describe("shared toolchain policy", () => {
     );
   });
 
+  test("published Oxlint peers accept exactly the policy's Oxlint versions", async () => {
+    // A floor below the policy lets a consumer install a combination the
+    // shared config and plugin were never tested against; a floor above it
+    // rejects the policy's own pin.
+    const peerRange = (version: string): string =>
+      `>=${version} <${Number(version.split(".")[0]) + 1}`;
+    const oxlintPeer = peerRange(toolchainPolicy.oxlint);
+    const pluginsPeer = peerRange(toolchainPolicy["@oxlint/plugins"]);
+    for (const manifest of [
+      "packages/oxlint-plugin/package.json",
+      "packages/oxlint-plugin/publish-contract.json",
+    ])
+      expect({ manifest, json: await readJson(manifest) }).toEqual({
+        manifest,
+        json: expect.objectContaining({
+          peerDependencies: {
+            "@oxlint/plugins": pluginsPeer,
+            oxlint: oxlintPeer,
+          },
+        }),
+      });
+    for (const manifest of [
+      "packages/oxlint-config/package.json",
+      "packages/oxlint-config/publish-contract.json",
+    ])
+      expect({ manifest, json: await readJson(manifest) }).toEqual({
+        manifest,
+        json: expect.objectContaining({
+          peerDependencies: expect.objectContaining({ oxlint: oxlintPeer }),
+        }),
+      });
+  });
+
   test("no repository manifest installs or peers on TypeScript", async () => {
     for (const manifest of [
       "package.json",

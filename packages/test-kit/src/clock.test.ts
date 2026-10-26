@@ -6,7 +6,7 @@ import {
   systemClock,
   TEST_CLOCK_START,
 } from "./clock.ts";
-import { rejectionOf } from "./rejection-support.ts";
+import { rejectionOf } from "./rejection.ts";
 
 describe("test clock", () => {
   test("starts at a fixed instant and only moves when advanced", async () => {

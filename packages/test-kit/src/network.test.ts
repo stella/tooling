@@ -8,7 +8,7 @@ import {
   isLoopbackHost,
   NetworkAccessError,
 } from "./network.ts";
-import { rejectionOf } from "./rejection-support.ts";
+import { rejectionOf } from "./rejection.ts";
 
 let uninstall: (() => void) | undefined;
 let restoreProcessEnvironment: (() => void) | undefined;
