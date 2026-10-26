@@ -314,6 +314,106 @@ test("cloud generation rejects every nonexact or out-of-series Node selector", (
     );
 }, 15_000);
 
+test("cloud generation embeds the shared archive pins for the policy Node and Bun releases", () => {
+  const script = generate(declaration);
+  const node = policy.nodeArchiveSha256["26.10.0"];
+  const bun = policy.bunArchiveSha256[policy.bun];
+  if (node === undefined || bun === undefined)
+    throw new Error("Shared policy lacks pins for its own releases");
+  expect(script).toContain(
+    `NODE_SHA256='${node.amd64}'; BUN_SHA256='${bun.amd64}'`,
+  );
+  expect(script).toContain(
+    `NODE_SHA256='${node.arm64}'; BUN_SHA256='${bun.arm64}'`,
+  );
+});
+
+test("an accepted Node patch or newer Bun without shared pins needs repository pins for that exact release", () => {
+  const pins = (seed: string) => ({
+    amd64: seed.repeat(64),
+    arm64: seed.repeat(32) + "0".repeat(32),
+  });
+  const run = (
+    runtimeArchiveSha256: unknown,
+    nodeVersion = "26.11.0",
+    bun = "1.4.5",
+  ) => {
+    const cloud = parseCloudSetup({
+      ...declaration,
+      ...(runtimeArchiveSha256 === undefined ? {} : { runtimeArchiveSha256 }),
+    });
+    if (cloud === undefined) throw new Error("Missing cloud declaration");
+    return generateCloudSetup({
+      policy: { ...policy, bun },
+      cloud,
+      nodeVersion,
+    });
+  };
+  expect(() => run(undefined)).toThrow(
+    "the shared policy has no node 26.11.0 archive SHA256 pins; declare cloud.runtimeArchiveSha256.node for 26.11.0 with the amd64 and arm64 values from https://nodejs.org/dist/v26.11.0/SHASUMS256.txt",
+  );
+  expect(() => run({ node: { "26.11.0": pins("a") } })).toThrow(
+    "the shared policy has no bun 1.4.5 archive SHA256 pins; declare cloud.runtimeArchiveSha256.bun for 1.4.5 with the amd64 and arm64 values from https://github.com/oven-sh/bun/releases/download/bun-v1.4.5/SHASUMS256.txt",
+  );
+  const script = run({
+    node: { "26.11.0": pins("a") },
+    bun: { "1.4.5": pins("b") },
+  });
+  expect(script).toContain(
+    `NODE_SHA256='${pins("a").amd64}'; BUN_SHA256='${pins("b").amd64}'`,
+  );
+  expect(script).toContain(
+    `NODE_SHA256='${pins("a").arm64}'; BUN_SHA256='${pins("b").arm64}'`,
+  );
+  // Pins stay bound to the release they were recorded for.
+  expect(() =>
+    run(
+      { node: { "26.11.0": pins("a") }, bun: { "1.4.5": pins("b") } },
+      "26.12.0",
+    ),
+  ).toThrow(
+    "cloud.runtimeArchiveSha256.node pins 26.11.0, but the repository selects node 26.12.0",
+  );
+  // The shared policy stays the only source for releases it pins.
+  expect(() =>
+    run({ node: { "26.10.0": pins("a") } }, "26.10.0", policy.bun),
+  ).toThrow(
+    "the shared policy pins node 26.10.0 archives; remove cloud.runtimeArchiveSha256.node",
+  );
+});
+
+test("repository runtime archive pins accept exactly one lowercase amd64 and arm64 pair per runtime", () => {
+  const pin = "c".repeat(64);
+  for (const [runtimeArchiveSha256, message] of [
+    [{ deno: {} }, "cloud.runtimeArchiveSha256 accepts only node and bun"],
+    [{ node: {} }, "cloud.runtimeArchiveSha256.node pins exactly one release"],
+    [
+      {
+        node: {
+          "26.11.0": { amd64: pin, arm64: pin },
+          "26.12.0": { amd64: pin, arm64: pin },
+        },
+      },
+      "cloud.runtimeArchiveSha256.node pins exactly one release",
+    ],
+    [
+      { bun: { "1.4": { amd64: pin, arm64: pin } } },
+      "cloud.runtimeArchiveSha256.bun requires exact release keys",
+    ],
+    [
+      { bun: { "1.4.5": { amd64: pin } } },
+      "cloud.runtimeArchiveSha256.bun 1.4.5 requires amd64 and arm64 pins",
+    ],
+    [
+      { bun: { "1.4.5": { amd64: pin.toUpperCase(), arm64: pin } } },
+      "cloud.runtimeArchiveSha256.bun 1.4.5 requires lowercase SHA256 pins",
+    ],
+  ] as const)
+    expect(() =>
+      parseCloudSetup({ ...declaration, runtimeArchiveSha256 }),
+    ).toThrow(message);
+});
+
 test("shell quoting preserves canonical literal metacharacters through single-pass replacement", () => {
   withRepository((root) => {
     const envFile = ".env'\"$`@SERVICE_INSTALL@";

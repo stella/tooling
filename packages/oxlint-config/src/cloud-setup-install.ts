@@ -41,20 +41,20 @@ apt_install() (
   policy_state=installed
   printf '%s\n' '#!/bin/sh' 'exit 101' > /usr/sbin/policy-rc.d
   chmod 755 /usr/sbin/policy-rc.d
-  local package
-  for package in "$@"; do
-    if [[ "$package" == */* ]]; then
-      # apt cannot fetch local archives with --download-only, so their installs
-      # stay one call. Package triggers can be slow on cloud filesystems; the
-      # longer whole-call deadline covers them while Acquire timeouts still
-      # bound each network request.
-      APT_DEADLINE=600 DEBIAN_FRONTEND=noninteractive apt_network install -y --no-install-recommends "$@"
-      return
-    fi
-  done
   # The network deadline covers downloads only; unpacking and maintainer scripts
   # (for example locale generation or cluster creation) run offline afterwards.
   DEBIAN_FRONTEND=noninteractive apt_network install -y --no-install-recommends --download-only "$@"
+  local package pending
+  for package in "$@"; do
+    if [[ "$package" == */* ]]; then
+      # apt rejects --no-download for local archives, so prove instead that
+      # only local file: archives remain; --print-uris reads local state only.
+      pending="$(set -o pipefail; DEBIAN_FRONTEND=noninteractive apt-get --print-uris -qq -y --no-install-recommends install "$@" | awk '$1 !~ /^\047file:/')"
+      [[ -z "$pending" ]] || fail "Package downloads remain after the bounded download step: $pending"
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$@"
+      return
+    fi
+  done
   DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --no-download "$@"
 )
 

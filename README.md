@@ -598,18 +598,21 @@ Recommended scripts:
 }
 ```
 
-Use the Rust templates by copying them into a Rust repository:
+Generate Rust policy from the published CLI. Commit `stll-rust-policy.json`:
 
-```bash
-cp rust/rustfmt.toml /path/to/repo/rustfmt.toml
-cp rust/clippy.toml /path/to/repo/clippy.toml
-cp rust/cargo-config.toml /path/to/repo/.cargo/config.toml
+```json
+{ "kind": "single-crate" }
 ```
 
-Then copy either `rust/cargo-root.toml` or `rust/cargo-workspace.toml` into the
-repository's root `Cargo.toml`. Cargo does not support extending these settings
-from another package, so the templates are kept here as the canonical source and
-synced into consumers.
+```bash
+bunx --no-install stll-rust-policy
+bunx --no-install stll-rust-policy --check
+```
+
+The generator owns Cargo lint/profile values, Cargo aliases, rustfmt and Clippy
+policy from `rust/`; `--check` reports drift without writing. Unrelated TOML
+values survive generation; comments and layout are canonicalized. See
+[rust/README.md](rust/README.md) for workspace members and reasoned exceptions.
 
 Install the stable source lint using an exact tooling commit, then run it after
 Clippy. Replace `<sha>` with the commit containing the adopted checker:

@@ -1,5 +1,6 @@
 import { valid } from "semver";
 
+import { parseArchiveSha256 } from "./archive-pins";
 import { parseFormatterPolicy } from "./toolchain-formatter";
 import { nodePolicyValid } from "./toolchain-node";
 
@@ -85,8 +86,16 @@ export const parseToolchainPolicy = (input: unknown) => {
   const packages: Record<string, string> = {};
   for (const key of packagePinKeys) packages[key] = string(input, key);
   const bun = string(input, "bun");
+  const bunArchiveSha256 = parseArchiveSha256(
+    input["bunArchiveSha256"],
+    "bunArchiveSha256",
+  );
   const typescript = string(input, "typescript");
   const node = string(input, "node");
+  const nodeArchiveSha256 = parseArchiveSha256(
+    input["nodeArchiveSha256"],
+    "nodeArchiveSha256",
+  );
   const consumerNode = string(input, "consumerNode");
   const consumerNpm = string(input, "consumerNpm");
   const consumerPnpm = string(input, "consumerPnpm");
@@ -198,9 +207,11 @@ export const parseToolchainPolicy = (input: unknown) => {
   }
   return {
     bun,
+    bunArchiveSha256,
     formatter: parseFormatterPolicy(input["formatter"]),
     typescript,
     node,
+    nodeArchiveSha256,
     postgres,
     valkey,
     valkeyArtifacts,

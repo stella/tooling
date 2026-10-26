@@ -1,6 +1,12 @@
 {
   "schemaVersion": 1,
   "bun": "1.4.4",
+  "bunArchiveSha256": {
+    "1.4.4": {
+      "amd64": "bf8ccbfb2b0b80159e0f9a6d15c55317add8077534dbc6130a3edb52fccb395c",
+      "arm64": "baa6bb36f51d6e58561e02bbea825038a9df454f673d6d776e8bbf86f8c7850e"
+    }
+  },
   "typescript": "7.0.2",
   "oxlint": "1.87.0",
   "@oxlint/plugins": "1.87.0",
@@ -55,9 +61,15 @@
       }
     }
   },
-  "@stll/oxlint-plugin": "0.6.2",
+  "@stll/oxlint-plugin": "0.6.3",
   "lefthook": "2.2.2",
   "node": "26.x",
+  "nodeArchiveSha256": {
+    "26.10.0": {
+      "amd64": "ca70e9e349de048b9522abb3adc05b3bd6f43c5ffd3ec57916c7da292f59f022",
+      "arm64": "7a6353f63eb3d04765004b4adf172616243e4522434635cb1d26288658b04ab5"
+    }
+  },
   "postgres": "18",
   "valkey": "9.1.1",
   "valkeyArtifacts": {

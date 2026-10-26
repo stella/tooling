@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { defineConfig } from "tsdown";
@@ -10,7 +11,24 @@ const tsrs = path.join(
 );
 
 export default defineConfig({
+  define: {
+    STLL_RUST_TEMPLATES: JSON.stringify(
+      Object.fromEntries(
+        [
+          "cargo-root.toml",
+          "cargo-workspace.toml",
+          "cargo-config.toml",
+          "rustfmt.toml",
+          "clippy.toml",
+        ].map((name) => [
+          name,
+          readFileSync(new URL(`../../rust/${name}`, import.meta.url), "utf8"),
+        ]),
+      ),
+    ),
+  },
   entry: [
+    "src/rust-policy-cli.ts",
     "src/index.ts",
     "src/quarantine-cli.ts",
     "src/quarantine-policy.ts",

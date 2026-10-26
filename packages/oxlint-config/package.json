@@ -1,6 +1,6 @@
 {
   "name": "@stll/oxlint-config",
-  "version": "1.9.0",
+  "version": "2.0.0",
   "description": "Shared general oxlint configuration for stella packages.",
   "license": "Apache-2.0",
   "repository": {
@@ -15,6 +15,7 @@
     "stll-engine-support": "./dist/engine-support-cli.mjs",
     "stll-publish-contract": "./dist/publish-contract-cli.mjs",
     "stll-quarantine": "./dist/quarantine-cli.mjs",
+    "stll-rust-policy": "./dist/rust-policy-cli.mjs",
     "stll-toolchain-changed": "./dist/toolchain-changed-cli.mjs",
     "stll-toolchain-check": "./dist/toolchain-check-cli.mjs",
     "stll-typecheck-probe": "./dist/typecheck-probe-cli.mjs",

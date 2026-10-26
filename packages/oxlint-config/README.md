@@ -492,6 +492,13 @@ it gets no network allowance. Generation fails when the script is not in the
 root `package.json`.
 
 Generation uses the installed policy's Bun, Node, PostgreSQL, and Valkey pins.
+Node and Bun archives are verified against SHA256 values recorded at generation
+time, in addition to the upstream checksum manifests. The shared policy records
+them for its own Node patch and Bun release. A repository that tracks another
+accepted Node patch or a newer Bun records that one release's amd64 and arm64
+values from the official `SHASUMS256.txt` in `cloud.runtimeArchiveSha256`, for
+example `{ "node": { "26.11.0": { "amd64": "…", "arm64": "…" } } }`; a release
+the shared policy pins must not be repeated there.
 PostgreSQL uses the PGDG major-version packages; minor updates within the pinned
 major are accepted for the disposable database. Before adding PGDG, provisioning
 reuses an existing source only after verifying its signing-key fingerprint;
@@ -1129,3 +1136,13 @@ closed and writes nothing unless both inputs normalize successfully.
 Use `stll-normalize-wasi-loaders --check <loader-1> <loader-2>` in CI. Check mode
 does not write files and exits non-zero if either loader differs from the normalized
 output.
+
+## Rust policy generation
+
+Run `bunx --no-install stll-rust-policy` at the repository root with
+`stll-rust-policy.json` containing `{ "kind": "single-crate" }`. Use
+`--check` in CI to report drift without writes and `--config <path>` to select
+another input. The published CLI embeds the canonical `rust/` templates and
+merges policy into Cargo, Cargo aliases, rustfmt, and Clippy configuration.
+Unrelated TOML values survive; comments and layout are canonicalized.
+See [Rust adoption](../../rust/README.md) for workspace members and exceptions.
