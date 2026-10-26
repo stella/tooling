@@ -1,4 +1,4 @@
-import { eslintCompatPlugin } from "@oxlint/plugins";
+import { eslintCompatPlugin, type Plugin } from "@oxlint/plugins";
 import type { Ranged } from "@oxlint/plugins";
 
 import { getImportedName, getPropertyName, isIdentifier } from "./utils.ts";
@@ -113,7 +113,7 @@ const getQuerySubscriptionHookName = (
     : null;
 };
 
-export default eslintCompatPlugin({
+const plugin: Plugin = eslintCompatPlugin({
   meta: { name: "no-raw-route-query-client" },
   rules: {
     "no-raw-route-query-client": {
@@ -322,3 +322,5 @@ export default eslintCompatPlugin({
     },
   },
 });
+
+export default plugin;

@@ -1,3 +1,5 @@
+import type { Plugin } from "@oxlint/plugins";
+
 import {
   createBindingResolver,
   isNode,
@@ -5,7 +7,7 @@ import {
   testOnlyPlugin,
 } from "./test-rule-utils";
 
-export default testOnlyPlugin(
+const plugin: Plugin = testOnlyPlugin(
   "no-wall-clock-in-tests",
   "noWallClock",
   "Use the @stll/test-kit clock instead of reading the wall clock in tests.",
@@ -56,3 +58,5 @@ export default testOnlyPlugin(
     };
   },
 );
+
+export default plugin;

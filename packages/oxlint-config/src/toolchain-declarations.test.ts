@@ -6,7 +6,6 @@ import path from "node:path";
 import { stringify } from "yaml";
 
 import { detectToolchainChanges } from "./toolchain-changed";
-import { runSelectedTypecheckParity } from "./typecheck-parity-selection";
 
 const bunAction = "oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6";
 const workflow = (inputs: Record<string, string>) => ({
@@ -313,7 +312,7 @@ const withSnapshots = async (
 };
 
 for (const mutation of mutations)
-  test(`${mutation.name} forces compiler parity from committed declarations`, async () => {
+  test(`${mutation.name} is a compiler change in committed declarations`, async () => {
     await withSnapshots(mutation, async ({ repo, since }) => {
       const unchanged = await detectToolchainChanges({ repo, since: "HEAD" });
       expect(unchanged.status).toBe("compared");
@@ -324,20 +323,6 @@ for (const mutation of mutations)
       expect(
         result.tools.some((tool) => tool === "bun" || tool === "typescript"),
       ).toBe(true);
-      let invocations = 0;
-      const passed = await runSelectedTypecheckParity({
-        repo,
-        since,
-        run: async () => {
-          invocations++;
-          return false;
-        },
-        output: () => {
-          throw new Error("changed compiler declarations must not skip parity");
-        },
-      });
-      expect(invocations).toBe(1);
-      expect(passed).toBe(false);
     });
   }, 15_000);
 
@@ -446,7 +431,7 @@ test("a same-repository checkout path selector is compared, and another reposito
   );
 }, 15_000);
 
-test("unclassifiable changed runtime declarations run parity rather than skipping", async () => {
+test("unclassifiable changed runtime declarations are reported as changed", async () => {
   await withSnapshots(
     {
       name: "dynamic runtime selector",
@@ -467,21 +452,6 @@ test("unclassifiable changed runtime declarations run parity rather than skippin
       expect(
         result.tools.some((tool) => tool === "bun" || tool === "typescript"),
       ).toBe(true);
-      let invocations = 0;
-      await runSelectedTypecheckParity({
-        repo,
-        since,
-        run: async () => {
-          invocations++;
-          return true;
-        },
-        output: () => {
-          throw new Error(
-            "unclassifiable changed declaration must not skip parity",
-          );
-        },
-      });
-      expect(invocations).toBe(1);
     },
   );
 }, 15_000);
@@ -524,7 +494,7 @@ const pnpmLock = (version: string) =>
     snapshots: { "typescript@7.0.2": {}, "typescript@7.0.3": {} },
   });
 
-test("ordinary pnpm protocol resolutions preserve skip selection while compiler lock bumps run parity", async () => {
+test("ordinary pnpm protocol resolutions report no change while compiler lock bumps report TypeScript", async () => {
   await withSnapshots(
     {
       name: "pnpm protocol resolutions",
@@ -547,40 +517,10 @@ test("ordinary pnpm protocol resolutions preserve skip selection while compiler 
       expect(unchanged.status).toBe("compared");
       expect(unchanged.changed).toBe(false);
       expect(unchanged.tools).toEqual([]);
-      let invocations = 0;
-      const output: string[] = [];
-      expect(
-        await runSelectedTypecheckParity({
-          repo,
-          since: "HEAD",
-          run: async () => {
-            invocations++;
-            return true;
-          },
-          output: (message) => output.push(message),
-        }),
-      ).toBe(true);
-      expect(invocations).toBe(0);
-      expect(output).toHaveLength(1);
-      expect(output.at(0)).toContain("parity skipped:");
       const changed = await detectToolchainChanges({ repo, since });
       expect(changed.status).toBe("compared");
       expect(changed.changed).toBe(true);
       expect(changed.tools).toEqual(["typescript"]);
-      expect(
-        await runSelectedTypecheckParity({
-          repo,
-          since,
-          run: async () => {
-            invocations++;
-            return false;
-          },
-          output: () => {
-            throw new Error("resolved compiler changes must not skip parity");
-          },
-        }),
-      ).toBe(false);
-      expect(invocations).toBe(1);
     },
   );
 }, 15_000);
@@ -602,7 +542,7 @@ const runtimeWorkflow = ({
   },
 });
 
-test("Node-only arbitrary selector content changes force CI without requiring compiler parity", async () => {
+test("Node-only arbitrary selector content changes force CI without a compiler change", async () => {
   await withSnapshots(
     {
       name: "Node selector content",
@@ -667,7 +607,7 @@ const nonNodeSelectors = [
 ] as const;
 
 for (const selector of nonNodeSelectors)
-  test(`${selector.name} selector file content changes conservatively force parity`, async () => {
+  test(`${selector.name} selector file content changes conservatively report a shared change`, async () => {
     const automationFile =
       selector.surface === "workflow"
         ? ".github/workflows/check.yml"
@@ -698,21 +638,6 @@ for (const selector of nonNodeSelectors)
         expect(result.status).toBe("compared");
         expect(result.changed).toBe(true);
         expect(result.tools).toContain("shared");
-        let invocations = 0;
-        await runSelectedTypecheckParity({
-          repo,
-          since,
-          run: async () => {
-            invocations++;
-            return true;
-          },
-          output: () => {
-            throw new Error(
-              "unclassified runtime selector changes must not skip parity",
-            );
-          },
-        });
-        expect(invocations).toBe(1);
       },
     );
   }, 15_000);
@@ -743,19 +668,6 @@ for (const reference of [
         const result = await detectToolchainChanges({ repo, since });
         expect(result.status).toBe("unreadable");
         expect(result.changed).toBe(true);
-        let invocations = 0;
-        await runSelectedTypecheckParity({
-          repo,
-          since,
-          run: async () => {
-            invocations++;
-            return true;
-          },
-          output: () => {
-            throw new Error("unreadable selectors must not skip parity");
-          },
-        });
-        expect(invocations).toBe(1);
       },
     );
   }, 15_000);
@@ -897,7 +809,7 @@ const sharedDeclarationMutations = [
 ] as const satisfies readonly DeclarationMutation[];
 
 for (const mutation of sharedDeclarationMutations)
-  test(`${mutation.name} is detected and conservatively runs compiler parity`, async () => {
+  test(`${mutation.name} is detected as a shared change`, async () => {
     await withSnapshots(mutation, async ({ repo, since }) => {
       const unchanged = await detectToolchainChanges({ repo, since: "HEAD" });
       expect(unchanged.status).toBe("compared");
@@ -906,21 +818,6 @@ for (const mutation of sharedDeclarationMutations)
       expect(changed.status).toBe("compared");
       expect(changed.changed).toBe(true);
       expect(changed.tools).toContain("shared");
-      let invocations = 0;
-      await runSelectedTypecheckParity({
-        repo,
-        since,
-        run: async () => {
-          invocations++;
-          return true;
-        },
-        output: () => {
-          throw new Error(
-            "changed runtime or manager declarations must not skip parity",
-          );
-        },
-      });
-      expect(invocations).toBe(1);
     });
   }, 15_000);
 
@@ -1018,23 +915,10 @@ const unresolvedImages = [
 ] as const satisfies readonly DeclarationMutation[];
 
 for (const mutation of unresolvedImages)
-  test(`${mutation.name} fails safe and invokes parity`, async () => {
+  test(`${mutation.name} fails safe as unreadable`, async () => {
     await withSnapshots(mutation, async ({ repo, since }) => {
       const result = await detectToolchainChanges({ repo, since });
       expect(result.status).toBe("unreadable");
       expect(result.changed).toBe(true);
-      let invocations = 0;
-      await runSelectedTypecheckParity({
-        repo,
-        since,
-        run: async () => {
-          invocations++;
-          return true;
-        },
-        output: () => {
-          throw new Error("unresolved runtime images must not skip parity");
-        },
-      });
-      expect(invocations).toBe(1);
     });
   }, 15_000);

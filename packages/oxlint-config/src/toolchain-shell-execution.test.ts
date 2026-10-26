@@ -141,7 +141,7 @@ test("parameter braces stay literal tokens and compiler policy retains raw group
   expect(
     check('echo ${RUSTUP_TOOLCHAIN}; echo "{ cargo +nightly test; }"'),
   ).toEqual([]);
-  const approved = "node ./node_modules/@typescript/native/bin/tsc --noEmit";
+  const approved = "bun check --no-pretty --all --project=tsconfig.json";
   expect(compilerCommandSegments(approved)).toContainEqual(approved.split(" "));
   for (const grouped of [`{ ${approved}; }`, `(${approved})`]) {
     expect(compilerCommandSegments(grouped)).not.toContainEqual(

@@ -1,4 +1,4 @@
-import type { ESTree, Scope } from "@oxlint/plugins";
+import type { ESTree, Plugin, Scope } from "@oxlint/plugins";
 import { eslintCompatPlugin } from "@oxlint/plugins";
 
 import { filenameForContext } from "./utils";
@@ -176,7 +176,7 @@ export const testOnlyPlugin = (
     report: (node: Node) => void,
     getScope: (node: Node) => Scope,
   ) => Record<string, (node: Node) => void>,
-) =>
+): Plugin =>
   eslintCompatPlugin({
     meta: { name },
     rules: {

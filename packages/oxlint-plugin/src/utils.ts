@@ -166,13 +166,17 @@ export const EXPRESSION_WRAPPER_TYPES = [
   "TSSatisfiesExpression",
   "TSTypeAssertion",
   "TSInstantiationExpression",
-] as const satisfies readonly ESTree.Node["type"][];
+] as const;
 
 // Keep the parser's other expression-bearing contexts intact.
 export const unwrapExpression = (node: unknown): AstNode | null => {
   while (isAstNode(node)) {
     const { type } = node;
-    if (!EXPRESSION_WRAPPER_TYPES.some((wrapper) => wrapper === type))
+    if (
+      !(EXPRESSION_WRAPPER_TYPES satisfies readonly ESTree.Node["type"][]).some(
+        (wrapper) => wrapper === type,
+      )
+    )
       return node;
     node = node.expression;
   }
@@ -335,7 +339,7 @@ const bindingFromVariable = (
 export const resolveImportedExpressionForEnforcement = (
   context: ScopeContext,
   node: unknown,
-  seen = new Set<unknown>(),
+  seen: Set<unknown> = new Set(),
 ): ImportedBinding | null => {
   const expression = unwrapExpression(node);
   if (!isAstNode(expression) || seen.has(expression)) {

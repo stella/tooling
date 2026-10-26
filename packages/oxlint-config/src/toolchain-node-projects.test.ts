@@ -78,12 +78,12 @@ test("duplicate lint inventories produce one stable diagnostic per orphan", () =
 }, 15_000);
 
 const require = createRequire(import.meta.url);
+// The consumer installs no TypeScript: tsrs from the shared tooling resolves configs.
 const fixtureManifest = {
   scripts: { lint: "oxlint --config .oxlintrc.json --type-aware scripts" },
   devDependencies: {
     oxlint: "1.87.0",
     "oxlint-tsgolint": "7.0.2003",
-    typescript: "7.0.2",
   },
 };
 const withInventoryFixture = (
@@ -94,7 +94,7 @@ const withInventoryFixture = (
   try {
     mkdirSync(path.join(root, "node_modules"));
     mkdirSync(path.join(root, "scripts"));
-    for (const dependency of ["oxlint", "oxlint-tsgolint", "typescript"])
+    for (const dependency of ["oxlint", "oxlint-tsgolint"])
       symlinkSync(
         path.dirname(require.resolve(`${dependency}/package.json`)),
         path.join(root, "node_modules", dependency),
@@ -192,6 +192,46 @@ test("an unreferenced nondefault config cannot claim ownership but a solution re
     expect(
       checkNodeProjects({ root, manifest: fixtureManifest, trackedFiles }),
     ).toEqual([]);
+  });
+}, 15_000);
+
+test("directory references own their default config, and unreadable configs report the compiler error", () => {
+  withInventoryFixture((root, trackedFiles) => {
+    mkdirSync(path.join(root, "config/tools"), { recursive: true });
+    const source = "scripts/owned.ts";
+    const project = "config/tools/tsconfig.json";
+    writeFileSync(path.join(root, source), "export const value = 1;\n");
+    writeFileSync(
+      path.join(root, project),
+      '{"include":["../../scripts/*.ts"]}',
+    );
+    writeFileSync(
+      path.join(root, "tsconfig.json"),
+      '{"files":[],"references":[{"path":"./config/tools"}]}',
+    );
+    for (const file of [source, project, "tsconfig.json"])
+      trackedFiles.add(file);
+    expect(
+      checkNodeProjects({ root, manifest: fixtureManifest, trackedFiles }),
+    ).toEqual([]);
+
+    writeFileSync(
+      path.join(root, project),
+      '{"extends":"./missing.json","include":["../../scripts/*.ts"]}',
+    );
+    const diagnostics = checkNodeProjects({
+      root,
+      manifest: fixtureManifest,
+      trackedFiles,
+    });
+    expect(diagnostics).toContainEqual(
+      expect.objectContaining({
+        rule: nodeProjectRule,
+        path: project,
+        message: expect.stringContaining("configuration discovery failed: TS"),
+      }),
+    );
+    expect(diagnostics.map(({ path: file }) => file)).toContain(source);
   });
 }, 15_000);
 
@@ -985,9 +1025,18 @@ test("declared inventory runtimes load real configs independently of the checker
       outdir: bundleRoot,
       naming: "checker.mjs",
       target: "node",
+      // tsrs resolves at run time, from the installation the checker runs in.
+      external: ["tsrs", "tsrs/*"],
     });
     expect(build.success).toBe(true);
     withInventoryFixture((root, trackedFiles) => {
+      // The bundle sits outside the package, so tsrs resolves from the
+      // repository: link the package's own installed tsrs.
+      symlinkSync(
+        path.join(import.meta.dir, "../node_modules/tsrs"),
+        path.join(root, "node_modules/tsrs"),
+        "dir",
+      );
       writeFileSync(
         path.join(root, "scripts/owned.mjs"),
         "export const owned = true;\n",
@@ -1036,7 +1085,9 @@ test("declared inventory runtimes load real configs independently of the checker
           const result = spawnSync(
             parent,
             [
-              ...(parent === "bun" ? ["--bun"] : []),
+              // Without --no-install, Bun would satisfy the bundle's missing
+              // tsrs from its global cache instead of the repository.
+              ...(parent === "bun" ? ["--bun", "--no-install"] : []),
               path.join(bundleRoot, "checker.mjs"),
               input,
             ],

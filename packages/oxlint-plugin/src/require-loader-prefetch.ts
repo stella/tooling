@@ -49,7 +49,7 @@
 // bounded/cheap scan this rule relies on; do not write that literal pattern
 // in prose comments inside `-components`/`-hooks`/`-queries` files.
 
-import { eslintCompatPlugin, type Ranged } from "@oxlint/plugins";
+import { eslintCompatPlugin, type Plugin, type Ranged } from "@oxlint/plugins";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
@@ -179,7 +179,7 @@ const suspenseFactoriesInSource = (sourceText: string): Set<string> => {
   return factories;
 };
 
-export default eslintCompatPlugin({
+const plugin: Plugin = eslintCompatPlugin({
   meta: { name: "require-loader-prefetch" },
   rules: {
     "require-loader-prefetch": {
@@ -357,3 +357,5 @@ export default eslintCompatPlugin({
     },
   },
 });
+
+export default plugin;

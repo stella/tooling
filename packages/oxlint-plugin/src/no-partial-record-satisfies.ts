@@ -1,4 +1,4 @@
-import { eslintCompatPlugin } from "@oxlint/plugins";
+import { eslintCompatPlugin, type Plugin } from "@oxlint/plugins";
 // Ban `<object literal> satisfies Partial<Record<Union, T>>` (with or
 // without a leading `as const`).
 //
@@ -90,7 +90,7 @@ const isObjectLiteralExpression = (node) => {
   return false;
 };
 
-export default eslintCompatPlugin({
+const plugin: Plugin = eslintCompatPlugin({
   meta: { name: "no-partial-record-satisfies" },
   rules: {
     "no-partial-record-satisfies": {
@@ -122,3 +122,5 @@ export default eslintCompatPlugin({
     },
   },
 });
+
+export default plugin;

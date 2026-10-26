@@ -8,7 +8,6 @@ import { stringify } from "yaml";
 import { compilerPackages } from "./compiler-packages";
 import { detectToolchainChanges } from "./toolchain-changed";
 import { parseChangedLock } from "./toolchain-changed-locks";
-import { runSelectedTypecheckParity } from "./typecheck-parity-selection";
 
 const integrity = (value: string) =>
   `sha512-${Buffer.alloc(64, value).toString("base64")}`;
@@ -255,7 +254,7 @@ const withCommittedLocks = async ({
 };
 
 for (const source of ["file", "git", "integrity"])
-  test(`committed same-version compiler ${source} identity changes run parity`, async () => {
+  test(`committed same-version compiler ${source} identity changes are TypeScript changes`, async () => {
     const lock = (next: boolean) => {
       if (source === "git")
         return npmLock({
@@ -273,22 +272,11 @@ for (const source of ["file", "git", "integrity"])
         const result = await detectToolchainChanges({ repo, since });
         expect(result.status).toBe("compared");
         expect(result.tools).toContain("typescript");
-        let runs = 0;
-        await runSelectedTypecheckParity({
-          repo,
-          since,
-          run: async () => {
-            runs++;
-            return true;
-          },
-          output: () => {},
-        });
-        expect(runs).toBe(1);
       },
     });
   }, 15_000);
 
-test("identical committed compiler source identity skips parity", async () => {
+test("identical committed compiler source identity reports no change", async () => {
   const lock = npmLock({
     resolved: "file:compiler.tgz",
     integrity: integrity("same"),
@@ -302,22 +290,11 @@ test("identical committed compiler source identity skips parity", async () => {
         changed: false,
         tools: [],
       });
-      let runs = 0;
-      await runSelectedTypecheckParity({
-        repo,
-        since,
-        run: async () => {
-          runs++;
-          return true;
-        },
-        output: () => {},
-      });
-      expect(runs).toBe(0);
     },
   });
 }, 15_000);
 
-test("committed compiler source without byte identity runs parity fail closed", async () => {
+test("committed compiler source without byte identity fails closed as unreadable", async () => {
   await withCommittedLocks({
     before: npmLock({ integrity: integrity("before") }),
     after: npmLock({ resolved: "file:compiler" }),
@@ -326,17 +303,6 @@ test("committed compiler source without byte identity runs parity fail closed", 
         status: "unreadable",
         changed: true,
       });
-      let runs = 0;
-      await runSelectedTypecheckParity({
-        repo,
-        since,
-        run: async () => {
-          runs++;
-          return true;
-        },
-        output: () => {},
-      });
-      expect(runs).toBe(1);
     },
   });
 }, 15_000);
@@ -586,7 +552,7 @@ test("pnpm compiler identity retains every peer and patch snapshot variant", () 
   ).toBe(before.identity);
 }, 15_000);
 
-test("committed pnpm peer snapshot edits run parity with compiler release unchanged", async () => {
+test("committed pnpm peer snapshot edits are TypeScript changes with the compiler release unchanged", async () => {
   await withCommittedLocks({
     file: "pnpm-lock.yaml",
     manager: "pnpm@12.9.1",
@@ -596,17 +562,6 @@ test("committed pnpm peer snapshot edits run parity with compiler release unchan
       const result = await detectToolchainChanges({ repo, since });
       expect(result).toEqual(expect.objectContaining({ status: "compared" }));
       expect(result.tools).toContain("typescript");
-      let runs = 0;
-      await runSelectedTypecheckParity({
-        repo,
-        since,
-        run: async () => {
-          runs++;
-          return true;
-        },
-        output: () => {},
-      });
-      expect(runs).toBe(1);
     },
   });
 }, 15_000);

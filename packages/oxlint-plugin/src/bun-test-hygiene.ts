@@ -40,7 +40,7 @@
 //            `@stll/property-testing/rejection`) for a rejection. Another
 //            framework's `expect` (Playwright) is not considered.
 
-import { eslintCompatPlugin } from "@oxlint/plugins";
+import { eslintCompatPlugin, type Plugin } from "@oxlint/plugins";
 
 import {
   isAstNode,
@@ -447,7 +447,7 @@ const enclosingBlock = (node: AstNode): EnclosingBlock => {
 const mentionsBunTest = (text: string): boolean =>
   text.includes(BUN_TEST_MODULE);
 
-export default eslintCompatPlugin({
+const plugin: Plugin = eslintCompatPlugin({
   meta: { name: "bun-test-hygiene" },
   rules: {
     "no-forced-database-drop": {
@@ -694,3 +694,5 @@ export default eslintCompatPlugin({
     },
   },
 });
+
+export default plugin;
