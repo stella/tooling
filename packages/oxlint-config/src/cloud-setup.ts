@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { valid } from "semver";
 
+import type { ArchivePins } from "./archive-pins";
 import { renderCloudServiceInstall } from "./cloud-setup-install";
 import { renderCloudNetwork } from "./cloud-setup-network";
 import { cloudServices, parseCloudSetup } from "./cloud-setup-schema";
@@ -82,8 +83,8 @@ BUN_CACHE="/var/cache/stll-cloud/bun/$OUTPUT_UID"
 [[ "$(awk 'NF { if (++count > 1 || NF != 1) exit 1; value=$1 } END { if (count != 1) exit 1; print value }' "$REPO_ROOT/.node-version")" == "$NODE_VERSION" ]] || fail 'Node selector changed; regenerate cloud-setup.sh'
 cd -- "$REPO_ROOT"
 case "$(uname -m)" in
-  x86_64) ARCH=amd64; NODE_ARCH=x64; BUN_ARCH=x64 ;;
-  aarch64|arm64) ARCH=arm64; NODE_ARCH=arm64; BUN_ARCH=aarch64 ;;
+  x86_64) ARCH=amd64; NODE_ARCH=x64; BUN_ARCH=x64; NODE_SHA256='@NODE_AMD64_SHA@'; BUN_SHA256='@BUN_AMD64_SHA@' ;;
+  aarch64|arm64) ARCH=arm64; NODE_ARCH=arm64; BUN_ARCH=aarch64; NODE_SHA256='@NODE_ARM64_SHA@'; BUN_SHA256='@BUN_ARM64_SHA@' ;;
   *) fail 'Only amd64 and arm64 are supported' ;;
 esac
 
@@ -177,6 +178,7 @@ install_runtimes() (
   if ! node_ready; then
     node_archive="node-v$NODE_VERSION-linux-$NODE_ARCH.tar.xz"
     download_file "https://nodejs.org/dist/v$NODE_VERSION/$node_archive" "$scratch/$node_archive" 120
+    (cd "$scratch"; printf '%s  %s\n' "$NODE_SHA256" "$node_archive" | sha256sum --strict -c -)
     download_file "https://nodejs.org/dist/v$NODE_VERSION/SHASUMS256.txt" "$scratch/node-sums" 45
     (cd "$scratch"; awk -v name="$node_archive" '$2 == name { print; count++ } END { if (count != 1) exit 1 }' node-sums | sha256sum --strict -c -)
     install -d -m 755 "$NODE_DIR"
@@ -186,6 +188,7 @@ install_runtimes() (
     bun_folder="bun-linux-$BUN_ARCH"
     bun_archive="$bun_folder.zip"
     download_file "https://github.com/oven-sh/bun/releases/download/bun-v$BUN_VERSION/$bun_archive" "$scratch/$bun_archive" 120
+    (cd "$scratch"; printf '%s  %s\n' "$BUN_SHA256" "$bun_archive" | sha256sum --strict -c -)
     download_file "https://github.com/oven-sh/bun/releases/download/bun-v$BUN_VERSION/SHASUMS256.txt" "$scratch/bun-sums" 45
     (cd "$scratch"; awk -v name="$bun_archive" '$2 == name || $2 == "*" name { print $1 "  " name; count++ } END { if (count != 1) exit 1 }' bun-sums | sha256sum --strict -c -)
     unzip -q "$scratch/$bun_archive" -d "$scratch/bun"
@@ -416,6 +419,47 @@ const renderPrepare = (
   ].join("\n");
 };
 
+const runtimeArchiveManifests = {
+  node: (version: string) =>
+    `https://nodejs.org/dist/v${version}/SHASUMS256.txt`,
+  bun: (version: string) =>
+    `https://github.com/oven-sh/bun/releases/download/bun-v${version}/SHASUMS256.txt`,
+} as const;
+
+// Shared pins cover the policy releases; a repository on another accepted
+// release declares that release's pins itself. One source per release.
+const runtimeArchivePins = ({
+  runtime,
+  version,
+  shared,
+  declared,
+}: {
+  runtime: keyof typeof runtimeArchiveManifests;
+  version: string;
+  shared: ArchivePins;
+  declared: ArchivePins | undefined;
+}) => {
+  const key = `cloud.runtimeArchiveSha256.${runtime}`;
+  const sharedPins = shared[version];
+  if (declared !== undefined) {
+    if (sharedPins !== undefined)
+      throw new Error(
+        `the shared policy pins ${runtime} ${version} archives; remove ${key}`,
+      );
+    const pins = declared[version];
+    if (pins === undefined)
+      throw new Error(
+        `${key} pins ${Object.keys(declared).join(", ")}, but the repository selects ${runtime} ${version}; update it with the amd64 and arm64 values from ${runtimeArchiveManifests[runtime](version)}`,
+      );
+    return pins;
+  }
+  if (sharedPins === undefined)
+    throw new Error(
+      `the shared policy has no ${runtime} ${version} archive SHA256 pins; declare ${key} for ${version} with the amd64 and arm64 values from ${runtimeArchiveManifests[runtime](version)}`,
+    );
+  return sharedPins;
+};
+
 export const generateCloudSetup = ({
   policy,
   cloud,
@@ -433,6 +477,21 @@ export const generateCloudSetup = ({
     throw new Error(
       "cloud requires a tracked exact .node-version within the shared Node series",
     );
+  // Callers resolve the repository's Bun (at or above the shared minimum)
+  // into policy.bun before generation.
+  const bunVersion = policy.bun;
+  const nodeArchiveSha256 = runtimeArchivePins({
+    runtime: "node",
+    version: exactNode,
+    shared: policy.nodeArchiveSha256,
+    declared: selected.runtimeArchiveSha256?.node,
+  });
+  const bunArchiveSha256 = runtimeArchivePins({
+    runtime: "bun",
+    version: bunVersion,
+    shared: policy.bunArchiveSha256,
+    declared: selected.runtimeArchiveSha256?.bun,
+  });
   const toolchains = resolveCloudToolchains({
     cloud: selected,
     files,
@@ -450,7 +509,7 @@ export const generateCloudSetup = ({
       renderCloudToolInstall(toolchains) +
         renderCloudShellInstall({
           nodeVersion: exactNode,
-          bunVersion: policy.bun,
+          bunVersion,
           rust: toolchains.rust,
         }),
     ],
@@ -479,8 +538,12 @@ export const generateCloudSetup = ({
         )
         .join("\n"),
     ],
-    ["@BUN@", policy.bun],
+    ["@BUN@", bunVersion],
     ["@NODE@", exactNode],
+    ["@NODE_AMD64_SHA@", nodeArchiveSha256.amd64],
+    ["@NODE_ARM64_SHA@", nodeArchiveSha256.arm64],
+    ["@BUN_AMD64_SHA@", bunArchiveSha256.amd64],
+    ["@BUN_ARM64_SHA@", bunArchiveSha256.arm64],
     [
       "@ENV_ASSIGNMENTS@",
       selected.envFile === undefined

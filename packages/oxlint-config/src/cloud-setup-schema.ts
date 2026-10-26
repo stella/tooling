@@ -1,3 +1,4 @@
+import { type ArchivePins, parseArchiveSha256 } from "./archive-pins";
 import {
   cloudSetupArtifacts,
   type CloudSetupArtifactTool,
@@ -130,6 +131,32 @@ const parseTools = (input: unknown) => {
   return result;
 };
 
+// A repository that selects a Node patch or Bun release the shared policy
+// does not pin records the official archive SHA256 values itself, bound to
+// that exact release.
+const cloudRuntimes = ["node", "bun"] as const;
+const parseRuntimeArchives = (input: unknown) => {
+  if (input === undefined) return undefined;
+  if (
+    !object(input) ||
+    Object.keys(input).some(
+      (key) => !cloudRuntimes.some((runtime) => runtime === key),
+    )
+  )
+    throw new Error("cloud.runtimeArchiveSha256 accepts only node and bun");
+  const result: Partial<Record<(typeof cloudRuntimes)[number], ArchivePins>> =
+    {};
+  for (const runtime of cloudRuntimes) {
+    if (!Object.hasOwn(input, runtime)) continue;
+    const label = `cloud.runtimeArchiveSha256.${runtime}`;
+    const pins = parseArchiveSha256(input[runtime], label);
+    if (Object.keys(pins).length !== 1)
+      throw new Error(`${label} pins exactly one release`);
+    result[runtime] = pins;
+  }
+  return result;
+};
+
 export const cloudInstallCommand = "bun install --frozen-lockfile";
 // Lifecycle scripts (postinstall code generation) can outlast a cloud setup
 // budget; a repository opts out and lets tasks generate what they need.
@@ -209,12 +236,16 @@ export const parseCloudSetup = (input: unknown) => {
       key !== "rust" &&
       key !== "tools" &&
       key !== "prepare" &&
-      key !== "submodules"
+      key !== "submodules" &&
+      key !== "runtimeArchiveSha256"
     )
       throw new Error(`unsupported cloud key: ${key}`);
   const rust = parseRust("rust" in input ? input.rust : undefined);
   const tools = parseTools("tools" in input ? input.tools : undefined);
   const prepare = parsePrepare("prepare" in input ? input.prepare : undefined);
+  const runtimeArchiveSha256 = parseRuntimeArchives(
+    "runtimeArchiveSha256" in input ? input.runtimeArchiveSha256 : undefined,
+  );
   const submodules = "submodules" in input ? input.submodules : false;
   if (typeof submodules !== "boolean")
     throw new Error("cloud.submodules must be a boolean when provided");
@@ -222,6 +253,7 @@ export const parseCloudSetup = (input: unknown) => {
     ...(rust === undefined ? {} : { rust }),
     ...(tools === undefined ? {} : { tools }),
     ...(prepare === undefined ? {} : { prepare }),
+    ...(runtimeArchiveSha256 === undefined ? {} : { runtimeArchiveSha256 }),
   };
   const selected = "services" in input ? input.services : [];
   if (!Array.isArray(selected))
