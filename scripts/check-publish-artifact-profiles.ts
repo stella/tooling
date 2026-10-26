@@ -23,7 +23,7 @@ try {
       private: true,
       type: "module",
       devDependencies: {
-        vite: "8.3.4",
+        vite: "8.3.5",
         "vite-plugin-dts": "5.1.2",
         "unplugin-dts": "1.1.2",
         typescript: "6.0.3",
