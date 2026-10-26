@@ -1,5 +1,11 @@
 # @stll/oxlint-config
 
+## 2.1.1
+
+### Patch Changes
+
+- [#224](https://github.com/stella/tooling/pull/224) [`df525b6`](https://github.com/stella/tooling/commit/df525b6cb63896ece2f6c6ef2b8293200167a1f4) Thanks [@dependabot](https://github.com/apps/dependabot)! - The optional vite peer moves to 8.3.5, and the Vite publish target resolver now supports Vite 8.3.5, the version the declaration-only build helper is built and tested against.
+
 ## 2.1.0
 
 ### Minor Changes
