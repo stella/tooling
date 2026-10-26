@@ -224,6 +224,7 @@ install_runtimes() (
     (cd "$scratch"; awk -v name="$bun_archive" '$2 == name || $2 == "*" name { print $1 "  " name; count++ } END { if (count != 1) exit 1 }' bun-sums | sha256sum --strict -c -)
     unzip -q "$scratch/$bun_archive" -d "$scratch/bun"
     install -d -m 755 "$BUN_DIR"
+    [[ ! -d "$BUN_DIR/bun" ]] || fail 'Install target is a directory; remove it and rerun install:' "$BUN_DIR/bun"
     install -m 755 "$scratch/bun/$bun_folder/bun" "$BUN_DIR/bun"
   fi
   runtime_ready
@@ -420,6 +421,7 @@ esac
     # Launchers persist the system homes in fresh shells without profile sourcing.
     printf '%s\n' '#!/bin/sh' 'export RUSTUP_HOME=/opt/stll-cloud/rustup' 'export CARGO_HOME=/opt/stll-cloud/cargo' 'export RUSTUP_AUTO_INSTALL=0' 'export RUSTUP_TOOLCHAIN=1.99.0' "exec /opt/stll-cloud/cargo/bin/$tool \"\$@\"" > "$scratch/$tool"
     if ! cmp -s "$scratch/$tool" "/usr/local/bin/$tool"; then
+      [[ ! -d "/usr/local/bin/$tool" ]] || fail 'Install target is a directory; remove it and rerun install:' "/usr/local/bin/$tool"
       install -m 755 "$scratch/$tool" "/usr/local/bin/$tool"
     fi
   done

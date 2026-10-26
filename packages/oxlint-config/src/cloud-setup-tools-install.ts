@@ -1,5 +1,6 @@
 import type { getCloudSetupArtifact } from "./cloud-setup-artifacts";
 import { cloudRustComponentBinaries } from "./cloud-setup-schema";
+import { refuseDirectoryTarget } from "./cloud-setup-shell";
 import type { resolveCloudToolchains } from "./cloud-setup-toolchains";
 
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
@@ -94,6 +95,7 @@ install_rust() (
     # Launchers persist the system homes in fresh shells without profile sourcing.
     printf '%s\n' '#!/bin/sh' 'export RUSTUP_HOME=/opt/stll-cloud/rustup' 'export CARGO_HOME=/opt/stll-cloud/cargo' 'export RUSTUP_AUTO_INSTALL=0' 'export RUSTUP_TOOLCHAIN=@RUST@' "exec /opt/stll-cloud/cargo/bin/$tool \"\$@\"" > "$scratch/$tool"
     if ! cmp -s "$scratch/$tool" "/usr/local/bin/$tool"; then
+      ${refuseDirectoryTarget('"/usr/local/bin/$tool"')}
       install -m 755 "$scratch/$tool" "/usr/local/bin/$tool"
     fi
   done
@@ -209,7 +211,7 @@ ${(["amd64", "arm64"] as const)
       `      ${arch})\n${Object.entries(release[arch].binaries)
         .map(
           ([binary, path]) =>
-            `        install -m 755 "$scratch/${path}" ${quote(`${directory}/${binary}`)}`,
+            `        ${refuseDirectoryTarget(quote(`${directory}/${binary}`))}\n        install -m 755 "$scratch/${path}" ${quote(`${directory}/${binary}`)}`,
         )
         .join("\n")}\n        ;;`,
   )

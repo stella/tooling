@@ -6,6 +6,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
@@ -19,10 +20,12 @@ import policyInput from "../toolchain.json";
 import { cloudEnvironmentMarker, generateCloudSetup } from "./cloud-setup";
 import { cloudSetupArtifacts } from "./cloud-setup-artifacts";
 import {
+  cloudArtifactTools,
   cloudInstallCommand,
   cloudServices,
   parseCloudSetup,
 } from "./cloud-setup-schema";
+import { refuseDirectoryTarget } from "./cloud-setup-shell";
 import { parseToolchainPolicy } from "./toolchain-schema";
 
 const policy = parseToolchainPolicy(policyInput);
@@ -1184,3 +1187,80 @@ test.skipIf(Bun.which("timeout") === null)(
   },
   30_000,
 );
+
+test("the directory-target guard stops a real install before it nests the file", () => {
+  const directory = mkdtempSync(join(tmpdir(), "cloud-publish-target-"));
+  try {
+    const source = join(directory, "source");
+    const target = join(directory, "target");
+    writeFileSync(source, "payload\n");
+    mkdirSync(target);
+    const result = Bun.spawnSync(
+      [
+        "bash",
+        "-c",
+        `set -euo pipefail\nfail() { echo "cloud-setup: $*" >&2; exit 1; }\n${refuseDirectoryTarget('"$TARGET"')}\ninstall -m 644 "$SOURCE" "$TARGET"`,
+      ],
+      { env: { ...process.env, SOURCE: source, TARGET: target } },
+    );
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toBe(
+      `cloud-setup: Install target is a directory; remove it and rerun install: ${target}\n`,
+    );
+    expect(readdirSync(target)).toEqual([]);
+
+    rmSync(target, { recursive: true });
+    const published = Bun.spawnSync(
+      [
+        "bash",
+        "-c",
+        `set -euo pipefail\nfail() { exit 1; }\n${refuseDirectoryTarget('"$TARGET"')}\ninstall -m 644 "$SOURCE" "$TARGET"`,
+      ],
+      { env: { ...process.env, SOURCE: source, TARGET: target } },
+    );
+    expect(published.exitCode).toBe(0);
+    expect(readFileSync(target, "utf8")).toBe("payload\n");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("every generated file publish refuses a target that is not a regular file first", () => {
+  const cloud = parseCloudSetup({
+    ...postgresAndValkeyDeclaration,
+    rust: {},
+    tools: Object.fromEntries(
+      cloudArtifactTools
+        .filter((tool) => tool !== "wasm-bindgen-cli")
+        .map((tool) => [tool, cloudSetupArtifacts[tool].version]),
+    ),
+  });
+  if (cloud === undefined) throw new Error("Missing cloud declaration");
+  const generated = generateCloudSetup({
+    policy,
+    cloud,
+    nodeVersion: "26.10.0",
+  });
+  const word = String.raw`"[^"]*"|'[^']*'|[^\s;]+`;
+  const publish = new RegExp(
+    String.raw`\b(?:install -m \d+|cp -p|mv -f --) (?:${word}) (${word})`,
+    "gu",
+  );
+  // The backup target is inside a directory this function just created.
+  const freshTargets = new Set(['"$backup/original"']);
+  const publishes = [...generated.matchAll(publish)];
+  expect(publishes.length).toBeGreaterThanOrEqual(6);
+  for (const match of publishes) {
+    const target = match[1] ?? "";
+    if (freshTargets.has(target)) continue;
+    const guards = [
+      `[[ ! -d ${target} ]]`,
+      `[[ -f ${target}`,
+      `|| -f ${target}`,
+    ];
+    expect(
+      guards.some((guard) => generated.lastIndexOf(guard, match.index) >= 0),
+      `${match[0]} has no earlier directory-target guard`,
+    ).toBe(true);
+  }
+});
