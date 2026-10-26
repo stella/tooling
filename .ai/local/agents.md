@@ -1,16 +1,20 @@
 ## Repository Specifics
 
-This repository publishes Stella shared TypeScript and oxlint configuration packages. Changes here affect many public repositories, so compatibility matters more than local convenience.
+This repository publishes Stella shared TypeScript and oxlint configuration, the shared toolchain policy and its `stll-*` commands, `@stll/oxlint-plugin`, `@stll/time` and `@stll/test-kit`, plus the Rust policy templates and the `stella_source_lint` checker. Changes here affect many public repositories, so compatibility matters more than local convenience.
 
 ### Commands
 
 - `bun install`
 - `bun run lint`
 - `bun run typecheck` (`bun check`)
+- `bun fmt` (`bun fmt --check` in CI)
 - `bun test`
+- `bun run test:rust-lints`
 - `bun run build`
+- `bun run check:toolchain` (reads the built CLI)
 - `bun run publint`
 - `bun run pack:dry-run`
+- `bun run sync-ai` (regenerates `AGENTS.md` and `GEMINI.md`)
 
 ### Working Rules
 

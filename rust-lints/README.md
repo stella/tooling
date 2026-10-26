@@ -13,8 +13,9 @@ cargo stella-lint .
 ```
 
 Installation provides both `cargo-stella-lint` (invoked as `cargo stella-lint`)
-and `stella_source_lint` (invoked directly). To use `cargo ci-stella-lint`, copy
-[the Cargo alias template](../rust/cargo-config.toml) into `.cargo/config.toml`.
+and `stella_source_lint` (invoked directly). `stll-rust-policy` writes the
+`cargo ci-stella-lint` alias from [the Cargo alias template](../rust/cargo-config.toml)
+into `.cargo/config.toml`; see [Rust adoption](../rust/README.md#adoption).
 
 The command recursively checks `.rs` files under its paths (the current directory
 by default). Findings print `file:line:column` diagnostics and exit with status 1.

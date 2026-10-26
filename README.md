@@ -9,18 +9,22 @@ Shared TypeScript, oxlint, and Rust configuration for stella public packages.
 This repo intentionally contains only portable tooling policy:
 
 - `@stll/typescript-config`: strict TypeScript config presets.
-- `@stll/oxlint-config`: general upstream oxlint rules and the shared
-  `stella-lowercase` and `no-raw-colors` JS plugins.
-- `@stll/oxlint-plugin`: portable static-safety rules for unsafe type
-  assertions, incomplete union-keyed records, raw DOM HTML sinks, and
-  route-query waterfalls.
+- `@stll/oxlint-config`: general upstream oxlint rules, the shared
+  `stella-lowercase` and `no-raw-colors` JS plugins, the shared toolchain
+  policy (`toolchain.json`) and the `stll-*` commands that enforce and
+  generate it.
+- `@stll/oxlint-plugin`: portable static-safety rules for `any` casts, unsafe
+  type assertions, incomplete union-keyed records, raw DOM HTML sinks, and
+  route-query waterfalls, plus Bun test hygiene and test-reliability rules.
 - `@stll/time`: named duration constants, calendar-date parsing and
   arithmetic, the calendar day in a time zone, and a side-effect-free
   `Temporal`.
 - `@stll/test-kit`: hermetic test primitives for Bun: a controllable clock,
   event-based waits, per-test temp directories and an outbound network guard.
-- `rust/`: source-of-truth Rust formatting, lint, and Cargo profile templates.
-- `rust-lints/`: Dylint libraries for stella-specific Rust rules.
+- `rust/`: source-of-truth Rust formatting, lint, Cargo alias and profile
+  templates, which `stll-rust-policy` generates into consumers.
+- `rust-lints/`: `stella_source_lint`, a stable-Rust source checker
+  (`cargo stella-lint`, built on `syn`) for stella-specific Rust rules.
 
 Repo-specific stella rules stay in the consuming repo: domain authorization,
 i18n, generated native artifacts, benchmark exceptions, and package-specific
@@ -45,6 +49,9 @@ Schema version 1 contains these fields:
 | `oxlint`, `oxlint-tsgolint`, `@oxlint/plugins`, `@stll/oxlint-plugin`, `lefthook` | Exact dependency and catalog pins. Declared local workspace packages must resolve to the same version.                                                                                                                                                                                                                                                                                |
 | `typescript`                                                                      | The TypeScript release `bun check` implements; a `typescript` peer range must include it. Repositories allow their own TypeScript installs in `stll-toolchain.json` `typescriptAllowlist`.                                                                                                                                                                                            |
 | `node`, `python`, `rust`                                                          | Runtime selectors and version-manager pins. Node selects the policy major (`26.x`); static minor and patch selectors within that major are allowed. A Python minor pin preserves existing patch selectors within that release series; a patch policy requires the exact patch. Rust selects one exact stable release across toolchain files, commands, workflow selectors and images. |
+| `bunArchiveSha256`, `nodeArchiveSha256`                                           | SHA256 of the pinned Bun release and Node patch archives (amd64, arm64) that generated cloud setup verifies.                                                                                                                                                                                                                                                                          |
+| `postgres`, `valkey`, `valkeyArtifacts`                                           | Service pins for generated cloud setup: the PostgreSQL major, and the Valkey release with its per-architecture package URLs and SHA256.                                                                                                                                                                                                                                               |
+| `consumerNode`, `consumerNpm`, `consumerPnpm`, `consumerTypescript`               | Consumer policy that published engines and peers must support, independent of the development toolchain (see [Published package contracts](#published-package-contracts)).                                                                                                                                                                                                            |
 | `actions`                                                                         | Approved action names mapped to full `sha` and `version` comment.                                                                                                                                                                                                                                                                                                                     |
 | `dependabot`                                                                      | Shared schedule, cooldown and groups. Package and action ignores derive from the owned pins. `actionGroups` come first in every GitHub Actions entry, so first-party reusable workflows that move by commit arrive as one update.                                                                                                                                                     |
 | `formatter`                                                                       | `bun fmt` is the only formatter. `style` is the one `[fmt]` style (line width, import groups) every Bun repository's root `bunfig.toml` repeats exactly; `ignorePatterns` lists the generated files every repository leaves to their generators. A repository adds only its own ignore patterns and, where it uses Tailwind, `sortTailwindcss`.                                       |
@@ -175,7 +182,8 @@ rule opt-outs; literal pins and local-action provenance remain enforced.
 The named rules are `bun-pins`, `package-pins`, `typescript-layout`,
 `node-engine`, `node-version`, `python-version`, `rust-version`,
 `runtime-manager`, `runtime-docker`, `runtime-workflow`, `action-pins`, `workflow-trust`,
-`dependabot-policy`, and `cloud-setup-drift`. Non-Rust rule exceptions require a
+`dependabot-policy`, `type-aware-projects`, `formatter-policy`,
+`cloud-setup-drift`, and `quarantine-policy`. Non-Rust rule exceptions require a
 tracked root `stll-toolchain.json` listing the rule and its reason:
 
 ```json
@@ -184,9 +192,9 @@ tracked root `stll-toolchain.json` listing the rule and its reason:
 }
 ```
 
-Each manifest answers for its own TypeScript install: a member that uses a
-listed peer blocker may declare the exact TypeScript 6 compatibility release in
-its dependencies or devDependencies, without a root or workspace counterpart.
+Each workspace answers for its own TypeScript install: it declares one only
+through its repository's `typescriptAllowlist` entry (see
+[TypeScript toolchain](#typescript-toolchain)), with no root counterpart.
 Peer ranges, exact versions included, declare support: a `typescript` range
 must include the policy release. Ranges do not count as installs.
 
@@ -198,8 +206,9 @@ fixtures do not. Package-manager selection follows the nearest declaration or lo
 workspace members share their owner's update entry. Bundler `Gemfile`/`Gemfile.lock`
 and Composer `composer.json`/`composer.lock` declare roots at their own directories.
 
-`rust-version`, `node-engine`, `workflow-trust` and `cloud-setup-drift` are mandatory: opt-outs cannot bypass the
-shared Node support range or generated cloud setup requirements.
+`rust-version`, `node-engine`, `workflow-trust`, `type-aware-projects`,
+`cloud-setup-drift` and `quarantine-policy` are mandatory: opt-outs cannot
+bypass them (Rust uses expiring `rustExceptions` instead).
 
 Unknown rules, empty reasons, duplicate rules, and malformed configurations
 fail. Opt-outs apply repository-wide to the named rule, so keep them narrow.
@@ -447,8 +456,8 @@ checks root membership. Oxlint's
 `--tsconfig` flag changes import resolution; it does not select a type-aware
 ownership project. Only tracked JavaScript and TypeScript files selected by lint
 are checked; lint exclusions stay excluded. An unrelated, unreferenced config
-does not establish ownership. Oxlint supplies its file inventory and the
-TypeScript compiler expands inherited config, JSONC, includes and excludes; this
+does not establish ownership. Oxlint supplies its file inventory and tsrs
+expands inherited config, JSONC, includes and excludes; this
 check does not run lint rules or type checking. Unsupported lint launchers or
 unreadable project configurations produce diagnostics rather than bypassing the
 check. Add the appropriate shared project declaration instead of suppressing the
@@ -524,6 +533,14 @@ export default defineConfig({
 `useSuspenseQuery` in a route to be referenced by that route's `loader`.
 `no-raw-route-query-client` requires route freshness helpers instead of raw
 TanStack Query client calls and keeps pending components synchronous.
+
+Test suites add `bunTestHygieneRules` (no focused, disabled or identically
+titled tests, no `.resolves`/`.rejects` matchers, no forced database drops)
+and `testReliabilityRules` (no wall clock, real timer waits, unseeded
+randomness, real network or checkout writes in tests, and no assertions on
+measured time or timer races) the same way, with
+`bunTestHygienePluginSpecifiers` and `testReliabilityPluginSpecifiers`.
+`@stll/test-kit` provides the replacements those rules point to.
 
 When using `no-unsafe-inner-html`, disable the blanket `react/no-danger` rule.
 Its default `sanitizerPolicy: "allowlist"` permits static HTML and calls whose

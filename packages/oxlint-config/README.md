@@ -292,8 +292,9 @@ fixtures do not. Package-manager selection follows the nearest declaration or lo
 workspace members share their owner's update entry. Bundler `Gemfile`/`Gemfile.lock`
 and Composer `composer.json`/`composer.lock` declare roots at their own directories.
 
-`node-engine`, `workflow-trust` and `cloud-setup-drift` are mandatory: opt-outs cannot bypass the
-shared Node support range or generated cloud setup requirements.
+`rust-version`, `node-engine`, `workflow-trust`, `type-aware-projects`,
+`cloud-setup-drift` and `quarantine-policy` are mandatory: opt-outs cannot
+bypass them (Rust uses expiring `rustExceptions` instead).
 
 Opt-outs apply to the entire repository for that rule. Unknown or duplicate
 rules, empty reasons, and malformed configuration fail validation. See the
