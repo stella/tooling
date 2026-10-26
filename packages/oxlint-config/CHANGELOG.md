@@ -1,5 +1,13 @@
 # @stll/oxlint-config
 
+## 2.1.0
+
+### Minor Changes
+
+- [#175](https://github.com/stella/tooling/pull/175) [`1ef84f7`](https://github.com/stella/tooling/commit/1ef84f70017f2074f7e2b0e35a0e986120237d21) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Cloud setup verifies Node and Bun archives against SHA256 values recorded at generation time. The shared policy records them for its own releases; a repository on another accepted Node patch or a newer Bun records that release's values in `cloud.runtimeArchiveSha256`. Local package archives now download under the network deadline, and their installation, package triggers and maintainer scripts run without one.
+
+- [#163](https://github.com/stella/tooling/pull/163) [`3aec193`](https://github.com/stella/tooling/commit/3aec1937678bc43495bfdac4a336fa1d8de68708) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Add stll-rust-policy to generate Cargo, rustfmt, and Clippy policy with a read-only drift check.
+
 ## 2.0.0
 
 ### Major Changes
