@@ -1,5 +1,6 @@
 import { parse } from "smol-toml";
 
+import type { ExpiryScope } from "./dated-entry-scope";
 import {
   checkQuarantinePolicy,
   isFirstPartyPackageName,
@@ -9,6 +10,7 @@ import {
   synchronizeFirstPartyExcludes,
 } from "./quarantine-policy-core";
 
+export type { ExpiryScope } from "./dated-entry-scope";
 export {
   EXACT_UTC_TIMESTAMP,
   NPM_REGISTRY,
@@ -59,12 +61,14 @@ type RepositoryQuarantineOptions = {
   files: Record<string, string>;
   now?: Date | undefined;
   npmrcPresent?: boolean | undefined;
+  expiry?: ExpiryScope | undefined;
 };
 
 export const checkRepositoryQuarantine = ({
   files,
   now,
   npmrcPresent,
+  expiry,
 }: RepositoryQuarantineOptions) =>
   checkQuarantinePolicy({
     bunfig: files["bunfig.toml"] ?? "",
@@ -73,6 +77,7 @@ export const checkRepositoryQuarantine = ({
     parseToml: parse,
     ...(now === undefined ? {} : { now }),
     ...(npmrcPresent === undefined ? {} : { npmrcPresent }),
+    ...(expiry === undefined ? {} : { expiry }),
   });
 
 export const synchronizeRepositoryQuarantine = ({

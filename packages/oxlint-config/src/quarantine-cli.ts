@@ -2,6 +2,7 @@
 import { lstat, readFile, realpath } from "node:fs/promises";
 import { join } from "node:path";
 
+import { resolveExpiryScope } from "./dated-entry-scope";
 import {
   checkGeneratedOutput,
   generationDiagnostics,
@@ -53,6 +54,7 @@ const main = async () => {
     const result = checkRepositoryQuarantine({
       files,
       npmrcPresent: npmrc !== undefined || trackedFiles.has(".npmrc"),
+      expiry: resolveExpiryScope(root),
     });
     for (const warning of result.warnings)
       process.stderr.write(`warning: ${warning}\n`);
