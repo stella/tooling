@@ -740,19 +740,25 @@ export default {
 };
 ```
 
-This adapter requires consumer-installed `vite-plugin-dts` 5.1.2 and its
-`unplugin-dts` 1.1.2 implementation. Its dependency scope must provide TypeScript
-6.0.3 as `typescript` or the plugin's `@typescript/typescript6` fallback.
-Unsupported versions fail explicitly.
+The helper emits declarations with the tsrs that `@stll/oxlint-config` already
+depends on; the consumer installs neither TypeScript nor a declaration plugin.
+After the bundle is written, it runs `tsrs -p` once on a generated config that
+extends the package `tsconfig.json` with `emitDeclarationOnly`, `outDir` set to
+`build.outDir`, the helper's include/exclude, and `rootDir` set to `entryRoot`
+(or the common directory of the inputs).
+Doc comments are kept. Side-effect imports such as `import "./styles.css"` are
+dropped from the declarations. Type errors are reported as warnings, and
+declarations are still written. Option errors, inputs outside `entryRoot`, and
+`compilerOptions.paths` aliases fail the build, because declarations keep
+import specifiers exactly as written.
 The resolver proves a direct helper import and call in a literal plugin array;
 raw declaration plugins, opaque plugin arrays, and additional emitters fail.
 It reads the config with oxc-parser and ignores TypeScript-only syntax, so a
 TypeScript config needs no compiler; any value import of a raw emitter fails.
-Options are closed and static: include/exclude, entryRoot, pathsToAliases,
-compilerOptions.declarationMap=false, strictOutput=true, and declarationOnly=false. Hooks may
-emit only `.d.ts`, `.d.mts`, `.d.cts`, and their maps. Bundle and on-disk non-declaration
-bytes must remain unchanged across each declaration hook; this is checked during
-the actual build, without a comparison build.
+Options are closed and static: include/exclude, entryRoot, and
+compilerOptions.declarationMap=false. The emit may add or change only `.d.ts`,
+`.d.mts`, `.d.cts`, and their maps. Every other file in the output directory
+must stay byte-identical, and this is checked during the actual build.
 
 Nuxt modules can set both emitted targets without replacing the builder's entries:
 
