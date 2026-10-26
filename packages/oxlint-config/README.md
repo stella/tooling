@@ -1031,16 +1031,31 @@ creation timestamps remain stable across runs; they are not expiries.
 
 Third-party entries require `# quarantine-expires: YYYY-MM-DDTHH:mm:ss.sssZ`.
 `stll-toolchain-check` warns 48 hours before expiry; warnings continue through
-the existing 24-hour removal grace, after which expired entries fail. The
-quarantine rule cannot be opted out. `stll-quarantine --check` is read-only;
+the existing 24-hour removal grace, after which expired entries fail where the
+run can act on them. The clock alone never fails a change that leaves an entry
+untouched:
+
+- `push`, `schedule`, `workflow_dispatch` and other GitHub Actions events, and
+  non-GitHub CI (`CI` set), fail every overdue entry, which prompts the removal
+  PR.
+- `pull_request`, `pull_request_target` and `merge_group` fail an overdue entry
+  only when the change adds it or edits its annotation, compared with the
+  event's base commit; inherited overdue entries warn. While temporary entries
+  exist, these runs need the base commit in the clone (`actions/checkout` with
+  `fetch-depth: 0`) and fail if it is missing.
+- Local runs outside CI warn.
+
+The quarantine rule cannot be opted out. `stll-quarantine --check` is read-only;
 `--prune` removes expired third-party entries without removing first-party ones.
 `--help` lists modes. Linked output files are rejected.
 
 `@stll/oxlint-config/quarantine` exports the Node-compatible repository helpers
 `checkRepositoryQuarantine`, `synchronizeRepositoryQuarantine`, and
 `pruneRepositoryQuarantine`, accepting a tracked `files` snapshot and optional
-`now`. The toolchain API reports advisory expiry messages through `onWarning`;
-its returned diagnostics remain failures. Snapshot readers keep lockfiles
+`now`, plus an optional `expiry` scope (`{ kind: "enforce" }` by default). The
+toolchain API takes the same scope as `quarantineExpiry`, reports advisory
+expiry messages through `onWarning`, and its returned diagnostics remain
+failures. Snapshot readers keep lockfiles
 opaque by default; `{ bunLock: "content" }` explicitly requests the root graph
 when quarantine identity checks need it.
 

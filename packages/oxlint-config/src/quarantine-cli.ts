@@ -7,6 +7,7 @@ import {
   generationDiagnostics,
   writeGeneratedFile,
 } from "./generated-file";
+import { resolveExpiryEnforcement } from "./quarantine-expiry-scope";
 import {
   checkRepositoryQuarantine,
   pruneRepositoryQuarantine,
@@ -53,6 +54,7 @@ const main = async () => {
     const result = checkRepositoryQuarantine({
       files,
       npmrcPresent: npmrc !== undefined || trackedFiles.has(".npmrc"),
+      expiry: resolveExpiryEnforcement(root),
     });
     for (const warning of result.warnings)
       process.stderr.write(`warning: ${warning}\n`);

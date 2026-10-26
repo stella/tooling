@@ -298,6 +298,19 @@ const validNow = (now: Date): number => {
   return now.getTime();
 };
 export type CheckResult = { errors: string[]; warnings: string[] };
+/**
+ * Which overdue temporary excludes fail. The clock alone never fails a change
+ * that leaves an entry untouched: `enforce` fails every overdue entry (default
+ * branch, schedule), `advisory` only warns (local runs), and `changed` fails
+ * entries that are absent or annotated differently at the base revision.
+ */
+export type ExpiryEnforcement =
+  | { kind: "enforce" }
+  | { kind: "advisory" }
+  | {
+      kind: "changed";
+      base: { bunfig: string | undefined } | { unavailable: string };
+    };
 type CheckOptions = {
   bunfig: string;
   lockfile: string | undefined;
@@ -305,6 +318,35 @@ type CheckOptions = {
   npmrcPresent?: boolean;
   now?: Date;
   firstPartyPackages?: FirstPartyPackages;
+  expiry?: ExpiryEnforcement;
+};
+const temporaryKey = (name: string, timestamp: string) =>
+  `${name}\0${timestamp}`;
+/** Temporary excludes the base already declares identically ("all" = advisory). */
+const inheritedTemporaryExcludes = (
+  expiry: ExpiryEnforcement,
+  parseToml: ParseToml,
+): ReadonlySet<string> | "all" => {
+  if (expiry.kind === "advisory") return "all";
+  if (
+    expiry.kind === "enforce" ||
+    !("bunfig" in expiry.base) ||
+    expiry.base.bunfig === undefined
+  )
+    return new Set();
+  const inherited = new Set<string>();
+  try {
+    for (const entry of readSourceArray(expiry.base.bunfig, parseToml)
+      .entries) {
+      const annotation = annotationOf(entry);
+      if (annotation.type === "expires")
+        inherited.add(temporaryKey(entry.name, annotation.timestamp));
+    }
+  } catch {
+    // An unreadable base cannot prove any entry unchanged, so every entry fails.
+    return new Set();
+  }
+  return inherited;
 };
 export const checkQuarantinePolicy = ({
   bunfig,
@@ -313,12 +355,22 @@ export const checkQuarantinePolicy = ({
   npmrcPresent = false,
   now = new Date(),
   firstPartyPackages,
+  expiry = { kind: "enforce" },
 }: CheckOptions): CheckResult => {
   const errors: string[] = [];
   const warnings: string[] = [];
   try {
     const nowMs = validNow(now);
     const { entries } = readSourceArray(bunfig, parseToml);
+    const inherited = inheritedTemporaryExcludes(expiry, parseToml);
+    if (
+      expiry.kind === "changed" &&
+      "unavailable" in expiry.base &&
+      entries.some(({ name }) => !ownPackage(name))
+    )
+      errors.push(
+        `bunfig.toml temporary quarantine excludes need the base revision to scope expiry checks: ${expiry.base.unavailable}`,
+      );
     if (npmrcPresent)
       errors.push(
         "bunfig.toml quarantine policy does not allow a repository .npmrc",
@@ -356,11 +408,19 @@ export const checkQuarantinePolicy = ({
         );
         continue;
       }
-      if (nowMs >= timestampMs + 24 * HOUR_MS)
-        errors.push(
-          `bunfig.toml temporary quarantine exclude "${entry.name}" expired at ${annotation.timestamp} and is still present`,
-        );
-      else if (nowMs >= timestampMs)
+      if (nowMs >= timestampMs + 24 * HOUR_MS) {
+        if (
+          inherited === "all" ||
+          inherited.has(temporaryKey(entry.name, annotation.timestamp))
+        )
+          warnings.push(
+            `bunfig.toml temporary quarantine exclude "${entry.name}" expired at ${annotation.timestamp} and is still present; merge its removal PR (default-branch and scheduled runs fail, as do changes that add or edit it)`,
+          );
+        else
+          errors.push(
+            `bunfig.toml temporary quarantine exclude "${entry.name}" expired at ${annotation.timestamp} and is still present`,
+          );
+      } else if (nowMs >= timestampMs)
         warnings.push(
           `bunfig.toml temporary quarantine exclude "${entry.name}" expired at ${annotation.timestamp}; its removal PR should be merged`,
         );

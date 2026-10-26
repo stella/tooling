@@ -263,7 +263,10 @@ minimumReleaseAgeExcludes = [
 
 `stll-toolchain-check` validates tracked root `bunfig.toml` and warns starting
 48 hours before a temporary exception expires. Expired exceptions warn during
-the existing 24-hour removal grace period, then fail validation. The standalone
+the existing 24-hour removal grace period, then fail validation on default-branch
+pushes, schedules and dispatches. Pull requests and merge groups fail only when
+the change adds or edits the overdue entry (inherited ones warn, and these runs
+need the base commit in the clone); local runs warn. The standalone
 `stll-quarantine --check` command performs the same policy check without writes;
 `--prune` removes expired third-party entries and retains first-party entries.
 Only `--sync` changes the generated first-party set. Unrelated Bun settings and

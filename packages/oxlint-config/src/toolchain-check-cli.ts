@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
 
+import { resolveExpiryEnforcement } from "./quarantine-expiry-scope";
 import { checkToolchain } from "./toolchain-guard";
 import { parseToolchainPolicy } from "./toolchain-schema";
 
@@ -21,6 +22,7 @@ try {
   const diagnostics = checkToolchain({
     root: process.cwd(),
     policy,
+    quarantineExpiry: resolveExpiryEnforcement(process.cwd()),
     onWarning: ({ path, line, rule, message }) =>
       process.stderr.write(`${path}:${line}: [${rule}] warning: ${message}\n`),
     onDelegated: ({ path, line, tool, selector, ref }) =>

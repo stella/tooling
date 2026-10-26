@@ -19,7 +19,10 @@ import {
 } from "./cloud-setup-claude";
 import { parseCloudSetup } from "./cloud-setup-schema";
 import { readGitTrackedOutput } from "./git-tracked-output";
-import { checkRepositoryQuarantine } from "./quarantine-policy";
+import {
+  checkRepositoryQuarantine,
+  type ExpiryEnforcement,
+} from "./quarantine-policy";
 import { repositoryBun } from "./toolchain-bun";
 import {
   checkConsumerChecks,
@@ -244,6 +247,8 @@ type CheckSharedToolchainOptions = {
   onDelegated?: ((report: RuntimeDelegation) => void) | undefined;
   onWarning?: ((report: SharedToolchainDiagnostic) => void) | undefined;
   now?: Date | undefined;
+  /** Defaults to failing every overdue exclude; CLIs derive it from the run context. */
+  quarantineExpiry?: ExpiryEnforcement | undefined;
 };
 
 export const checkToolchain = ({
@@ -252,6 +257,7 @@ export const checkToolchain = ({
   onDelegated,
   onWarning,
   now,
+  quarantineExpiry,
 }: CheckSharedToolchainOptions) => {
   const { files, trackedFiles, diagnostics } = readToolchainInputs(root, {
     bunLock: "content",
@@ -392,6 +398,7 @@ export const checkToolchain = ({
         files,
         now,
         npmrcPresent: trackedFiles.has(".npmrc"),
+        expiry: quarantineExpiry,
       });
       for (const message of result.errors)
         diagnostics.push({
