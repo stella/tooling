@@ -1,8 +1,8 @@
 import { parse } from "smol-toml";
 
+import type { ExpiryScope } from "./dated-entry-scope";
 import {
   checkQuarantinePolicy,
-  type ExpiryEnforcement,
   isFirstPartyPackageName,
   pruneExpiredExcludes,
   readRegistryFirstPartyPackages,
@@ -10,7 +10,7 @@ import {
   synchronizeFirstPartyExcludes,
 } from "./quarantine-policy-core";
 
-export type { ExpiryEnforcement } from "./quarantine-policy-core";
+export type { ExpiryScope } from "./dated-entry-scope";
 export {
   EXACT_UTC_TIMESTAMP,
   NPM_REGISTRY,
@@ -61,7 +61,7 @@ type RepositoryQuarantineOptions = {
   files: Record<string, string>;
   now?: Date | undefined;
   npmrcPresent?: boolean | undefined;
-  expiry?: ExpiryEnforcement | undefined;
+  expiry?: ExpiryScope | undefined;
 };
 
 export const checkRepositoryQuarantine = ({
