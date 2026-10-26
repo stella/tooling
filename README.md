@@ -134,8 +134,8 @@ Rust exceptions use one closed declaration in root `stll-toolchain.json`:
 ```
 
 Replace the example with a verified compatibility constraint and its tracking
-issue. Each exception permits only that exact release and must expire in the
-future. Floating channels, duplicate pins, extra fields and `rust-version`
+issue. Each exception permits only that exact release until its expiry date;
+expired exceptions follow the quarantine expiry scope below. Floating channels, duplicate pins, extra fields and `rust-version`
 opt-outs fail validation. The same exception applies to toolchain files,
 workflow Rust inputs and environments, Cargo/rustup commands and Rust images.
 
@@ -263,7 +263,10 @@ minimumReleaseAgeExcludes = [
 
 `stll-toolchain-check` validates tracked root `bunfig.toml` and warns starting
 48 hours before a temporary exception expires. Expired exceptions warn during
-the existing 24-hour removal grace period, then fail validation. The standalone
+the existing 24-hour removal grace period, then fail validation on default-branch
+pushes, schedules and dispatches. Pull requests and merge groups fail only when
+the change adds or edits the overdue entry (inherited ones warn; a shallow
+checkout fetches just the base commit to decide); local runs warn. The standalone
 `stll-quarantine --check` command performs the same policy check without writes;
 `--prune` removes expired third-party entries and retains first-party entries.
 Only `--sync` changes the generated first-party set. Unrelated Bun settings and
