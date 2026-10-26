@@ -1,127 +1,205 @@
-import { readFileSync, realpathSync } from "node:fs";
+import { execFile } from "node:child_process";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
 import path from "node:path";
+import { parseSync } from "oxc-parser";
 import type { Plugin } from "vite";
 
-import { compilerPackages } from "./compiler-packages";
 import {
-  createDeclarationEmissionLedger,
-  declarationHookParts,
-  guardDeclarationHook,
+  assertDeclarationOnlyOutput,
   type ReviewedViteDtsOptions,
   reviewedViteDtsOptions,
-  reviewedViteDtsVersions,
+  snapshotDeclarationDirectory,
 } from "./publish-build-target-vite-dts";
 
 type DeclarationOnlyDtsOptions = { directory: string } & ReviewedViteDtsOptions;
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** The actual build uses this closed factory and its guarded declaration hooks. */
+/** Side-effect imports name runtime modules (often styles) that declarations cannot resolve. */
+export const withoutSideEffectImports = (file: string, source: string) => {
+  const { program, errors } = parseSync(file, source, {
+    lang: "dts",
+    sourceType: "module",
+  });
+  if (errors.length > 0)
+    throw new Error(
+      `Emitted declaration ${file} does not parse: ${errors[0]?.message ?? ""}`,
+    );
+  let result = source;
+  for (const statement of program.body.toReversed()) {
+    if (
+      statement.type !== "ImportDeclaration" ||
+      statement.importKind === "type" ||
+      statement.specifiers.length > 0
+    )
+      continue;
+    const end = /^\r?\n/.exec(result.slice(statement.end))?.[0].length ?? 0;
+    result =
+      result.slice(0, statement.start) + result.slice(statement.end + end);
+  }
+  return result;
+};
+
+const commonDirectory = (files: readonly string[]) => {
+  const directories = files.map((file) => path.dirname(file).split(path.sep));
+  const first = directories.at(0);
+  if (first === undefined)
+    throw new Error("Declaration emit found no TypeScript inputs");
+  let length = first.length;
+  for (const parts of directories)
+    while (
+      parts.slice(0, length).join(path.sep) !==
+      first.slice(0, length).join(path.sep)
+    )
+      length -= 1;
+  return first.slice(0, length).join(path.sep);
+};
+
+const run = (args: string[], cwd: string) =>
+  new Promise<{ status: number; output: string }>((resolve, reject) => {
+    execFile(
+      process.execPath,
+      [
+        path.join(
+          path.dirname(
+            createRequire(import.meta.url).resolve("tsrs/package.json"),
+          ),
+          "bin",
+          "tsrs",
+        ),
+        ...args,
+      ],
+      { cwd, encoding: "utf8", maxBuffer: 32 * 1024 * 1024, timeout: 300_000 },
+      (error, stdout, stderr) => {
+        const status = error === null ? 0 : error.code;
+        if (typeof status !== "number")
+          reject(error ?? new Error("tsrs failed"));
+        else resolve({ status, output: `${stdout}${stderr}`.trim() });
+      },
+    );
+  });
+
+type EmitDeclarationsOptions = {
+  root: string;
+  output: string;
+  options: ReviewedViteDtsOptions;
+  warn: (message: string) => void;
+};
+/** tsrs emits declarations for the package tsconfig into the build output; nothing else may change. */
+export const emitDeclarations = async ({
+  root,
+  output,
+  options,
+  warn,
+}: EmitDeclarationsOptions) => {
+  const base = path.join(root, "tsconfig.json");
+  if (!existsSync(base))
+    throw new Error("Declaration emit requires the package tsconfig.json");
+  const scratch = mkdtempSync(path.join(tmpdir(), "stll-declarations-"));
+  const config = path.join(scratch, "tsconfig.json");
+  const absolute = (patterns: readonly string[]) =>
+    patterns.map((pattern) => path.join(root, pattern));
+  const compilerOptions: Record<string, unknown> = {
+    noEmit: false,
+    declaration: true,
+    emitDeclarationOnly: true,
+    noEmitOnError: false,
+    noUnusedLocals: false,
+    noUnusedParameters: false,
+    // The bundler resolves style and asset imports; their declarations are dropped below.
+    noUncheckedSideEffectImports: false,
+    outDir: output,
+    declarationDir: null,
+    outFile: null,
+    composite: false,
+    incremental: false,
+    tsBuildInfoFile: null,
+    ...options.compilerOptions,
+  };
+  const project = {
+    extends: base,
+    compilerOptions,
+    ...(options.include === undefined
+      ? {}
+      : { files: [], include: absolute(options.include) }),
+    ...(options.exclude === undefined
+      ? {}
+      : { exclude: absolute(options.exclude) }),
+  };
+  const { API } = await import("tsrs/unstable/async");
+  const api = new API({ cwd: root });
+  try {
+    writeFileSync(config, JSON.stringify(project));
+    const parsed = await api.parseConfigFile(config);
+    const error = parsed.errors.at(0);
+    if (error !== undefined)
+      throw new Error(
+        `Declaration emit cannot read ${base}: TS${error.code} ${error.text}`,
+      );
+    const paths: unknown = parsed.options.paths;
+    if (record(paths) && Object.keys(paths).length > 0)
+      throw new Error(
+        "Declaration emit keeps import specifiers as written; replace compilerOptions.paths aliases with package imports or relative paths",
+      );
+    compilerOptions["rootDir"] =
+      options.entryRoot === undefined
+        ? commonDirectory(
+            parsed.fileNames.filter((file) => !/\.d\.[cm]?ts$/.test(file)),
+          )
+        : path.join(root, options.entryRoot);
+    writeFileSync(config, JSON.stringify(project));
+    const before = snapshotDeclarationDirectory(output);
+    const { status, output: diagnostics } = await run(
+      ["-p", config, "--pretty", "false"],
+      root,
+    );
+    // Exit 2 reports type diagnostics with outputs written. Compiler option and output
+    // errors (TS5xxx), inputs outside rootDir or the project, and no inputs stop the build.
+    if (
+      status !== 0 &&
+      (status !== 2 || /TS(?:5\d{3}|6059|6307|18003):/.test(diagnostics))
+    )
+      throw new Error(`Declaration emit failed:\n${diagnostics}`);
+    if (status === 2) warn(`Declaration emit diagnostics:\n${diagnostics}`);
+    const after = snapshotDeclarationDirectory(output);
+    assertDeclarationOnlyOutput({ before, after });
+    for (const [file, digest] of Object.entries(after)) {
+      if (before[file] === digest || !/\.d\.[cm]?ts$/.test(file)) continue;
+      const target = path.join(output, file);
+      writeFileSync(
+        target,
+        withoutSideEffectImports(file, readFileSync(target, "utf8")),
+      );
+    }
+  } finally {
+    await api.close();
+    rmSync(scratch, { recursive: true, force: true });
+  }
+};
+
+/** The actual build uses this closed factory; tsrs writes only declarations after the bundle. */
 export const declarationOnlyDts = ({
   directory,
   ...options
 }: DeclarationOnlyDtsOptions): Plugin => {
   const root = realpathSync(directory);
-  const require = createRequire(path.join(root, "package.json"));
-  const pluginRequire = createRequire(require.resolve("vite-plugin-dts"));
-  for (const [name, version] of Object.entries(reviewedViteDtsVersions)) {
-    const owner = name === "unplugin-dts" ? pluginRequire : require;
-    const metadata: unknown = JSON.parse(
-      readFileSync(owner.resolve(`${name}/package.json`), "utf8"),
-    );
-    if (!record(metadata) || metadata["version"] !== version)
-      throw new Error(`Declaration-only adapter requires ${name} ${version}`);
-  }
-  const compilerRequire = createRequire(pluginRequire.resolve("unplugin-dts"));
-  const compilerVersion = (name: string) => {
-    try {
-      const metadata: unknown = JSON.parse(
-        readFileSync(compilerRequire.resolve(`${name}/package.json`), "utf8"),
-      );
-      return record(metadata) && typeof metadata["version"] === "string"
-        ? metadata["version"]
-        : undefined;
-    } catch (error) {
-      if (!record(error) || error["code"] !== "MODULE_NOT_FOUND") throw error;
-      return undefined;
-    }
-  };
-  const primaryCompiler = compilerVersion(compilerPackages.typescript);
-  const compatibleCompiler =
-    primaryCompiler === "6.0.3" ||
-    (primaryCompiler?.startsWith("7.") === true &&
-      compilerVersion(compilerPackages.typescriptCompatibility) === "6.0.3");
-  if (!compatibleCompiler)
-    throw new Error(
-      "Declaration-only adapter requires TypeScript 6.0.3 as typescript or the TypeScript 7 @typescript/typescript6 fallback in the declaration plugin's dependency scope",
-    );
-  const loaded: unknown = require("vite-plugin-dts");
-  const factory = record(loaded) ? loaded["default"] : loaded;
-  if (typeof factory !== "function")
-    throw new Error("Installed declaration plugin does not expose its factory");
-  const plugin: unknown = Reflect.apply(factory, undefined, [
-    reviewedViteDtsOptions(options),
-  ]);
-  if (!record(plugin)) throw new Error("Invalid installed declaration plugin");
-  const hookNames = [
-    "config",
-    "configResolved",
-    "buildStart",
-    "transform",
-    "watchChange",
-    "generateBundle",
-    "writeBundle",
-  ] as const;
-  const allowed = new Set<string>([
-    "name",
-    "apply",
-    "enforce",
-    "vite",
-    "rollup",
-    "rolldown",
-    "webpack",
-    "rspack",
-    "esbuild",
-    ...hookNames,
-  ]);
-  for (const key of Reflect.ownKeys(plugin)) {
-    const descriptor = Object.getOwnPropertyDescriptor(plugin, key);
-    if (
-      typeof key !== "string" ||
-      !allowed.has(key) ||
-      !descriptor ||
-      !("value" in descriptor)
-    )
-      throw new Error("Unreviewed installed declaration plugin shape");
-  }
-  if (
-    plugin["name"] !== "unplugin-dts" ||
-    plugin["apply"] !== "build" ||
-    plugin["enforce"] !== "pre"
-  )
-    throw new Error("Unreviewed installed declaration plugin identity");
-  const outputDirectories: string[] = [];
-  // Only the dts producer is confined here; JS emitted by other plugins is out of scope.
-  // Resolve its emitter references at both output hooks, including deferred assets.
-  const ledger = createDeclarationEmissionLedger();
-  const hook = (name: (typeof hookNames)[number]) =>
-    guardDeclarationHook({
-      hook: declarationHookParts(plugin[name]).handler,
-      hookName: name,
-      outputDirectories,
-      ledger,
-    });
-  // The object form's static id filter is kept; its handler stays guarded.
-  const transformFilter = declarationHookParts(plugin["transform"]).filter;
-  const transform = hook("transform");
-  const configResolved = hook("configResolved");
+  const reviewed = reviewedViteDtsOptions(options);
+  let output: string | undefined;
+  let emitted = false;
   return {
     name: "stll:declaration-only-dts",
     apply: "build",
     enforce: "pre",
-    config: hook("config"),
-    async configResolved(config) {
+    configResolved(config) {
       if (
         realpathSync(config.root) !== root ||
         config.build.write === false ||
@@ -130,8 +208,8 @@ export const declarationOnlyDts = ({
         throw new Error(
           "Declaration-only adapter requires a package-local production build",
         );
-      const output = path.resolve(root, config.build.outDir);
-      const relative = path.relative(root, output);
+      const resolved = path.resolve(root, config.build.outDir);
+      const relative = path.relative(root, resolved);
       if (
         relative === "" ||
         relative === ".." ||
@@ -141,12 +219,11 @@ export const declarationOnlyDts = ({
         throw new Error(
           "Declaration output directory must stay within the package",
         );
-      // Check existing ancestor paths before the declaration plugin can write.
-      let ancestor = output;
+      // Check existing ancestor paths before declarations are written.
+      let ancestor = resolved;
       while (ancestor !== root) {
         try {
-          const resolved = realpathSync(ancestor);
-          const within = path.relative(root, resolved);
+          const within = path.relative(root, realpathSync(ancestor));
           if (
             within === ".." ||
             within.startsWith(`..${path.sep}`) ||
@@ -159,27 +236,23 @@ export const declarationOnlyDts = ({
           ancestor = path.dirname(ancestor);
         }
       }
-      outputDirectories.push(output);
-      await configResolved.call(this, config);
-    },
-    buildStart: hook("buildStart"),
-    transform:
-      transformFilter === undefined
-        ? transform
-        : { filter: transformFilter, handler: transform },
-    watchChange: hook("watchChange"),
-    generateBundle: {
-      order: "post",
-      async handler(outputOptions, bundle, isWrite) {
-        await hook("generateBundle").call(this, outputOptions, bundle, isWrite);
-        ledger.audit();
-      },
+      output = resolved;
     },
     writeBundle: {
       order: "post",
-      async handler(outputOptions, bundle) {
-        await hook("writeBundle").call(this, outputOptions, bundle);
-        ledger.audit();
+      sequential: true,
+      async handler() {
+        // Every output format shares one outDir; declarations are emitted once.
+        if (emitted) return;
+        emitted = true;
+        if (output === undefined)
+          throw new Error("Declaration output directory was not resolved");
+        await emitDeclarations({
+          root,
+          output,
+          options: reviewed,
+          warn: (message) => this.warn(message),
+        });
       },
     },
   };
