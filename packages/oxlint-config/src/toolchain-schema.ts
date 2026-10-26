@@ -134,27 +134,6 @@ export const parseToolchainPolicy = (input: unknown) => {
     throw new Error(
       "consumerTypescript must be an exact stable TypeScript 6 release",
     );
-  const compatibility = input["typescript6Compatibility"];
-  if (!record(compatibility))
-    throw new Error("missing TypeScript compatibility policy");
-  const version = string(compatibility, "version");
-  const packageAlias = string(compatibility, "packageAlias");
-  if (valid(version) !== version || !version.startsWith("6."))
-    throw new Error(
-      "TypeScript compatibility must be an exact TypeScript 6 release",
-    );
-  const blockers = compatibility["peerBlockers"];
-  if (
-    !Array.isArray(blockers) ||
-    blockers.length === 0 ||
-    !blockers.every(
-      (blocker: unknown) => typeof blocker === "string" && blocker !== "",
-    )
-  )
-    throw new Error(
-      "TypeScript compatibility must list its peer blockers as nonempty package names",
-    );
-  const peerBlockers: readonly string[] = blockers;
   const actionsInput = input["actions"];
   if (!record(actionsInput) || Object.keys(actionsInput).length === 0)
     throw new Error("missing approved actions");
@@ -233,7 +212,6 @@ export const parseToolchainPolicy = (input: unknown) => {
     rust,
     packages,
     actions,
-    typescript6Compatibility: { version, packageAlias, peerBlockers },
     dependabot: {
       schedule,
       cooldown: { defaultDays },
@@ -246,11 +224,10 @@ export const parseToolchainPolicy = (input: unknown) => {
           // consumerNpm or consumerPnpm change.
           "npm",
           "pnpm",
-          // TypeScript 6 moves only with a reviewed compatibility change;
-          // the native compiler package stays retired.
+          // A repository's TypeScript install moves only with a reviewed
+          // typescriptAllowlist change in stll-toolchain.json.
           "typescript",
           "@typescript/native",
-          packageAlias,
           "bun-types",
         ]),
       ],

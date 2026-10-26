@@ -3,7 +3,12 @@
 import { describe, expect, test } from "bun:test";
 import { stringify } from "yaml";
 
-import { checkPackageFiles, packageRules } from "./toolchain-packages";
+import {
+  checkPackageFiles,
+  packageRules,
+  parseTypescriptAllowlist,
+  type TypescriptAllowlistEntry,
+} from "./toolchain-packages";
 
 const policy = {
   bun: "1.4.3",
@@ -14,15 +19,12 @@ const policy = {
   },
   node: "26.x",
   typescript: "7.0.2",
-  typescript6Compatibility: {
-    version: "6.0.3",
-    packageAlias: "typescript-compat",
-    peerBlockers: ["@astrojs/check", "dependency-cruiser"],
-  },
 } as const;
 const json = (value: unknown) => JSON.stringify(value, null, 2);
-const check = (files: Record<string, string>) =>
-  checkPackageFiles({ files, policy });
+const check = (
+  files: Record<string, string>,
+  typescriptAllowlist: readonly TypescriptAllowlistEntry[] = [],
+) => checkPackageFiles({ files, policy, typescriptAllowlist });
 const manifest = (value: unknown) => check({ "package.json": json(value) });
 
 describe("shared package pins", () => {
@@ -217,11 +219,7 @@ describe("shared package pins", () => {
   });
   test("pnpm default and named catalogs resolve owned tool pins", () => {
     for (const reference of ["catalog:", "catalog:default", "catalog:tools"]) {
-      const pins = {
-        ...policy.packages,
-        "bun-types": policy.bun,
-        typescript: policy.typescript6Compatibility.version,
-      };
+      const pins = { ...policy.packages, "bun-types": policy.bun };
       const workspace = {
         packages: ["packages/*"],
         catalog: pins,
@@ -231,13 +229,9 @@ describe("shared package pins", () => {
         "pnpm-workspace.yaml": stringify(workspace),
         "package.json": json({}),
         "packages/app/package.json": json({
-          devDependencies: {
-            ...Object.fromEntries(
-              Object.keys(pins).map((name) => [name, reference]),
-            ),
-            // The TypeScript 6 install belongs beside its peer blocker.
-            "dependency-cruiser": "17.0.0",
-          },
+          devDependencies: Object.fromEntries(
+            Object.keys(pins).map((name) => [name, reference]),
+          ),
         }),
       };
       expect(check(files)).toEqual([]);
@@ -762,12 +756,26 @@ describe("TypeScript installs", () => {
   const expected = "bun check --no-pretty --all --project=tsconfig.json";
   const layoutRule = ({ rule }: { rule: string }) =>
     rule === "typescript-layout";
-  test("no manifest installs TypeScript 7 or the native compiler", () => {
+  const graphCruiser: TypescriptAllowlistEntry = {
+    workspace: "packages/graph",
+    name: "typescript",
+    spec: "6.0.3",
+    dependency: "dependency-cruiser",
+    reason: "dependency-cruiser parses TypeScript sources with it",
+  };
+  const graphWorkspace = (devDependencies: Record<string, string>) => ({
+    "package.json": json({ workspaces: ["packages/*"] }),
+    "packages/graph/package.json": json({ devDependencies }),
+  });
+  test("no manifest installs any TypeScript without an allowlist entry", () => {
     for (const [name, value] of [
       ["typescript", "7.0.2"],
       ["typescript", "^7.0.2"],
+      ["typescript", "6.0.3"],
+      ["@typescript/native", "7.0.2"],
       ["@typescript/native", "npm:typescript@7.0.2"],
-      ["typescript-compat", "npm:typescript@7.0.2"],
+      ["typescript-compat", "npm:typescript@6.0.3"],
+      ["native-compat", "npm:@typescript/native@7.0.2"],
     ] as const)
       for (const section of [
         "dependencies",
@@ -780,105 +788,237 @@ describe("TypeScript installs", () => {
         expect(diagnostics.map(({ rule }) => rule)).toEqual([
           "typescript-layout",
         ]);
-        // The message names every replacement for the removed install.
+        // The message names every replacement and the entry that would allow it.
         const message = diagnostics.at(0)?.message ?? "";
         for (const replacement of ["bun check", "tsrs", "oxc-parser"])
           expect(message).toContain(replacement);
+        expect(message).toContain(
+          `{"workspace":".","name":${JSON.stringify(name)},"spec":${JSON.stringify(value.startsWith("^") ? "<exact version>" : value)},`,
+        );
       }
     expect(manifest({ devDependencies: {} })).toEqual([]);
   });
-  test("a package-local TypeScript 6 install needs its own peer blocker and no root pair", () => {
-    for (const blocker of policy.typescript6Compatibility.peerBlockers)
-      for (const section of ["dependencies", "devDependencies"])
-        for (const compatibility of [
-          { typescript: "6.0.3" },
-          { "typescript-compat": "npm:typescript@6.0.3" },
-        ])
-          expect(
-            check({
+  test("an allowlist entry admits one install in its own workspace", () => {
+    for (const section of [
+      "dependencies",
+      "devDependencies",
+      "optionalDependencies",
+    ])
+      for (const [name, spec] of [
+        ["typescript", "6.0.3"],
+        ["typescript", "7.0.2"],
+        ["typescript-compat", "npm:typescript@6.0.3"],
+      ] as const)
+        expect(
+          check(
+            {
               "package.json": json({ workspaces: ["packages/*"] }),
               "packages/graph/package.json": json({
-                [section]: { ...compatibility, [blocker]: "1.0.0" },
+                [section]: { [name]: spec, "dependency-cruiser": "17.0.0" },
               }),
-            }),
-          ).toEqual([]);
-    const unblocked = check({
-      "package.json": json({ workspaces: ["packages/*"] }),
+            },
+            [{ ...graphCruiser, name, spec }],
+          ),
+        ).toEqual([]);
+    // The entry belongs to its workspace, not to another manifest.
+    expect(
+      check(
+        {
+          "package.json": json({
+            workspaces: ["packages/*"],
+            devDependencies: { "dependency-cruiser": "17.0.0" },
+          }),
+          "packages/graph/package.json": json({
+            devDependencies: { typescript: "6.0.3" },
+          }),
+        },
+        [{ ...graphCruiser, workspace: "." }],
+      ).map(({ path, message }) => [path, message.split(":")[0]]),
+    ).toEqual([
+      [
+        "packages/graph/package.json",
+        "typescript 6.0.3 in packages/graph/package.json is not allowed",
+      ],
+      [
+        "stll-toolchain.json",
+        "typescriptAllowlist entry typescript 6.0.3 for . is stale",
+      ],
+    ]);
+  });
+  test("an allowed spec must match exactly", () => {
+    for (const [name, value, spec] of [
+      ["typescript", "6.0.2", "6.0.3"],
+      ["typescript", "^6.0.3", "6.0.3"],
+      ["typescript-compat", "npm:typescript@^6.0.3", "npm:typescript@6.0.3"],
+      ["typescript-compat", "npm:typescript@6.0.2", "npm:typescript@6.0.3"],
+    ] as const)
+      expect(
+        check(
+          graphWorkspace({ [name]: value, "dependency-cruiser": "17.0.0" }),
+          [{ ...graphCruiser, name, spec }],
+        ),
+      ).toMatchObject([
+        {
+          rule: "typescript-layout",
+          path: "packages/graph/package.json",
+          message: `${name} in packages/graph/package.json resolves to ${value}, but typescriptAllowlist in stll-toolchain.json allows ${spec} for dependency-cruiser; declare ${spec} or update the entry's spec`,
+        },
+      ]);
+  });
+  test("stale entries report on stll-toolchain.json when it is tracked", () => {
+    const configuration = json({ typescriptAllowlist: [graphCruiser] });
+    expect(
+      check(
+        {
+          ...graphWorkspace({ typescript: "6.0.3" }),
+          "stll-toolchain.json": configuration,
+        },
+        [graphCruiser],
+      ),
+    ).toMatchObject([
+      {
+        rule: "typescript-layout",
+        path: "stll-toolchain.json",
+        line: 4,
+        message: expect.stringContaining(
+          "packages/graph/package.json no longer depends on dependency-cruiser",
+        ),
+      },
+    ]);
+    expect(
+      check(graphWorkspace({ "dependency-cruiser": "17.0.0" }), [graphCruiser]),
+    ).toMatchObject([
+      {
+        path: "stll-toolchain.json",
+        line: 1,
+        message: expect.stringContaining("no longer declares typescript"),
+      },
+    ]);
+  });
+  test("allowlist entries are exact, scoped and unique", () => {
+    expect(parseTypescriptAllowlist(undefined)).toEqual([]);
+    expect(parseTypescriptAllowlist([graphCruiser])).toEqual([graphCruiser]);
+    expect(
+      parseTypescriptAllowlist([
+        { ...graphCruiser, name: "ts6", spec: "npm:typescript@6.0.3" },
+        {
+          ...graphCruiser,
+          workspace: ".",
+          name: "@typescript/native",
+          spec: "7.0.2",
+        },
+      ]),
+    ).toHaveLength(2);
+    for (const [entry, message] of [
+      [{ ...graphCruiser, spec: "^6.0.3" }, "exact spec"],
+      [{ ...graphCruiser, spec: "catalog:ts6" }, "exact spec"],
+      [{ ...graphCruiser, spec: "npm:typescript@^6.0.3" }, "exact spec"],
+      [{ ...graphCruiser, name: "ts6" }, "alias"],
+      [{ ...graphCruiser, workspace: "./packages/graph" }, "workspace"],
+      [{ ...graphCruiser, workspace: "packages/graph/" }, "workspace"],
+      [{ ...graphCruiser, workspace: "../graph" }, "workspace"],
+      [{ ...graphCruiser, workspace: "/packages/graph" }, "workspace"],
+      [{ ...graphCruiser, workspace: "" }, "nonempty strings"],
+      [{ ...graphCruiser, reason: " " }, "nonempty strings"],
+      [{ ...graphCruiser, extra: "x" }, "nonempty strings"],
+      [{ ...graphCruiser, dependency: "typescript" }, "dependency"],
+    ] as const)
+      expect(() => parseTypescriptAllowlist([entry])).toThrow(message);
+    expect(() =>
+      parseTypescriptAllowlist([graphCruiser, graphCruiser]),
+    ).toThrow("more than once");
+    expect(() => parseTypescriptAllowlist(graphCruiser)).toThrow(
+      "must be an array",
+    );
+  });
+  test("catalogs hold TypeScript only for an allowed install at its spec", () => {
+    const files = (
+      catalog: Record<string, string>,
+      reference = "catalog:",
+    ) => ({
+      "package.json": json({
+        workspaces: { packages: ["packages/*"], catalog },
+      }),
       "packages/graph/package.json": json({
-        devDependencies: { typescript: "6.0.3" },
+        devDependencies: {
+          typescript: reference,
+          "dependency-cruiser": "17.0.0",
+        },
       }),
     });
-    expect(unblocked).toMatchObject([
-      { rule: "typescript-layout", path: "packages/graph/package.json" },
-    ]);
-    expect(unblocked.at(0)?.message).toContain("dependency-cruiser");
-    // The blocker belongs to the installing package, not to another manifest.
+    expect(check(files({ typescript: "6.0.3" }), [graphCruiser])).toEqual([]);
+    // An unreferenced catalog entry serves no install.
     expect(
       check({
         "package.json": json({
-          workspaces: ["packages/*"],
-          devDependencies: { "dependency-cruiser": "17.0.0" },
-        }),
-        "packages/graph/package.json": json({
-          devDependencies: { typescript: "6.0.3" },
+          workspaces: { catalogs: { ts7: { typescript: "7.0.2" } } },
         }),
       }),
     ).toMatchObject([
-      { rule: "typescript-layout", path: "packages/graph/package.json" },
+      {
+        rule: "typescript-layout",
+        path: "package.json",
+        message: expect.stringContaining("serves no allowed install"),
+      },
     ]);
-  });
-  test("TypeScript 6 compatibility specifiers are exact", () => {
-    type CompatibilityName = "typescript" | "typescript-compat";
-    const inexact: readonly (readonly [CompatibilityName, string])[] = [
-      ["typescript", "6.0.2"],
-      ["typescript", "^6.0.3"],
-      ["typescript-compat", "6.0.3"],
-      ["typescript-compat", "npm:typescript@^6.0.3"],
-      ["typescript-compat", "npm:other@6.0.3"],
-    ];
-    for (const [name, value] of inexact)
-      expect(
-        manifest({
-          devDependencies: { [name]: value, "dependency-cruiser": "17.0.0" },
-        }),
-      ).toMatchObject([{ rule: "typescript-layout" }]);
-  });
-  test("catalogs and resolutions follow the same install rule", () => {
-    const blocker = { "dependency-cruiser": "17.0.0" };
+    // A drifted catalog fails at the catalog and at the install.
     expect(
-      check({
-        "package.json": json({
-          workspaces: { catalog: { typescript: "6.0.3" } },
-        }),
-        "app/package.json": json({
-          devDependencies: { typescript: "catalog:", ...blocker },
-        }),
+      check(files({ typescript: "6.0.2" }), [graphCruiser]).map(
+        ({ path }) => path,
+      ),
+    ).toEqual(["package.json", "packages/graph/package.json"]);
+    // pnpm catalogs follow the same rule.
+    const pnpm = {
+      "pnpm-workspace.yaml": stringify({
+        packages: ["packages/*"],
+        catalogs: { ts6: { typescript: "6.0.3" } },
       }),
-    ).toEqual([]);
+      "package.json": json({}),
+      "packages/graph/package.json": json({
+        devDependencies: {
+          typescript: "catalog:ts6",
+          "dependency-cruiser": "17.0.0",
+        },
+      }),
+    };
+    expect(check(pnpm, [graphCruiser])).toEqual([]);
     expect(
-      check({
-        "package.json": json({
-          workspaces: { catalog: { typescript: "7.0.2" } },
-        }),
-      }),
-    ).toMatchObject([{ rule: "typescript-layout" }]);
+      check(pnpm)
+        .map(({ path }) => path)
+        .sort(),
+    ).toEqual(["packages/graph/package.json", "pnpm-workspace.yaml"]);
+  });
+  test("overrides and resolutions never declare TypeScript", () => {
     for (const field of ["overrides", "resolutions", "pnpm"])
-      for (const [replacement, valid] of [
-        ["6.0.3", true],
-        ["7.0.2", false],
-        ["npm:typescript@7.0.2", false],
+      for (const [selector, replacement] of [
+        ["parent>typescript", "6.0.3"],
+        ["parent>typescript", "7.0.2"],
+        ["typescript", "npm:typescript@7.0.2"],
+        ["@typescript/native", "npm:typescript@7.0.2"],
+        ["some-tool", "npm:typescript@7.0.2"],
       ] as const) {
-        const entries = { "parent>typescript": replacement };
-        const diagnostics = manifest({
-          devDependencies: blocker,
-          [field]: field === "pnpm" ? { overrides: entries } : entries,
-        });
-        if (valid) expect(diagnostics).toEqual([]);
-        else expect(diagnostics).toMatchObject([{ rule: "typescript-layout" }]);
+        const entries = { [selector]: replacement };
+        const diagnostics = check(
+          {
+            "package.json": json({
+              devDependencies: {
+                typescript: "6.0.3",
+                "dependency-cruiser": "17.0.0",
+              },
+              [field]: field === "pnpm" ? { overrides: entries } : entries,
+            }),
+          },
+          [{ ...graphCruiser, workspace: "." }],
+        );
+        expect(diagnostics).toMatchObject([
+          {
+            rule: "typescript-layout",
+            message: expect.stringContaining(
+              "must not be overridden or resolved",
+            ),
+          },
+        ]);
       }
-    expect(
-      manifest({ overrides: { "@typescript/native": "npm:typescript@7.0.2" } }),
-    ).toMatchObject([{ rule: "typescript-layout" }]);
   });
   test("peer ranges declare support without installing a compiler", () => {
     for (const range of [">=6.0.3 <8", "^7.0.0", "*", "7.0.2"])
@@ -892,28 +1032,27 @@ describe("TypeScript installs", () => {
           message: `typescript peer support range must include 7.0.2, found ${range}`,
         },
       ]);
-    expect(
-      manifest({ peerDependencies: { "typescript-compat": "6.0.3" } }),
-    ).toEqual([]);
-    expect(
-      manifest({ peerDependencies: { "typescript-compat": "7.0.2" } }),
-    ).toMatchObject([
-      {
-        rule: "typescript-layout",
-        message:
-          "typescript-compat peer support range must include 6.0.3, found 7.0.2",
-      },
-    ]);
-    expect(
-      manifest({ peerDependencies: { "typescript-compat": "^6.0.0" } }),
-    ).toEqual([]);
-    expect(
-      manifest({ peerDependencies: { "@typescript/native": "^7.0.0" } }),
-    ).toMatchObject([{ rule: "typescript-layout" }]);
+    for (const peer of [
+      { "@typescript/native": "^7.0.0" },
+      { typescript: "npm:typescript@7.0.2" },
+      { "typescript-compat": "npm:typescript@6.0.3" },
+    ])
+      expect(manifest({ peerDependencies: peer })).toMatchObject([
+        { rule: "typescript-layout" },
+      ]);
   });
   test("typecheck scripts run bun check, with or without a TypeScript install", () => {
+    const allowed = [{ ...graphCruiser, workspace: "." }];
+    const withScripts = (
+      dependencies: Record<string, string>,
+      typecheck: string,
+    ) =>
+      check(
+        { "package.json": json({ dependencies, scripts: { typecheck } }) },
+        allowed,
+      ).filter(({ path }) => path === "package.json");
     for (const dependencies of [
-      {},
+      { "dependency-cruiser": "17.0.0" },
       { typescript: "6.0.3", "dependency-cruiser": "17.0.0" },
     ]) {
       for (const typecheck of [
@@ -923,7 +1062,7 @@ describe("TypeScript installs", () => {
         "bun --filter app typecheck",
         "bun scripts/typecheck.ts",
       ])
-        expect(manifest({ dependencies, scripts: { typecheck } })).toEqual([]);
+        expect(withScripts(dependencies, typecheck)).toEqual([]);
       for (const typecheck of [
         "tsc --noEmit",
         "tsgo --noEmit",
@@ -934,9 +1073,7 @@ describe("TypeScript installs", () => {
         `${expected} && tsc --noEmit`,
         `tsc --noEmit || ${expected}`,
       ])
-        expect(
-          manifest({ dependencies, scripts: { typecheck } }),
-        ).toMatchObject([
+        expect(withScripts(dependencies, typecheck)).toMatchObject([
           {
             rule: "typescript-layout",
             path: "package.json",
@@ -1167,6 +1304,7 @@ test("node engine ranges must contain the entire selected major series", () => {
     checkPackageFiles({
       files: { "package.json": json({ engines: { node } }) },
       policy: selectedPolicy,
+      typescriptAllowlist: [],
     });
   for (const range of [
     "26",
@@ -1196,6 +1334,7 @@ test("node engine ranges must contain the entire selected major series", () => {
     checkPackageFiles({
       files: { "package.json": json({}) },
       policy: selectedPolicy,
+      typescriptAllowlist: [],
     }),
   ).toEqual([]);
 });

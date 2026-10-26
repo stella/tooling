@@ -44,7 +44,11 @@ import {
 import { checkFormatter, formatterRule } from "./toolchain-formatter";
 import { toolchainInputKind } from "./toolchain-inputs";
 import { checkNodeProjects, nodeProjectRule } from "./toolchain-node-projects";
-import { checkPackageFiles, packageRules } from "./toolchain-packages";
+import {
+  checkPackageFiles,
+  packageRules,
+  parseTypescriptAllowlist,
+} from "./toolchain-packages";
 import {
   checkRuntimeFile,
   type RuntimeDelegation,
@@ -93,12 +97,13 @@ export const parseToolchainConfiguration = (input: unknown) => {
         key !== "dynamicSelectors" &&
         key !== "consumerChecks" &&
         key !== "rustExceptions" &&
-        key !== "dependabotIgnores",
+        key !== "dependabotIgnores" &&
+        key !== "typescriptAllowlist",
     ) ||
     (input["optOuts"] !== undefined && !array(input["optOuts"]))
   )
     throw new Error(
-      "stll-toolchain.json accepts only optOuts, cloud, engineFloors, dynamicSelectors, consumerChecks, rustExceptions and dependabotIgnores declarations",
+      "stll-toolchain.json accepts only optOuts, cloud, engineFloors, dynamicSelectors, consumerChecks, rustExceptions, dependabotIgnores and typescriptAllowlist declarations",
     );
   const disabled = new Set<string>();
   const optOuts = input["optOuts"] ?? [];
@@ -150,6 +155,7 @@ export const parseToolchainConfiguration = (input: unknown) => {
     dynamicSelectors: parseDynamicSelectors(input["dynamicSelectors"]),
     consumerChecks: parseConsumerChecks(input["consumerChecks"]),
     dependabotIgnores: parseDependabotIgnores(input["dependabotIgnores"]),
+    typescriptAllowlist: parseTypescriptAllowlist(input["typescriptAllowlist"]),
   };
 };
 
@@ -389,7 +395,13 @@ export const checkToolchain = ({
       policy,
     }),
   );
-  diagnostics.push(...checkPackageFiles({ files, policy }));
+  diagnostics.push(
+    ...checkPackageFiles({
+      files,
+      policy,
+      typescriptAllowlist: configuration.typescriptAllowlist,
+    }),
+  );
   const usesBun = Object.entries(files).some(([file, text]) => {
     if (path.posix.basename(file) === "bun.lock") return true;
     if (path.posix.basename(file) !== "package.json") return false;

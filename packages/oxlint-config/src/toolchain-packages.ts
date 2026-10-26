@@ -1,6 +1,6 @@
 import path from "node:path";
 import picomatch from "picomatch";
-import { satisfies, validRange } from "semver";
+import { satisfies, valid, validRange } from "semver";
 import { isNode, LineCounter, parseDocument } from "yaml";
 
 import { nodeSupportRangeMatches } from "./toolchain-node";
@@ -17,19 +17,23 @@ type PackagePolicy = {
   bun: string;
   packages: Record<string, string>;
   typescript: string;
-  typescript6Compatibility: {
-    version: string;
-    packageAlias: string;
-    peerBlockers: readonly string[];
-  };
   node: string;
 };
 
-/** Native compiler packages that `bun check` replaces; no manifest installs them. */
-const retiredCompilerPackages = ["@typescript/native"] as const;
+/** Compiler packages `bun check` replaces; an install needs a repository allowlist entry. */
+const typescriptPackages: ReadonlySet<string> = new Set([
+  "typescript",
+  "@typescript/native",
+]);
 const typecheckCommand = "bun check";
 const typescriptGuidance =
   "type check with `bun check --no-pretty --all --project=<tsconfig>`, use tsrs for programs and type checkers, and oxc-parser for syntax-only reads";
+const installSections = [
+  "dependencies",
+  "devDependencies",
+  "optionalDependencies",
+] as const;
+const allowlistFile = "stll-toolchain.json";
 
 type Diagnostic = {
   rule: (typeof packageRules)[number];
@@ -40,6 +44,109 @@ type Diagnostic = {
 
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** `npm:typescript@7.0.2` installs a compiler under another name; returns its version. */
+const typescriptAliasVersion = (spec: unknown) => {
+  if (typeof spec !== "string") return undefined;
+  const match = /^npm:(?:typescript|@typescript\/native)(?:@(.*))?$/.exec(spec);
+  return match === null ? undefined : (match[1] ?? "");
+};
+const exactTypescriptSpec = (spec: unknown): spec is string => {
+  if (typeof spec !== "string") return false;
+  const version = typescriptAliasVersion(spec) ?? spec;
+  return valid(version) === version;
+};
+const isTypescriptInstall = (name: string, value: unknown) =>
+  typescriptPackages.has(name) || typescriptAliasVersion(value) !== undefined;
+
+/** One repository-declared TypeScript install: where, what, and which dependency needs it. */
+export type TypescriptAllowlistEntry = {
+  workspace: string;
+  name: string;
+  spec: string;
+  dependency: string;
+  reason: string;
+};
+
+const allowlistKeys = [
+  "workspace",
+  "name",
+  "spec",
+  "dependency",
+  "reason",
+] as const;
+const allowlistFormat =
+  '{"workspace": "<package directory or .>", "name": "typescript", "spec": "<exact version>", "dependency": "<package that needs it>", "reason": "<why>"}';
+const workspaceManifest = (workspace: string) =>
+  workspace === "." ? "package.json" : `${workspace}/package.json`;
+
+/** Each repository declares its own TypeScript installs; there is no shared list. */
+export const parseTypescriptAllowlist = (
+  input: unknown,
+): TypescriptAllowlistEntry[] => {
+  if (input === undefined) return [];
+  if (!Array.isArray(input))
+    throw new Error(
+      `typescriptAllowlist must be an array of entries like ${allowlistFormat}`,
+    );
+  const seen = new Set<string>();
+  return input.map((entry: unknown) => {
+    const shown = JSON.stringify(entry);
+    const text = (key: (typeof allowlistKeys)[number]) => {
+      const value = record(entry) ? entry[key] : undefined;
+      return typeof value === "string" && value.trim() !== ""
+        ? value
+        : undefined;
+    };
+    const workspace = text("workspace");
+    const name = text("name");
+    const spec = text("spec");
+    const dependency = text("dependency");
+    const reason = text("reason");
+    if (
+      !record(entry) ||
+      Object.keys(entry).length !== allowlistKeys.length ||
+      workspace === undefined ||
+      name === undefined ||
+      spec === undefined ||
+      dependency === undefined ||
+      reason === undefined
+    )
+      throw new Error(
+        `typescriptAllowlist entry ${shown} must have exactly workspace, name, spec, dependency and reason as nonempty strings: ${allowlistFormat}`,
+      );
+    if (
+      workspace !== "." &&
+      (path.posix.normalize(workspace) !== workspace ||
+        workspace.startsWith("/") ||
+        workspace.endsWith("/") ||
+        workspace === ".." ||
+        workspace.startsWith("../"))
+    )
+      throw new Error(
+        `typescriptAllowlist entry ${shown}: workspace must be "." for the root or a normalized relative package directory such as "apps/web"`,
+      );
+    if (!exactTypescriptSpec(spec))
+      throw new Error(
+        `typescriptAllowlist entry ${shown}: spec must be the exact spec the manifest resolves to, such as "6.0.3" or "npm:typescript@6.0.3", not a range or catalog reference`,
+      );
+    if (!isTypescriptInstall(name, spec))
+      throw new Error(
+        `typescriptAllowlist entry ${shown}: name must be typescript or @typescript/native, or an alias whose spec is npm:typescript@<version> or npm:@typescript/native@<version>`,
+      );
+    if (typescriptPackages.has(dependency) || dependency === name)
+      throw new Error(
+        `typescriptAllowlist entry ${shown}: dependency must name the package in that workspace that needs ${name}, not a TypeScript package`,
+      );
+    const key = `${workspace}\0${name}`;
+    if (seen.has(key))
+      throw new Error(
+        `typescriptAllowlist declares ${name} for ${workspace} more than once; keep one entry`,
+      );
+    seen.add(key);
+    return { workspace, name, spec, dependency, reason };
+  });
+};
 
 // Inspect explicit substitution bodies without evaluating shell expressions.
 const shellSubstitutions = (command: string) => {
@@ -658,6 +765,8 @@ const invokesCompiler = (words: string[]) => {
 type CheckPackageFilesOptions = {
   files: Record<string, string>;
   policy: PackagePolicy;
+  /** The repository's own TypeScript installs from `stll-toolchain.json`. */
+  typescriptAllowlist: readonly TypescriptAllowlistEntry[];
 };
 
 type AddDiagnosticOptions = {
@@ -672,6 +781,7 @@ type AddDiagnosticOptions = {
 export const checkPackageFiles = ({
   files,
   policy,
+  typescriptAllowlist,
 }: CheckPackageFilesOptions) => {
   const sources = new Map(Object.entries(files));
   const diagnostics: Diagnostic[] = [];
@@ -831,16 +941,22 @@ export const checkPackageFiles = ({
       directory = path.posix.dirname(directory);
     }
   };
-  const resolve = (file: string, name: string, value: unknown): unknown => {
+  // `catalogs` lists every catalog the reference passed through.
+  const resolveThrough = (file: string, name: string, value: unknown) => {
     const visited = new Set<string>();
+    const catalogs: Record<string, unknown>[] = [];
     while (typeof value === "string" && value.startsWith("catalog:")) {
-      if (visited.has(value)) return undefined;
+      if (visited.has(value)) return { value: undefined, catalogs };
       visited.add(value);
       const catalog = catalogFor(file, value.slice("catalog:".length));
-      value = record(catalog) ? catalog[name] : undefined;
+      if (!record(catalog)) return { value: undefined, catalogs };
+      catalogs.push(catalog);
+      value = catalog[name];
     }
-    return value;
+    return { value, catalogs };
   };
+  const resolve = (file: string, name: string, value: unknown): unknown =>
+    resolveThrough(file, name, value).value;
   const workspaceOwnerFor = (file: string) => {
     const pnpm = pnpmWorkspaceFor(file);
     if (pnpm !== undefined)
@@ -902,37 +1018,88 @@ export const checkPackageFiles = ({
       ? "matched"
       : "mismatch";
   };
-  const compatibility = policy.typescript6Compatibility;
-  // TypeScript 6 stays installable only for peer blockers; nothing else is.
-  const compatibilitySpecifiers = new Map<string, string>([
-    ["typescript", compatibility.version],
-    [compatibility.packageAlias, `npm:typescript@${compatibility.version}`],
-  ]);
-  const typescriptNames = new Set<string>([
-    ...compatibilitySpecifiers.keys(),
-    ...retiredCompilerPackages,
-  ]);
-  // Peer ranges, exact versions included, state support: `typescript` must
-  // cover the checker's release, the alias its TypeScript 6 release; retired
-  // packages have none.
-  const peerReleases = new Map<string, string>([
-    ["typescript", policy.typescript],
-    [compatibility.packageAlias, compatibility.version],
-  ]);
-  const peerBlockerList = compatibility.peerBlockers.join(", ");
-  const typescriptMessage = (name: string, value: unknown) => {
-    const allowed = compatibilitySpecifiers.get(name);
-    return allowed === undefined
-      ? `${name} is not needed: ${typescriptGuidance}`
-      : `${name} ${String(value)} is not needed: ${typescriptGuidance}; only a package that uses a TypeScript 6 peer blocker (${peerBlockerList}) declares ${name} ${allowed}`;
+  // TypeScript installs exist only where the repository allowlists them.
+  const allowed = new Map(
+    typescriptAllowlist.map((entry) => [
+      `${workspaceManifest(entry.workspace)}\0${entry.name}`,
+      entry,
+    ]),
+  );
+  // A catalog may hold a TypeScript entry only for an allowed install that
+  // resolves through it to the allowed spec.
+  const allowedCatalogEntries = new Map<Record<string, unknown>, Set<string>>();
+  for (const entry of typescriptAllowlist) {
+    const file = workspaceManifest(entry.workspace);
+    const json = manifests.get(file);
+    if (json === undefined) continue;
+    for (const section of installSections) {
+      const entries = json[section];
+      if (!record(entries) || !Object.hasOwn(entries, entry.name)) continue;
+      const { value, catalogs } = resolveThrough(
+        file,
+        entry.name,
+        entries[entry.name],
+      );
+      if (value !== entry.spec) continue;
+      for (const catalog of catalogs) {
+        const names = allowedCatalogEntries.get(catalog) ?? new Set<string>();
+        names.add(entry.name);
+        allowedCatalogEntries.set(catalog, names);
+      }
+    }
+  }
+  const shownSpec = (raw: unknown, value: unknown) => {
+    if (typeof value !== "string") return `${String(raw)} (unresolved)`;
+    return raw === value ? value : `${value} (from ${String(raw)})`;
+  };
+  const typescriptMessage = (name: string, value: unknown) =>
+    `${name} ${String(value)} is not needed: ${typescriptGuidance}`;
+  type EntryScope = "install" | "catalog" | "peer" | "resolution";
+  const typescriptEntryMessage = ({
+    file,
+    entries,
+    name,
+    raw,
+    value,
+    scope,
+  }: {
+    file: string;
+    entries: Record<string, unknown>;
+    name: string;
+    raw: unknown;
+    value: unknown;
+    scope: EntryScope;
+  }) => {
+    const shown = shownSpec(raw, value);
+    if (scope === "catalog")
+      return allowedCatalogEntries.get(entries)?.has(name) === true
+        ? undefined
+        : `${name} ${shown} in a catalog of ${file} serves no allowed install: ${typescriptGuidance}; a catalog may hold ${name} only at the spec of a workspace entry in typescriptAllowlist in ${allowlistFile}`;
+    if (scope === "resolution")
+      return `${name} must not be overridden or resolved (${shown}): ${typescriptGuidance}; declare it in the workspace whose dependency needs it and add a typescriptAllowlist entry in ${allowlistFile}`;
+    if (scope === "peer")
+      return `${name} peer ${shown} is not a version range: ${typescriptGuidance}`;
+    const entry =
+      path.posix.basename(file) === "package.json"
+        ? allowed.get(`${file}\0${name}`)
+        : undefined;
+    if (entry === undefined) {
+      const workspace = path.posix.dirname(file);
+      const suggestion = JSON.stringify({
+        workspace,
+        name,
+        spec: exactTypescriptSpec(value) ? value : "<exact version>",
+        dependency: "<package that needs it>",
+        reason: "<why it needs this TypeScript>",
+      });
+      return `${name} ${shown} in ${file} is not allowed: ${typescriptGuidance}; if a dependency of this workspace needs it, add ${suggestion} to typescriptAllowlist in ${allowlistFile}`;
+    }
+    return value === entry.spec
+      ? undefined
+      : `${name} in ${file} resolves to ${shown}, but typescriptAllowlist in ${allowlistFile} allows ${entry.spec} for ${entry.dependency}; declare ${entry.spec} or update the entry's spec`;
   };
   const peerRange = (value: unknown): value is string =>
     typeof value === "string" && validRange(value) !== null;
-  const installSections = [
-    "dependencies",
-    "devDependencies",
-    "optionalDependencies",
-  ] as const;
   for (const [file, json] of manifests) {
     const manager = json["packageManager"];
     if (manager !== undefined && manager !== `bun@${policy.bun}`)
@@ -945,19 +1112,28 @@ export const checkPackageFiles = ({
       });
     const checkEntries = (
       entries: unknown,
+      scope: EntryScope,
       location?: { key: string; value: unknown },
     ) => {
       if (!record(entries)) return;
       for (const [name, raw] of Object.entries(entries)) {
         const value = resolve(file, name, raw);
-        if (typescriptNames.has(name)) {
-          if (value !== compatibilitySpecifiers.get(name))
+        if (isTypescriptInstall(name, value)) {
+          const message = typescriptEntryMessage({
+            file,
+            entries,
+            name,
+            raw,
+            value,
+            scope,
+          });
+          if (message !== undefined)
             add({
               file,
               rule: "typescript-layout",
               key: location?.key ?? name,
               value: location === undefined ? raw : location.value,
-              message: typescriptMessage(name, value),
+              message,
             });
           continue;
         }
@@ -981,19 +1157,20 @@ export const checkPackageFiles = ({
         });
       }
     };
-    for (const key of installSections) checkEntries(json[key]);
+    for (const key of installSections) checkEntries(json[key], "install");
     if (record(json["peerDependencies"]))
       for (const [name, value] of Object.entries(json["peerDependencies"])) {
-        if (typescriptNames.has(name) && !peerRange(resolve(file, name, value)))
-          checkEntries({ [name]: value });
+        const resolved = resolve(file, name, value);
+        if (isTypescriptInstall(name, resolved) && !peerRange(resolved))
+          checkEntries({ [name]: value }, "peer");
       }
     for (const source of catalogSources(json)) {
-      checkEntries(source["catalog"]);
+      checkEntries(source["catalog"], "catalog");
       if (!record(source["catalogs"])) continue;
       for (const catalog of Object.values(source["catalogs"]))
-        checkEntries(catalog);
+        checkEntries(catalog, "catalog");
     }
-    const ownedNames = new Set([...pins.keys(), ...typescriptNames]);
+    const ownedNames = new Set([...pins.keys(), ...typescriptPackages]);
     const resolutionDependencies: Record<string, unknown> = {};
     const resolutionRoot = manifests.get(
       path.posix.join(path.posix.dirname(file), "package.json"),
@@ -1042,54 +1219,28 @@ export const checkPackageFiles = ({
           checkResolutionMap(replacement, target);
           continue;
         }
-        for (const name of ownedNames) {
-          if (!picomatch(pattern)(name)) continue;
-          let value = replacement;
-          if (typeof replacement === "string" && replacement.startsWith("$")) {
-            const reference = replacement.slice(1);
-            value = resolutionDependencies[reference];
-          }
-          checkEntries(
-            { [name]: value },
-            {
-              key: selector,
-              value: replacement,
-            },
-          );
+        let value = replacement;
+        if (typeof replacement === "string" && replacement.startsWith("$")) {
+          const reference = replacement.slice(1);
+          value = resolutionDependencies[reference];
         }
+        const location = { key: selector, value: replacement };
+        const targets = [...ownedNames].filter((name) =>
+          picomatch(pattern)(name),
+        );
+        for (const name of targets)
+          checkEntries({ [name]: value }, "resolution", location);
+        // Redirecting any other package to a compiler is a TypeScript install too.
+        if (
+          typescriptAliasVersion(value) !== undefined &&
+          !targets.some((name) => isTypescriptInstall(name, value))
+        )
+          checkEntries({ [pattern]: value }, "resolution", location);
       }
     };
     checkResolutionMap(json["overrides"]);
     checkResolutionMap(json["resolutions"]);
     if (record(json["pnpm"])) checkResolutionMap(json["pnpm"]["overrides"]);
-    // A TypeScript 6 install belongs to the package whose peer blocker needs it;
-    // no root or workspace counterpart is required.
-    const usesPeerBlocker = installSections.some((section) => {
-      const entries = json[section];
-      return (
-        record(entries) &&
-        compatibility.peerBlockers.some((blocker) =>
-          Object.hasOwn(entries, blocker),
-        )
-      );
-    });
-    if (!usesPeerBlocker)
-      for (const section of installSections) {
-        const entries = json[section];
-        if (!record(entries)) continue;
-        for (const [name, raw] of Object.entries(entries)) {
-          const allowed = compatibilitySpecifiers.get(name);
-          if (allowed === undefined || resolve(file, name, raw) !== allowed)
-            continue;
-          add({
-            file,
-            rule: "typescript-layout",
-            key: name,
-            value: raw,
-            message: `${name} ${allowed} is only for a package that uses a TypeScript 6 peer blocker (${peerBlockerList}); remove it and ${typescriptGuidance}`,
-          });
-        }
-      }
     const command = record(json["scripts"])
       ? json["scripts"]["typecheck"]
       : undefined;
@@ -1115,10 +1266,12 @@ export const checkPackageFiles = ({
       }
     if (record(json["peerDependencies"]))
       for (const [name, raw] of Object.entries(json["peerDependencies"])) {
-        if (!typescriptNames.has(name)) continue;
+        if (!typescriptPackages.has(name)) continue;
         const range = resolve(file, name, raw);
         if (!peerRange(range)) continue;
-        const release = peerReleases.get(name);
+        // Peer ranges, exact versions included, state support: `typescript`
+        // must cover the checker's release; the native package has none.
+        const release = name === "typescript" ? policy.typescript : undefined;
         if (release === undefined) {
           add({
             file,
@@ -1150,6 +1303,44 @@ export const checkPackageFiles = ({
         key: "node",
         value: json["engines"]["node"],
         message: `engines.node must support ${policy.node}, found ${JSON.stringify(json["engines"]["node"])}`,
+      });
+  }
+  // An entry stays only while its workspace still installs the TypeScript
+  // entry beside the dependency that needs it.
+  const staleness = (entry: TypescriptAllowlistEntry) => {
+    const file = workspaceManifest(entry.workspace);
+    const json = manifests.get(file);
+    if (json === undefined)
+      return `${file} is missing or invalid; remove the entry`;
+    const declares = (name: string) =>
+      installSections.some((section) => {
+        const entries = json[section];
+        return record(entries) && Object.hasOwn(entries, name);
+      });
+    if (!declares(entry.name))
+      return `${file} no longer declares ${entry.name} in dependencies, devDependencies or optionalDependencies; remove the entry`;
+    if (!declares(entry.dependency))
+      return `${file} no longer depends on ${entry.dependency}; remove the entry and the ${entry.name} declaration, or name the dependency that still needs it`;
+    return undefined;
+  };
+  for (const entry of typescriptAllowlist) {
+    const stale = staleness(entry);
+    if (stale === undefined) continue;
+    const message = `typescriptAllowlist entry ${entry.name} ${entry.spec} for ${entry.workspace} is stale: ${stale}`;
+    if (sources.has(allowlistFile))
+      add({
+        file: allowlistFile,
+        rule: "typescript-layout",
+        key: "workspace",
+        value: entry.workspace,
+        message,
+      });
+    else
+      diagnostics.push({
+        rule: "typescript-layout",
+        path: allowlistFile,
+        line: 1,
+        message,
       });
   }
   return diagnostics;
