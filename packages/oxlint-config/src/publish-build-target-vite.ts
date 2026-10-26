@@ -1,9 +1,8 @@
-import { parse } from "acorn";
-import { transformSync } from "esbuild";
 import { readFileSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { parseSync } from "oxc-parser";
 
 import { reviewedViteDtsOptions } from "./publish-build-target-vite-dts";
 import { declarationOnlyDts } from "./publish-build-target-vite-dts-helper";
@@ -37,6 +36,67 @@ const walkAst = ({ value, visit, parent }: WalkAstOptions) => {
   for (const entry of Object.values(value))
     if (typeof entry === "object" && entry !== null)
       walkAst({ value: entry, visit, parent: value });
+};
+/** TypeScript wrappers whose runtime value is their operand. */
+const typeExpressionWrappers: ReadonlySet<unknown> = new Set([
+  "TSAsExpression",
+  "TSSatisfiesExpression",
+  "TSNonNullExpression",
+  "TSTypeAssertion",
+  "TSInstantiationExpression",
+]);
+/** Annotation fields that type stripping removes from otherwise JavaScript nodes. */
+const typeFields: ReadonlySet<string> = new Set([
+  "typeAnnotation",
+  "returnType",
+  "typeParameters",
+  "typeArguments",
+  "superTypeArguments",
+  "implements",
+]);
+/** Members and statements with no runtime counterpart. */
+const typeDeclarations: ReadonlySet<unknown> = new Set([
+  "TSTypeAliasDeclaration",
+  "TSInterfaceDeclaration",
+  "TSDeclareFunction",
+  "TSIndexSignature",
+  "TSAbstractMethodDefinition",
+  "TSAbstractPropertyDefinition",
+  "TSAbstractAccessorProperty",
+]);
+const typeOnly = (value: unknown): boolean => {
+  if (!record(value)) return false;
+  if (
+    typeDeclarations.has(value["type"]) ||
+    value["declare"] === true ||
+    value["importKind"] === "type" ||
+    value["exportKind"] === "type"
+  )
+    return true;
+  if (
+    value["type"] === "ExportNamedDeclaration" ||
+    value["type"] === "ExportDefaultDeclaration"
+  )
+    return typeOnly(value["declaration"]);
+  // Type stripping drops an import whose named bindings are all type-only.
+  return (
+    value["type"] === "ImportDeclaration" &&
+    Array.isArray(value["specifiers"]) &&
+    value["specifiers"].length > 0 &&
+    value["specifiers"].every(typeOnly)
+  );
+};
+/** The JavaScript a type-stripping compiler would leave, as the plain ESTree the walk below reads. */
+const javascriptView = (value: unknown): unknown => {
+  if (Array.isArray(value))
+    return value.filter((entry) => !typeOnly(entry)).map(javascriptView);
+  if (!record(value)) return value;
+  if (typeExpressionWrappers.has(value["type"]))
+    return javascriptView(value["expression"]);
+  const result: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value))
+    if (!typeFields.has(key)) result[key] = javascriptView(entry);
+  return result;
 };
 const astName = (value: unknown) =>
   record(value) && value["type"] === "Identifier" ? value["name"] : undefined;
@@ -92,10 +152,16 @@ export const reviewedDtsConfiguration = ({
   directory,
   loader,
 }: ReviewedDtsConfigurationOptions) => {
-  const ast: unknown = parse(
-    transformSync(source, { loader, format: "esm", target: "esnext" }).code,
-    { ecmaVersion: "latest", sourceType: "module" },
-  );
+  const { program, errors } = parseSync(`vite.config.${loader}`, source, {
+    lang: loader,
+    astType: loader,
+    sourceType: "module",
+    preserveParens: false,
+  });
+  const error = errors.at(0);
+  if (error !== undefined)
+    throw new SyntaxError(`Invalid Vite configuration: ${error.message}`);
+  const ast = javascriptView(program);
   if (!record(ast) || !Array.isArray(ast["body"]))
     throw new Error("Invalid Vite configuration AST");
   const bindings = new Set<string>();

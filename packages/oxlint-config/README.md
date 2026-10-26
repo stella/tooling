@@ -746,6 +746,8 @@ This adapter requires consumer-installed `vite-plugin-dts` 5.1.2 and its
 Unsupported versions fail explicitly.
 The resolver proves a direct helper import and call in a literal plugin array;
 raw declaration plugins, opaque plugin arrays, and additional emitters fail.
+It reads the config with oxc-parser and ignores TypeScript-only syntax, so a
+TypeScript config needs no compiler; any value import of a raw emitter fails.
 Options are closed and static: include/exclude, entryRoot, pathsToAliases,
 compilerOptions.declarationMap=false, strictOutput=true, and declarationOnly=false. Hooks may
 emit only `.d.ts`, `.d.mts`, `.d.cts`, and their maps. Bundle and on-disk non-declaration
@@ -767,8 +769,8 @@ TypeScript import on the package's minimum supported Node release.
 Packed-artifact checks run nightly, while the static contract check runs per PR.
 Every packed `.js`, `.mjs`, and `.cjs` file is checked, including non-entry chunks
 and executables. The actual packed manifest must match the committed contract.
-Acorn 8.15.0 applies the strictest declared ECMAScript target (`es5`, `es2015`
-through `es2025`); the provisioned consumer Node also parses every file with
+Acorn applies the strictest declared ECMAScript target (`es5`, `es2015`
+through `es2025`; oxc-parser has no per-year grammar); the provisioned consumer Node also parses every file with
 `--check`, without executing artifact code. `esnext` and supported Node targets use the native consumer Node bound.
 Node target identifiers follow the same grammar and compatibility rule as the
 static contract; no older Node-to-ECMAScript mapping is inferred. Browser targets

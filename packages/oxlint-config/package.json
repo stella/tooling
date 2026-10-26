@@ -134,7 +134,7 @@
     "@changesets/read": "1.0.1",
     "@manypkg/get-packages": "3.1.0",
     "acorn": "8.19.0",
-    "esbuild": "0.28.2",
+    "oxc-parser": "0.155.0",
     "picomatch": "4.0.7",
     "semver": "7.8.5",
     "smol-toml": "1.9.1",
