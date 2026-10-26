@@ -46,13 +46,29 @@ describe("shared toolchain policy", () => {
 
   test("rejects pre-TS7 tsgolint consumers", async () => {
     const oxlintPackage = await readJson("packages/oxlint-config/package.json");
+    if (typeof oxlintPackage !== "object" || oxlintPackage === null)
+      throw new Error(
+        "packages/oxlint-config/package.json must be a JSON object",
+      );
+    const devDependencies: unknown = Reflect.get(
+      oxlintPackage,
+      "devDependencies",
+    );
+    if (typeof devDependencies !== "object" || devDependencies === null)
+      throw new Error(
+        "packages/oxlint-config/package.json must declare devDependencies",
+      );
+    const builtVite: unknown = Reflect.get(devDependencies, "vite");
+    // The vite peer is pinned to the exact version the build helper is
+    // built and tested against, so it follows the devDependency pin.
+    expect(builtVite).toEqual(expect.stringMatching(/^\d+\.\d+\.\d+$/));
 
     expect(oxlintPackage).toEqual(
       expect.objectContaining({
         peerDependencies: {
           oxlint: ">=1.87.0 <2",
           "oxlint-tsgolint": ">=7.0.2003 <8",
-          vite: "8.3.4",
+          vite: builtVite,
         },
         peerDependenciesMeta: {
           vite: { optional: true },

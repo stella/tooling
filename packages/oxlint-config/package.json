@@ -148,13 +148,13 @@
     "@types/semver": "7.8.0",
     "oxlint": "1.87.0",
     "unplugin-dts": "1.1.2",
-    "vite": "8.3.4",
+    "vite": "8.3.5",
     "vite-plugin-dts": "5.1.2"
   },
   "peerDependencies": {
     "oxlint": ">=1.87.0 <2",
     "oxlint-tsgolint": ">=7.0.2003 <8",
-    "vite": "8.3.4"
+    "vite": "8.3.5"
   },
   "peerDependenciesMeta": {
     "vite": {
