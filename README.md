@@ -43,7 +43,7 @@ Schema version 1 contains these fields:
 | `schemaVersion`                                                                   | Supported policy schema version (`1`).                                                                                                                                                                                                                                                                                                                                                |
 | `bun`                                                                             | Minimum Bun; the repository pins one exact release at or above it everywhere.                                                                                                                                                                                                                                                                                                         |
 | `oxlint`, `oxlint-tsgolint`, `@oxlint/plugins`, `@stll/oxlint-plugin`, `lefthook` | Exact dependency and catalog pins. Declared local workspace packages must resolve to the same version.                                                                                                                                                                                                                                                                                |
-| `typescript`, `typescript6Compatibility`                                          | The TypeScript release `bun check` implements, and the exact TypeScript 6 release and alias allowed beside a listed peer blocker.                                                                                                                                                                                                                                                     |
+| `typescript`                                                                      | The TypeScript release `bun check` implements; a `typescript` peer range must include it. Repositories allow their own TypeScript installs in `stll-toolchain.json` `typescriptAllowlist`.                                                                                                                                                                                            |
 | `node`, `python`, `rust`                                                          | Runtime selectors and version-manager pins. Node selects the policy major (`26.x`); static minor and patch selectors within that major are allowed. A Python minor pin preserves existing patch selectors within that release series; a patch policy requires the exact patch. Rust selects one exact stable release across toolchain files, commands, workflow selectors and images. |
 | `actions`                                                                         | Approved action names mapped to full `sha` and `version` comment.                                                                                                                                                                                                                                                                                                                     |
 | `dependabot`                                                                      | Shared schedule, cooldown and groups. Package and action ignores derive from the owned pins. `actionGroups` come first in every GitHub Actions entry, so first-party reusable workflows that move by commit arrive as one update.                                                                                                                                                     |
@@ -298,11 +298,10 @@ Every repository that uses these configs follows one toolchain:
   or wrap `tsc` in a custom script.
 - **No `typescript` package.** `bun check` embeds the checker, oxlint-tsgolint
   embeds its own, and `stll-toolchain-check` resolves tsconfig projects with
-  tsrs, so no manifest installs `typescript` 7 or `@typescript/native`. Keep
-  `typescript` only in a package that uses a tool which imports or peers on it
-  (the `peerBlockers` in `toolchain.json`: `@astrojs/check`,
-  `@typescript-eslint/utils`, dependency-cruiser and `vite-plugin-dts`), pinned
-  to the TypeScript 6 compatibility release, with a note naming that tool.
+  tsrs, so no manifest installs `typescript` or `@typescript/native`. A
+  package that uses a tool which imports or peers on `typescript` keeps it
+  only through its repository's own `typescriptAllowlist` (below); there is no
+  shared list of such tools.
 - **Declarations** built with tsdown use `dts: { generator: "oxc" }`, which
   needs explicit types on exported declarations. A package that cannot provide
   them points tsdown at tsrs instead:
@@ -321,13 +320,36 @@ Every repository that uses these configs follows one toolchain:
 
 `stll-toolchain-check` enforces this with the `typescript-layout` rule:
 
-- A manifest, catalog or resolution that declares `typescript` 7,
-  `@typescript/native` or any other TypeScript specifier fails, with a message
-  pointing at `bun check`, tsrs and oxc-parser.
-- `typescript` `6.0.3` (or the `typescript-compat` alias,
-  `npm:typescript@6.0.3`) passes only in a manifest that also depends on one of
-  the listed peer blockers. The install belongs to that package; no root or
-  workspace counterpart is required.
+- A manifest, catalog, override or resolution that declares `typescript`,
+  `@typescript/native` or an alias of either (`npm:typescript@…`) fails, with a
+  message pointing at `bun check`, tsrs and oxc-parser and showing the
+  allowlist entry that would permit it.
+- A repository allows an install with an entry in `typescriptAllowlist` in its
+  root `stll-toolchain.json`: the workspace directory (`.` for the root), the
+  declared name, the exact spec it resolves to, the dependency in that same
+  workspace that needs it, and a reason:
+
+  ```json
+  {
+    "typescriptAllowlist": [
+      {
+        "workspace": "apps/docs",
+        "name": "typescript",
+        "spec": "6.0.3",
+        "dependency": "@astrojs/check",
+        "reason": "astro check loads the TypeScript 6 language service."
+      }
+    ]
+  }
+  ```
+
+  The workspace may declare the entry directly or through a catalog
+  (`catalog:`, `catalog:ts6`); either way it must resolve to `spec`. A catalog
+  may hold a TypeScript entry only at the spec of an allowed install that
+  references it. Overrides and resolutions never declare TypeScript.
+
+- An entry fails once it is stale: its workspace no longer declares the name,
+  or no longer depends on the named dependency. A different spec fails too.
 - A `typecheck` script that runs a compiler (`tsc`, `tsgo`, a launcher around
   them) fails; `bun check` with any arguments passes.
 - A peer range on `typescript` must include the TypeScript release `bun check`

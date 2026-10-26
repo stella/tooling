@@ -37,32 +37,6 @@ test("Node policy permits canonical major series only", () => {
     );
 });
 
-test("TypeScript 6 compatibility retains its peer blockers and rejects other releases", () => {
-  expect(parseToolchainPolicy(policy).typescript6Compatibility).toEqual(
-    policy.typescript6Compatibility,
-  );
-  for (const peerBlockers of [undefined, [], [""], [42], "dependency-cruiser"])
-    expect(() =>
-      parseToolchainPolicy({
-        ...policy,
-        typescript6Compatibility: {
-          ...policy.typescript6Compatibility,
-          peerBlockers,
-        },
-      }),
-    ).toThrow("peer blockers");
-  for (const version of ["7.0.2", "^6.0.3", "6"])
-    expect(() =>
-      parseToolchainPolicy({
-        ...policy,
-        typescript6Compatibility: {
-          ...policy.typescript6Compatibility,
-          version,
-        },
-      }),
-    ).toThrow("TypeScript 6 release");
-});
-
 test("service policy requires a canonical PostgreSQL major and exact stable Valkey release", () => {
   expect(parseToolchainPolicy(policy).postgres).toBe(policy.postgres);
   expect(parseToolchainPolicy(policy).valkey).toBe(policy.valkey);

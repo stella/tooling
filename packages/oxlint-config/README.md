@@ -238,11 +238,39 @@ policy; update consumer pins and run the checker together.
 
 The `typescript-layout` rule keeps TypeScript out of manifests: type checking
 runs `bun check`, programs and checkers use tsrs, and syntax reads use
-oxc-parser. No manifest, catalog or resolution declares `typescript` 7 or
-`@typescript/native`. A package that depends on one of the `peerBlockers` in
-`typescript6Compatibility` may declare `typescript` (or the `typescript-compat`
-alias) at the exact TypeScript 6 compatibility release; no root counterpart is
-required. A `typecheck` script that runs a compiler must run `bun check`.
+oxc-parser. No manifest, catalog, override or resolution declares `typescript`,
+`@typescript/native` or an `npm:typescript@…` alias unless the repository
+allows it. A `typecheck` script that runs a compiler must run `bun check`.
+
+Each repository lists the TypeScript installs its own tools need in
+`typescriptAllowlist` in tracked root `stll-toolchain.json`; there is no shared
+list. An entry names the workspace directory (`.` for the root), the declared
+name, the exact spec the manifest resolves to, the dependency in that same
+workspace that needs it, and a reason:
+
+```json
+{
+  "typescriptAllowlist": [
+    {
+      "workspace": "apps/docs",
+      "name": "typescript",
+      "spec": "6.0.3",
+      "dependency": "@astrojs/check",
+      "reason": "astro check loads the TypeScript 6 language service."
+    }
+  ]
+}
+```
+
+The workspace's `dependencies`, `devDependencies` or `optionalDependencies`
+may declare the entry directly or through a catalog (`catalog:`,
+`catalog:ts6`); it must resolve to `spec`. A catalog holds a TypeScript entry
+only at the spec of an allowed install that references it. An undeclared
+install fails with the entry to add; an entry fails when its spec differs,
+when the workspace no longer declares the name, or when it no longer depends on
+`dependency`. Overrides and resolutions never declare TypeScript. To keep
+Dependabot from moving an allowed alias, declare it in `dependabotIgnores`;
+`typescript` and `@typescript/native` are already shared ignores.
 
 An exception requires a tracked root `stll-toolchain.json` with the named
 rule and a nonempty reason:
