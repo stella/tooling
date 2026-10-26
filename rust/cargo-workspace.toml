@@ -1,8 +1,5 @@
-# Copy these snippets into the root Cargo.toml for a workspace.
-# Add this to each member crate:
-#
-# [lints]
-# workspace = true
+# Source template for stll-rust-policy workspace manifests.
+# The generator adds lint inheritance to discovered member manifests.
 
 [workspace]
 resolver = "2"

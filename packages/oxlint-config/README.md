@@ -1136,3 +1136,13 @@ closed and writes nothing unless both inputs normalize successfully.
 Use `stll-normalize-wasi-loaders --check <loader-1> <loader-2>` in CI. Check mode
 does not write files and exits non-zero if either loader differs from the normalized
 output.
+
+## Rust policy generation
+
+Run `bunx --no-install stll-rust-policy` at the repository root with
+`stll-rust-policy.json` containing `{ "kind": "single-crate" }`. Use
+`--check` in CI to report drift without writes and `--config <path>` to select
+another input. The published CLI embeds the canonical `rust/` templates and
+merges policy into Cargo, Cargo aliases, rustfmt, and Clippy configuration.
+Unrelated TOML values survive; comments and layout are canonicalized.
+See [Rust adoption](../../rust/README.md) for workspace members and exceptions.
