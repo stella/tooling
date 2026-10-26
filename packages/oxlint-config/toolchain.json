@@ -61,7 +61,7 @@
       }
     }
   },
-  "@stll/oxlint-plugin": "0.6.3",
+  "@stll/oxlint-plugin": "0.6.4",
   "lefthook": "2.2.2",
   "node": "26.x",
   "nodeArchiveSha256": {
