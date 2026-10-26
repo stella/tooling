@@ -19,7 +19,7 @@
     },
     "packages/oxlint-config": {
       "name": "@stll/oxlint-config",
-      "version": "1.9.0",
+      "version": "2.0.0",
       "bin": {
         "stll-cloud-setup": "./dist/cloud-setup-cli.mjs",
         "stll-consumer-compat": "./dist/consumer-compat-cli.mjs",
@@ -66,7 +66,7 @@
     },
     "packages/oxlint-plugin": {
       "name": "@stll/oxlint-plugin",
-      "version": "0.6.2",
+      "version": "0.6.3",
       "devDependencies": {
         "@oxlint/plugins": "1.87.0",
         "@stll/typescript-config": "workspace:*",
@@ -79,7 +79,7 @@
     },
     "packages/test-kit": {
       "name": "@stll/test-kit",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "dependencies": {
         "@stll/time": "0.4.1",
         "better-result": "3.0.1",
@@ -98,7 +98,7 @@
     },
     "packages/time": {
       "name": "@stll/time",
-      "version": "0.4.1",
+      "version": "0.4.2",
       "dependencies": {
         "better-result": "3.0.1",
         "temporal-polyfill": "1.0.6",
@@ -110,7 +110,7 @@
     },
     "packages/typescript-config": {
       "name": "@stll/typescript-config",
-      "version": "0.9.0",
+      "version": "0.10.0",
     },
   },
   "trustedDependencies": [],

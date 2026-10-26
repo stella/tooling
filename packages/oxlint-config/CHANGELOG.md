@@ -1,5 +1,47 @@
 # @stll/oxlint-config
 
+## 2.0.0
+
+### Major Changes
+
+- [#223](https://github.com/stella/tooling/pull/223) [`5eeae16`](https://github.com/stella/tooling/commit/5eeae1660787ac38367d90565bced339666eed84) Thanks [@jan-kubica](https://github.com/jan-kubica)! - The shared TypeScript 6 peer-blocker list is gone (`typescript6Compatibility` is removed from `toolchain.json`). By default no manifest, catalog, override or resolution may declare `typescript`, `@typescript/native` or an `npm:typescript@…` alias. A repository that needs an install for one of its tools declares it in `typescriptAllowlist` in its own `stll-toolchain.json`, with the workspace (`.` for the root), the declared name, the exact spec, the dependency in that workspace that needs it, and a reason:
+
+  ```json
+  {
+    "typescriptAllowlist": [
+      {
+        "workspace": "apps/docs",
+        "name": "typescript",
+        "spec": "6.0.3",
+        "dependency": "@astrojs/check",
+        "reason": "astro check loads the TypeScript 6 language service."
+      }
+    ]
+  }
+  ```
+
+  The spec may be any version, declared directly or through a catalog that resolves to it. An undeclared install fails with the entry to add, and an entry fails when its spec differs or when its workspace no longer declares the name or the dependency. Overrides and resolutions may not declare TypeScript. Repositories that kept `typescript` 6.0.3 beside a former peer blocker add one entry per workspace.
+
+  `typescript-compat` is no longer a shared Dependabot ignore: regenerate `.github/dependabot.yml` with `stll-dependabot`, and declare an alias you keep in `dependabotIgnores`.
+
+- [#221](https://github.com/stella/tooling/pull/221) [`55c8622`](https://github.com/stella/tooling/commit/55c8622809b02eac3b527facacbecf53660474a6) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Remove `stll-typecheck-parity`: type checking is `bun check`, and consumers drop their `check:typecheck-parity` script and any CI step that runs it. `stll-typecheck-probe` stays.
+
+  The `typescript-layout` rule no longer reads install layouts (`typescriptInstallLayouts` is gone from `toolchain.json`). No manifest, catalog or resolution may declare `typescript` 7 or `@typescript/native`; the messages point at `bun check`, tsrs and oxc-parser. A `typescript` peer dependency, exact versions included, states support and must include the release `bun check` implements. `typescript` 6.0.3 (or the `typescript-compat` alias) is allowed only in a package that depends on a listed peer blocker, with no root counterpart; `vite-plugin-dts` joins the peer blockers. Any `typecheck` script that invokes a compiler must use `bun check`, whether or not the package installs TypeScript.
+
+  `stll-toolchain-check` reads tsconfig projects with tsrs instead of the consumer's `typescript` install, so a repository that declares `oxlint-tsgolint` no longer needs `typescript` for the type-aware project check.
+
+### Minor Changes
+
+- [#182](https://github.com/stella/tooling/pull/182) [`0376007`](https://github.com/stella/tooling/commit/0376007873c84e2f31b6c1bfc799940783798abc) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Cloud setup accepts `cloud.submodules`: the networked install phase synchronizes and shallow-initializes Git submodules before dependency installation.
+
+- [#222](https://github.com/stella/tooling/pull/222) [`97b621a`](https://github.com/stella/tooling/commit/97b621aa0b1124f46ce3bf84b41b296ea4046aa9) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Overdue dated entries (temporary quarantine excludes in `bunfig.toml` and `rustExceptions` in `stll-toolchain.json`) no longer fail pull requests and merge groups that leave them untouched. `stll-toolchain-check` and `stll-quarantine --check` fail every overdue entry on pushes, schedules, dispatches and non-GitHub CI. On pull requests and merge groups they fail only entries the change adds or edits, compared with the event's base commit (fetched on demand in shallow checkouts), and warn about inherited ones. Local runs warn.
+
+### Patch Changes
+
+- [#218](https://github.com/stella/tooling/pull/218) [`5314e44`](https://github.com/stella/tooling/commit/5314e44aa0765a02ed507f3cd99aeee886008f54) Thanks [@jan-kubica](https://github.com/jan-kubica)! - The generated cloud setup runs the frozen dependency install at every start instead of skipping it on a lockfile stamp. The install reads every input the package manager uses and changes nothing on a current tree, so a manifest or patch edit without a regenerated lockfile is refused and a deleted or replaced `node_modules` is reinstalled.
+
+- [#220](https://github.com/stella/tooling/pull/220) [`43af202`](https://github.com/stella/tooling/commit/43af20233510ff451193b1e9f3febf15b5f03d0d) Thanks [@jan-kubica](https://github.com/jan-kubica)! - The toolchain pins lefthook 2.2.2. From 2.2.1 lefthook keeps the hidden unstaged changes of each linked worktree in its own patch file, and 2.2.2 drops only the stash it created, so worktrees of one repository can run pre-commit at the same time.
+
 ## 1.9.0
 
 ### Minor Changes
