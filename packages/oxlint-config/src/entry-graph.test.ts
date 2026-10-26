@@ -1,20 +1,17 @@
 import { expect, test } from "bun:test";
-import { build } from "esbuild";
 import { fileURLToPath } from "node:url";
 
 import manifest from "../package.json";
 
 const graphImports = async (entry: URL) => {
-  const result = await build({
-    entryPoints: [fileURLToPath(entry)],
-    bundle: true,
+  const result = await Bun.build({
+    entrypoints: [fileURLToPath(entry)],
     packages: "external",
-    platform: "node",
-    write: false,
+    target: "node",
     metafile: true,
-    treeShaking: false,
-    logLevel: "silent",
   });
+  if (result.metafile === undefined)
+    throw new Error("Bun.build returned no metafile for the entry graph");
   return new Set(
     Object.values(result.metafile.inputs).flatMap(({ imports }) =>
       imports.map(({ path }) => path),
