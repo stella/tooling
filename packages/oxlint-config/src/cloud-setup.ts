@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { valid } from "semver";
 
+import type { ArchivePins } from "./archive-pins";
 import { renderCloudServiceInstall } from "./cloud-setup-install";
 import { renderCloudNetwork } from "./cloud-setup-network";
 import { cloudServices, parseCloudSetup } from "./cloud-setup-schema";
@@ -418,6 +419,47 @@ const renderPrepare = (
   ].join("\n");
 };
 
+const runtimeArchiveManifests = {
+  node: (version: string) =>
+    `https://nodejs.org/dist/v${version}/SHASUMS256.txt`,
+  bun: (version: string) =>
+    `https://github.com/oven-sh/bun/releases/download/bun-v${version}/SHASUMS256.txt`,
+} as const;
+
+// Shared pins cover the policy releases; a repository on another accepted
+// release declares that release's pins itself. One source per release.
+const runtimeArchivePins = ({
+  runtime,
+  version,
+  shared,
+  declared,
+}: {
+  runtime: keyof typeof runtimeArchiveManifests;
+  version: string;
+  shared: ArchivePins;
+  declared: ArchivePins | undefined;
+}) => {
+  const key = `cloud.runtimeArchiveSha256.${runtime}`;
+  const sharedPins = shared[version];
+  if (declared !== undefined) {
+    if (sharedPins !== undefined)
+      throw new Error(
+        `the shared policy pins ${runtime} ${version} archives; remove ${key}`,
+      );
+    const pins = declared[version];
+    if (pins === undefined)
+      throw new Error(
+        `${key} pins ${Object.keys(declared).join(", ")}, but the repository selects ${runtime} ${version}; update it with the amd64 and arm64 values from ${runtimeArchiveManifests[runtime](version)}`,
+      );
+    return pins;
+  }
+  if (sharedPins === undefined)
+    throw new Error(
+      `the shared policy has no ${runtime} ${version} archive SHA256 pins; declare ${key} for ${version} with the amd64 and arm64 values from ${runtimeArchiveManifests[runtime](version)}`,
+    );
+  return sharedPins;
+};
+
 export const generateCloudSetup = ({
   policy,
   cloud,
@@ -435,28 +477,21 @@ export const generateCloudSetup = ({
     throw new Error(
       "cloud requires a tracked exact .node-version within the shared Node series",
     );
-  let bunVersion = policy.bun;
-  const manifest = files["package.json"];
-  if (manifest !== undefined) {
-    const parsed: unknown = JSON.parse(manifest);
-    if (
-      typeof parsed === "object" &&
-      parsed !== null &&
-      "packageManager" in parsed
-    ) {
-      const manager = parsed.packageManager;
-      if (typeof manager === "string" && manager.startsWith("bun@"))
-        bunVersion = manager.slice(4);
-    }
-  }
-  const nodeArchiveSha256 = policy.nodeArchiveSha256[exactNode];
-  if (nodeArchiveSha256 === undefined)
-    throw new Error(`cloud Node ${exactNode} has no archive SHA256 pins`);
-  const bunArchiveSha256 = policy.bunArchiveSha256[bunVersion];
-  if (bunArchiveSha256 === undefined)
-    throw new Error(
-      `cloud packageManager Bun ${bunVersion} has no archive SHA256 pins; policy Bun is ${policy.bun}`,
-    );
+  // Callers resolve the repository's Bun (at or above the shared minimum)
+  // into policy.bun before generation.
+  const bunVersion = policy.bun;
+  const nodeArchiveSha256 = runtimeArchivePins({
+    runtime: "node",
+    version: exactNode,
+    shared: policy.nodeArchiveSha256,
+    declared: selected.runtimeArchiveSha256?.node,
+  });
+  const bunArchiveSha256 = runtimeArchivePins({
+    runtime: "bun",
+    version: bunVersion,
+    shared: policy.bunArchiveSha256,
+    declared: selected.runtimeArchiveSha256?.bun,
+  });
   const toolchains = resolveCloudToolchains({
     cloud: selected,
     files,

@@ -464,6 +464,13 @@ it gets no network allowance. Generation fails when the script is not in the
 root `package.json`.
 
 Generation uses the installed policy's Bun, Node, PostgreSQL, and Valkey pins.
+Node and Bun archives are verified against SHA256 values recorded at generation
+time, in addition to the upstream checksum manifests. The shared policy records
+them for its own Node patch and Bun release. A repository that tracks another
+accepted Node patch or a newer Bun records that one release's amd64 and arm64
+values from the official `SHASUMS256.txt` in `cloud.runtimeArchiveSha256`, for
+example `{ "node": { "26.11.0": { "amd64": "…", "arm64": "…" } } }`; a release
+the shared policy pins must not be repeated there.
 PostgreSQL uses the PGDG major-version packages; minor updates within the pinned
 major are accepted for the disposable database. Before adding PGDG, provisioning
 reuses an existing source only after verifying its signing-key fingerprint;

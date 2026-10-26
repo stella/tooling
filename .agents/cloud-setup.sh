@@ -312,27 +312,20 @@ apt_install() (
   policy_state=installed
   printf '%s\n' '#!/bin/sh' 'exit 101' > /usr/sbin/policy-rc.d
   chmod 755 /usr/sbin/policy-rc.d
-  local package
-  for package in "$@"; do
-    if [[ "$package" == */* ]]; then
-      # Local archives are already downloaded and verified, but their
-      # dependencies may not be: --print-uris names what is missing without
-      # contacting any server, the network deadline covers only fetching it,
-      # and dpkg, package triggers and maintainer scripts run offline.
-      local missing
-      missing="$(set -o pipefail; DEBIAN_FRONTEND=noninteractive apt-get --print-uris -qq -y --no-install-recommends install "$@" | awk '{ name = $2; sub(/_.*/, "", name); print name }')"
-      if [[ -n "$missing" ]]; then
-        # Debian package names never contain whitespace: split one per word.
-        # shellcheck disable=SC2086
-        DEBIAN_FRONTEND=noninteractive apt_network install -y --no-install-recommends --download-only $missing
-      fi
-      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --no-download "$@"
-      return
-    fi
-  done
   # The network deadline covers downloads only; unpacking and maintainer scripts
   # (for example locale generation or cluster creation) run offline afterwards.
   DEBIAN_FRONTEND=noninteractive apt_network install -y --no-install-recommends --download-only "$@"
+  local package pending
+  for package in "$@"; do
+    if [[ "$package" == */* ]]; then
+      # apt rejects --no-download for local archives, so prove instead that
+      # only local file: archives remain; --print-uris reads local state only.
+      pending="$(set -o pipefail; DEBIAN_FRONTEND=noninteractive apt-get --print-uris -qq -y --no-install-recommends install "$@" | awk '$1 !~ /^\047file:/')"
+      [[ -z "$pending" ]] || fail "Package downloads remain after the bounded download step: $pending"
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$@"
+      return
+    fi
+  done
   DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --no-download "$@"
 )
 

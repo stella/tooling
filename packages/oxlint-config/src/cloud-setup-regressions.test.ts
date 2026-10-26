@@ -142,9 +142,12 @@ test("Bun archive rejects a matching downloaded SHASUMS entry when the policy pi
         "-c",
         `
 fail() { exit 98; }
+apt_refresh_for() { :; }
+apt_install() { :; }
+ldconfig() { printf '%s\\n' libatomic.so.1; }
 download_file() {
   if [[ "$1" == */SHASUMS256.txt ]]; then
-    printf '%s  %s\n' "$(printf malicious | /usr/bin/sha256sum | cut -d ' ' -f1)" bun-linux-x64.zip > "$2"
+    printf '%s  %s\\n' "$(printf malicious | sha256sum | cut -d ' ' -f1)" bun-linux-x64.zip > "$2"
   else
     printf malicious > "$2"
   fi
