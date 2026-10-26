@@ -310,14 +310,18 @@ test("workspace exclusions use literal path prefixes and literal member preceden
         expect(member).not.toHaveProperty("lints");
       else expect(member).toMatchObject({ lints: { workspace: true } });
     }
-    expect(await generateRustPolicy({ root, input, mode: "check" })).toEqual([]);
+    expect(await generateRustPolicy({ root, input, mode: "check" })).toEqual(
+      [],
+    );
   });
 });
 
 test("glob traversal leaves non-member manifests unparsed and unmanaged", async () => {
   for (const kind of ["malformed", "hardlink"])
     await fixture(async (root) => {
-      await mkdir(join(root, "crates/team/members/member"), { recursive: true });
+      await mkdir(join(root, "crates/team/members/member"), {
+        recursive: true,
+      });
       await writeFile(
         join(root, "Cargo.toml"),
         '[workspace]\nmembers = ["crates/**/members/*"]\n',
@@ -340,7 +344,9 @@ test("glob traversal leaves non-member manifests unparsed and unmanaged", async 
       expect(
         await read(root, "crates/team/members/member/Cargo.toml"),
       ).toMatchObject({ lints: { workspace: true } });
-      expect(await generateRustPolicy({ root, input, mode: "check" })).toEqual([]);
+      expect(await generateRustPolicy({ root, input, mode: "check" })).toEqual(
+        [],
+      );
     });
 });
 
@@ -839,7 +845,9 @@ test("declared members include ordinary, build and dependency directory names", 
       expect(await read(root, `crates/${directory}/Cargo.toml`)).toMatchObject({
         lints: { workspace: true },
       });
-    expect(await generateRustPolicy({ root, input, mode: "check" })).toEqual([]);
+    expect(await generateRustPolicy({ root, input, mode: "check" })).toEqual(
+      [],
+    );
   });
 });
 
@@ -917,9 +925,9 @@ test("retired member paths retain source provenance and reject symlink substitut
     const keep = await readFile(join(root, "keep/Cargo.toml"), "utf8");
     await rm(join(root, "retire"), { recursive: true });
     await symlink(join(root, "keep"), join(root, "retire"));
-    expect(
-      generateRustPolicy({ root, input, mode: "write" }),
-    ).rejects.toThrow("real repository directory");
+    expect(generateRustPolicy({ root, input, mode: "write" })).rejects.toThrow(
+      "real repository directory",
+    );
     expect(await readFile(join(root, "Cargo.toml"), "utf8")).toBe(source);
     expect(await readFile(join(root, "keep/Cargo.toml"), "utf8")).toBe(keep);
   });

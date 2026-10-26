@@ -1,5 +1,5 @@
 import { readdir, readFile, stat } from "node:fs/promises";
-import { posix, join } from "node:path";
+import { join, posix } from "node:path";
 import picomatch from "picomatch";
 import { parse } from "smol-toml";
 
@@ -92,7 +92,9 @@ export const rustWorkspaceMembers = async (
   const declaredMembers = patterns(workspace["members"]);
   const excludes = patterns(workspace["exclude"]);
   const within = (directory: string, prefix: string) =>
-    prefix === "." || directory === prefix || directory.startsWith(`${prefix}/`);
+    prefix === "." ||
+    directory === prefix ||
+    directory.startsWith(`${prefix}/`);
   // Cargo checks literal path prefixes here, including the original member
   // strings. A glob-expanded member does not override an exclusion prefix.
   const excluded = (directory: string) =>
@@ -113,8 +115,8 @@ export const rustWorkspaceMembers = async (
       members.set(pattern, member);
       continue;
     }
-    let matches = 0;
-    let prunedExclusion = false;
+    // Mutated inside the recursive walk; an object keeps the final check honest.
+    const outcome = { matches: 0, prunedExclusion: false };
     const canContainMember = memberPrefixMatcher(pattern);
     const maximumDepth = pattern.includes("**")
       ? Infinity
@@ -123,11 +125,11 @@ export const rustWorkspaceMembers = async (
       const depth = directory === "." ? 0 : directory.split("/").length;
       if (!canContainMember(directory)) return;
       if (excludedSubtree(directory)) {
-        prunedExclusion = true;
+        outcome.prunedExclusion = true;
         return;
       }
       if (picomatch.isMatch(directory, pattern, { dot: true })) {
-        matches++;
+        outcome.matches++;
         if (!excluded(directory)) {
           const member = await safeManifest(root, directory);
           if (member === undefined)
@@ -144,7 +146,7 @@ export const rustWorkspaceMembers = async (
         const child = posix.join(directory, entry.name);
         if (!canContainMember(child)) continue;
         if (excludedSubtree(child)) {
-          prunedExclusion = true;
+          outcome.prunedExclusion = true;
           continue;
         }
         if (entry.isSymbolicLink()) {
@@ -158,7 +160,7 @@ export const rustWorkspaceMembers = async (
       }
     };
     await walk(scan.base || ".");
-    if (matches === 0 && !prunedExclusion)
+    if (outcome.matches === 0 && !outcome.prunedExclusion)
       throw new Error(`workspace pattern matched no manifests: ${pattern}`);
   }
   const inherited = workspace["dependencies"];

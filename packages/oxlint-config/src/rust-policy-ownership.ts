@@ -99,7 +99,7 @@ const removeLeaf = (table: Record<string, unknown>, path: string[]) => {
       throw new Error(
         "Rust ownership leaf became a table; resolve ownership explicitly",
       );
-    delete table[key];
+    Reflect.deleteProperty(table, key);
     return;
   }
   if (!record(value))
@@ -107,7 +107,7 @@ const removeLeaf = (table: Record<string, unknown>, path: string[]) => {
       "Rust ownership table became a value; resolve ownership explicitly",
     );
   removeLeaf(value, path.slice(1));
-  if (Object.keys(value).length === 0) delete table[key];
+  if (Object.keys(value).length === 0) Reflect.deleteProperty(table, key);
 };
 
 const previousPolicyPaths = (file: string, current: string | undefined) => {
@@ -174,7 +174,7 @@ const memberPaths = (input: unknown) => {
       value === "Cargo.toml" ||
       !value.endsWith("/Cargo.toml") ||
       value.includes("\\") ||
-      /[\u0000-\u001f\u007f]/u.test(value) ||
+      /\p{Cc}/u.test(value) ||
       /^[A-Za-z]:/u.test(value) ||
       value
         .split("/")
