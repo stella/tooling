@@ -2,11 +2,16 @@
 
 import { describe, expect, test } from "bun:test";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import toolchain from "../toolchain.json";
+import { synchronizeRepositoryQuarantine } from "./quarantine-policy";
+import {
+  parseFormatterPolicy,
+  sharedFormatTables,
+} from "./toolchain-formatter";
 
 const packageJson = (properties: Record<string, unknown>) =>
   JSON.stringify(properties, null, 2);
@@ -17,10 +22,8 @@ describe("consumer toolchain guard CLI", () => {
     const entry = path.resolve(import.meta.dir, "toolchain-check-cli.ts");
     try {
       execFileSync("git", ["init", "-q", root]);
-      writeFileSync(
-        path.join(root, "package.json"),
-        packageJson({ packageManager: "bun@1.4.3" }),
-      );
+      const manifest = packageJson({ packageManager: `bun@${toolchain.bun}` });
+      writeFileSync(path.join(root, "package.json"), manifest);
       writeFileSync(
         path.join(root, "stll-toolchain.json"),
         packageJson({
@@ -38,9 +41,27 @@ describe("consumer toolchain guard CLI", () => {
           cwd: root,
           encoding: "utf8",
         });
+      const missingQuarantine = run([]);
+      expect(missingQuarantine.status).toBe(1);
+      expect(missingQuarantine.stderr).toContain("[quarantine-policy]");
+      expect(missingQuarantine.stderr).toContain("stll-quarantine --sync");
+      writeFileSync(
+        path.join(root, "bunfig.toml"),
+        `${synchronizeRepositoryQuarantine({
+          files: { "package.json": manifest },
+        })}\n${sharedFormatTables(parseFormatterPolicy(toolchain.formatter))}`,
+      );
+      execFileSync("git", ["add", "bunfig.toml"], { cwd: root });
       const passing = run([]);
-      expect(passing.status).toBe(0);
+      expect(passing.status, passing.stderr).toBe(0);
       expect(passing.stderr).toBe("");
+      // The shared Bun is a minimum: a later exact release passes.
+      writeFileSync(
+        path.join(root, "package.json"),
+        packageJson({ packageManager: "bun@99.0.0" }),
+      );
+      const newer = run([]);
+      expect(newer.status, newer.stderr).toBe(0);
       writeFileSync(
         path.join(root, "package.json"),
         packageJson({ packageManager: "bun@1.4.1" }),
@@ -48,7 +69,7 @@ describe("consumer toolchain guard CLI", () => {
       const failing = run([]);
       expect(failing.status).toBe(1);
       expect(failing.stderr).toContain(
-        "package.json:2: [bun-pins] packageManager Bun version must be 1.4.3",
+        `package.json:2: [bun-pins] packageManager Bun version must be ${toolchain.bun}`,
       );
       const help = run(["--help"]);
       expect(help.status).toBe(0);
@@ -76,11 +97,13 @@ describe("consumer toolchain guard CLI", () => {
           ],
         }),
       );
+      rmSync(path.join(root, "bunfig.toml"));
+      execFileSync("git", ["add", "-u", "bunfig.toml"], { cwd: root });
       expect(run([]).status).toBe(0);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 });
 
 test("CLI delegation reaches stdout and preserves success while ordinary pins still fail", () => {
@@ -121,4 +144,4 @@ test("CLI delegation reaches stdout and preserves success while ordinary pins st
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, 15_000);

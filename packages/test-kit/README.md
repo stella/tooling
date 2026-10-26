@@ -11,15 +11,20 @@ peer dependency, needed only by `@stll/test-kit/db`.
 bun add -d @stll/test-kit
 ```
 
-| Need                                            | Use                                                                                 | Instead of                                                   |
-| ----------------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| Time that moves only when the test says so      | `createTestClock()`; pass it where the code takes a `Clock`                         | `Date.now()`, `performance.now()`, `Bun.sleep`, `setTimeout` |
-| Wait for something that happens                 | `deferred()`, `waitForEvent()`, `waitForAbort()`                                    | sleeping and hoping                                          |
-| Wait for state without an event (a row, a file) | `waitFor(probe, { description })`                                                   | a hand-written poll loop                                     |
-| A deadline that only catches hangs              | `settledWithin(promise, { description })`                                           | `Promise.race` with a short timer as an assertion            |
-| A private directory per test                    | `useTestTmpDir()`, `withTestTmpDir()`, `await using dir = await createTestTmpDir()` | `mkdtemp(tmpdir())` and manual cleanup                       |
-| No outbound network                             | preload `@stll/test-kit/forbid-network`, or `installNetworkGuard()`                 | relying on the CI network                                    |
-| Database timestamps compared with `now()`       | `dbClock.ago(ms)` / `dbClock.fromNow(ms)` from `@stll/test-kit/db`                  | `new Date(Date.now() - ms)` written into a column            |
+| Need                                               | Use                                                                                 | Instead of                                                   |
+| -------------------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| Time that moves only when the test says so         | `createTestClock()`; pass it where the code takes a `Clock`                         | `Date.now()`, `performance.now()`, `Bun.sleep`, `setTimeout` |
+| Wait for something that happens                    | `deferred()`, `waitForEvent()`, `waitForAbort()`                                    | sleeping and hoping                                          |
+| Wait for state without an event (a row, a file)    | `waitFor(probe, { description })`                                                   | a hand-written poll loop                                     |
+| A deadline that only catches hangs                 | `settledWithin(promise, { description })`                                           | `Promise.race` with a short timer as an assertion            |
+| A private directory per test                       | `useTestTmpDir()`, `withTestTmpDir()`, `await using dir = await createTestTmpDir()` | `mkdtemp(tmpdir())` and manual cleanup                       |
+| No outbound network                                | preload `@stll/test-kit/forbid-network`, or `installNetworkGuard()`                 | relying on the CI network                                    |
+| No inherited proxy settings during a network guard | `installNetworkGuard()` hides and later restores proxy environment variables        | treating sandbox proxy settings as test network access       |
+| Database timestamps compared with `now()`          | `dbClock.ago(ms)` / `dbClock.fromNow(ms)` from `@stll/test-kit/db`                  | `new Date(Date.now() - ms)` written into a column            |
+| Repeatable random data                             | `createSeededRandom(testSeed())`                                                    | `Math.random()`                                              |
+| Timer-driven behavior                              | `withFakeTimers()` or `createFakeTimers()`                                          | real `setTimeout()` and `setInterval()`                      |
+| HTTP dependencies                                  | `withFakeServer()`                                                                  | the internet or shared services                              |
+| Explicit checked-in artifact regeneration          | `writeRegeneratedFile()` with an exact opt-in environment flag                      | accidentally overwriting fixtures during a test run          |
 
 ## Clock
 
@@ -41,3 +46,24 @@ not shorten it to assert that something is fast. Assert work counts instead.
 Postgres compares rows with its own `now()`. A JavaScript timestamp written
 into a column that the code compares with `now()` mixes two clocks.
 `dbClock` builds those values from the database clock instead.
+
+## Seeded randomness
+
+`createSeededRandom(seed)` supplies `next()`, inclusive `int(min, max)`,
+`pick(items)`, and a non-mutating `shuffle(items)`. `testSeed()` derives a stable
+seed from its test call site unless `STLL_TEST_SEED` is set, and prints the seed.
+Copy the printed assignment into the environment to reproduce a failure exactly.
+
+## Fake timers
+
+`createFakeTimers()` returns timer functions plus `advance(ms)` and `runAll()`.
+They use a test clock and fire only when explicitly advanced. `withFakeTimers(fn)`
+temporarily installs those functions on `globalThis`, then restores the real timer
+functions even when `fn` throws. Code outside the callback is unaffected.
+
+## Fake HTTP server
+
+`withFakeServer(handler, fn)` binds an ephemeral port on `127.0.0.1`, passes
+`{ baseUrl, requests }` to `fn`, records request metadata and bodies, and stops the
+server afterward even when `fn` throws. Loopback remains available when the network
+guard is installed.

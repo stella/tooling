@@ -1,8 +1,6 @@
 {
   "engines": {},
-  "peerDependencies": {
-    "typescript": ">=6.0.3 <8"
-  },
+  "peerDependencies": {},
   "target": {
     "type": "types-only"
   },
@@ -12,7 +10,10 @@
       "./base.json": "./base.json",
       "./library.json": "./library.json",
       "./node.json": "./node.json",
-      "./bun.json": "./bun.json"
+      "./bun.json": "./bun.json",
+      "./published.json": "./published.json",
+      "./react-library.json": "./react-library.json",
+      "./single-checker.json": "./single-checker.json"
     }
   }
 }

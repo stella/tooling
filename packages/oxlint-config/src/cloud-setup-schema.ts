@@ -1,7 +1,7 @@
 import {
   cloudSetupArtifacts,
-  cloudSetupPackages,
   type CloudSetupArtifactTool,
+  cloudSetupPackages,
   type CloudSetupPackageTool,
 } from "./cloud-setup-artifacts";
 
@@ -208,12 +208,16 @@ export const parseCloudSetup = (input: unknown) => {
       key !== "envFile" &&
       key !== "rust" &&
       key !== "tools" &&
-      key !== "prepare"
+      key !== "prepare" &&
+      key !== "submodules"
     )
       throw new Error(`unsupported cloud key: ${key}`);
   const rust = parseRust("rust" in input ? input.rust : undefined);
   const tools = parseTools("tools" in input ? input.tools : undefined);
   const prepare = parsePrepare("prepare" in input ? input.prepare : undefined);
+  const submodules = "submodules" in input ? input.submodules : false;
+  if (typeof submodules !== "boolean")
+    throw new Error("cloud.submodules must be a boolean when provided");
   const extensions = {
     ...(rust === undefined ? {} : { rust }),
     ...(tools === undefined ? {} : { tools }),
@@ -241,6 +245,7 @@ export const parseCloudSetup = (input: unknown) => {
   return {
     services,
     install,
+    ...(submodules ? { submodules } : {}),
     ...extensions,
     ...(services.length === 0 ? {} : { envFile: parseEnvFile(input) }),
   } as const;

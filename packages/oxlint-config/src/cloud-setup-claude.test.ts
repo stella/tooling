@@ -3,8 +3,8 @@
 import { expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import {
-  mkdtempSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -68,6 +68,32 @@ const releasedProjectHook = {
   ],
 };
 
+// Exact SessionStart hook persisted by tooling main at 783bc97.
+const previouslyCurrentHook = {
+  matcher: "",
+  hooks: [
+    {
+      type: "command",
+      command: `if [ "\${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
+  cloud_setup_incomplete() {
+    printf '%s\\n' 'Cloud setup could not establish a verified session environment. From the repository root, run bash .agents/cloud-setup.sh install and then bash .agents/cloud-setup.sh start. Do not assume pinned tools or services are ready until start succeeds.'
+    printf '%s\\n' "cloud-setup: $1" >&2
+    exit 0
+  }
+  bash "$CLAUDE_PROJECT_DIR/.agents/cloud-setup.sh" start >&2 || cloud_setup_incomplete 'startup failed; run install'
+  if [ -n "\${CLAUDE_ENV_FILE:-}" ]; then
+    if [ ! -s /etc/profile.d/stll-cloud.sh ]; then
+      cloud_setup_incomplete 'cloud shell profile is unavailable; run install'
+    fi
+    cloud_shell_exports="$(cat /etc/profile.d/stll-cloud.sh)" || cloud_setup_incomplete 'cloud shell profile could not be read; run install'
+    [ -n "$cloud_shell_exports" ] || cloud_setup_incomplete 'cloud shell profile is unavailable; run install'
+    printf '\\n%s\\n' "$cloud_shell_exports" >> "$CLAUDE_ENV_FILE" || cloud_setup_incomplete 'session environment could not be persisted; check its write access and rerun start'
+  fi
+fi`,
+    },
+  ],
+};
+
 test("Claude settings merge preserves unrelated settings and reaches a byte-stable fixed point", () => {
   const unrelated = {
     permissions: { allow: ["Read"], deny: ["Bash(rm:*)"] },
@@ -106,14 +132,18 @@ test("Claude settings merge preserves unrelated settings and reaches a byte-stab
   });
   const compact = settingsWith([cloudSessionStartHook]);
   expect(mergeCloudClaudeSettings(compact)).toBe(compact);
-});
+}, 15_000);
 
-test("Claude settings merge replaces both released exact forms in place and reaches a fixed point", () => {
+test("Claude settings merge replaces shipped exact hook forms in place and reaches a fixed point", () => {
   const unrelated = {
     matcher: "startup",
     hooks: [{ type: "command", command: "echo existing" }],
   };
-  for (const previous of [releasedHook, releasedProjectHook]) {
+  for (const previous of [
+    releasedHook,
+    releasedProjectHook,
+    previouslyCurrentHook,
+  ]) {
     const merged = mergeCloudClaudeSettings(
       JSON.stringify({
         env: { EXAMPLE: "value" },
@@ -144,7 +174,7 @@ test("Claude settings merge replaces both released exact forms in place and reac
       ]),
     ),
   ).toThrow(cloudSessionStartFix);
-});
+}, 15_000);
 
 test("Claude attribution conflicts fail with the exact manual fix and drift rejects them", () => {
   const hooks = { SessionStart: [cloudSessionStartHook] };
@@ -167,7 +197,7 @@ test("Claude attribution conflicts fail with the exact manual fix and drift reje
   expect(cloudAttributionFix).toContain(
     JSON.stringify({ attribution: { commit: "", pr: "" } }, null, 2),
   );
-});
+}, 15_000);
 
 test("Claude hook unsafe merges fail with the exact manual fix and drift rejects them", () => {
   const unguarded = {
@@ -198,6 +228,7 @@ test("Claude hook unsafe merges fail with the exact manual fix and drift rejects
         ],
       },
     ]),
+    settingsWith([{ ...previouslyCurrentHook, matcher: "startup" }]),
   ];
   for (const input of invalid) {
     expect(() => mergeCloudClaudeSettings(input)).toThrow(cloudSessionStartFix);
@@ -205,7 +236,7 @@ test("Claude hook unsafe merges fail with the exact manual fix and drift rejects
   }
   expect(hasCloudSessionStartHook(undefined)).toBe(false);
   expect(hasCloudSessionStartHook("{}")).toBe(false);
-});
+}, 15_000);
 
 test("Claude SessionStart reports remote startup failure as visible context and leaves local sessions silent", () => {
   const root = mkdtempSync(join(tmpdir(), "cloud-claude-hook-"));
@@ -219,6 +250,7 @@ test("Claude SessionStart reports remote startup failure as visible context and 
     for (const remote of [undefined, "", "false", "1", "TRUE", "true"]) {
       const env = { ...process.env };
       delete env["CLAUDE_CODE_REMOTE"];
+      delete env["CLAUDE_ENV_FILE"];
       env["CLAUDE_PROJECT_DIR"] = root;
       if (remote !== undefined) env["CLAUDE_CODE_REMOTE"] = remote;
       const result = spawnSync("bash", ["-c", command], { cwd: root, env });
@@ -243,7 +275,7 @@ test("Claude SessionStart reports remote startup failure as visible context and 
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("remote Claude SessionStart resolves the setup script from the project root in a subdirectory", () => {
   const root = mkdtempSync(join(tmpdir(), "cloud-claude-subdirectory-"));
@@ -274,13 +306,16 @@ test("remote Claude SessionStart resolves the setup script from the project root
     expect(result.stderr).toBe("");
     expect(result.status).toBe(0);
     expect(readFileSync(join(root, "calls"), "utf8")).toBe(
-      `start ${realpathSync(subdirectory)}\n`,
+      `session ${realpathSync(subdirectory)}\n`,
     );
-    expect(readFileSync(environment, "utf8")).toBe(`\n${exports}`);
+    expect(readFileSync(environment, "utf8")).toBe(
+      `\n. '${environment}.stll-cloud'\n`,
+    );
+    expect(readFileSync(`${environment}.stll-cloud`, "utf8")).toBe(exports);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("Claude SessionStart persists literal pinned exports after start while retaining the future shell PATH", () => {
   const root = mkdtempSync(join(tmpdir(), "cloud-claude-environment-"));
@@ -300,7 +335,16 @@ test("Claude SessionStart persists literal pinned exports after start while reta
     }
     writeFileSync(
       join(root, ".agents/cloud-setup.sh"),
-      'printf "%s\\n" "$1" >> calls\nexit "${START_EXIT:-0}"\n',
+      [
+        "printf '%s\\n' \"$1\" >> calls",
+        'if [ "$1" = session ]; then',
+        '  [ "${START_EXIT:-0}" = 0 ] || exit "$START_EXIT"',
+        '  printf "%s\\n" "export DATABASE_URL=\'postgres://stll_cloud:fixture-secret@127.0.0.1:55432/cloud_test\'"',
+        "  exit 0",
+        "fi",
+        'exit "${START_EXIT:-0}"',
+        "",
+      ].join("\n"),
     );
     const exports = `export PATH="${pinned}:$PATH"\nexport RUSTUP_HOME="${root}/rustup"\n`;
     writeFileSync(profile, exports);
@@ -309,6 +353,9 @@ test("Claude SessionStart persists literal pinned exports after start while reta
       profile,
     );
     const original = "export KEEP=retained";
+    const snapshot = `${environment}.stll-cloud`;
+    const source = `. '${snapshot}'\n`;
+    const sessionExports = `export DATABASE_URL='postgres://stll_cloud:fixture-secret@127.0.0.1:55432/cloud_test'\n${exports}`;
     const env = {
       ...process.env,
       PATH: [...inherited, "/usr/bin", "/bin"].join(":"),
@@ -326,10 +373,28 @@ test("Claude SessionStart persists literal pinned exports after start while reta
       expect(result.stdout).toBe("");
       expect(result.stderr).toBe("");
       expect(readFileSync(environment, "utf8")).toBe(
-        remote === "true" ? `${original}\n${exports}` : original,
+        remote === "true" ? `${original}\n${source}` : original,
       );
+      expect(result.stdout).not.toContain("fixture-secret");
+      expect(result.stderr).not.toContain("fixture-secret");
     }
-    const persisted = readFileSync(environment, "utf8");
+    // A later start (resume, clear, compact) refreshes only its snapshot and
+    // keeps whatever other hooks appended to the shared file.
+    writeFileSync(
+      environment,
+      `${readFileSync(environment, "utf8")}export LATER=kept\n`,
+    );
+    const rerun = spawnSync("/bin/bash", ["-c", command], {
+      cwd: root,
+      env: { ...env, CLAUDE_CODE_REMOTE: "true" },
+      encoding: "utf8",
+    });
+    expect(rerun.status).toBe(0);
+    expect(readFileSync(environment, "utf8")).toBe(
+      `${original}\n${source}export LATER=kept\n`,
+    );
+    expect(readFileSync(snapshot, "utf8")).toBe(sessionExports);
+    const persisted = readFileSync(snapshot, "utf8");
     expect(persisted).toContain("$PATH");
     for (const directory of inherited)
       expect(persisted).not.toContain(directory);
@@ -349,7 +414,9 @@ test("Claude SessionStart persists literal pinned exports after start while reta
       `${pinned}:${env.PATH}`,
       "",
     ]);
-    expect(readFileSync(join(root, "calls"), "utf8")).toBe("start\n");
+    expect(readFileSync(join(root, "calls"), "utf8")).toBe(
+      "session\nsession\n",
+    );
 
     writeFileSync(environment, original);
     const failed = spawnSync("/bin/bash", ["-c", command], {
@@ -383,7 +450,7 @@ test("Claude SessionStart persists literal pinned exports after start while reta
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("Node settings parse diagnostics use the canonical repair without echoing input", () => {
   const marker = "fixture-settings-source";
@@ -404,9 +471,9 @@ catch (error) { process.stdout.write(error.message); }
   expect(result.stdout).toContain("settings must contain valid JSON");
   expect(result.stdout).toContain(cloudSessionStartFix);
   expect(result.stdout).not.toContain(marker);
-});
+}, 15_000);
 
-test("SessionStart profile reads and single appends fail visibly without changing existing environment", () => {
+test("SessionStart reads, writes and replacement fail visibly without changing existing environment", () => {
   const root = mkdtempSync(join(tmpdir(), "cloud-claude-write-failure-"));
   try {
     mkdirSync(join(root, ".agents"));
@@ -422,12 +489,22 @@ test("SessionStart profile reads and single appends fail visibly without changin
       cloudShellProfilePath,
       profile,
     );
-    for (const operation of ["read", "append"]) {
+    const failures = [
+      { failure: "cat() { return 74; }", reason: "could not be read" },
+      {
+        failure:
+          'printf() { if [[ /dev/fd/1 -ef "$CLAUDE_ENV_FILE" ]]; then return 76; fi; builtin printf "$@"; }',
+        reason: "could not be persisted",
+      },
+      {
+        failure:
+          'printf() { if [[ -n "${cloud_env_temporary:-}" && /dev/fd/1 -ef "$cloud_env_temporary" ]]; then return 73; fi; builtin printf "$@"; }',
+        reason: "could not be prepared",
+      },
+      { failure: "mv() { return 75; }", reason: "could not be persisted" },
+    ];
+    for (const { failure, reason } of failures) {
       writeFileSync(environment, original);
-      const failure =
-        operation === "read"
-          ? "cat() { return 74; }"
-          : String.raw`printf() { if [ "$1" = '\n%s\n' ]; then return 73; fi; builtin printf "$@"; }`;
       const result = spawnSync("bash", ["-c", `${failure}\n${command}`], {
         cwd: root,
         env: {
@@ -445,12 +522,10 @@ test("SessionStart profile reads and single appends fail visibly without changin
       expect(result.stdout).toContain("bash .agents/cloud-setup.sh install");
       expect(result.stdout).not.toContain("fixture-untrusted-start-output");
       expect(result.stdout).not.toContain("private-value");
-      expect(result.stderr).toContain(
-        operation === "read" ? "could not be read" : "could not be persisted",
-      );
+      expect(result.stderr).toContain(reason);
       expect(readFileSync(environment, "utf8")).toBe(original);
     }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, 15_000);

@@ -1,6 +1,6 @@
 {
   "name": "@stll/oxlint-plugin",
-  "version": "0.2.2",
+  "version": "0.6.2",
   "description": "Portable static-safety and route-query rules for Oxlint consumers.",
   "license": "Apache-2.0",
   "repository": {
@@ -91,6 +91,83 @@
         "default": "./dist/require-loader-prefetch.cjs"
       },
       "default": "./dist/require-loader-prefetch.mjs"
+    },
+    "./bun-test-hygiene": {
+      "import": {
+        "types": "./dist/bun-test-hygiene.d.mts",
+        "default": "./dist/bun-test-hygiene.mjs"
+      },
+      "require": {
+        "types": "./dist/bun-test-hygiene.d.cts",
+        "default": "./dist/bun-test-hygiene.cjs"
+      },
+      "default": "./dist/bun-test-hygiene.mjs"
+    },
+    "./no-wall-clock-in-tests": {
+      "import": {
+        "types": "./dist/no-wall-clock-in-tests.d.mts",
+        "default": "./dist/no-wall-clock-in-tests.mjs"
+      },
+      "require": {
+        "types": "./dist/no-wall-clock-in-tests.d.cts",
+        "default": "./dist/no-wall-clock-in-tests.cjs"
+      },
+      "default": "./dist/no-wall-clock-in-tests.mjs"
+    },
+    "./no-real-timer-waits-in-tests": {
+      "import": {
+        "types": "./dist/no-real-timer-waits-in-tests.d.mts",
+        "default": "./dist/no-real-timer-waits-in-tests.mjs"
+      },
+      "require": {
+        "types": "./dist/no-real-timer-waits-in-tests.d.cts",
+        "default": "./dist/no-real-timer-waits-in-tests.cjs"
+      },
+      "default": "./dist/no-real-timer-waits-in-tests.mjs"
+    },
+    "./no-unseeded-random-in-tests": {
+      "import": {
+        "types": "./dist/no-unseeded-random-in-tests.d.mts",
+        "default": "./dist/no-unseeded-random-in-tests.mjs"
+      },
+      "require": {
+        "types": "./dist/no-unseeded-random-in-tests.d.cts",
+        "default": "./dist/no-unseeded-random-in-tests.cjs"
+      },
+      "default": "./dist/no-unseeded-random-in-tests.mjs"
+    },
+    "./no-real-network-in-tests": {
+      "import": {
+        "types": "./dist/no-real-network-in-tests.d.mts",
+        "default": "./dist/no-real-network-in-tests.mjs"
+      },
+      "require": {
+        "types": "./dist/no-real-network-in-tests.d.cts",
+        "default": "./dist/no-real-network-in-tests.cjs"
+      },
+      "default": "./dist/no-real-network-in-tests.mjs"
+    },
+    "./no-checkout-writes-in-tests": {
+      "import": {
+        "types": "./dist/no-checkout-writes-in-tests.d.mts",
+        "default": "./dist/no-checkout-writes-in-tests.mjs"
+      },
+      "require": {
+        "types": "./dist/no-checkout-writes-in-tests.d.cts",
+        "default": "./dist/no-checkout-writes-in-tests.cjs"
+      },
+      "default": "./dist/no-checkout-writes-in-tests.mjs"
+    },
+    "./no-wall-clock-bound": {
+      "import": {
+        "types": "./dist/no-wall-clock-bound.d.mts",
+        "default": "./dist/no-wall-clock-bound.mjs"
+      },
+      "require": {
+        "types": "./dist/no-wall-clock-bound.d.cts",
+        "default": "./dist/no-wall-clock-bound.cjs"
+      },
+      "default": "./dist/no-wall-clock-bound.mjs"
     }
   },
   "publishConfig": {
@@ -98,15 +175,12 @@
   },
   "scripts": {
     "build": "tsdown",
-    "typecheck": "bun check",
-    "format": "oxfmt ."
+    "typecheck": "bun check --no-pretty --all --project=tsconfig.json"
   },
   "devDependencies": {
     "@oxlint/plugins": "1.87.0",
     "@stll/typescript-config": "workspace:*",
-    "@types/node": "26.6.5",
-    "oxfmt": "0.72.0",
-    "typescript": "7.0.2"
+    "@types/node": "26.6.5"
   },
   "peerDependencies": {
     "@oxlint/plugins": ">=1.75.0 <2",

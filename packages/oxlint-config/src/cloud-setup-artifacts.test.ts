@@ -7,15 +7,15 @@ import policyInput from "../toolchain.json";
 import { generateCloudSetup } from "./cloud-setup";
 import {
   cloudSetupArtifacts,
+  type CloudSetupArtifactTool,
   cloudSetupArtifactVersions,
   cloudSetupPackages,
   getCloudSetupArtifact,
   getCloudSetupPackage,
-  type CloudSetupArtifactTool,
 } from "./cloud-setup-artifacts";
 import {
-  cloudInstallCommand,
   cloudExtraTools,
+  cloudInstallCommand,
   isCloudPackageTool,
   parseCloudSetup,
 } from "./cloud-setup-schema";
@@ -56,7 +56,7 @@ test("artifact catalog pins safe upstream downloads and explicit binary paths", 
       }
     }
   }
-});
+}, 15_000);
 
 test("artifact lookup accepts every explicit version and rejects unsupported versions for every tool", () => {
   const tools = [
@@ -91,7 +91,7 @@ test("artifact lookup accepts every explicit version and rejects unsupported ver
         `Unsupported ${tool} version ${version}; supported versions: ${versions.join(", ")}`,
       );
   }
-});
+}, 15_000);
 
 test("gitleaks generation pins both release artifacts and exposes the binary on the persisted PATH", () => {
   const generate = (version: string) => {
@@ -136,7 +136,7 @@ test("gitleaks generation pins both release artifacts and exposes the binary on 
   expect(() => generate("8.30.0")).toThrow(
     "Unsupported gitleaks version 8.30.0; supported versions: 8.30.1",
   );
-});
+}, 15_000);
 
 test("package catalog accepts only the Ubuntu 24.04 release", () => {
   for (const [tool, release] of Object.entries(cloudSetupPackages)) {
@@ -147,7 +147,7 @@ test("package catalog accepts only the Ubuntu 24.04 release", () => {
         `Unsupported ${tool} version ${version}; supported versions: ${release.version}`,
       );
   }
-});
+}, 15_000);
 
 test("the documented direct network hosts equal the complete generated download host set", async () => {
   const policy = parseToolchainPolicy(policyInput);
@@ -198,4 +198,4 @@ test("the documented direct network hosts equal the complete generated download 
   expect(new Set(documented)).toEqual(
     new Set([...generated, ...artifactHosts]),
   );
-});
+}, 15_000);

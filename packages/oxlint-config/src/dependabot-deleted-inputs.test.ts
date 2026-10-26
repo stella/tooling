@@ -65,4 +65,4 @@ test("generation and policy checks omit deleted tracked Bundler and Composer dec
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, 15_000);

@@ -1,5 +1,6 @@
 import { valid } from "semver";
 
+import { parseFormatterPolicy } from "./toolchain-formatter";
 import { nodePolicyValid } from "./toolchain-node";
 
 export const packagePinKeys = [
@@ -7,7 +8,6 @@ export const packagePinKeys = [
   "oxlint-tsgolint",
   "@oxlint/plugins",
   "@stll/oxlint-plugin",
-  "oxfmt",
   "lefthook",
 ] as const;
 
@@ -139,54 +139,22 @@ export const parseToolchainPolicy = (input: unknown) => {
     throw new Error("missing TypeScript compatibility policy");
   const version = string(compatibility, "version");
   const packageAlias = string(compatibility, "packageAlias");
-  if (valid(version) !== version)
-    throw new Error("TypeScript compatibility must be an exact release");
-  const layouts = input["typescriptInstallLayouts"];
-  if (!Array.isArray(layouts) || layouts.length === 0)
-    throw new Error("missing TypeScript install layouts");
-  const typescriptInstallLayouts = layouts.map((layout: unknown) => {
-    if (!record(layout)) throw new Error("invalid TypeScript install layout");
-    const compilerPackage = string(layout, "compilerPackage");
-    const compilerSpecifier = string(layout, "compilerSpecifier");
-    const typecheckCommand = string(layout, "typecheckCommand");
-    switch (layout["type"]) {
-      case "direct":
-        if (
-          compilerSpecifier !== typescript ||
-          compilerPackage !== "typescript"
-        )
-          throw new Error(
-            "direct TypeScript layout differs from shared version",
-          );
-        return {
-          type: "direct",
-          compilerPackage,
-          compilerSpecifier,
-          typecheckCommand,
-        } as const;
-      case "split-compatibility": {
-        const compatibilityPackage = string(layout, "compatibilityPackage");
-        const compatibilitySpecifier = string(layout, "compatibilitySpecifier");
-        if (
-          compilerSpecifier !== `npm:typescript@${typescript}` ||
-          compatibilitySpecifier !== version
-        )
-          throw new Error(
-            "split TypeScript layout differs from shared versions",
-          );
-        return {
-          type: "split-compatibility",
-          compilerPackage,
-          compilerSpecifier,
-          compatibilityPackage,
-          compatibilitySpecifier,
-          typecheckCommand,
-        } as const;
-      }
-      default:
-        throw new Error("unsupported TypeScript install layout");
-    }
-  });
+  if (valid(version) !== version || !version.startsWith("6."))
+    throw new Error(
+      "TypeScript compatibility must be an exact TypeScript 6 release",
+    );
+  const blockers = compatibility["peerBlockers"];
+  if (
+    !Array.isArray(blockers) ||
+    blockers.length === 0 ||
+    !blockers.every(
+      (blocker: unknown) => typeof blocker === "string" && blocker !== "",
+    )
+  )
+    throw new Error(
+      "TypeScript compatibility must list its peer blockers as nonempty package names",
+    );
+  const peerBlockers: readonly string[] = blockers;
   const actionsInput = input["actions"];
   if (!record(actionsInput) || Object.keys(actionsInput).length === 0)
     throw new Error("missing approved actions");
@@ -229,6 +197,17 @@ export const parseToolchainPolicy = (input: unknown) => {
       throw new Error("Dependabot group values must be string arrays");
     return value;
   };
+  // First-party reusable workflows move by commit, without a semver update
+  // type, and must land together; they precede the shared semver groups.
+  const actionGroupsInput = dependabotInput["actionGroups"];
+  if (!record(actionGroupsInput))
+    throw new Error("missing Dependabot action groups");
+  const actionGroups: Record<string, { patterns: string[] }> = {};
+  for (const [name, group] of Object.entries(actionGroupsInput)) {
+    if (!record(group) || Object.keys(group).some((key) => key !== "patterns"))
+      throw new Error(`invalid Dependabot action group: ${name}`);
+    actionGroups[name] = { patterns: strings(group["patterns"]) };
+  }
   const groups: Record<string, { patterns: string[]; updateTypes: string[] }> =
     {};
   for (const [name, group] of Object.entries(dependabotInput["groups"])) {
@@ -240,6 +219,7 @@ export const parseToolchainPolicy = (input: unknown) => {
   }
   return {
     bun,
+    formatter: parseFormatterPolicy(input["formatter"]),
     typescript,
     node,
     postgres,
@@ -253,20 +233,23 @@ export const parseToolchainPolicy = (input: unknown) => {
     rust,
     packages,
     actions,
-    typescriptInstallLayouts,
-    typescript6Compatibility: { version, packageAlias },
+    typescript6Compatibility: { version, packageAlias, peerBlockers },
     dependabot: {
       schedule,
       cooldown: { defaultDays },
+      actionGroups,
       groups,
       ignoredPackages: [
         ...new Set([
           ...Object.keys(packages),
-          ...typescriptInstallLayouts.flatMap((layout) =>
-            layout.type === "direct"
-              ? [layout.compilerPackage]
-              : [layout.compilerPackage, layout.compatibilityPackage],
-          ),
+          // The consumer package managers move only with a reviewed
+          // consumerNpm or consumerPnpm change.
+          "npm",
+          "pnpm",
+          // TypeScript 6 moves only with a reviewed compatibility change;
+          // the native compiler package stays retired.
+          "typescript",
+          "@typescript/native",
           packageAlias,
           "bun-types",
         ]),

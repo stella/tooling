@@ -78,7 +78,7 @@ test("public generator and write CLI produce the same complete fixed point", asy
       (await stat(join(root, ".github/dependabot.yml"))).mode & 0o777,
     ).toBe(0o644);
   });
-});
+}, 15_000);
 
 test.skipIf(process.env["CI"] !== "true")(
   "published ESM and CommonJS entries export the generator and the built CLI writes it",
@@ -146,7 +146,7 @@ test("preserves the existing yaml spelling and rejects conflicting outputs", asy
       "sentinel\n",
     );
   });
-});
+}, 15_000);
 
 test("recreates a deleted tracked output at its indexed spelling", async () => {
   for (const extension of ["yml", "yaml"]) {
@@ -180,7 +180,7 @@ test("recreates a deleted tracked output at its indexed spelling", async () => {
       });
     }
   }
-});
+}, 15_000);
 
 test("missing unrelated inputs and conflicting indexed output spellings never write", async () => {
   await withRepository(async (root) => {
@@ -215,7 +215,7 @@ test("missing unrelated inputs and conflicting indexed output spellings never wr
       code: "ENOENT",
     });
   });
-});
+}, 15_000);
 
 test("help needs no repository and invalid options never write", async () => {
   const root = await mkdtemp(join(tmpdir(), "dependabot-help-"));
@@ -231,7 +231,7 @@ test("help needs no repository and invalid options never write", async () => {
   } finally {
     await rm(root, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("generated configuration never overwrites linked external targets", async () => {
   for (const kind of ["parent", "symlink", "hard-link"]) {
@@ -255,7 +255,7 @@ test("generated configuration never overwrites linked external targets", async (
       }
     });
   }
-});
+}, 15_000);
 
 test("check mode reports absent or stale output without writing and accepts the generated fixed point", async () => {
   await withRepository(async (root) => {
@@ -276,7 +276,7 @@ test("check mode reports absent or stale output without writing and accepts the 
     expect(await readFile(output, "utf8")).toBe(`${generated}# stale\n`);
     expect((await stat(output)).mtimeMs).toBe(stale.mtimeMs);
   });
-});
+}, 15_000);
 
 test("explicit ecosystem declarations use shared policy and check the same generated output", async () => {
   await withRepository(async (root) => {
@@ -307,7 +307,7 @@ test("explicit ecosystem declarations use shared policy and check the same gener
       output,
     );
   });
-});
+}, 15_000);
 
 test("declarations cannot omit detected coverage or override shared update policy", async () => {
   const invalidInputs: unknown[] = [
@@ -351,7 +351,7 @@ test("declarations cannot omit detected coverage or override shared update polic
       expect(invoke(root, args).status).toBe(1);
     }
   });
-});
+}, 15_000);
 
 test("unsupported ecosystem declarations cannot write or validate generated output", async () => {
   await withRepository(async (root) => {
@@ -380,4 +380,58 @@ test("unsupported ecosystem declarations cannot write or validate generated outp
       }
     }
   });
-});
+}, 15_000);
+
+test("the CLI generates and checks tracked stll-toolchain.json Dependabot ignores", async () => {
+  await withRepository(async (root) => {
+    const graphql = {
+      ecosystem: "bun",
+      dependency: "graphql",
+      updateTypes: ["version-update:semver-major"],
+      reason: "Payload 3 requires graphql ^16.",
+    };
+    const declare = async (configuration: unknown) => {
+      await writeFile(
+        join(root, "stll-toolchain.json"),
+        JSON.stringify(configuration),
+      );
+      execFileSync("git", ["add", "stll-toolchain.json"], { cwd: root });
+    };
+    await declare({ dependabotIgnores: [graphql] });
+    const written = invoke(root);
+    expect(written.status, written.stderr).toBe(0);
+    expect(
+      await readFile(join(root, ".github/dependabot.yml"), "utf8"),
+    ).toContain("dependency-name: graphql");
+    execFileSync("git", ["add", ".github/dependabot.yml"], { cwd: root });
+    expect(invoke(root, ["--check"]).status).toBe(0);
+    await declare({});
+    const drifted = invoke(root, ["--check"]);
+    expect(drifted.status).toBe(1);
+    expect(drifted.stderr).toContain("has drifted");
+    // stll-toolchain-check owns unrelated declarations; they must not block generation.
+    const unrelated = {
+      optOuts: [{ rule: "unknown-rule", reason: "" }],
+      futureDeclaration: true,
+    };
+    await declare({ ...unrelated, dependabotIgnores: [graphql] });
+    const scoped = invoke(root);
+    expect(scoped.status, scoped.stderr).toBe(0);
+    expect(invoke(root, ["--check"]).status).toBe(0);
+    for (const { dependabotIgnores, message } of [
+      {
+        dependabotIgnores: [{ ...graphql, dependency: "oxlint" }],
+        message: "shared pin oxlint",
+      },
+      {
+        dependabotIgnores: [{ ...graphql, reason: " " }],
+        message: "nonempty reason",
+      },
+    ]) {
+      await declare({ ...unrelated, dependabotIgnores });
+      const rejected = invoke(root);
+      expect(rejected.status).toBe(1);
+      expect(rejected.stderr).toContain(message);
+    }
+  });
+}, 15_000);

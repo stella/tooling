@@ -8,8 +8,8 @@ import {
 } from "../packages/oxlint-config/src/consumer-compat";
 import { discoverConsumerPackages } from "../packages/oxlint-config/src/consumer-compat-config";
 import {
-  resolveManifestContract,
   type PublishTarget,
+  resolveManifestContract,
 } from "../packages/oxlint-config/src/publish-contract";
 import policy from "../packages/oxlint-config/toolchain.json";
 

@@ -1,10 +1,10 @@
 import { afterEach, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import {
-  mkdtempSync,
   mkdirSync,
-  rmSync,
+  mkdtempSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -18,8 +18,6 @@ import {
   parseChangedJson,
   parseChangedLock,
 } from "./toolchain-changed-locks";
-import { parseParityArguments } from "./typecheck-parity-args";
-import { runSelectedTypecheckParity } from "./typecheck-parity-selection";
 
 test("the repository's actual HEAD resolves without executing installed tooling", async () => {
   const repo = fileURLToPath(new URL("../../../", import.meta.url));
@@ -31,7 +29,7 @@ test("the repository's actual HEAD resolves without executing installed tooling"
     expect(result.current.bun.length).toBe(1);
     expect(result.current.typescript.length).toBeGreaterThan(0);
   }
-});
+}, 15_000);
 
 const directories: string[] = [];
 afterEach(() => {
@@ -80,7 +78,7 @@ const runtimeActions = [
     exact: "1.4.3",
   },
   {
-    uses: "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+    uses: "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1",
     input: "node-version",
     exact: "26.10.0",
   },
@@ -119,19 +117,8 @@ for (const surface of ["workflow", "composite"])
         const stable = selector === runtime.exact;
         expect(result.status).toBe(stable ? "compared" : "unreadable");
         expect(result.changed).toBe(!stable);
-        let invocations = 0;
-        await runSelectedTypecheckParity({
-          repo,
-          since,
-          run: async () => {
-            invocations++;
-            return true;
-          },
-          output: () => {},
-        });
-        expect(invocations).toBe(stable ? 0 : 1);
       }
-    });
+    }, 15_000);
 
 for (const surface of ["workflow", "composite"])
   for (const runtime of runtimeActions)
@@ -160,19 +147,8 @@ for (const surface of ["workflow", "composite"])
         const stable = selector === runtime.exact;
         expect(result.status).toBe(stable ? "compared" : "unreadable");
         expect(result.changed).toBe(!stable);
-        let invocations = 0;
-        await runSelectedTypecheckParity({
-          repo,
-          since,
-          run: async () => {
-            invocations++;
-            return true;
-          },
-          output: () => {},
-        });
-        expect(invocations).toBe(stable ? 0 : 1);
       }
-    });
+    }, 15_000);
 
 test("non-Node setup version files reject floating runtime series", async () => {
   for (const runtime of [
@@ -206,7 +182,7 @@ test("non-Node setup version files reject floating runtime series", async () => 
       });
     }
   }
-});
+}, 15_000);
 
 test("Bun JSON version selectors validate the exact packageManager release", async () => {
   for (const manager of [
@@ -236,7 +212,7 @@ test("Bun JSON version selectors validate the exact packageManager release", asy
       changed: !stable,
     });
   }
-});
+}, 15_000);
 
 test("Go file selection validates an overriding toolchain directive", async () => {
   for (const selector of ["go1.24.4", "go1.25rc1", "go1.25"]) {
@@ -260,7 +236,7 @@ test("Go file selection validates an overriding toolchain directive", async () =
       changed: !stable,
     });
   }
-});
+}, 15_000);
 
 test("Rust setup toolchains require an immutable stable release", async () => {
   for (const selector of ["1.96.0", "nightly-2026-04-16", "nightly"]) {
@@ -280,7 +256,7 @@ test("Rust setup toolchains require an immutable stable release", async () => {
       changed: !stable,
     });
   }
-});
+}, 15_000);
 
 test("canonical Node runtime selectors cannot float without a setup action", async () => {
   for (const declaration of [
@@ -316,7 +292,7 @@ test("canonical Node runtime selectors cannot float without a setup action", asy
       });
     }
   }
-});
+}, 15_000);
 
 test("committed quoted Yarn Classic compiler selectors bind unchanged and changed artifacts", async () => {
   const { repo, write, commit } = fixture();
@@ -347,19 +323,8 @@ test("committed quoted Yarn Classic compiler selectors bind unchanged and change
       changed,
       tools: changed ? ["typescript"] : [],
     });
-    let invocations = 0;
-    await runSelectedTypecheckParity({
-      repo,
-      since,
-      run: async () => {
-        invocations++;
-        return true;
-      },
-      output: () => {},
-    });
-    expect(invocations).toBe(changed ? 1 : 0);
   }
-});
+}, 15_000);
 
 for (const location of ["catalog", "catalogs", "workspaces", "pnpm"])
   test(`compiler catalog alias in ${location} retains patch bytes and canonical resolution`, async () => {
@@ -408,7 +373,7 @@ for (const location of ["catalog", "catalogs", "workspaces", "pnpm"])
     expect(await detectToolchainChanges({ repo, since: "HEAD" })).toMatchObject(
       { status: "unreadable", changed: true },
     );
-  });
+  }, 15_000);
 
 test("compiler catalog archives require their own immutable source evidence", async () => {
   const { repo, write, commit } = fixture();
@@ -434,7 +399,7 @@ test("compiler catalog archives require their own immutable source evidence", as
     status: "compared",
     changed: false,
   });
-});
+}, 15_000);
 
 test("the nearest catalog owner controls compiler source validation", async () => {
   const { repo, write, commit } = fixture();
@@ -463,7 +428,7 @@ test("the nearest catalog owner controls compiler source validation", async () =
     status: "unreadable",
     changed: true,
   });
-});
+}, 15_000);
 
 for (const source of [
   "file:../compiler",
@@ -490,8 +455,8 @@ for (const source of [
     expect(await detectToolchainChanges({ repo, since: "HEAD" })).toMatchObject(
       { status: "unreadable", changed: true },
     );
-  });
-test("exact Bun image variants normalize while floating selectors always run parity", async () => {
+  }, 15_000);
+test("exact Bun image variants normalize while floating selectors are unreadable", async () => {
   for (const variant of ["alpine", "slim", "debian", "distroless"]) {
     const { repo, write, commit } = fixture();
     write("package.json", { packageManager: "bun@1.4.3" });
@@ -518,20 +483,9 @@ test("exact Bun image variants normalize while floating selectors always run par
       const result = await detectToolchainChanges({ repo, since: "HEAD" });
       expect(result.status).toBe("unreadable");
       expect(result.changed).toBe(true);
-      let calls = 0;
-      await runSelectedTypecheckParity({
-        repo,
-        since: "HEAD",
-        detect: async () => result,
-        run: async () => {
-          calls += 1;
-          return true;
-        },
-      });
-      expect(calls).toBe(1);
     }
   }
-});
+}, 15_000);
 
 const bunLock = (swap: boolean) => ({
   lockfileVersion: 1,
@@ -556,7 +510,7 @@ test("JSONC preserves quoted comments, escaped quotes and URL slashes", () => {
     list: [1],
   });
   expect(() => parseChangedJson("{/*unfinished")).toThrow("Unterminated");
-});
+}, 15_000);
 
 test("Bun resolution locations prevent root/member compiler swaps from looking unchanged", async () => {
   const { repo, write, commit } = fixture();
@@ -581,7 +535,7 @@ test("Bun resolution locations prevent root/member compiler swaps from looking u
       bun: ["1.4.3"],
       typescript: ["typescript@6.0.3", "typescript@7.0.2"],
     });
-});
+}, 15_000);
 
 test("a nested version 2 Bun lockfile beside a version 1 root is compared", async () => {
   const { repo, write, commit } = fixture();
@@ -623,7 +577,7 @@ test("a nested version 2 Bun lockfile beside a version 1 root is compared", asyn
     changed: true,
     tools: ["typescript"],
   });
-});
+}, 15_000);
 
 test("a registry range Bun links to a workspace member is checked against its version", async () => {
   const { repo, write, commit } = fixture();
@@ -671,7 +625,7 @@ test("a registry range Bun links to a workspace member is checked against its ve
     error:
       "Toolchain lock resolution does not satisfy manifest: packages/kit/package.json:@stll/base",
   });
-});
+}, 15_000);
 
 test("pnpm importer alias swaps detect changes with an unchanged global package pool", async () => {
   const { repo, write, commit } = fixture();
@@ -691,7 +645,7 @@ test("pnpm importer alias swaps detect changes with an unchanged global package 
   expect((await detectToolchainChanges({ repo, since })).tools).toEqual([
     "typescript",
   ]);
-});
+}, 15_000);
 
 test("npm nested resolutions retain their installation locations", async () => {
   const { repo, write, commit } = fixture();
@@ -713,7 +667,7 @@ test("npm nested resolutions retain their installation locations", async () => {
   expect((await detectToolchainChanges({ repo, since })).tools).toEqual([
     "typescript",
   ]);
-});
+}, 15_000);
 
 test("immutable HEAD snapshots ignore working files and unrelated lock dependencies", async () => {
   const { repo, write, commit } = fixture();
@@ -737,9 +691,9 @@ test("immutable HEAD snapshots ignore working files and unrelated lock dependenc
     tools: [],
     current: { bun: ["1.4.3"], typescript: [] },
   });
-});
+}, 15_000);
 
-test("Bun, npm and pnpm compiler specifier edits retain resolved versions but run parity", async () => {
+test("Bun, npm and pnpm compiler specifier edits retain resolved versions but report TypeScript", async () => {
   for (const format of ["bun", "npm", "pnpm"] as const) {
     const { repo, write, commit } = fixture();
     const writeSnapshot = (range: string) => {
@@ -775,7 +729,7 @@ test("Bun, npm and pnpm compiler specifier edits retain resolved versions but ru
       current: { bun: [], typescript: ["typescript@7.0.2"] },
     });
   }
-});
+}, 15_000);
 
 test("a compatible child compiler cannot conceal the root's stale resolution", async () => {
   for (const format of ["bun", "npm"] as const) {
@@ -806,7 +760,7 @@ test("a compatible child compiler cannot conceal the root's stale resolution", a
         "does not satisfy manifest: package.json:typescript",
       );
   }
-});
+}, 15_000);
 
 test("switching the declared manager binds a different effective compiler in a fixed lock pool", async () => {
   const { repo, write, commit } = fixture();
@@ -834,7 +788,7 @@ test("switching the declared manager binds a different effective compiler in a f
   const result = await detectToolchainChanges({ repo, since });
   expect(result.status).toBe("compared");
   expect(result.tools).toEqual(["typescript", "shared"]);
-});
+}, 15_000);
 
 test("nearest lock ownership outranks a longer root lock filename", async () => {
   const { repo, write, commit } = fixture();
@@ -869,7 +823,7 @@ test("nearest lock ownership outranks a longer root lock filename", async () => 
   const changed = await detectToolchainChanges({ repo, since });
   expect(changed.status).toBe("compared");
   expect(changed.tools).toEqual(["typescript"]);
-});
+}, 15_000);
 
 test("runtime changes and workflow fingerprints classify their independent categories", async () => {
   const { repo, write, commit } = fixture();
@@ -887,7 +841,7 @@ test("runtime changes and workflow fingerprints classify their independent categ
     "typescript",
     "shared",
   ]);
-});
+}, 15_000);
 
 test("unresolved dependencies, unknown refs and conflicting Bun selectors fail closed", async () => {
   const { repo, write, commit } = fixture();
@@ -910,7 +864,7 @@ test("unresolved dependencies, unknown refs and conflicting Bun selectors fail c
   expect((await detectToolchainChanges({ repo, since: "HEAD" })).status).toBe(
     "unreadable",
   );
-});
+}, 15_000);
 
 test("supported lock generations resolve aliases and reject unknown tool resolutions", () => {
   for (const version of [1, 2, 3]) {
@@ -949,9 +903,9 @@ test("supported lock generations resolve aliases and reject unknown tool resolut
       }),
     }),
   ).toThrow("Unresolved");
-});
+}, 15_000);
 
-test("CI event-base wiring invokes parity for a committed compiler bump", async () => {
+test("CI event-base wiring runs the toolchain detector for a committed compiler bump", async () => {
   const workflow = parseDocument(
     readFileSync(
       new URL("../../../.github/workflows/ci.yml", import.meta.url),
@@ -961,7 +915,7 @@ test("CI event-base wiring invokes parity for a committed compiler bump", async 
   const document: unknown = workflow.toJS({ maxAliasCount: 100 });
   if (!changedRecord(document) || !changedRecord(document["jobs"]))
     throw new Error("missing workflow jobs");
-  const parityJobs = Object.values(document["jobs"]).filter(
+  const detectorJobs = Object.values(document["jobs"]).filter(
     (job) =>
       changedRecord(job) &&
       Array.isArray(job["steps"]) &&
@@ -969,17 +923,15 @@ test("CI event-base wiring invokes parity for a committed compiler bump", async 
         (step: unknown) =>
           changedRecord(step) &&
           typeof step["run"] === "string" &&
-          step["run"].includes("check:typecheck-parity"),
+          step["run"].includes("toolchain-changed-cli"),
       ),
   );
-  const job = parityJobs.at(0);
-  if (parityJobs.length !== 1 || !changedRecord(job))
-    throw new Error(
-      "expected exactly one workflow job running typecheck parity",
-    );
+  const job = detectorJobs.at(0);
+  if (detectorJobs.length !== 1 || !changedRecord(job))
+    throw new Error("expected exactly one workflow job running the detector");
   const environment = job["env"];
   if (!changedRecord(environment))
-    throw new Error("missing parity job environment");
+    throw new Error("missing detector job environment");
   const baseExpression = environment["TOOLCHAIN_BASE"];
   expect(typeof baseExpression).toBe("string");
   if (typeof baseExpression !== "string") throw new Error("missing event base");
@@ -992,7 +944,6 @@ test("CI event-base wiring invokes parity for a committed compiler bump", async 
     expect(baseExpression).toContain(source);
   const steps = job["steps"];
   if (!Array.isArray(steps)) throw new Error("missing workflow steps");
-  let parityCommand = "";
   let detectorCommand = "";
   let checkoutDepth: unknown;
   for (const step of steps) {
@@ -1007,7 +958,6 @@ test("CI event-base wiring invokes parity for a committed compiler bump", async 
       checkoutDepth = step["with"]["fetch-depth"];
     const run = step["run"];
     if (typeof run !== "string") continue;
-    if (run.includes("check:typecheck-parity")) parityCommand = run;
     if (run.includes("toolchain-changed-cli"))
       detectorCommand =
         run
@@ -1015,7 +965,6 @@ test("CI event-base wiring invokes parity for a committed compiler bump", async 
           .find((line) => line.includes("toolchain-changed-cli")) ?? "";
   }
   expect(checkoutDepth).toBe(0);
-  expect(parityCommand).not.toBe("");
   expect(detectorCommand).toContain('--since "$TOOLCHAIN_BASE"');
   const { repo, write, commit } = fixture();
   write("package.json", {
@@ -1034,10 +983,10 @@ test("CI event-base wiring invokes parity for a committed compiler bump", async 
   });
   commit();
   for (const ref of [base, "0".repeat(40), "unavailable-toolchain-base"]) {
-    // Execute the real workflow shell command; capture only the compiler command's argv.
+    // Execute the real workflow shell command; capture only the detector's argv.
     const captured = execFileSync(
       "bash",
-      ["-c", 'bun() { printf "%s\\n" "$@"; }; ' + parityCommand],
+      ["-c", 'node() { printf "%s\\n" "$@"; }; ' + detectorCommand],
       {
         cwd: repo,
         env: { ...process.env, TOOLCHAIN_BASE: ref },
@@ -1046,23 +995,9 @@ test("CI event-base wiring invokes parity for a committed compiler bump", async 
     )
       .trim()
       .split("\n");
-    expect(captured.slice(0, 2)).toEqual(["run", "check:typecheck-parity"]);
-    const args = parseParityArguments(captured.slice(2));
-    if (args.mode === "help")
-      throw new Error("workflow must select event-based parity");
-    expect(args.changedSince).toBe(ref);
-    let invocations = 0;
-    await runSelectedTypecheckParity({
-      repo,
-      since: args.changedSince,
-      run: async () => {
-        invocations += 1;
-        return true;
-      },
-      output: () => {
-        throw new Error("a compiler bump must not skip parity");
-      },
-    });
-    expect(invocations).toBe(1);
+    expect(captured.slice(1)).toEqual(["--since", ref]);
+    expect((await detectToolchainChanges({ repo, since: ref })).changed).toBe(
+      true,
+    );
   }
-});
+}, 15_000);

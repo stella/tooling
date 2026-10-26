@@ -3,8 +3,8 @@ import { expect, test } from "bun:test";
 
 import toolchain from "../toolchain.json";
 import {
-  parseDynamicSelectors,
   type DynamicSelector,
+  parseDynamicSelectors,
 } from "./toolchain-dynamic-selectors";
 import { checkRuntimeFile } from "./toolchain-runtime";
 import { parseToolchainPolicy } from "./toolchain-schema";

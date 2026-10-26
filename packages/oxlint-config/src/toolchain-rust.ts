@@ -1,5 +1,6 @@
 import { parseDocument } from "yaml";
 
+import { type ExpiryScope, overdueVerdict } from "./dated-entry-scope";
 import { canonicalDockerRuntime, rustImageVersion } from "./toolchain-images";
 import { githubAutomationFileKind, isShellScript } from "./toolchain-inputs";
 import { decodeShellWord, shellCommandSegments } from "./toolchain-packages";
@@ -14,11 +15,11 @@ export type RustException = {
   expires: string;
 };
 
-/** Exceptions authorize one immutable release, never a channel or an entire rule. */
-export const parseRustExceptions = (
-  input: unknown,
-  today = new Date().toISOString().slice(0, 10),
-): RustException[] => {
+/**
+ * Exceptions authorize one immutable release, never a channel or an entire
+ * rule. Expiry is scoped separately by checkRustExceptionExpiry.
+ */
+export const parseRustExceptions = (input: unknown): RustException[] => {
   if (input === undefined) return [];
   if (!Array.isArray(input)) throw new Error("rustExceptions must be an array");
   const pins = new Set<string>();
@@ -42,11 +43,10 @@ export const parseRustExceptions = (
       !Number.isFinite(Date.parse(entry["expires"])) ||
       new Date(entry["expires"]).toISOString().slice(0, 10) !==
         entry["expires"] ||
-      entry["expires"] <= today ||
       pins.has(entry["pin"])
     )
       throw new Error(
-        "each Rust exception requires a unique exact stable pin, reason, GitHub issue and future valid expiry date",
+        "each Rust exception requires a unique exact stable pin, reason, GitHub issue and valid expiry date",
       );
     pins.add(entry["pin"]);
     return {
@@ -56,6 +56,56 @@ export const parseRustExceptions = (
       expires: entry["expires"],
     };
   });
+};
+
+/** Whether the base stll-toolchain.json declares this exception with the same expiry. */
+const declaresException = (
+  baseText: string,
+  { pin, expires }: RustException,
+) => {
+  const base: unknown = JSON.parse(baseText);
+  const exceptions = record(base) ? base["rustExceptions"] : undefined;
+  return (
+    Array.isArray(exceptions) &&
+    exceptions.some(
+      (entry: unknown) =>
+        record(entry) && entry["pin"] === pin && entry["expires"] === expires,
+    )
+  );
+};
+
+type RustExceptionExpiryOptions = {
+  exceptions: readonly RustException[];
+  now?: Date | undefined;
+  scope: ExpiryScope;
+};
+/** An exception expires on its date; the scope decides whether that fails this run. */
+export const checkRustExceptionExpiry = ({
+  exceptions,
+  now = new Date(),
+  scope,
+}: RustExceptionExpiryOptions) => {
+  const today = now.toISOString().slice(0, 10);
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  for (const exception of exceptions) {
+    if (exception.expires > today) continue;
+    const overdue = `stll-toolchain.json Rust exception ${exception.pin} expired on ${exception.expires}`;
+    const verdict = overdueVerdict(scope, "stll-toolchain.json", (base) =>
+      declaresException(base, exception),
+    );
+    if (!verdict.fail)
+      warnings.push(
+        `${overdue}; remove it or move to the shared Rust pin (default-branch and scheduled runs fail, as do changes that add or edit it)`,
+      );
+    else if (verdict.unavailable === undefined)
+      errors.push(`${overdue}; remove it or move to the shared Rust pin`);
+    else
+      errors.push(
+        `${overdue}; cannot tell whether this change adds it: ${verdict.unavailable}`,
+      );
+  }
+  return { errors, warnings };
 };
 
 type RustReferenceOptions = {

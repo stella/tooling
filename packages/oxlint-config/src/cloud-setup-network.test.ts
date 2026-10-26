@@ -31,7 +31,7 @@ download_file https://nodejs.org/dist/v26.10.0/SHASUMS256.txt /tmp/sums 45
   expect(output).toContain(
     "--connect-timeout 20 --max-time 45 --retry 3 --retry-all-errors --retry-max-time 45",
   );
-});
+}, 15_000);
 
 test("deadline and transfer timeout failures identify the download host", () => {
   for (const status of [28, 124, 137]) {
@@ -48,7 +48,7 @@ test("deadline and transfer timeout failures identify the download host", () => 
       "timeout() { return 22; }; download_file https://github.com/oven-sh/bun/releases/download/bun-v1.4.3/bun-linux-x64.zip /tmp/bun 120",
     ).exitCode,
   ).toBe(22);
-});
+}, 15_000);
 
 test("APT deadlines name configured hosts and bind Acquire retries", () => {
   const result = run(`
@@ -72,7 +72,7 @@ apt_network update
   expect(failure.stderr.toString()).toContain(
     "download timed out: archive.ubuntu.com,apt.postgresql.org",
   );
-});
+}, 15_000);
 
 test("APT native timeout failures name configured hosts while other status 100 failures retain their status", () => {
   const directory = mkdtempSync(join(tmpdir(), "cloud-network-test-"));
@@ -131,7 +131,7 @@ apt_network update
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("native Bun and Rustup timeout wording is classified independently of their exit status", () => {
   const directory = mkdtempSync(join(tmpdir(), "cloud-network-test-"));
@@ -158,7 +158,7 @@ network_run registry.npmjs.org,static.rust-lang.org 180 fixture-command
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("network logs are removed after outer deadlines and capture failures", () => {
   const directory = mkdtempSync(join(tmpdir(), "cloud-network-test-"));
@@ -184,10 +184,14 @@ network_run github.com 120 fixture-command
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("APT refreshes indexes unless the install downloads nothing", () => {
-  const stub = (uris: string, status: number, network = "printf 'refresh:%s\\n' \"$*\"") => `
+  const stub = (
+    uris: string,
+    status: number,
+    network = "printf 'refresh:%s\\n' \"$*\"",
+  ) => `
 apt-get() {
   [[ "$1" == --print-uris && "$2" == -qq && "$3" == -y ]] || exit 91
   printf '%b' '${uris}'
@@ -203,7 +207,10 @@ echo after
   // Cached indexes resolve, but the install would download: a stale index
   // could name a file the mirror no longer serves, so refresh first.
   const downloads = run(
-    stub("http://archive.ubuntu.com/ubuntu/pool/main/c/curl/curl.deb curl.deb 1 SHA256:00\\n", 0),
+    stub(
+      "http://archive.ubuntu.com/ubuntu/pool/main/c/curl/curl.deb curl.deb 1 SHA256:00\\n",
+      0,
+    ),
   );
   expect(downloads.exitCode).toBe(0);
   expect(downloads.stdout.toString()).toBe("refresh:update\nafter\n");
@@ -213,7 +220,7 @@ echo after
   const failed = run(stub("", 100, "return 7"));
   expect(failed.exitCode).not.toBe(0);
   expect(failed.stdout.toString()).toBe("");
-});
+}, 15_000);
 
 test("APT deadline defaults to 180 s and callers may extend the whole call", () => {
   const stub = `
@@ -224,7 +231,7 @@ timeout() { printf 'deadline:%s\\n' "$3"; }
   expect(fallback.stdout.toString()).toContain("deadline:180s");
   const extended = run(`${stub}APT_DEADLINE=600 apt_network install x`);
   expect(extended.stdout.toString()).toContain("deadline:600s");
-});
+}, 15_000);
 
 test("a process left behind with the command's output open does not hold the network step", () => {
   const started = performance.now();
@@ -238,7 +245,7 @@ network_run example.test 20 sh -c 'sleep 30 & echo configured'`,
   expect(result.exitCode).toBe(0);
   expect(result.stdout.toString()).toBe("configured\n");
   expect(elapsedSeconds).toBeLessThan(10);
-});
+}, 15_000);
 
 test("processes still holding a step log are ended once the command exits", () => {
   const directory = mkdtempSync(join(tmpdir(), "cloud-network-test-"));
@@ -269,7 +276,7 @@ network_run example.test 20 fixture-install
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("bounded commands never read the caller's input", () => {
   const result = Bun.spawnSync(
@@ -283,4 +290,4 @@ test("bounded commands never read the caller's input", () => {
   );
   expect(result.exitCode).toBe(0);
   expect(result.stdout.toString()).toBe("");
-});
+}, 15_000);

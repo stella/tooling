@@ -2,8 +2,8 @@ import { decodeShellWord, shellCommandSegments } from "./toolchain-packages";
 import { scriptSourceKind } from "./toolchain-script-extensions";
 import {
   rootScriptManager,
-  scriptLifecycleStages,
   type ScriptLifecycleContext,
+  scriptLifecycleStages,
 } from "./toolchain-script-lifecycle";
 
 const record = (value: unknown): value is Record<string, unknown> =>

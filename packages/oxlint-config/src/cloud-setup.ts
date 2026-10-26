@@ -31,9 +31,9 @@ const script = String.raw`#!/usr/bin/env bash
 # Supported platform: Ubuntu 24.04 (noble), amd64/arm64, root or passwordless sudo.
 set -euo pipefail
 
-usage() { echo 'Usage: cloud-setup.sh install|start' >&2; exit 2; }
+usage() { echo 'Usage: cloud-setup.sh install|start|session' >&2; exit 2; }
 [[ "$#" == 1 ]] || usage
-case "$1" in install|start) MODE="$1" ;; *) usage ;; esac
+case "$1" in install|start|session) MODE="$1" ;; *) usage ;; esac
 fail() { echo "cloud-setup: $*" >&2; exit 1; }
 trap 'echo "cloud-setup: command failed at line $LINENO" >&2' ERR
 # Each phase logs its start and duration so a stalled phase is visible in the task log.
@@ -103,6 +103,63 @@ runtime_ready() {
   node_ready || fail 'Pinned Node, npm or npx is unavailable; run install'
   [[ -x "$BUN_DIR/bun" && "$($BUN_DIR/bun --version)" == "$BUN_VERSION" ]] || fail 'Pinned Bun is unavailable; run install'
 }
+bun_route() {
+  local label="$1" resolved version
+  shift
+  resolved="$("$@" -c 'command -v bun')" || fail "Bun is unavailable through $label"
+  version="$("$@" -c 'bun --version')" || fail "Bun at $resolved failed through $label"
+  [[ "$version" == "$BUN_VERSION" ]] || fail "Bun at $resolved resolves version $version through $label; expected $BUN_VERSION"
+}
+verify_bun_routes() {
+  local configured_mise login_shell minimal_path mise_root root_mise shims
+  # Test-only overrides keep route executables and image locations inside fixtures.
+  login_shell="$(printenv STLL_CLOUD_TEST_LOGIN_SHELL || true)"
+  [[ -n "$login_shell" ]] || login_shell=bash
+  minimal_path="$(printenv STLL_CLOUD_TEST_MINIMAL_PATH || true)"
+  [[ -n "$minimal_path" ]] || minimal_path=/usr/local/bin:/usr/bin:/bin
+  root_mise="$(printenv STLL_CLOUD_TEST_ROOT_MISE || true)"
+  [[ -n "$root_mise" ]] || root_mise=/root/.local/share/mise
+  # An absolute shell: a PATH entry such as a user-writable mise shims
+  # directory must never supply the program that root runs.
+  bun_route 'the setup PATH' env PATH="$PATH" /bin/sh
+  bun_route 'sh -c' /bin/sh
+  bun_route 'bash -lc' "$login_shell" -l
+  bun_route 'the minimal system PATH' env -i PATH="$minimal_path" /bin/sh
+  configured_mise="$(printenv MISE_DATA_DIR || true)"
+  for mise_root in "$configured_mise" "$OUTPUT_HOME/.local/share/mise" "$root_mise"; do
+    [[ -n "$mise_root" ]] || continue
+    shims="$mise_root/shims"
+    [[ -d "$shims" ]] || continue
+    bun_route "mise shims PATH $shims" env PATH="$shims:$PATH" /bin/sh
+  done
+}
+replace_image_buns() {
+  local candidate configured_mise directory mise_root root_mise
+  configured_mise="$(printenv MISE_DATA_DIR || true)"
+  root_mise="$(printenv STLL_CLOUD_TEST_ROOT_MISE || true)"
+  [[ -n "$root_mise" ]] || root_mise=/root/.local/share/mise
+  for mise_root in "$configured_mise" "$OUTPUT_HOME/.local/share/mise" "$root_mise"; do
+    [[ -n "$mise_root" ]] || continue
+    if [[ -d "$mise_root/installs/bun" ]]; then
+      while IFS= read -r -d '' candidate; do
+        [[ -d "$candidate" ]] || ln -sfnT -- "$BUN_DIR/bun" "$candidate"
+      done < <(find "$mise_root/installs/bun" \( -type f -o -type l \) \( -name bun -o -name bunx \) -print0)
+    fi
+    for candidate in "$mise_root/shims/bun" "$mise_root/shims/bunx"; do
+      [[ -e "$candidate" || -L "$candidate" ]] || continue
+      [[ -d "$candidate" ]] || ln -sfnT -- "$BUN_DIR/bun" "$candidate"
+    done
+  done
+  while IFS= read -r directory; do
+    [[ -n "$directory" ]] || directory=.
+    for candidate in "$directory/bun" "$directory/bunx"; do
+      [[ -e "$candidate" || -L "$candidate" ]] || continue
+      [[ -d "$candidate" ]] && continue
+      [[ "$(readlink -f -- "$candidate")" == "$(readlink -f -- "$BUN_DIR/bun")" ]] || ln -sfnT -- "$BUN_DIR/bun" "$candidate"
+    done
+  # The trailing newline lets read return the last PATH entry too.
+  done < <(printf '%s\n' "$PATH" | tr : '\n')
+}
 install_runtimes() (
   if [[ ! -s /etc/ssl/certs/ca-certificates.crt ]]; then
     command -v update-ca-certificates >/dev/null || fail 'System CA certificate bundle is missing; restore ca-certificates in the base image offline before install'
@@ -140,6 +197,7 @@ install_runtimes() (
   ln -sfnT -- "$NODE_DIR/bin/npm" /usr/local/bin/npm
   ln -sfnT -- "$NODE_DIR/bin/npx" /usr/local/bin/npx
   ln -sfnT -- "$BUN_DIR/bun" /usr/local/bin/bun
+  replace_image_buns
 )
 
 dependency_install() {
@@ -178,7 +236,16 @@ process.stdout.write([...hosts].sort().join(","));
   network_run "$download_hosts" 240 runuser -u "$OUTPUT_USER" -- env HOME="$OUTPUT_HOME" BUN_INSTALL_CACHE_DIR="$BUN_CACHE" PATH="$PATH" BUN_CONFIG_HTTP_IDLE_TIMEOUT=20 "$BUN_DIR/bun" @INSTALL_ARGS@
 }
 
-@SERVICE_INSTALL@
+# The frozen install is the check: it reads every input the package manager
+# uses and changes nothing on a current tree, so no stamp stands in for it.
+install_dependencies() {
+  dependency_install
+}
+sync_dependencies() {
+  dependency_install || fail 'bun.lock mismatch; dependency installation failed'
+}
+
+@SUBMODULE_FUNCTION@@SERVICE_INSTALL@
 @SERVICE_START@
 
 @TOOL_INSTALL@
@@ -186,6 +253,8 @@ process.stdout.write([...hosts].sort().join(","));
 @INPUT_VALIDATION@
 
 @ENV_FUNCTIONS@
+@ENVIRONMENT_VALUES@
+@SESSION_ENVIRONMENT@
 
 @PREPARE_FUNCTION@
 
@@ -194,18 +263,46 @@ if [[ "$MODE" == install ]]; then
   step services install_services
   step tools install_tools
   step shell install_shell_environment
-  step dependencies dependency_install
+  # Login routes read the installed profile, so they are checked after it.
+  step routes verify_bun_routes
+@SUBMODULE_STEP@  step dependencies install_dependencies
 @PREPARE_STEP@
   exit 0
 fi
-step runtime-check runtime_ready
-step tool-check verify_tools
-step shell install_shell_environment
-step shell-check verify_shell_environment
-@ENV_VALIDATE@
-step state prepare_state
-step service-start start_services
-@ENV_WRITE@
+@ENV_INITIALIZE@
+start_environment() {
+  step runtime-check runtime_ready
+  step dependencies sync_dependencies
+  step tool-check verify_tools
+  step shell install_shell_environment
+  step shell-check verify_shell_environment
+  @ENV_VALIDATE@
+  step state prepare_state
+  step service-start start_services
+  @ENV_WRITE@
+}
+if [[ "$MODE" == session ]]; then
+  start_environment >&2
+else
+  start_environment
+fi
+@SESSION_ENVIRONMENT_CALL@
+`;
+
+const environmentValuesFunction = String.raw`
+environment_values() {
+  local emit="$1"
+  "$emit" NODE_ENV test
+  if [[ -n "$DATABASE_URL" ]]; then
+    "$emit" DATABASE_URL "$DATABASE_URL"
+    "$emit" POSTGRES_HOST "$POSTGRES_HOST"
+    "$emit" POSTGRES_USER "$POSTGRES_USER"
+    "$emit" POSTGRES_PASSWORD "$POSTGRES_PASSWORD"
+    "$emit" POSTGRES_DB_NAME "$POSTGRES_DB_NAME"
+    "$emit" POSTGRES_ADDITIONAL_CONNECTION_DATA "$POSTGRES_ADDITIONAL_CONNECTION_DATA"
+  fi
+  if [[ -n "$REDIS_URL" ]]; then "$emit" REDIS_URL "$REDIS_URL"; fi
+}
 `;
 
 const environmentFunctions = String.raw`
@@ -222,22 +319,64 @@ validate_environment() {
     [[ "$first_line" == "$ENV_MARKER" ]] || fail 'Refusing to overwrite an unowned environment file'
   fi
 }
+environment_file_value() { printf '%s=%s\n' "$1" "$2"; }
 write_environment() {
   validate_environment
   local env_path="$REPO_ROOT/$ENV_FILE" temporary
   temporary="$(mktemp "$(dirname -- "$env_path")/.stll-cloud-env.XXXXXX")"
   chmod 600 "$temporary"
   {
-    printf '%s\n' "$ENV_MARKER" 'NODE_ENV=test'
-    if [[ -n "$DATABASE_URL" ]]; then printf 'DATABASE_URL=%s\n' "$DATABASE_URL"; fi
-    if [[ -n "$REDIS_URL" ]]; then printf 'REDIS_URL=%s\n' "$REDIS_URL"; fi
+    printf '%s\n' "$ENV_MARKER"
+    environment_values environment_file_value
   } > "$temporary"
   chown "$OUTPUT_UID:$OUTPUT_GID" "$temporary"
   mv -f -- "$temporary" "$env_path"
 }
 `;
 
+const sessionEnvironmentFunction = String.raw`
+environment_shell_value() { printf 'export %s=%q\n' "$1" "$2"; }
+emit_session_environment() {
+  environment_values environment_shell_value
+}
+`;
+
 const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+
+const renderWasmBindgenLockValidation = (version: string) =>
+  `[[ -f 'Cargo.lock' && ! -L 'Cargo.lock' ]] && awk -v expected=${shellQuote(version)} '${String.raw`
+function validate_package() {
+  if (in_package && name == "wasm-bindgen") {
+    count++
+    if (version != expected) mismatch = 1
+  }
+}
+/^\[\[package\]\][[:space:]]*$/ {
+  validate_package()
+  in_package = 1
+  name = ""
+  version = ""
+  next
+}
+/^\[/ {
+  validate_package()
+  in_package = 0
+  next
+}
+in_package && /^[[:space:]]*name[[:space:]]*=/ {
+  name = $0
+  sub(/^[^=]*=[[:space:]]*"/, "", name)
+  sub(/"[[:space:]]*$/, "", name)
+}
+in_package && /^[[:space:]]*version[[:space:]]*=/ {
+  version = $0
+  sub(/^[^=]*=[[:space:]]*"/, "", version)
+  sub(/"[[:space:]]*$/, "", version)
+}
+END {
+  validate_package()
+  exit !(count >= 1 && !mismatch)
+}`}' 'Cargo.lock' || fail 'Cargo.lock wasm-bindgen version changed; regenerate cloud-setup.sh'`;
 
 // Offline and time-bounded: stdin is closed so a prompt cannot hold the
 // snapshot. timeout leads its own process group (its pid), but it stops
@@ -317,13 +456,7 @@ export const generateCloudSetup = ({
     ],
     [
       "@INPUT_VALIDATION@",
-      [
-        "rust-toolchain.toml",
-        "rust-toolchain",
-        ...(selected.tools?.["wasm-bindgen-cli"] === undefined
-          ? []
-          : ["Cargo.lock"]),
-      ]
+      ["rust-toolchain.toml", "rust-toolchain"]
         .flatMap((file) => {
           const content = files[file];
           if (content === undefined)
@@ -335,6 +468,15 @@ export const generateCloudSetup = ({
             `[[ -f ${shellQuote(file)} && ! -L ${shellQuote(file)} ]] && [[ "$(sha256sum -- ${shellQuote(file)} | cut -d ' ' -f1)" == ${shellQuote(hash)} ]] || fail ${shellQuote(`${file} changed; regenerate cloud-setup.sh`)}`,
           ];
         })
+        .concat(
+          selected.tools?.["wasm-bindgen-cli"] === undefined
+            ? []
+            : [
+                renderWasmBindgenLockValidation(
+                  selected.tools["wasm-bindgen-cli"],
+                ),
+              ],
+        )
         .join("\n"),
     ],
     ["@BUN@", policy.bun],
@@ -350,13 +492,44 @@ export const generateCloudSetup = ({
       selected.envFile === undefined ? "" : environmentFunctions,
     ],
     [
-      "@ENV_VALIDATE@",
-      selected.envFile === undefined
+      "@ENVIRONMENT_VALUES@",
+      selected.services.length === 0 ? "" : environmentValuesFunction,
+    ],
+    [
+      "@ENV_INITIALIZE@",
+      selected.services.length === 0
         ? ""
-        : "DATABASE_URL=''\nREDIS_URL=''\nvalidate_environment",
+        : "DATABASE_URL=''\nPOSTGRES_HOST=''\nPOSTGRES_USER=''\nPOSTGRES_PASSWORD=''\nPOSTGRES_DB_NAME=''\nPOSTGRES_ADDITIONAL_CONNECTION_DATA=''\nREDIS_URL=''",
+    ],
+    [
+      "@ENV_VALIDATE@",
+      selected.envFile === undefined ? "" : "validate_environment",
+    ],
+    [
+      "@SESSION_ENVIRONMENT@",
+      selected.services.length === 0 ? "" : sessionEnvironmentFunction,
+    ],
+    [
+      "@SESSION_ENVIRONMENT_CALL@",
+      selected.services.length === 0
+        ? ""
+        : 'if [[ "$MODE" == session ]]; then emit_session_environment; fi',
     ],
     ["@ENV_WRITE@", selected.envFile === undefined ? "" : "write_environment"],
     ["@PREPARE_FUNCTION@", renderPrepare(selected.prepare, files)],
+    [
+      "@SUBMODULE_FUNCTION@",
+      selected.submodules
+        ? String.raw`install_submodules() {
+  network_run github.com 240 runuser -u "$OUTPUT_USER" -- env HOME="$OUTPUT_HOME" git submodule sync --recursive
+  network_run github.com 240 runuser -u "$OUTPUT_USER" -- env HOME="$OUTPUT_HOME" git submodule update --init --recursive --depth 1
+}`.concat("\n\n")
+        : "",
+    ],
+    [
+      "@SUBMODULE_STEP@",
+      selected.submodules ? "  step submodules install_submodules\n" : "",
+    ],
     [
       "@PREPARE_STEP@",
       selected.prepare === undefined ? "" : "  step prepare prepare_sources",

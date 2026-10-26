@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import {
-  mkdtemp,
   mkdir,
+  mkdtemp,
   readFile,
   realpath,
   rm,
@@ -35,7 +35,7 @@ type CommandOptions = {
 const diagnosticText = (value: string) =>
   value
     .replace(
-      /(PGPASSWORD|VALKEYCLI_AUTH|DATABASE_URL|REDIS_URL)=[^\s]+/g,
+      /(PGPASSWORD|POSTGRES_PASSWORD|VALKEYCLI_AUTH|DATABASE_URL|REDIS_URL)=[^\s]+/g,
       "$1=[redacted]",
     )
     .replace(
@@ -923,24 +923,82 @@ if (fs.statSync(path.join(vite, "consumer-cache")).uid !== uid) process.exit(1);
     assert(
       lines.at(0) === cloudEnvironmentMarker &&
         lines.at(1) === "NODE_ENV=test" &&
-        lines.length === 5 &&
-        lines.at(4) === "",
+        lines.length === 10 &&
+        lines.at(9) === "",
       "Generated environment shape differs",
     );
     const database = lines.find((line) => line.startsWith("DATABASE_URL="));
+    const postgresHost = lines.find((line) =>
+      line.startsWith("POSTGRES_HOST="),
+    );
+    const postgresUser = lines.find((line) =>
+      line.startsWith("POSTGRES_USER="),
+    );
+    const postgresPassword = lines.find((line) =>
+      line.startsWith("POSTGRES_PASSWORD="),
+    );
+    const postgresDatabase = lines.find((line) =>
+      line.startsWith("POSTGRES_DB_NAME="),
+    );
+    const postgresAdditional = lines.find((line) =>
+      line.startsWith("POSTGRES_ADDITIONAL_CONNECTION_DATA="),
+    );
     const redis = lines.find((line) => line.startsWith("REDIS_URL="));
     assert(
-      database !== undefined && redis !== undefined,
-      "Both service connections are required",
+      database !== undefined &&
+        postgresHost === "POSTGRES_HOST=127.0.0.1:55432" &&
+        postgresUser === "POSTGRES_USER=stll_cloud" &&
+        postgresPassword !== undefined &&
+        postgresDatabase === "POSTGRES_DB_NAME=cloud_test" &&
+        postgresAdditional === "POSTGRES_ADDITIONAL_CONNECTION_DATA=" &&
+        redis !== undefined,
+      "Generated service connection variables differ",
     );
-    if (database === undefined || redis === undefined)
+    if (
+      database === undefined ||
+      postgresHost === undefined ||
+      postgresUser === undefined ||
+      postgresPassword === undefined ||
+      postgresDatabase === undefined ||
+      postgresAdditional === undefined ||
+      redis === undefined
+    )
       throw new Error("Service connections are absent");
+    const databaseUrlText = database.slice("DATABASE_URL=".length);
+    const postgresPasswordText = postgresPassword.slice(
+      "POSTGRES_PASSWORD=".length,
+    );
+    const postgresUserText = postgresUser.slice("POSTGRES_USER=".length);
+    const postgresHostText = postgresHost.slice("POSTGRES_HOST=".length);
+    const postgresDatabaseText = postgresDatabase.slice(
+      "POSTGRES_DB_NAME=".length,
+    );
+    const postgresAdditionalText = postgresAdditional.slice(
+      "POSTGRES_ADDITIONAL_CONNECTION_DATA=".length,
+    );
+    const postgresUrlFromParts =
+      `postgres://${postgresUserText}:${postgresPasswordText}@` +
+      `${postgresHostText}/${postgresDatabaseText}${postgresAdditionalText}`;
+    let postgresUrlFromPartsParsed: URL;
     try {
-      databaseUrl = new URL(database.slice("DATABASE_URL=".length));
+      databaseUrl = new URL(databaseUrlText);
+      postgresUrlFromPartsParsed = new URL(postgresUrlFromParts);
       redisUrl = new URL(redis.slice("REDIS_URL=".length));
     } catch {
       throw new Error("Generated local connection syntax is invalid");
     }
+    assert(
+      databaseUrl.protocol === "postgresql:" &&
+        postgresUrlFromPartsParsed.protocol === "postgres:" &&
+        databaseUrl.hostname === postgresUrlFromPartsParsed.hostname &&
+        databaseUrl.port === postgresUrlFromPartsParsed.port &&
+        databaseUrl.username === postgresUrlFromPartsParsed.username &&
+        databaseUrl.password === postgresUrlFromPartsParsed.password &&
+        databaseUrl.pathname === postgresUrlFromPartsParsed.pathname &&
+        databaseUrl.search === postgresUrlFromPartsParsed.search &&
+        databaseUrl.hash === postgresUrlFromPartsParsed.hash,
+      "DATABASE_URL must identify the endpoint assembled from PostgreSQL components",
+    );
     assert(
       databaseUrl.hostname === "127.0.0.1" &&
         databaseUrl.port === "55432" &&

@@ -1,9 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import {
-  checkReleaseVersion,
-  parseNpmVersions,
-} from "./lib/registry-versions";
+import { checkReleaseVersion, parseNpmVersions } from "./lib/registry-versions";
 
 // Registry order is publish order, not semver order.
 const REGRESSED_LINE = [

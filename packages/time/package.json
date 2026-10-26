@@ -1,6 +1,6 @@
 {
   "name": "@stll/time",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Time helpers: named duration constants, calendar-date parsing and arithmetic, and a side-effect-free Temporal.",
   "keywords": [
     "date",
@@ -40,12 +40,12 @@
   },
   "scripts": {
     "build": "tsdown",
-    "typecheck": "bun check",
+    "typecheck": "bun check --no-pretty --all --project=tsconfig.json",
     "test": "bun test src"
   },
   "dependencies": {
     "better-result": "3.0.1",
-    "temporal-polyfill": "1.0.5"
+    "temporal-polyfill": "1.0.6"
   },
   "devDependencies": {
     "@stll/typescript-config": "workspace:*",

@@ -1,4 +1,4 @@
-import { parse, type Options } from "acorn";
+import { type Options, parse } from "acorn";
 import Module from "node:module";
 import path from "node:path";
 

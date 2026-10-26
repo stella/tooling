@@ -3,13 +3,11 @@
   "include": [
     "oxlint.config.ts",
     "packages/oxlint-config/src/**/*.ts",
+    "packages/typescript-config/**/*.ts",
     "scripts/**/*.ts",
     "scripts/**/*.js",
     "scripts/**/*.mjs",
     "scripts/**/*.cjs"
   ],
-  "exclude": [
-    "node_modules",
-    "packages/oxlint-config/dist"
-  ]
+  "exclude": ["node_modules", "packages/oxlint-config/dist"]
 }

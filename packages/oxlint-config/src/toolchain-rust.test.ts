@@ -147,7 +147,7 @@ const exception = {
   expires: "2099-01-01",
 };
 test("one exact release exception authorizes every selector without floating channels", () => {
-  const exceptions = parseRustExceptions([exception], "2026-10-11");
+  const exceptions = parseRustExceptions([exception]);
   for (const { file, source } of fixtures) {
     expect(check(file, source(exception.pin), exceptions)).toEqual([]);
     expect(check(file, source("1.97.2"), exceptions).length).toBeGreaterThan(0);
@@ -163,15 +163,13 @@ test("one exact release exception authorizes every selector without floating cha
   ).toThrow("rust-version requires expiring");
 });
 
-test("Rust exception records are closed, unique, tracked and expire strictly", () => {
+test("Rust exception records are closed, unique, tracked and dated", () => {
   for (const invalid of [
     { ...exception, pin: "stable" },
     { ...exception, pin: "nightly-2026-04-16" },
     { ...exception, pin: "01.97.1" },
     { ...exception, reason: " " },
     { ...exception, tracking: "later" },
-    { ...exception, expires: "2026-10-11" },
-    { ...exception, expires: "2026-10-10" },
     { ...exception, expires: "2099-02-30" },
     { ...exception, expires: "never" },
     { ...exception, extra: true },
@@ -181,12 +179,12 @@ test("Rust exception records are closed, unique, tracked and expire strictly", (
       expires: exception.expires,
     },
   ])
-    expect(() => parseRustExceptions([invalid], "2026-10-11")).toThrow(
+    expect(() => parseRustExceptions([invalid])).toThrow(
       "each Rust exception requires",
     );
-  expect(() =>
-    parseRustExceptions([exception, exception], "2026-10-11"),
-  ).toThrow("each Rust exception requires");
+  expect(() => parseRustExceptions([exception, exception])).toThrow(
+    "each Rust exception requires",
+  );
   expect(() => parseRustExceptions(true)).toThrow(
     "rustExceptions must be an array",
   );

@@ -75,10 +75,12 @@ Shared-pin Dependabot ignores must contain only `dependency-name` and
 `version-update:semver-minor`, and `version-update:semver-patch`. This ignores
 version updates while preserving security update pull requests.
 
-Set `packageManager` to `bun@` followed by the policy's `bun` value, and pin
-`bun-types` to that same value. Dependency pins can live in default or named
-catalogs, including Bun's `workspaces` catalogs. Bun image tags, version
-files, and mise/asdf entries also inherit the policy pin.
+The policy's `bun` value is the minimum Bun. Set `packageManager` to `bun@`
+followed by one exact release at or above it, and pin `bun-types` to that same
+release. Dependency pins can live in default or named catalogs, including
+Bun's `workspaces` catalogs. Bun image tags, version files, and mise/asdf
+entries also inherit the repository's pin, so a repository can take a newer
+Bun without a policy release.
 
 Configure `oven-sh/setup-bun` with a tracked manifest as its version source:
 
@@ -234,11 +236,13 @@ The CLI checks tracked files, prints `path:line: [rule] message` diagnostics,
 and exits with status 1 on a mismatch. Updating the package updates the
 policy; update consumer pins and run the checker together.
 
-`typescriptInstallLayouts` declares the compiler package, exact specifier,
-and typecheck command for each supported layout. Prefer the direct layout.
-Use the split compatibility layout for the compiler-API consumers and peer
-blockers listed in `typescript6Compatibility`; it retains the current
-compiler for typechecking while providing the compatibility package.
+The `typescript-layout` rule keeps TypeScript out of manifests: type checking
+runs `bun check`, programs and checkers use tsrs, and syntax reads use
+oxc-parser. No manifest, catalog or resolution declares `typescript` 7 or
+`@typescript/native`. A package that depends on one of the `peerBlockers` in
+`typescript6Compatibility` may declare `typescript` (or the `typescript-compat`
+alias) at the exact TypeScript 6 compatibility release; no root counterpart is
+required. A `typecheck` script that runs a compiler must run `bun check`.
 
 An exception requires a tracked root `stll-toolchain.json` with the named
 rule and a nonempty reason:
@@ -249,13 +253,8 @@ rule and a nonempty reason:
 }
 ```
 
-Workspace TypeScript toolchains combine the root and declared members' devDependencies.
-An included member may declare the exact TypeScript 6 compatibility API across
-dependencies, devDependencies, and peerDependencies when that shared install uses
-the complete split layout. Ambiguous or partial layouts do not grant this allowance.
-Peer ranges declare support: they must include the policy compiler release and the
-compatibility release when the selected layout uses it. Ranges do not contribute
-to the installed compiler inventory.
+Peer ranges, exact versions included, declare support: a `typescript` range
+must include the policy release. Ranges do not count as installs.
 
 JavaScript update roots include the repository root, declared workspace membership,
 and directories with their own `bun.lock`, `package-lock.json`, `yarn.lock`, or
@@ -273,23 +272,6 @@ rules, empty reasons, and malformed configuration fail validation. See the
 [shared toolchain reference](https://github.com/stella/tooling#shared-toolchain)
 for the schema, rule list, runtime support ranges, and generated Dependabot
 template.
-
-## Typecheck parity project selection
-
-Run `stll-typecheck-parity` from the repository root. Without flags, it checks
-the root `tsconfig.json` and recursively discovers project references in build
-mode. Repeat `--project` to check exactly the selected configs:
-
-```sh
-stll-typecheck-parity --project packages/api/tsconfig.json --project packages/web/tsconfig.json
-```
-
-Selected configs run independently using the repository-root compiler
-installation; child packages need no compiler declaration and a root tsconfig
-is unnecessary. Their original reference metadata is preserved without
-discovering or building referenced projects. Missing, unreadable, and zero-input
-selected configs fail the check. `--help` prints usage and exits successfully;
-unknown arguments fail.
 
 ## Generate dependency update configuration
 
@@ -323,10 +305,47 @@ Shared `toolchain.json` owns the schedule, cooldown, groups, and tooling-owned
 package/action/image ignores. The input rejects policy overrides. Without
 `--config`, the tracked manifest inventory supplies ecosystem roots.
 
+A repository that deliberately holds a dependency declares the decision in
+tracked root `stll-toolchain.json`:
+
+```json
+{
+  "dependabotIgnores": [
+    {
+      "ecosystem": "bun",
+      "dependency": "graphql",
+      "updateTypes": ["version-update:semver-major"],
+      "reason": "Payload 3 requires graphql ^16."
+    },
+    {
+      "ecosystem": "github-actions",
+      "dependency": "owner/repo/.github/workflows/reusable.yml",
+      "updateTypes": [
+        "version-update:semver-major",
+        "version-update:semver-minor",
+        "version-update:semver-patch"
+      ],
+      "reason": "Newer commits no longer ship this reusable workflow."
+    }
+  ]
+}
+```
+
+`dependency` is Dependabot's `dependency-name`; `*` is the only wildcard
+(`@babel/*`). `updateTypes` is a nonempty set of version-update types, so
+security updates stay enabled. Each declaration needs a supported ecosystem with
+a generated update entry and a nonempty reason; duplicates fail. A declaration
+that names or matches a shared pin fails configuration validation: the shared
+policy owns those ignores. The generator appends declarations after the shared
+pins in code-unit order with canonical update types, so output stays
+byte-stable. `stll-toolchain-check` accepts exactly the shared pins plus these
+declarations; any other ignore fails.
+
 For programmatic generation, the `@stll/oxlint-config/dependabot` subpath exports
-`generateDependabotConfig({ files, policy, updates? })`, `parseDependabotInput`,
-and `parseToolchainPolicy`. `parseDependabotInput` validates the JSON shape above
-and returns the `updates` array:
+`generateDependabotConfig({ files, policy, updates?, ignores? })`,
+`parseDependabotInput`, `parseDependabotIgnores` and `parseToolchainPolicy`.
+`parseDependabotInput` validates the JSON shape above and returns the `updates`
+array; `parseDependabotIgnores` validates `dependabotIgnores` for `ignores`:
 
 ```ts
 import {
@@ -357,6 +376,7 @@ Add an explicit declaration to tracked root `stll-toolchain.json`:
   "cloud": {
     "services": ["postgres", "valkey"],
     "install": "bun install --frozen-lockfile",
+    "submodules": true,
     "envFile": ".env.cloud",
     "rust": {
       "components": ["clippy", "rustfmt"],
@@ -378,11 +398,29 @@ only. No `cloud` declaration means no cloud setup script. `envFile` is required
 with services and rejected without services; runtime-only scripts emit no
 environment file code. With services, `envFile` must be a canonical
 repository-relative path; its existing parent must be safe at runtime. Track an exact stable Node patch in root
-`.node-version` within the shared Node series. Generate and commit the script:
+`.node-version` within the shared Node series.
+
+Set `cloud.submodules` to `true` when workspace inputs are held in Git
+submodules. The networked install phase synchronizes and shallow-initializes
+submodules recursively before dependency installation; startup remains offline.
+
+Generate and commit the script:
 
 ```sh
 bunx --no-install stll-cloud-setup
 ```
+
+When PostgreSQL is enabled, the selected environment file contains `DATABASE_URL`
+and `POSTGRES_HOST`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB_NAME`,
+and `POSTGRES_ADDITIONAL_CONNECTION_DATA`. `DATABASE_URL` retains the
+`postgresql://` spelling; the component values assemble the same endpoint with
+`postgres://`. Additional connection data is empty by default.
+Remote Claude sessions receive these generated values as quoted `export`
+assignments after service startup succeeds. SessionStart does not source the
+selected environment file, and it preserves the configured `envFile` path for
+tools that load that file directly. Settings generation migrates only exact
+SessionStart hooks from releases 1.1.0 and 1.3.1 and the prior main-branch form
+at 783bc97; edited or unknown hook forms fail with the canonical repair.
 
 Rust is optional. A tracked root `rust-toolchain.toml` enables it automatically;
 otherwise declare `cloud.rust` to enable it. `cloud.rust.toolchain`, when given,
@@ -434,21 +472,26 @@ binary DEBs for the declared release and architecture, verifies the policy's
 SHA256 pins, and installs those local files with apt. It does not resolve Valkey
 from a mutable package index.
 The command writes `.agents/cloud-setup.sh` with executable permissions and
-merges a `SessionStart` hook into `.claude/settings.json`. The hook runs
-`bash "$CLAUDE_PROJECT_DIR/.agents/cloud-setup.sh" start` only when
-`CLAUDE_CODE_REMOTE=true`, including sessions that reuse cached filesystems and
-sessions started from a repository subdirectory. Generation replaces the exact hooks written by 1.1.0 and 1.3.1 in place.
-After successful startup, it appends the
-managed shell profile's literal exports to `CLAUDE_ENV_FILE` when available, so
-subsequent Claude commands select pinned runtimes and tools before preinstalled
-versions while retaining their inherited `PATH`. The settings also set
+merges a `SessionStart` hook into `.claude/settings.json`. Only when
+`CLAUDE_CODE_REMOTE=true`, the hook runs
+`bash "$CLAUDE_PROJECT_DIR/.agents/cloud-setup.sh" session` if `CLAUDE_ENV_FILE`
+is nonempty, and `start` otherwise. This includes sessions that reuse cached
+filesystems and sessions started from a repository subdirectory. Generation
+replaces the exact hooks written by 1.1.0 and 1.3.1 and the prior main-branch
+form in place.
+After successful startup, the hook copies existing `CLAUDE_ENV_FILE` content
+into a temporary file in the same directory, adds the generated service exports
+and managed shell profile's literal exports, then renames it over the destination.
+The resulting file has mode `0600`; an existing destination must be a regular,
+non-symlink file. Subsequent Claude commands select pinned runtimes and tools
+before preinstalled versions while retaining their inherited `PATH`. The settings also set
 `"attribution": {"commit": "", "pr": ""}`, so cloud sessions add no tool
 attribution to commits or pull requests. Existing environment-file
 content, unrelated settings, and hooks are preserved. Invalid JSON, disabled
 hooks, conflicting cloud startup entries, or a different `attribution` value stop
 generation with a repair instruction. Startup or environment persistence failures
 produce actionable session context and a stderr reason; SessionStart cannot block
-a session. Successful startup is silent on stdout. Commit both generated files.
+a session. Successful hook execution is silent on stdout. Commit both generated files.
 Generation refuses symlink parents or destinations and hard-linked destinations.
 Generation recreates its deleted tracked output files and requires unrelated
 tracked inputs to remain readable.
@@ -462,19 +505,24 @@ prints usage without reading repository configuration.
 | ----------------------- | ------------------------------------- |
 | Networked install       | `bash .agents/cloud-setup.sh install` |
 | Offline session startup | `bash .agents/cloud-setup.sh start`   |
+| Startup with exports    | `bash .agents/cloud-setup.sh session` |
 
 Runtime installation repairs and verifies a missing or empty system CA bundle
 offline before any apt refresh or download, including when the certificate package
 is already current. If the certificate updater is unavailable or cannot restore
 trust, restore the base image offline before rerunning installation.
 
-Both commands can be rerun. Missing or unknown subcommands print usage and
+All three commands can be rerun. Passwordless sudo rules limited to specific
+script arguments must authorize `install`, `start`, and `session`.
+Missing or unknown subcommands print usage and
 exit 2; there is no implicit lifecycle mode. The script supports Ubuntu 24.04
 with root access or passwordless sudo and fails when required capabilities
 or pinned installations are unavailable. `install` provisions runtimes,
 dependencies, and declared services; `start` refreshes the managed shell environment
 and restores local services after
-cached environments lose running processes. Services bind only to localhost.
+cached environments lose running processes. `session` performs the same offline
+startup, sends startup output to stderr, and emits the declared service environment
+exports on stdout for the hook to capture. Services bind only to localhost.
 System provisioning runs as root; frozen dependencies run as the invoking user
 with that user's home and a private, user-owned Bun cache. Package installation
 does not permit automatic downgrades.
@@ -532,6 +580,19 @@ Those repository-specific hosts are not chosen by this generator. `start`
 performs no downloads.
 
 ## Published package contracts
+
+### Engine support releases
+
+Run `stll-engine-support --base <git ref>` in pull request CI to require a major
+changeset when an existing published package narrows its `engines.node` range.
+Base engine ranges are read from the manifest at each HEAD package directory.
+Packages moved or renamed between the base and HEAD are therefore treated as new
+packages and skipped. A missing range means unrestricted Node support.
+
+Only published workspace packages managed by Changesets and absent from its
+`ignore` list are checked. Derived platform packages and ignored packages are
+not checked separately; their owner package carries the engine range users
+install against.
 
 Run `stll-publish-contract` in PR CI. Every published root or declared workspace
 package commits `publish-contract.json`, recording engines, peer support ranges,
@@ -614,7 +675,7 @@ including `engines`, are rejected. Real npm and pnpm pack tests compare the
 modeled contract with each tarball manifest.
 
 Build adapters use the installed configuration loaders and bind their behavior to
-tsdown 0.22.9, Vite 8.1.5, or @nuxt/module-builder 1.0.3 (unbuild 3.6.1 and
+tsdown 0.23.1, Vite 8.3.4, or @nuxt/module-builder 1.0.3 (unbuild 3.6.1 and
 mkdist 2.4.1). They record final transform targets, including separate Nuxt module
 and runtime entries. No syntax lowering records `esnext`.
 Only exact single build invocations (`tsdown`, `vite build`, or
@@ -643,8 +704,8 @@ export default {
 };
 ```
 
-This adapter requires consumer-installed `vite-plugin-dts` 5.0.3 and its
-`unplugin-dts` 1.0.3 implementation. Its dependency scope must provide TypeScript
+This adapter requires consumer-installed `vite-plugin-dts` 5.1.2 and its
+`unplugin-dts` 1.1.2 implementation. Its dependency scope must provide TypeScript
 6.0.3 as `typescript` or the plugin's `@typescript/typescript6` fallback.
 Unsupported versions fail explicitly.
 The resolver proves a direct helper import and call in a literal plugin array;
@@ -876,29 +937,29 @@ Workflows with no declared trust job retain their existing fork-CI policy.
 
 The comparison includes Bun declarations, Node selectors and support ranges,
 resolved TypeScript compiler versions (including workspace and compatibility
-aliases), oxlint, oxlint-tsgolint, oxfmt, and shared tooling pins. Lockfile
+aliases), oxlint, oxlint-tsgolint, and shared tooling pins. Lockfile
 resolutions determine installed package versions; manifest ranges alone do not.
 Resolution locations and importer bindings are retained: swapping compiler
 versions between workspaces cannot look unchanged. Compiler specifier changes
-run parity even when the resolved release version is unchanged. Unknown lock
-shapes and ambiguous resolutions report an unreadable snapshot. Supported text
-locks include Bun JSONC (schema 0/1), pnpm YAML (5.4/6/9), npm package-lock/
+report `typescript` even when the resolved release version is unchanged. Unknown
+lock shapes and ambiguous resolutions report an unreadable snapshot. Supported
+text locks include Bun JSONC (schema 0/1), pnpm YAML (5.4/6/9), npm package-lock/
 shrinkwrap (1/2/3), and bounded Yarn Classic/Berry shapes; a binary-only Bun lock
 cannot be compared without executing Bun.
 Workflow/action and Docker definition edits conservatively force full CI.
-Unrelated application dependency changes do not force compiler parity.
+Unrelated application dependency changes do not report a compiler change.
 Setup-action runtime selectors and their tracked version-file contents must
 identify an exact stable release. Floating selectors,
 ranges, expressions, empty
-values, or omitted runtime versions report an unreadable snapshot and run parity
-even when their committed text is unchanged.
+values, or omitted runtime versions report an unreadable snapshot even when
+their committed text is unchanged.
 
-On pull requests, run the repository's ordinary Bun typecheck and the probe,
-then select parity using the same detector:
+On pull requests, run the repository's ordinary Bun typecheck and the probe. The
+shared `rust-napi-ci.yml` workflow runs both when called with `typecheck: true`;
+elsewhere, run:
 
 ```sh
 stll-typecheck-probe --project packages/api/tsconfig.json --seed-dir packages/api/src -- bun run typecheck
-stll-typecheck-parity --changed-since origin/main --project packages/api/tsconfig.json
 ```
 
 The probe writes an exclusive temporary TypeScript file in the declared
@@ -909,35 +970,31 @@ excluded seeds fail instead of producing a vacuous pass. Commands are argv,
 not shell expressions. Cleanup also runs on failure and handled termination.
 Repeat the probe for independently checked projects as needed.
 
-Conditional parity runs when Bun, TypeScript, or shared declarations change;
-otherwise it prints `parity skipped: toolchain unchanged since ...`. An unreadable
-reference runs full parity. Nightly jobs omit `--changed-since` to run full parity.
-Node and lint-tool changes still force full CI through the shared detector.
-
 Workflow, composite-action, Docker, mise, and tool-version declarations are
-conservatively fingerprinted for compiler parity, including referenced tracked
+conservatively fingerprinted as `shared` changes, including referenced tracked
 setup-action version files (Node, Bun, Python, Go, Java and other runtimes).
 Rust toolchain-file selectors and conventional runtime files are included;
 cache-dependency-path is not a runtime selector. Compose and Kubernetes image
-definitions are conservatively fingerprinted alongside Dockerfiles. Catalog and unresolved declaration changes also force parity;
-an unclassifiable reference runs full parity. This may run parity for unrelated
-edits to these declaration files. Active installed compiler comparisons still
-use the owning lockfile resolutions.
+definitions are conservatively fingerprinted alongside Dockerfiles. Catalog and
+unresolved declaration changes also report a change; an unclassifiable reference
+reports an unreadable snapshot. This may report a change for unrelated edits to
+these declaration files. Installed compiler comparisons use the owning lockfile
+resolutions.
 
 Compiler patch declarations, lockfile patch hashes, and their tracked patch files
 are included even when the compiler version is unchanged. Compiler patch-package
 files are included too. Missing referenced compiler patches fail closed; unrelated
-package patches do not trigger compiler parity.
+package patches do not report a compiler change.
 
 Compiler manifest specifiers and complete compiler lock entries form part of the
 change identity, including resolved URLs, integrity, commits, checksums and patch
-hashes. Changing a source at the same release version runs parity. Local compiler
-sources without an immutable byte identity fail closed; a version alone does not
-identify a local directory. Git compiler sources require a full commit identity.
-Supported text locks include Bun, npm, pnpm and bounded
-Yarn Classic/Berry shapes; unrecognized lock shapes run parity. Yarn compiler
-`patch:` protocols are unsupported and run parity because their patch bytes are
-not represented by the lock checksum alone.
+hashes. Changing a source at the same release version reports `typescript`. Local
+compiler sources without an immutable byte identity fail closed; a version alone
+does not identify a local directory. Git compiler sources require a full commit
+identity. Supported text locks include Bun, npm, pnpm and bounded
+Yarn Classic/Berry shapes; unrecognized lock shapes report an unreadable snapshot.
+Yarn compiler `patch:` protocols are unsupported and report an unreadable
+snapshot because their patch bytes are not represented by the lock checksum alone.
 
 ## Rust selectors
 
@@ -949,8 +1006,10 @@ Cargo manifest `rust-version` remains an MSRV floor at or below the shared pin.
 
 Only `rustExceptions` in the consumer's root `stll-toolchain.json` can authorize
 another exact stable release. Each record contains exactly `pin`, `reason`,
-`tracking` (a GitHub issue URL) and `expires` (a future `YYYY-MM-DD` date).
-Channels, expired records and `rust-version` rule opt-outs fail validation.
+`tracking` (a GitHub issue URL) and `expires` (a `YYYY-MM-DD` date).
+Channels and `rust-version` rule opt-outs fail validation. A record expires on
+its date and then follows the same expiry scope as quarantine excludes (see
+[Quarantine preset and expiry checks](#quarantine-preset-and-expiry-checks)).
 See the [root policy guide](../../README.md) for a complete declaration.
 
 `stll-toolchain-check` requires tracked JavaScript and TypeScript files selected by type-aware lint to belong to declared TypeScript projects. See the [Node scripts project recipe](https://github.com/stella/tooling/blob/main/README.md) for scripts outside the library project. The check inventories Oxlint-selected files and expands compiler configurations; it does not run lint or type checking.
@@ -963,6 +1022,85 @@ fail closed. This is an ownership check for ordinary authored package scripts,
 not a security boundary against deliberately obfuscated code or lint invocations
 hidden inside arbitrary program bodies. Unsupported forms require an explicit
 supported script invocation or a separately tested extension to the model.
+
+## Quarantine preset and expiry checks
+
+Run `bunx --no-install stll-quarantine --sync` before installation to create the
+five-day Bun preset and synchronize permanent exact-name `@stll/` exemptions.
+The command derives registry identities from dependency declarations and the
+root Bun lockfile, including transitive platform packages. Existing first-party
+creation timestamps remain stable across runs; they are not expiries.
+
+Third-party entries require `# quarantine-expires: YYYY-MM-DDTHH:mm:ss.sssZ`.
+`stll-toolchain-check` warns 48 hours before expiry; warnings continue through
+the existing 24-hour removal grace, after which expired entries fail where the
+run can act on them. The same scope applies to expired `rustExceptions`. The
+clock alone never fails a change that leaves an entry untouched:
+
+- `push`, `schedule`, `workflow_dispatch` and other GitHub Actions events, and
+  non-GitHub CI (`CI` set), fail every overdue entry, which prompts the removal
+  PR.
+- `pull_request`, `pull_request_target` and `merge_group` fail an overdue entry
+  only when the change adds it or edits its expiry, compared with the event's
+  base commit; inherited overdue entries warn. A shallow checkout that lacks the
+  base fetches exactly that commit from its remote
+  (`git fetch --no-tags --depth=1 origin <base>`, using the checkout's
+  credentials). Only if that also fails does an overdue entry fail, with the
+  reason. Entries that have not expired never need the base.
+- Local runs outside CI warn.
+
+The quarantine rule cannot be opted out. `stll-quarantine --check` is read-only;
+`--prune` removes expired third-party entries without removing first-party ones.
+`--help` lists modes. Linked output files are rejected.
+
+`@stll/oxlint-config/quarantine` exports the Node-compatible repository helpers
+`checkRepositoryQuarantine`, `synchronizeRepositoryQuarantine`, and
+`pruneRepositoryQuarantine`, accepting a tracked `files` snapshot and optional
+`now`, plus an optional `expiry` scope (`{ kind: "enforce" }` by default). The
+toolchain API takes the same scope as `expiryScope`, reports advisory
+expiry messages through `onWarning`, and its returned diagnostics remain
+failures. Snapshot readers keep lockfiles
+opaque by default; `{ bunLock: "content" }` explicitly requests the root graph
+when quarantine identity checks need it.
+
+The shared scheduled workflow imports the same dependency-free policy core
+from an exact tooling commit; it does not install consumer dependencies to
+perform enforcement or pruning. Its stable removal branch updates one PR per
+repository. See the [root guide](../../README.md#package-quarantine) for the
+inline annotation format and adoption boundary.
+
+## Normalize generated WASI loaders
+
+Run `stll-normalize-wasi-loaders <loader-1> <loader-2>` after `@napi-rs/cli`
+generates the two WASI loaders. Arguments may appear in either order: the
+`.wasi-browser.js` and `.wasi.cjs` suffixes select the loader kind, and any other
+suffix produces an unsupported-file error.
+
+The normalizer applies these exact transformations:
+
+- **cleanup handshake:** wraps the cleanup macrotask scheduler so synchronous
+  completion settles safely and thrown scheduler errors reject the promise.
+- **runtime poll promise:** adds the rejection path used by the scheduler wrapper.
+- **runtime poll timer:** runs the paced runtime timer through the scheduler wrapper.
+- **runtime poll macrotask:** runs the early runtime macrotask through the scheduler
+  wrapper.
+- **async work poll:** runs the async-work timer through the scheduler wrapper.
+- **worker construction:** builds named worker data and options objects; the browser
+  loader receives the add-on crash flag, while the CommonJS loader keeps its crash
+  data and retries invalid `execArgv` by updating the shared options.
+- **scheduler helper:** adds the wrapper that handles synchronous completion and
+  converts thrown scheduler errors into promise rejections.
+- **artifact metadata:** keeps napi-rs artifact metadata on line 1 when present.
+- **generated-file header:** removes leading generator directives and writes the
+  standard `@ts-nocheck` header immediately after metadata, or first when metadata
+  is absent.
+
+Each named transformation must have its exact expected count. The command fails
+closed and writes nothing unless both inputs normalize successfully.
+
+Use `stll-normalize-wasi-loaders --check <loader-1> <loader-2>` in CI. Check mode
+does not write files and exits non-zero if either loader differs from the normalized
+output.
 
 ## Rust policy generation
 

@@ -2,11 +2,11 @@
 import { expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import {
-  mkdtempSync,
-  writeFileSync,
   mkdirSync,
+  mkdtempSync,
   rmSync,
   symlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -14,18 +14,21 @@ import path from "node:path";
 import toolchain from "../toolchain.json";
 import { cloudSetupPath, generateCloudSetup } from "./cloud-setup";
 import {
-  cloudClaudeSettingsPath,
   cloudAttribution,
   cloudAttributionFix,
+  cloudClaudeSettingsPath,
   cloudSessionStartHook,
   mergeCloudClaudeSettings,
 } from "./cloud-setup-claude";
 import type { parseCloudSetup } from "./cloud-setup-schema";
 import { readGitTrackedOutput } from "./git-tracked-output";
+import { REQUIRED_RELEASE_AGE_SECONDS } from "./quarantine-policy";
 import {
   consumerCheckWorkflow,
   consumerRunnerVersion,
 } from "./toolchain-consumer-checks";
+import type { DependabotIgnoreDeclaration } from "./toolchain-dependabot";
+import { sharedFormatTables } from "./toolchain-formatter";
 import {
   checkToolchain,
   parseToolchainConfiguration,
@@ -36,6 +39,11 @@ import { toolchainInputKind } from "./toolchain-inputs";
 import { packagePinKeys, parseToolchainPolicy } from "./toolchain-schema";
 
 const policy = parseToolchainPolicy(toolchain);
+const validBunQuarantine = `[install]
+minimumReleaseAge = ${REQUIRED_RELEASE_AGE_SECONDS}
+minimumReleaseAgeExcludes = []
+
+${sharedFormatTables(policy.formatter)}`;
 
 test("large tracked file lists preserve all paths and toolchain diagnostics", () => {
   const root = mkdtempSync(path.join(tmpdir(), "stll-large-file-list-"));
@@ -78,7 +86,7 @@ test("large tracked file lists preserve all paths and toolchain diagnostics", ()
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 const fixture = (
   files: Record<string, string>,
@@ -184,11 +192,11 @@ test("consumer check declarations remain mandatory despite runtime and action op
     expect(fixture(mutation).some(({ rule }) => rule === "configuration")).toBe(
       true,
     );
-});
+}, 15_000);
 
 test("empty repositories do not acquire unrelated tool requirements", () => {
   expect(fixture({ "readme.txt": "hello" })).toEqual([]);
-});
+}, 15_000);
 
 test("tracked root and nested action metadata cannot bypass snapshot discovery", () => {
   const config = JSON.stringify({
@@ -221,7 +229,7 @@ test("tracked root and nested action metadata cannot bypass snapshot discovery",
       ),
     ).toEqual([]);
   }
-});
+}, 15_000);
 
 test("mise environment overrides remain part of the tracked configuration snapshot", () => {
   for (const file of [
@@ -237,7 +245,7 @@ test("mise environment overrides remain part of the tracked configuration snapsh
           rule === "runtime-manager" && source === file,
       ),
     ).toBe(true);
-});
+}, 15_000);
 
 test("configuration discovery shares lockfile presence without parsing lock contents", () => {
   for (const file of ["bun.lock", "uv.lock", "tools/bun.lock", "tools/uv.lock"])
@@ -262,8 +270,78 @@ test("configuration discovery shares lockfile presence without parsing lock cont
         ],
       }),
     }),
-  ).toEqual([]);
-});
+  ).toEqual([
+    expect.objectContaining({
+      rule: "quarantine-policy",
+      path: "bunfig.toml",
+      message: expect.stringContaining("tracked root bunfig.toml"),
+    }),
+  ]);
+}, 15_000);
+
+test("Bun markers require a tracked quarantine policy while non-Bun repositories remain unaffected", () => {
+  const configuration = {
+    "stll-toolchain.json": JSON.stringify({
+      optOuts: [{ rule: "dependabot-policy", reason: "Quarantine fixture" }],
+    }),
+  };
+  const manifest = JSON.stringify({ packageManager: `bun@${policy.bun}` });
+  const lockfile = JSON.stringify({ lockfileVersion: 1, packages: {} });
+  const bunInputs = [
+    { "bun.lock": lockfile },
+    { "tools/bun.lock": lockfile },
+    { "package.json": manifest },
+    { "tools/package.json": manifest },
+  ] as const satisfies readonly Record<string, string>[];
+  for (const files of bunInputs) {
+    const input = { ...configuration, ...files };
+    expect(
+      fixture(input).filter(({ rule }) => rule === "quarantine-policy"),
+    ).toEqual([
+      expect.objectContaining({
+        path: "bunfig.toml",
+        message: expect.stringContaining("stll-quarantine --sync"),
+      }),
+    ]);
+    expect(
+      fixture({ ...input, "bunfig.toml": validBunQuarantine }).filter(
+        ({ rule }) => rule === "quarantine-policy",
+      ),
+    ).toEqual([]);
+    expect(
+      fixture({
+        ...input,
+        "bunfig.toml":
+          "[install]\nminimumReleaseAge = 0\nminimumReleaseAgeExcludes = []\n",
+      }).filter(({ rule }) => rule === "quarantine-policy"),
+    ).toContainEqual(
+      expect.objectContaining({
+        message: expect.stringContaining(
+          `minimumReleaseAge = ${REQUIRED_RELEASE_AGE_SECONDS}`,
+        ),
+      }),
+    );
+  }
+  expect(
+    fixture(
+      { ...configuration, "bun.lock": lockfile },
+      { "bunfig.toml": validBunQuarantine },
+    ).filter(({ rule }) => rule === "quarantine-policy"),
+  ).toHaveLength(1);
+  for (const files of [
+    {},
+    { "package.json": JSON.stringify({ name: "plain-package" }) },
+    { "package.json": JSON.stringify({ packageManager: "npm@10.0.0" }) },
+    { "package-lock.json": "{}" },
+    { "examples/bun.lock.txt": "example" },
+  ] as const) {
+    expect(
+      fixture({ ...configuration, ...files }).filter(
+        ({ rule }) => rule === "quarantine-policy",
+      ),
+    ).toEqual([]);
+  }
+}, 15_000);
 
 test("Docker action policy opt-outs require a tracked explicit reason", () => {
   const action =
@@ -289,7 +367,7 @@ test("Docker action policy opt-outs require a tracked explicit reason", () => {
       }),
     }),
   ).toEqual([]);
-});
+}, 15_000);
 
 test("permitted named rules have reasoned opt-outs; mandatory and malformed choices fail", () => {
   expect(new Set(toolchainRules).size).toBe(toolchainRules.length);
@@ -304,7 +382,8 @@ test("permitted named rules have reasoned opt-outs; mandatory and malformed choi
       rule === "node-engine" ||
       rule === "cloud-setup-drift" ||
       rule === "type-aware-projects" ||
-      rule === "workflow-trust"
+      rule === "workflow-trust" ||
+      rule === "quarantine-policy"
     ) {
       expect(() =>
         parseToolchainConfiguration({
@@ -335,7 +414,7 @@ test("permitted named rules have reasoned opt-outs; mandatory and malformed choi
     },
   ])
     expect(() => parseToolchainConfiguration(input)).toThrow();
-});
+}, 15_000);
 
 test("untracked and invalid opt-outs cannot conceal a failing runtime", () => {
   const failing = { ".node-version": "0.0.0\n" };
@@ -358,9 +437,9 @@ test("untracked and invalid opt-outs cannot conceal a failing runtime", () => {
       (entry) => entry.rule,
     ),
   ).toEqual(["configuration", "node-version"]);
-});
+}, 15_000);
 
-test("policy rejects schema drift, missing pins, inconsistent TS layouts and invalid SHAs", () => {
+test("policy rejects schema drift, missing or inexact pins and invalid SHAs", () => {
   expect(policy.packages).toEqual(
     Object.fromEntries(packagePinKeys.map((key) => [key, toolchain[key]])),
   );
@@ -381,7 +460,7 @@ test("policy rejects schema drift, missing pins, inconsistent TS layouts and inv
     parseToolchainPolicy({ ...toolchain, schemaVersion: 2 }),
   ).toThrow();
   expect(() =>
-    parseToolchainPolicy({ ...toolchain, typescript: "0.0.0" }),
+    parseToolchainPolicy({ ...toolchain, typescript: "^7.0.2" }),
   ).toThrow();
   expect(() =>
     parseToolchainPolicy({
@@ -395,7 +474,7 @@ test("policy rejects schema drift, missing pins, inconsistent TS layouts and inv
       dependabot: { ...toolchain.dependabot, cooldown: { defaultDays: 0 } },
     }),
   ).toThrow();
-});
+}, 15_000);
 
 test("all package and runtime diagnostics survive orchestration and only named rules opt out", () => {
   const files = {
@@ -403,6 +482,7 @@ test("all package and runtime diagnostics survive orchestration and only named r
       devDependencies: { oxlint: "latest" },
       packageManager: `bun@${policy.bun}`,
     }),
+    "bunfig.toml": validBunQuarantine,
     ".node-version": "0.0.0",
     "stll-toolchain.json": JSON.stringify({
       optOuts: [{ rule: "dependabot-policy", reason: "Dependency fixture" }],
@@ -423,7 +503,7 @@ test("all package and runtime diagnostics survive orchestration and only named r
       }),
     }).map((entry) => entry.rule),
   ).toEqual(["package-pins"]);
-});
+}, 15_000);
 
 test("GitHub origin identity reaches prefixed workflow selector validation", () => {
   const checkout = policy.actions["actions/checkout"];
@@ -464,7 +544,7 @@ test("GitHub origin identity reaches prefixed workflow selector validation", () 
       rmSync(root, { recursive: true, force: true });
     }
   }
-});
+}, 15_000);
 
 test("configuration readers accept only resolved targets inside the tracked tree", () => {
   for (const target of [
@@ -517,7 +597,7 @@ test("configuration readers accept only resolved targets inside the tracked tree
       rmSync(workspace, { recursive: true, force: true });
     }
   }
-});
+}, 15_000);
 
 test("a reasoned opt-out cannot hide a Node support range outside the shared series", () => {
   const diagnostics = fixture({
@@ -533,7 +613,7 @@ test("a reasoned opt-out cannot hide a Node support range outside the shared ser
         rule === "configuration" && message.includes("cannot be opted out"),
     ),
   ).toBe(true);
-});
+}, 15_000);
 
 test("repository configuration accepts an explicit cloud declaration without changing opt-outs", () => {
   const cloud = {
@@ -555,7 +635,7 @@ test("repository configuration accepts an explicit cloud declaration without cha
       cloud: { install: cloud.install, services: [] },
     }).cloud?.services,
   ).toEqual([]);
-});
+}, 15_000);
 
 test("unknown root keys and malformed cloud declarations fail through the tracked configuration boundary", () => {
   const cloud = {
@@ -588,7 +668,7 @@ test("unknown root keys and malformed cloud declarations fail through the tracke
   });
   expect(invalid.some(({ rule }) => rule === "configuration")).toBe(true);
   expect(invalid.some(({ rule }) => rule === "node-version")).toBe(true);
-});
+}, 15_000);
 
 const cloudDeclaration = {
   services: [],
@@ -624,7 +704,7 @@ test("cloud setup guard rejects missing, drifted and stray tracked scripts and a
     ),
   ).toBe(true);
   expect(fixture({}, { [cloudSetupPath]: script })).toEqual([]);
-});
+}, 15_000);
 
 test("cloud generation requires an exact tracked root Node patch within the shared series", () => {
   const files = cloudFixtureFiles();
@@ -648,7 +728,7 @@ test("cloud generation requires an exact tracked root Node patch within the shar
       { ".node-version": "26.10.0" },
     ).some(({ rule }) => rule === "cloud-setup-drift"),
   ).toBe(true);
-});
+}, 15_000);
 
 test("published engine floors permit only an exact selector in the declared workflow job", () => {
   const setup = policy.actions["actions/setup-node"];
@@ -819,7 +899,7 @@ test("published engine floors permit only an exact selector in the declared work
       }).some(({ rule }) => rule === "configuration"),
     ).toBe(true);
   }
-});
+}, 15_000);
 
 test("engine floor configuration is closed, scoped and independent of optional opt-outs", () => {
   const entry = {
@@ -844,7 +924,7 @@ test("engine floor configuration is closed, scoped and independent of optional o
     [entry, entry],
   ])
     expect(() => parseToolchainConfiguration({ engineFloors })).toThrow();
-});
+}, 15_000);
 
 test("dynamic selector declarations fail when absent, stale, duplicated by aliases or static", () => {
   const file = ".github/workflows/example.yml";
@@ -886,7 +966,7 @@ test("dynamic selector declarations fail when absent, stale, duplicated by alias
     "stll-toolchain.json": JSON.stringify({ dynamicSelectors: [composeEntry] }),
   });
   expect(multi.some(({ rule }) => rule === "configuration")).toBe(true);
-});
+}, 15_000);
 
 test("tracked shell and service image declarations share the strict Rust exception boundary", () => {
   const sources = {
@@ -920,7 +1000,7 @@ test("tracked shell and service image declarations share the strict Rust excepti
       }),
     ).toEqual([]);
   }
-});
+}, 15_000);
 
 test("tracked extensionless shell shebangs enter Rust policy discovery", () => {
   for (const interpreter of [
@@ -948,7 +1028,7 @@ test("tracked extensionless shell shebangs enter Rust policy discovery", () => {
       "node_modules/rust-check": "#!/bin/sh\ncargo +nightly test",
     }),
   ).toEqual([]);
-});
+}, 15_000);
 
 test("shell discovery skips initialized and absent tracked submodules", () => {
   const root = mkdtempSync(path.join(tmpdir(), "stll-gitlink-"));
@@ -971,7 +1051,7 @@ test("shell discovery skips initialized and absent tracked submodules", () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("optional shebang discovery skips symlinks without tracked regular targets", () => {
   for (const target of [
@@ -1022,7 +1102,7 @@ test("optional shebang discovery skips symlinks without tracked regular targets"
       rmSync(workspace, { recursive: true, force: true });
     }
   }
-});
+}, 15_000);
 
 test("cloud drift requires the tracked remote-only SessionStart hook while preserving script checks", () => {
   const files = cloudFixtureFiles();
@@ -1077,7 +1157,7 @@ test("cloud drift requires the tracked remote-only SessionStart hook while prese
         }),
       );
   }
-});
+}, 15_000);
 
 test("cloud drift requires empty commit and pull request attribution with the exact repair", () => {
   const files = cloudFixtureFiles();
@@ -1111,4 +1191,33 @@ test("cloud drift requires empty commit and pull request attribution with the ex
     expect(check(JSON.stringify({ attribution, hooks }))).toEqual([
       attributionDrift,
     ]);
-});
+}, 15_000);
+
+test("stll-toolchain.json Dependabot ignores cannot claim shared pins", () => {
+  const declaration = {
+    ecosystem: "npm",
+    dependency: "graphql",
+    updateTypes: ["version-update:semver-major"],
+    reason: "Payload 3 requires graphql ^16.",
+  } satisfies DependabotIgnoreDeclaration;
+  expect(
+    parseToolchainConfiguration({ dependabotIgnores: [declaration] })
+      .dependabotIgnores,
+  ).toEqual([declaration]);
+  expect(() =>
+    parseToolchainConfiguration({
+      dependabotIgnores: [{ ...declaration, reason: "" }],
+    }),
+  ).toThrow();
+  const configuration = (dependency: string) =>
+    fixture({
+      "package.json": "{}",
+      "stll-toolchain.json": JSON.stringify({
+        dependabotIgnores: [{ ...declaration, dependency }],
+      }),
+    }).filter(({ rule }) => rule === "configuration");
+  expect(configuration("graphql")).toEqual([]);
+  expect(configuration("oxlint")).toMatchObject([
+    { rule: "configuration", path: "stll-toolchain.json" },
+  ]);
+}, 15_000);

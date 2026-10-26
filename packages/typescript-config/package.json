@@ -1,6 +1,6 @@
 {
   "name": "@stll/typescript-config",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Shared strict TypeScript configuration for stella packages.",
   "license": "Apache-2.0",
   "repository": {
@@ -16,12 +16,12 @@
     "./base.json": "./base.json",
     "./library.json": "./library.json",
     "./node.json": "./node.json",
-    "./bun.json": "./bun.json"
+    "./bun.json": "./bun.json",
+    "./published.json": "./published.json",
+    "./react-library.json": "./react-library.json",
+    "./single-checker.json": "./single-checker.json"
   },
   "publishConfig": {
     "access": "public"
-  },
-  "peerDependencies": {
-    "typescript": ">=6.0.3 <8"
   }
 }

@@ -5,10 +5,7 @@
       "time": "1.9"
     },
     "rust": {
-      "components": [
-        "clippy",
-        "rustfmt"
-      ]
+      "components": ["clippy", "rustfmt"]
     }
   },
   "engineFloors": [

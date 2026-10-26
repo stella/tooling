@@ -3,8 +3,8 @@ import {
   closeSync,
   lstatSync,
   openSync,
-  readSync,
   readFileSync,
+  readSync,
   realpathSync,
 } from "node:fs";
 import path from "node:path";
@@ -18,30 +18,42 @@ import {
   hasCloudSessionStartHook,
 } from "./cloud-setup-claude";
 import { parseCloudSetup } from "./cloud-setup-schema";
+import type { ExpiryScope } from "./dated-entry-scope";
 import { readGitTrackedOutput } from "./git-tracked-output";
+import { checkRepositoryQuarantine } from "./quarantine-policy";
+import { repositoryBun } from "./toolchain-bun";
 import {
   checkConsumerChecks,
   parseConsumerChecks,
 } from "./toolchain-consumer-checks";
-import { checkDependabot, dependabotRules } from "./toolchain-dependabot";
 import {
-  parseDynamicSelectors,
+  checkDependabot,
+  declaredIgnoreConflicts,
+  dependabotRules,
+  parseDependabotIgnores,
+} from "./toolchain-dependabot";
+import {
   type DynamicSelector,
+  parseDynamicSelectors,
 } from "./toolchain-dynamic-selectors";
 import {
   parseEngineFloors,
-  resolveEngineFloor,
   type ResolvedEngineFloor,
+  resolveEngineFloor,
 } from "./toolchain-engine-floors";
+import { checkFormatter, formatterRule } from "./toolchain-formatter";
 import { toolchainInputKind } from "./toolchain-inputs";
 import { checkNodeProjects, nodeProjectRule } from "./toolchain-node-projects";
 import { checkPackageFiles, packageRules } from "./toolchain-packages";
 import {
   checkRuntimeFile,
-  runtimeRules,
   type RuntimeDelegation,
+  runtimeRules,
 } from "./toolchain-runtime";
-import { parseRustExceptions } from "./toolchain-rust";
+import {
+  checkRustExceptionExpiry,
+  parseRustExceptions,
+} from "./toolchain-rust";
 import { parseToolchainPolicy } from "./toolchain-schema";
 
 export const toolchainRules = [
@@ -50,7 +62,9 @@ export const toolchainRules = [
     ...runtimeRules,
     ...dependabotRules,
     nodeProjectRule,
+    formatterRule,
     "cloud-setup-drift",
+    "quarantine-policy",
   ] as const),
 ] as const;
 export type ToolchainRule = (typeof toolchainRules)[number];
@@ -78,12 +92,13 @@ export const parseToolchainConfiguration = (input: unknown) => {
         key !== "engineFloors" &&
         key !== "dynamicSelectors" &&
         key !== "consumerChecks" &&
-        key !== "rustExceptions",
+        key !== "rustExceptions" &&
+        key !== "dependabotIgnores",
     ) ||
     (input["optOuts"] !== undefined && !array(input["optOuts"]))
   )
     throw new Error(
-      "stll-toolchain.json accepts only optOuts, cloud, engineFloors, dynamicSelectors consumerChecks and rustExceptions declarations",
+      "stll-toolchain.json accepts only optOuts, cloud, engineFloors, dynamicSelectors, consumerChecks, rustExceptions and dependabotIgnores declarations",
     );
   const disabled = new Set<string>();
   const optOuts = input["optOuts"] ?? [];
@@ -100,6 +115,10 @@ export const parseToolchainConfiguration = (input: unknown) => {
     )
       throw new Error(
         "each opt-out requires a unique known rule and a nonempty reason",
+      );
+    if (entry["rule"] === "quarantine-policy")
+      throw new Error(
+        "quarantine-policy cannot be opted out; temporary third-party exclusions require expiry",
       );
     if (entry["rule"] === "rust-version")
       throw new Error(
@@ -130,11 +149,19 @@ export const parseToolchainConfiguration = (input: unknown) => {
     engineFloors: parseEngineFloors(input["engineFloors"]),
     dynamicSelectors: parseDynamicSelectors(input["dynamicSelectors"]),
     consumerChecks: parseConsumerChecks(input["consumerChecks"]),
+    dependabotIgnores: parseDependabotIgnores(input["dependabotIgnores"]),
   };
 };
 
-/** Read one tracked configuration snapshot for guards and policy generation. */
-export const readToolchainInputs = (root: string) => {
+type ReadToolchainInputsOptions = {
+  bunLock?: "presence" | "content";
+};
+
+/** Dependency graphs stay opaque unless a caller explicitly needs registry identities. */
+export const readToolchainInputs = (
+  root: string,
+  { bunLock = "presence" }: ReadToolchainInputsOptions = {},
+) => {
   const diagnostics: SharedToolchainDiagnostic[] = [];
   const tracked = readGitTrackedOutput(root, "staged")
     .split("\0")
@@ -156,7 +183,10 @@ export const readToolchainInputs = (root: string) => {
     if (kind === undefined && !shebangCandidate) continue;
     try {
       const inputPath = path.join(resolvedRoot, file);
-      if (kind === "presence") {
+      if (
+        kind === "presence" &&
+        !(file === "bun.lock" && bunLock === "content")
+      ) {
         // The index can retain deleted declarations; presence follows the worktree.
         lstatSync(inputPath);
         files[file] = "";
@@ -216,14 +246,29 @@ type CheckSharedToolchainOptions = {
   root: string;
   policy: ReturnType<typeof parseToolchainPolicy>;
   onDelegated?: ((report: RuntimeDelegation) => void) | undefined;
+  onWarning?: ((report: SharedToolchainDiagnostic) => void) | undefined;
+  now?: Date | undefined;
+  /** Defaults to failing every overdue dated entry; CLIs derive it from the run context. */
+  expiryScope?: ExpiryScope | undefined;
 };
 
 export const checkToolchain = ({
   root,
-  policy,
+  policy: sharedPolicy,
   onDelegated,
+  onWarning,
+  now,
+  expiryScope = { kind: "enforce" },
 }: CheckSharedToolchainOptions) => {
-  const { files, trackedFiles, diagnostics } = readToolchainInputs(root);
+  const { files, trackedFiles, diagnostics } = readToolchainInputs(root, {
+    bunLock: "content",
+  });
+  // Every Bun reference follows the repository's own pin, which must be at
+  // or above the shared minimum.
+  const policy = {
+    ...sharedPolicy,
+    bun: repositoryBun(sharedPolicy.bun, files["package.json"]),
+  };
   let repository: string | undefined;
   try {
     const origin = execFileSync("git", ["remote", "get-url", "origin"], {
@@ -248,6 +293,25 @@ export const checkToolchain = ({
         JSON.parse(files["stll-toolchain.json"]),
       );
       dynamicSelectors = configuration.dynamicSelectors;
+      const expiry = checkRustExceptionExpiry({
+        exceptions: configuration.rustExceptions,
+        now,
+        scope: expiryScope,
+      });
+      for (const message of expiry.errors)
+        diagnostics.push({
+          rule: "configuration",
+          path: "stll-toolchain.json",
+          line: 1,
+          message,
+        });
+      for (const message of expiry.warnings)
+        onWarning?.({
+          rule: "configuration",
+          path: "stll-toolchain.json",
+          line: 1,
+          message,
+        });
       for (const entry of configuration.engineFloors)
         engineFloors.push(resolveEngineFloor(entry, files));
     } catch (error) {
@@ -326,6 +390,59 @@ export const checkToolchain = ({
     }),
   );
   diagnostics.push(...checkPackageFiles({ files, policy }));
+  const usesBun = Object.entries(files).some(([file, text]) => {
+    if (path.posix.basename(file) === "bun.lock") return true;
+    if (path.posix.basename(file) !== "package.json") return false;
+    try {
+      const manifest: unknown = JSON.parse(text);
+      return (
+        record(manifest) &&
+        typeof manifest["packageManager"] === "string" &&
+        /^bun(?:@|$)/u.test(manifest["packageManager"])
+      );
+    } catch {
+      // Package diagnostics already reject malformed manifests.
+      return false;
+    }
+  });
+  diagnostics.push(
+    ...checkFormatter({ files, policy: policy.formatter, usesBun }),
+  );
+  if (usesBun || files["bunfig.toml"] !== undefined) {
+    try {
+      if (files["bunfig.toml"] === undefined)
+        throw new Error(
+          "Bun repositories require a tracked root bunfig.toml with the five-day quarantine policy; use the documented pinned bunx stll-quarantine --sync bootstrap, then commit bunfig.toml",
+        );
+      const result = checkRepositoryQuarantine({
+        files,
+        now,
+        npmrcPresent: trackedFiles.has(".npmrc"),
+        expiry: expiryScope,
+      });
+      for (const message of result.errors)
+        diagnostics.push({
+          rule: "quarantine-policy",
+          path: "bunfig.toml",
+          line: 1,
+          message,
+        });
+      for (const message of result.warnings)
+        onWarning?.({
+          rule: "quarantine-policy",
+          path: "bunfig.toml",
+          line: 1,
+          message,
+        });
+    } catch (error) {
+      diagnostics.push({
+        rule: "quarantine-policy",
+        path: "bunfig.toml",
+        line: 1,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
   if (files["package.json"] !== undefined) {
     let manifest: unknown;
     try {
@@ -377,7 +494,24 @@ export const checkToolchain = ({
         line: 1,
         message: `dynamic selector ${entry.path}:${entry.at ?? entry.line} must match exactly one unresolved ${entry.kind} selector`,
       });
-  diagnostics.push(...checkDependabot({ files, policy: policy.dependabot }));
+  const dependabotIgnores = configuration.dependabotIgnores;
+  for (const message of declaredIgnoreConflicts({
+    ignores: dependabotIgnores,
+    policy: policy.dependabot,
+  }))
+    diagnostics.push({
+      rule: "configuration",
+      path: "stll-toolchain.json",
+      line: 1,
+      message,
+    });
+  diagnostics.push(
+    ...checkDependabot({
+      files,
+      policy: policy.dependabot,
+      ignores: dependabotIgnores,
+    }),
+  );
   return diagnostics.filter(
     (diagnostic) => !configuration.disabled.has(diagnostic.rule),
   );

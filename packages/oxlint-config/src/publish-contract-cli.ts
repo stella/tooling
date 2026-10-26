@@ -4,8 +4,8 @@ import path from "node:path";
 
 import {
   assertConsumerPublishableManifest,
-  discoverConsumerManifests,
   consumerRecord,
+  discoverConsumerManifests,
 } from "./consumer-compat-config";
 import { resolveConsumerReleasePack } from "./consumer-release-pack";
 import { readGitTrackedOutput } from "./git-tracked-output";
@@ -13,9 +13,9 @@ import { readPackedSyntaxFiles } from "./publish-artifact-syntax";
 import { resolvePublishBuildTarget } from "./publish-build-target";
 import {
   checkPublishContract,
-  resolveManifestContract,
   type PublishPacker,
   type PublishTarget,
+  resolveManifestContract,
 } from "./publish-contract";
 import { githubAutomationFileKind } from "./toolchain-inputs";
 import { parseToolchainPolicy } from "./toolchain-schema";

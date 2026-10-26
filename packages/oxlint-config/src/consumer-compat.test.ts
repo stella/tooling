@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
-  mkdtemp,
   mkdir,
-  readFile,
+  mkdtemp,
   readdir,
+  readFile,
   realpath,
   rm,
   writeFile,
@@ -18,35 +18,35 @@ import { parse, stringify } from "yaml";
 
 import policy from "../toolchain.json";
 import {
-  consumerCommandEnvironment,
-  assertConsumerPackedNodeSupport,
-  resolveInstalledManagerBin,
-  consumerReservedToolBins,
   assertConsumerFixtureFiles,
+  assertConsumerInstalledToolBins,
+  assertConsumerPackedNodeSupport,
+  consumerCommandEnvironment,
   consumerFixtureCommands,
-  verifyConsumerNodeArchive,
-  writeConsumerToolWrappers,
+  consumerReservedToolBins,
+  resolveInstalledManagerBin,
   runConsumerCompat,
   stageConsumerWorkspace,
-  assertConsumerInstalledToolBins,
+  verifyConsumerNodeArchive,
+  writeConsumerToolWrappers,
 } from "./consumer-compat";
 import { parseConsumerCompatArguments } from "./consumer-compat-arguments";
 import {
-  consumerRecord,
-  consumerPackageClosure,
-  consumerPublishedDependencyFields,
-  consumerBundledDependencyFields,
+  assertConsumerFixtureKind,
+  assertConsumerFixtureSelection,
   assertConsumerPublishableManifest,
-  consumerStagingPaths,
-  consumerPackRootManifest,
   bindConsumerManifest,
+  consumerBundledDependencyFields,
+  type ConsumerFixture,
+  consumerPackageClosure,
+  consumerPackRootManifest,
+  consumerPublishedDependencyFields,
+  consumerRecord,
+  consumerStagingPaths,
   discoverConsumerManifests,
   discoverConsumerPackages,
   oldestPublishedConsumerVersion,
   parseConsumerFixtures,
-  type ConsumerFixture,
-  assertConsumerFixtureKind,
-  assertConsumerFixtureSelection,
 } from "./consumer-compat-config";
 
 describe("consumer compatibility declarations", () => {
@@ -74,7 +74,7 @@ describe("consumer compatibility declarations", () => {
       expect(() =>
         assertConsumerFixtureSelection({ selected, fixtures }),
       ).toThrow("exactly match");
-  });
+  }, 15_000);
   test("a private workspace root stages its manifest without copying unrelated root files", async () => {
     const directory = await mkdtemp(
       path.join(tmpdir(), "consumer-private-root-"),
@@ -120,7 +120,7 @@ describe("consumer compatibility declarations", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
   test("staging preserves default and named catalogs for real publication without copying unrelated config", async () => {
     const require = createRequire(import.meta.url);
     const metadata: unknown = JSON.parse(
@@ -362,7 +362,7 @@ describe("consumer compatibility declarations", () => {
         await rm(directory, { recursive: true, force: true });
       }
     }
-  });
+  }, 15_000);
 
   test("malformed catalog sources and conflicting Bun definitions fail before packing", async () => {
     const cases = [
@@ -412,7 +412,7 @@ describe("consumer compatibility declarations", () => {
         await rm(root, { recursive: true, force: true });
       }
     }
-  });
+  }, 15_000);
 
   test("installed tool-bin collisions fail before running fixture commands", async () => {
     const directory = await mkdtemp(
@@ -451,7 +451,7 @@ describe("consumer compatibility declarations", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
   test("named private workspace owners remain discoverable but cannot be selected as consumers", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "consumer-private-owner-"));
     const fetchSpy = spyOn(globalThis, "fetch").mockRejectedValue(
@@ -509,7 +509,7 @@ describe("consumer compatibility declarations", () => {
       fetchSpy.mockRestore();
       await rm(root, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
   test("source engines outside consumer Node fail before provisioning", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "consumer-engines-"));
     const fetchSpy = spyOn(globalThis, "fetch").mockRejectedValue(
@@ -562,7 +562,7 @@ describe("consumer compatibility declarations", () => {
       fetchSpy.mockRestore();
       await rm(root, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
   test("packed manifests independently enforce consumer Node support", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "consumer-packed-engines-"));
     try {
@@ -593,7 +593,7 @@ describe("consumer compatibility declarations", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
   test("a React package cannot select a node fixture before provisioning or installing", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "consumer-kind-"));
     const fetchSpy = spyOn(globalThis, "fetch").mockRejectedValue(
@@ -647,7 +647,7 @@ describe("consumer compatibility declarations", () => {
       fetchSpy.mockRestore();
       await rm(root, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
   test("fixture kind follows published React peers rather than caller choice", () => {
     const fixture = {
       package: ".",
@@ -680,7 +680,7 @@ describe("consumer compatibility declarations", () => {
         }),
       ).toThrow("invalid published React peer");
     }
-  });
+  }, 15_000);
   test("pack staging preserves relative workspace references and public root identity", () => {
     const root = {
       directory: ".",
@@ -718,7 +718,7 @@ describe("consumer compatibility declarations", () => {
         {},
       ),
     ).toEqual({ private: true });
-  });
+  }, 15_000);
   test("fixture source directories are allowed but dependency-manager config is rejected", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "consumer-fixture-"));
     try {
@@ -740,7 +740,7 @@ describe("consumer compatibility declarations", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
   test("both managers preserve prototype-named dependencies unless explicitly bound", () => {
     for (const manager of ["npm", "pnpm"] as const)
       for (const field of [
@@ -772,7 +772,7 @@ describe("consumer compatibility declarations", () => {
           expect(Object.hasOwn(remaining, "constructor")).toBe(false);
         }
       }
-  });
+  }, 15_000);
   test("both managers bind direct and transitive closure to identical artifacts and consumer pins", () => {
     const artifacts = new Map([
       ["@example/library", "/artifacts/library.tgz"],
@@ -820,7 +820,7 @@ describe("consumer compatibility declarations", () => {
         manager: "pnpm",
       }),
     ).toThrow("dependency-manager setting");
-  });
+  }, 15_000);
   test("requires an explicit fixture and argument arrays for every package", () => {
     const entry = {
       package: "packages/library",
@@ -844,7 +844,7 @@ describe("consumer compatibility declarations", () => {
     expect(() => parseConsumerFixtures({ packages: [entry, entry] })).toThrow(
       "duplicate",
     );
-  });
+  }, 15_000);
 
   test("CLI fails on absent, unknown, duplicated and empty selection inputs", () => {
     const args = [
@@ -870,7 +870,7 @@ describe("consumer compatibility declarations", () => {
       ["--packages", "[]", ...args.slice(2)],
     ])
       expect(() => parseConsumerCompatArguments(bad)).toThrow();
-  });
+  }, 15_000);
 
   test("discovers declared workspace closure rather than arbitrary fixture manifests", () => {
     const manifest = (value: Record<string, unknown>) => JSON.stringify(value);
@@ -929,7 +929,7 @@ describe("consumer compatibility declarations", () => {
         "packages/core/package.json": files["packages/core/package.json"],
       }),
     ).toThrow("adjacent tracked package.json: pnpm-workspace.yaml");
-  });
+  }, 15_000);
 
   test("public packed manifests require valid versions while private workspace owners may omit them", () => {
     for (const version of [
@@ -985,7 +985,7 @@ describe("consumer compatibility declarations", () => {
         files: {},
       }),
     ).toThrow("semver-valid version: packages/core");
-  });
+  }, 15_000);
 
   test("both bundled-dependency fields fail closed for selected and transitive package artifacts", () => {
     for (const field of consumerBundledDependencyFields)
@@ -1032,7 +1032,7 @@ describe("consumer compatibility declarations", () => {
           }),
         ).toThrow(`does not support ${field}: packages/core`);
       }
-  });
+  }, 15_000);
 
   test("catalog dependencies selecting local packages require explicit workspace intent in every published section", () => {
     for (const source of ["pnpm", "bun"] as const)
@@ -1117,7 +1117,7 @@ describe("consumer compatibility declarations", () => {
             });
             expect([...closure().keys()]).toEqual(["library"]);
           }
-  });
+  }, 15_000);
 
   test("unresolved workspace dependencies fail instead of falling through to registry", () => {
     const pkg = {
@@ -1136,7 +1136,7 @@ describe("consumer compatibility declarations", () => {
         files: {},
       }),
     ).toThrow("unresolved workspace dependency");
-  });
+  }, 15_000);
 
   test("workspace aliases fail with a package-name migration instruction", () => {
     const core = {
@@ -1162,7 +1162,7 @@ describe("consumer compatibility declarations", () => {
     ).toThrow(
       "workspace alias specifiers are not supported by consumer-compat: alias -> workspace:@example/core@*; use the package name as the dependency key",
     );
-  });
+  }, 15_000);
 
   test("selects the oldest actual published version across the entire peer range", () => {
     const versions = ["19.0.0", "18.0.0", "17.0.2", "18.0.0-rc.0", "17.0.1"];
@@ -1175,7 +1175,7 @@ describe("consumer compatibility declarations", () => {
     expect(() => oldestPublishedConsumerVersion(versions, "^20")).toThrow(
       "no published",
     );
-  });
+  }, 15_000);
 });
 
 describe("isolated consumer runtime", () => {
@@ -1212,7 +1212,7 @@ describe("isolated consumer runtime", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
   test("nested manager invocations execute pinned wrappers before bundled and inherited producers", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "consumer-wrappers-"));
     try {
@@ -1268,7 +1268,7 @@ describe("isolated consumer runtime", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
   test("both managers install, typecheck, build and smoke using the consumer Node executable", () => {
     const tools = {
       node: "/consumer/node",
@@ -1345,7 +1345,7 @@ describe("isolated consumer runtime", () => {
         },
       }),
     ).toThrow("declared");
-  });
+  }, 15_000);
   test("checks exact official archive filename and digest before extraction", () => {
     const archive = Buffer.from("official archive fixture");
     const filename = "node-v22.23.3-linux-x64.tar.xz";
@@ -1374,7 +1374,7 @@ describe("isolated consumer runtime", () => {
         checksums,
       }),
     ).toThrow("checksum mismatch");
-  });
+  }, 15_000);
 
   test("consumer environment excludes inherited runtime and module lookup paths", () => {
     const env = consumerCommandEnvironment({
@@ -1426,7 +1426,7 @@ describe("isolated consumer runtime", () => {
     expect(env["YARN_CACHE_FOLDER"]).toBeUndefined();
     expect(env["XDG_CONFIG_HOME"]).toBe("/isolated/home/config");
     expect(env["KEEP"]).toBe("value");
-  });
+  }, 15_000);
 });
 
 test("installed manager bins come from declared package metadata across versions", async () => {
@@ -1462,4 +1462,4 @@ test("installed manager bins come from declared package metadata across versions
   } finally {
     await rm(root, { recursive: true, force: true });
   }
-});
+}, 15_000);

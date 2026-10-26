@@ -19,25 +19,15 @@
 //     inside `ensureRouteQueryData` / `prefetchRouteQuery`).
 //
 // Cross-file, one-hop check for colocated route components: the single-file
-// analysis above is blind to a `useSuspenseQuery(factory(...))` call living in
-// a sibling file imported by the route (the codebase convention for colocated,
-// non-route-generating files is a dash-prefixed directory next to the route,
-// e.g. `-components/`, `-hooks/`, `-queries/`, imported via the `@/routes/...`
-// alias — TanStack Router excludes `-`-prefixed paths from route generation).
-// A real instance of this shipped on `/settings/account/connections` before
-// being caught by the e2e depth guard: the page component had no
-// `useSuspenseQuery` of its own, it all lived in a child card component.
+// analysis above is blind to a `useSuspenseQuery(factory(...))` call in an
+// imported sibling file. Dash-prefixed directories such as `-components/`,
+// `-hooks/`, and `-queries/` are treated as colocated non-route files.
 //
-// To close that gap without a real module resolver: once a file is confirmed
-// to be a route file with an inline options object (the same precondition the
-// single-file check already requires), each `@/routes/.../-<dir>/...` import
-// it declares is resolved to an absolute path by reusing the *linted file's
-// own* path up to its `/routes/` segment as the alias root (mirrors the
-// `"@/*": ["./src/*"]` tsconfig path). The resolved file is read once — bounded
-// to that one hop, its own imports are never followed — and scanned with a
-// regex for the same two `useSuspenseQuery(...)` shapes the AST check
-// recognizes. Any factory it finds is checked against the route's `loader`
-// exactly like an in-file suspense call would be.
+// Without a module resolver, confirmed route files with inline options resolve
+// each `@/routes/.../-<dir>/...` import from the linted file's `/routes/`
+// segment. The child file is read once and scanned with a regex for the same
+// two `useSuspenseQuery(...)` shapes the AST check recognizes. Child imports
+// are not followed, and each factory is checked against the route's `loader`.
 //
 // Safe (not flagged):
 //   - `useSuspenseQuery` whose argument is a member expression or other shape
@@ -59,14 +49,17 @@
 // bounded/cheap scan this rule relies on; do not write that literal pattern
 // in prose comments inside `-components`/`-hooks`/`-queries` files.
 
-import { eslintCompatPlugin, type Ranged } from "@oxlint/plugins";
+import { eslintCompatPlugin, type Plugin, type Ranged } from "@oxlint/plugins";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
 import {
+  filenameForContext,
   getPropertyName,
+  isAstNode,
   isIdentifier,
   isStringLiteral,
+  resolveLiteralArraySpreads,
   unwrapExpression,
 } from "./utils.ts";
 
@@ -102,7 +95,8 @@ const suspenseFactoryName = (node) => {
   if (!isSuspenseCallee(node.callee)) {
     return null;
   }
-  const arg = unwrapExpression(node.arguments?.[0]);
+  const { args } = resolveLiteralArraySpreads(node.arguments ?? []);
+  const arg = unwrapExpression(args.at(0));
   if (arg?.type === "CallExpression" && isIdentifier(arg.callee)) {
     return arg.callee.name;
   }
@@ -177,7 +171,7 @@ const CHILD_SUSPENSE_RE = /useSuspenseQuery\(\s*([A-Za-z_$][\w$]*)\s*([(),])/g;
 const suspenseFactoriesInSource = (sourceText: string): Set<string> => {
   const factories = new Set<string>();
   for (const match of sourceText.matchAll(CHILD_SUSPENSE_RE)) {
-    const factory = match[1];
+    const factory = match.at(1);
     if (factory !== undefined) {
       factories.add(factory);
     }
@@ -185,7 +179,7 @@ const suspenseFactoriesInSource = (sourceText: string): Set<string> => {
   return factories;
 };
 
-export default eslintCompatPlugin({
+const plugin: Plugin = eslintCompatPlugin({
   meta: { name: "require-loader-prefetch" },
   rules: {
     "require-loader-prefetch": {
@@ -254,12 +248,14 @@ export default eslintCompatPlugin({
 
             if (isCreateFileRouteOptionsCall(callee)) {
               isRouteFile = true;
-              const optionsArg = node.arguments?.[0];
+              const { args } = resolveLiteralArraySpreads(node.arguments);
+              const optionsArg = args.at(0);
               if (
                 routeOptions === null &&
-                optionsArg?.type === "ObjectExpression"
+                isAstNode(optionsArg) &&
+                optionsArg.type === "ObjectExpression"
               ) {
-                routeOptions = optionsArg;
+                routeOptions = { properties: optionsArg.properties };
               }
             }
 
@@ -323,10 +319,7 @@ export default eslintCompatPlugin({
               return;
             }
 
-            const filename = context.filename ?? context.getFilename?.();
-            if (typeof filename !== "string") {
-              return;
-            }
+            const filename = filenameForContext(context);
 
             for (const { node, source } of colocatedImports) {
               const basePath = resolveColocatedImportBase(filename, source);
@@ -364,3 +357,5 @@ export default eslintCompatPlugin({
     },
   },
 });
+
+export default plugin;

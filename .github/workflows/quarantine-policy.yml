@@ -3,6 +3,8 @@ name: Package quarantine policy
 on:
   pull_request:
   merge_group:
+  push:
+    branches: [main]
 
 permissions:
   contents: read
@@ -13,4 +15,4 @@ jobs:
     if: github.repository == 'stella/tooling'
     permissions:
       contents: read
-    uses: stella/.github/.github/workflows/quarantine-policy.yml@5764ab66e4df84cfd2e642c7d7e4678261e668f8
+    uses: stella/.github/.github/workflows/quarantine-policy.yml@a98150379a0659f9ff603970a06dbdee56f7c4cb

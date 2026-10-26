@@ -12,6 +12,7 @@ import {
   generationDiagnostics,
   writeGeneratedFile,
 } from "./generated-file";
+import { readDependabotIgnores } from "./toolchain-dependabot";
 import { readToolchainInputs } from "./toolchain-guard";
 
 const usage =
@@ -79,10 +80,13 @@ const main = async () => {
       : parseDependabotInput(
           JSON.parse(await readFile(resolve(root, config), "utf8")),
         );
+  // Shared-pin conflicts and invalid declarations still throw in the generator and parser.
+  const dependabotIgnores = readDependabotIgnores(files["stll-toolchain.json"]);
   const text = generateDependabotConfig({
     files,
     policy: policy.dependabot,
     updates: declarations,
+    ignores: dependabotIgnores,
   });
   const destination = selected.path;
   if (mode === "check") {

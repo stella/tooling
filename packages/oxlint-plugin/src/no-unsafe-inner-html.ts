@@ -1,82 +1,194 @@
-import { eslintCompatPlugin } from "@oxlint/plugins";
 // Forbid injecting un-proven HTML into the DOM.
 //
 // Raw HTML may only reach the DOM from a value that is provably sanitized or
-// escaped. This precise guard can replace a blanket `react/no-danger` rule:
-// approved sanitizer calls remain usable while unescaped stored or user input
-// cannot flow into `__html` or `el.innerHTML` unnoticed.
+// escaped. This rule covers common DOM and JSX sinks while allowing explicit
+// sanitizer calls and narrowly scoped provenance comments.
 //
-// Two sinks share one allowlist:
-//   • JSX `__html` property of a `dangerouslySetInnerHTML` object literal
-//     (report on the value expression).
-//   • `AssignmentExpression` whose LHS is a non-computed `.innerHTML`
-//     MemberExpression (report on the RHS).
+// Sinks, all sharing one allowlist:
+//   • `__html` of a `dangerouslySetInnerHTML` object, whether the object is a
+//     JSX attribute value or a property of any object literal (props passed
+//     to `createElement` / `jsx()`, or spread into JSX).
+//   • assignment to `innerHTML`, `outerHTML` or `srcdoc`, dot or static
+//     bracket notation, and the same keys in an `Object.assign` source
+//     (either branch of a conditional or logical source).
+//   • the JSX `srcDoc` attribute.
+//   • `insertAdjacentHTML`, `setHTMLUnsafe`, `createContextualFragment`,
+//     `setAttribute("srcdoc", …)` / `setAttributeNS(…, "srcdoc", …)`,
+//     and `write` / `writeln` on a document.
 //
-// A value is allowed when it is:
-//   • a string Literal or TemplateLiteral whose interpolations are all
-//     independently proven safe (static markup, no raw injection), OR
-//   • a CallExpression whose callee is an HTML/DOM sanitizer or escaper
-//     (`escapeHtml`, `escapeXml`, `sanitizeHtml`, `sanitizeDom`,
-//     `DOMPurify.sanitize`), including a `.value` / `.data` / `.html`-style
-//     member read OFF such a call (some sanitizers return `{ value }`), OR
-//   • carries an explicit `// safe-html:` escape-hatch comment on the line
-//     directly above the sink (loc adjacency, like suppression-hygiene.ts).
+// In the default `allowlist` policy, a value is allowed when it is:
+//   • a static string Literal or TemplateLiteral whose interpolations are all
+//     independently static, OR
+//   • passed through the shared HTML sanitizer allowlist (`escapeHtml`,
+//     `escapeXml`, `sanitizeHtml`, `sanitizeDom`, `DOMPurify.sanitize`, and
+//     related established names), including `.value` / `.data` / `.html`
+//     result accessors; OR
+//   • annotated by a `// safe-html: <provenance>` comment with non-empty text
+//     on the line directly above the sink. One comment covers one sink: a
+//     second sink starting on the same line needs its own annotation.
+// The `provenance` policy omits the sanitizer-name allowlist and requires the
+// comment for dynamic sanitizer results as well.
 //
-// A value is NOT auto-allowed just because the identifier is named
-// `html` / `content` / `headline` / `body` — those are the sinks, not
-// proof of safety. Prove safety at the source or annotate with a reason.
-//
-// Flagged:
-//   <div dangerouslySetInnerHTML={{ __html: userInput }} />
-//   <div dangerouslySetInnerHTML={{ __html: hit.headline }} />   // unless annotated
-//   el.innerHTML = html;                                         // unless annotated
-//   el.innerHTML = data.body;
-//
-// Allowed:
-//   <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(x) }} />
-//   <div dangerouslySetInnerHTML={{ __html: `<b>${escapeXml(n)}</b>` }} />
-//   <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(x) }} />
-//   el.innerHTML = "";
-//   el.innerHTML = "&nbsp;";
-//   // safe-html: escaped by escapeAndHighlight()
-//   <div dangerouslySetInnerHTML={{ __html: hit.headline }} />
+// The sanitizer allowlist preserves the shared plugin contract. For dynamic
+// values outside that list, function names are not proof: a local identity
+// function can be named `sanitizeHtml`. Add explicit provenance at the sink
+// until the codebase has a branded SafeHtml boundary.
 
+import type { Scope, Variable } from "@oxlint/plugins";
+import { eslintCompatPlugin, type Plugin } from "@oxlint/plugins";
+
+import type { AstNode, LiteralArgumentResolution } from "./utils.ts";
 import {
-  getCalleeName,
   getPropertyName,
+  invokedCallee,
+  isAstNode,
   isIdentifier,
+  isStringLiteral,
+  memberPropertyName,
+  resolveLiteralArraySpreads,
+  staticStringValue,
   unwrapExpression,
 } from "./utils.ts";
 
-// Callee names that prove the value was run through an HTML/DOM sanitizer or
-// escaper. Keep this narrow: `escapeRegex()` and `sanitizeFilename()` are not
-// HTML-safe.
+type DomElementProducer = {
+  name: string;
+  kind: "property" | "method" | "collection" | "collection-property";
+  receiver: "document" | "element" | "either";
+};
+
+// DOM element provenance and the generated equivalence corpus share this table.
+export const DOM_ELEMENT_PRODUCERS = [
+  { name: "body", kind: "property", receiver: "document" },
+  { name: "head", kind: "property", receiver: "document" },
+  { name: "documentElement", kind: "property", receiver: "document" },
+  { name: "activeElement", kind: "property", receiver: "document" },
+  { name: "scrollingElement", kind: "property", receiver: "document" },
+  { name: "fullscreenElement", kind: "property", receiver: "document" },
+  { name: "createElement", kind: "method", receiver: "document" },
+  { name: "createElementNS", kind: "method", receiver: "document" },
+  { name: "getElementById", kind: "method", receiver: "document" },
+  { name: "querySelector", kind: "method", receiver: "either" },
+  { name: "closest", kind: "method", receiver: "element" },
+  { name: "elementFromPoint", kind: "method", receiver: "document" },
+  { name: "getElementsByClassName", kind: "collection", receiver: "either" },
+  { name: "getElementsByTagName", kind: "collection", receiver: "either" },
+  { name: "getElementsByTagNameNS", kind: "collection", receiver: "either" },
+  { name: "getElementsByName", kind: "collection", receiver: "document" },
+  { name: "querySelectorAll", kind: "collection", receiver: "either" },
+  { name: "children", kind: "collection-property", receiver: "element" },
+  { name: "parentElement", kind: "property", receiver: "element" },
+  { name: "firstElementChild", kind: "property", receiver: "element" },
+  { name: "lastElementChild", kind: "property", receiver: "element" },
+  { name: "nextElementSibling", kind: "property", receiver: "element" },
+  { name: "previousElementSibling", kind: "property", receiver: "element" },
+  { name: "offsetParent", kind: "property", receiver: "element" },
+] as const;
+
+// The provenance text after the marker must be non-empty.
+const WAIVER_RE = /^\s*safe-html:\s*\S/u;
+
+export const REACT_HTML_PROPS = [
+  { name: "dangerouslySetInnerHTML", kind: "payload", htmlKey: "__html" },
+  { name: "srcDoc", kind: "value" },
+  { name: "srcdoc", kind: "value" },
+] as const;
+type ReactHtmlProp = (typeof REACT_HTML_PROPS)[number];
+export const REACT_ELEMENT_FACTORIES: ReadonlySet<string> = new Set([
+  "createElement",
+  "React.createElement",
+  "jsx",
+  "jsxs",
+  "jsxDEV",
+]);
+const HTML_PROPERTIES: ReadonlySet<string> = new Set([
+  "innerHTML",
+  "outerHTML",
+  "srcdoc",
+]);
+// Methods whose first argument is parsed as HTML.
+const HTML_FIRST_ARGUMENT_METHODS: ReadonlySet<string> = new Set([
+  "createContextualFragment",
+  "setHTMLUnsafe",
+]);
+export const DOCUMENT_WRITE_METHODS: ReadonlySet<string> = new Set([
+  "write",
+  "writeln",
+]);
+export const HTML_ATTRIBUTE_SINKS = [
+  { name: "setAttribute", namespaceIndex: null, nameIndex: 0, valueIndex: 1 },
+  { name: "setAttributeNS", namespaceIndex: 0, nameIndex: 1, valueIndex: 2 },
+] as const;
+const DOCUMENT_MEMBERS: ReadonlySet<string> = new Set([
+  "contentDocument",
+  "document",
+  "ownerDocument",
+]);
+const FILE_SYSTEM_MODULES: ReadonlySet<string> = new Set([
+  "fs",
+  "fs/promises",
+  "node:fs",
+  "node:fs/promises",
+]);
+const CHILD_PROCESS_MODULES: ReadonlySet<string> = new Set([
+  "child_process",
+  "node:child_process",
+]);
+// Calls that return a ChildProcess, whose stdin is a writable stream.
+const CHILD_PROCESS_FACTORIES: ReadonlySet<string> = new Set([
+  "exec",
+  "execFile",
+  "fork",
+  "spawn",
+]);
 const HTML_SANITIZER_LEAF_RE =
   /^(?:escape(?:html|xml)|sanitize(?:html|dom)|purify(?:html|dom)|dompurify)$/iu;
-
-const DOM_PURIFY_RE = /^dompurify$/iu;
-
-// Members that some sanitizers expose on their result object
-// (`sanitizeHtml(x).value`, `sanitizeHtml(x).html`). Reading one of these OFF a
-// sanitizer call is still proven-safe.
 const SANITIZER_RESULT_MEMBERS = new Set(["value", "data", "html"]);
+const SANITIZER_POLICY = {
+  allowlist: "allowlist",
+  provenance: "provenance",
+} as const;
+const SANITIZER_POLICY_VALUES = Object.values(SANITIZER_POLICY);
+type SanitizerPolicy = (typeof SANITIZER_POLICY)[keyof typeof SANITIZER_POLICY];
 
-const ESCAPE_HATCH_RE = /^\s*safe-html:/u;
+const sanitizerPolicyFrom = (option: unknown): SanitizerPolicy => {
+  if (option === undefined) {
+    return SANITIZER_POLICY.allowlist;
+  }
+  if (typeof option !== "object" || option === null || Array.isArray(option)) {
+    throw new Error("no-unsafe-inner-html options must be an object");
+  }
+  const policy = Reflect.get(option, "sanitizerPolicy");
+  switch (policy) {
+    case undefined:
+    case SANITIZER_POLICY.allowlist:
+      return SANITIZER_POLICY.allowlist;
+    case SANITIZER_POLICY.provenance:
+      return SANITIZER_POLICY.provenance;
+    default:
+      throw new Error(`unknown sanitizer policy: ${String(policy)}`);
+  }
+};
 
-const isComment = (value) =>
-  typeof value === "object" &&
-  value !== null &&
-  typeof value.value === "string" &&
-  typeof value.loc === "object" &&
-  value.loc !== null;
+// Use the same static member-name resolution for sinks and safe-value proofs.
+const staticCalleeName = (node: unknown): string | null => {
+  const expression = unwrapExpression(node);
+  if (isIdentifier(expression)) return expression.name;
+  if (expression?.type !== "MemberExpression") return null;
+  const receiver = staticCalleeName(expression.object);
+  const property = memberPropertyName(expression);
+  return receiver === null || property === null
+    ? null
+    : `${receiver}.${property}`;
+};
 
-const isJsxIdentifier = (node, name) =>
-  typeof node === "object" &&
-  node !== null &&
-  node.type === "JSXIdentifier" &&
-  node.name === name;
-
-const isHtmlSanitizerCalleeName = (dotted) => {
+const isSanitizerCall = (node: unknown): boolean => {
+  if (!isAstNode(node) || node.type !== "CallExpression") {
+    return false;
+  }
+  const dotted = staticCalleeName(node.callee);
+  if (dotted === null) {
+    return false;
+  }
   const parts = dotted.split(".");
   const leaf = parts.at(-1);
   if (leaf === undefined) {
@@ -85,198 +197,869 @@ const isHtmlSanitizerCalleeName = (dotted) => {
   if (HTML_SANITIZER_LEAF_RE.test(leaf)) {
     return true;
   }
-  const objectName = parts.at(-2);
-  return leaf === "sanitize" && DOM_PURIFY_RE.test(objectName ?? "");
+  return leaf === "sanitize" && /^dompurify$/iu.test(parts.at(-2) ?? "");
 };
 
-const isSanitizerCall = (node) => {
-  if (node.type !== "CallExpression") {
+const isSanitizerResult = (node: unknown): boolean => {
+  const expression = unwrapExpression(node);
+  if (expression?.type !== "MemberExpression") {
     return false;
   }
-  const dotted = getCalleeName(node.callee);
-  return dotted !== null && isHtmlSanitizerCalleeName(dotted);
-};
-
-// A value is proven safe by its own shape (independent of any comment):
-// static string, or the result of a sanitizer call (directly, or via a
-// `.value`/`.data`/`.html` accessor off the call).
-const isProvenSafeValue = (node) => {
-  if (!node || typeof node.type !== "string") {
-    return false;
-  }
-  if (node.type === "Literal" && typeof node.value === "string") {
-    return true;
-  }
-  if (node.type === "TemplateLiteral") {
-    return (
-      Array.isArray(node.expressions) &&
-      node.expressions.every(isProvenSafeValue)
-    );
-  }
-  if (isSanitizerCall(node)) {
-    return true;
-  }
-  // `sanitize(x).value`, `purify(x).html` — a result accessor off a call.
-  if (
-    node.type === "MemberExpression" &&
-    node.computed === false &&
-    isProvenSafeMemberLeaf(node)
-  ) {
-    return true;
-  }
-  return false;
-};
-
-const isProvenSafeMemberLeaf = (node) => {
-  const propertyName = getPropertyName(node.property);
-  if (propertyName === null || !SANITIZER_RESULT_MEMBERS.has(propertyName)) {
-    return false;
-  }
-  return isSanitizerCall(node.object);
-};
-
-const isDangerouslySetInnerHtmlValue = (property) => {
-  if (getPropertyName(property.key) !== "__html") {
-    return false;
-  }
-  const objectExpression = property.parent;
-  if (objectExpression?.type !== "ObjectExpression") {
-    return false;
-  }
-
-  let current = objectExpression.parent;
-  while (
-    current?.type === "TSAsExpression" ||
-    current?.type === "TSSatisfiesExpression"
-  ) {
-    current = current.parent;
-  }
-
-  if (current?.type !== "JSXExpressionContainer") {
-    return false;
-  }
-  const attribute = current.parent;
+  const property = memberPropertyName(expression);
   return (
-    attribute?.type === "JSXAttribute" &&
-    isJsxIdentifier(attribute.name, "dangerouslySetInnerHTML")
+    property !== null &&
+    SANITIZER_RESULT_MEMBERS.has(property) &&
+    isSanitizerCall(expression.object)
   );
 };
 
-export default eslintCompatPlugin({
+type Located = { loc: { start: { line: number } } };
+
+const hasLocation = (node: unknown): node is Located =>
+  typeof node === "object" &&
+  node !== null &&
+  "loc" in node &&
+  typeof node.loc === "object" &&
+  node.loc !== null &&
+  "start" in node.loc &&
+  typeof node.loc.start === "object" &&
+  node.loc.start !== null &&
+  "line" in node.loc.start &&
+  typeof node.loc.start.line === "number";
+
+// A node without location data never matches a waiver line.
+const startLine = (node: unknown): number =>
+  hasLocation(node) ? node.loc.start.line : Number.NaN;
+
+type WaiverComment = {
+  value: string;
+  loc: { end: { line: number } };
+};
+
+const isWaiverComment = (value: unknown): value is WaiverComment =>
+  typeof value === "object" &&
+  value !== null &&
+  "value" in value &&
+  typeof value.value === "string" &&
+  WAIVER_RE.test(value.value) &&
+  "loc" in value &&
+  typeof value.loc === "object" &&
+  value.loc !== null;
+
+const jsxAttributeName = (node: unknown): string | null =>
+  isAstNode(node) &&
+  node.type === "JSXIdentifier" &&
+  typeof node.name === "string"
+    ? node.name
+    : null;
+
+// A value is proven safe by its own static shape, independent of comments.
+const isProvenSafeValue = (
+  node: unknown,
+  sanitizerPolicy: SanitizerPolicy,
+): boolean => {
+  const expression = unwrapExpression(node);
+  if (expression === null) {
+    return false;
+  }
+  if (isStringLiteral(expression)) {
+    return true;
+  }
+  if (
+    sanitizerPolicy === SANITIZER_POLICY.allowlist &&
+    (isSanitizerCall(expression) || isSanitizerResult(expression))
+  ) {
+    return true;
+  }
+  return (
+    expression.type === "TemplateLiteral" &&
+    Array.isArray(expression.expressions) &&
+    expression.expressions.every((entry) =>
+      isProvenSafeValue(entry, sanitizerPolicy),
+    )
+  );
+};
+
+// The static key of an object-literal Property: `a`, `"a"`, `["a"]`.
+const objectPropertyKey = (property: unknown): string | null => {
+  if (!isAstNode(property)) {
+    return null;
+  }
+  if (property.computed === true) {
+    return staticStringValue(property.key);
+  }
+  return getPropertyName(property.key);
+};
+
+const isOpaqueProperty = (property: AstNode): boolean =>
+  property.type === "SpreadElement" ||
+  (property.type === "Property" &&
+    property.computed === true &&
+    objectPropertyKey(property) === null);
+
+const objectProperties = (node: unknown): AstNode[] => {
+  const expression = unwrapExpression(node);
+  if (
+    expression?.type !== "ObjectExpression" ||
+    !Array.isArray(expression.properties)
+  ) {
+    return [];
+  }
+  const properties: AstNode[] = [];
+  for (const property of expression.properties.filter(isAstNode)) {
+    if (
+      property.type === "SpreadElement" &&
+      unwrapExpression(property.argument)?.type === "ObjectExpression"
+    ) {
+      properties.push(...objectProperties(property.argument));
+      continue;
+    }
+    properties.push(property);
+  }
+  return properties;
+};
+
+type AppliedArguments = LiteralArgumentResolution;
+
+const appliedArgumentsFor = (args: unknown[]): AppliedArguments => {
+  const applied = unwrapExpression(args.at(1));
+  if (
+    applied === null ||
+    (applied.type === "Literal" && applied.value === null) ||
+    isIdentifier(applied, "undefined")
+  ) {
+    return { status: "known", args: [] };
+  }
+  if (applied.type !== "ArrayExpression" || !Array.isArray(applied.elements)) {
+    return { status: "opaque", args: [], spread: args.at(1), tail: [] };
+  }
+  return resolveLiteralArraySpreads(applied.elements);
+};
+
+// The arguments the invoked function receives: `f.call(thisArg, ...args)`
+// shifts them by one; `f.apply(thisArg, [...])` forwards a literal array.
+const invokedArguments = (call: unknown): AppliedArguments => {
+  if (!isAstNode(call)) {
+    return { status: "known", args: [] };
+  }
+  const rawArguments = Array.isArray(call.arguments) ? call.arguments : [];
+  const resolved = resolveLiteralArraySpreads(rawArguments);
+  const callee = unwrapExpression(call.callee);
+  if (callee?.type !== "MemberExpression") return resolved;
+  const method = memberPropertyName(callee);
+  if (method === "call") {
+    return { ...resolved, args: resolved.args.slice(1) };
+  }
+  if (method !== "apply") return resolved;
+  if (resolved.status === "opaque") {
+    if (resolved.args.length >= 2) return appliedArgumentsFor(resolved.args);
+    return { ...resolved, args: [], tail: [] };
+  }
+  return appliedArgumentsFor(resolved.args);
+};
+
+const plugin: Plugin = eslintCompatPlugin({
   meta: { name: "no-unsafe-inner-html" },
   rules: {
     "no-unsafe-inner-html": {
       meta: {
         type: "problem",
+        schema: [
+          {
+            type: "object",
+            properties: {
+              sanitizerPolicy: {
+                type: "string",
+                enum: SANITIZER_POLICY_VALUES,
+              },
+            },
+            additionalProperties: false,
+          },
+        ],
         messages: {
           unsafeInnerHtml:
-            "Raw HTML injected into the DOM must come from a provably " +
-            "sanitized/escaped value: a static string, an HTML/DOM " +
-            "sanitize/escape call (or its .value/.data/.html result). " +
-            "Wrap the value in a sanitizer, or add a `// safe-html: <reason " +
-            "naming the sanitizer/source>` comment on the line directly above " +
-            "if it is escaped at its source.",
+            "Dynamic HTML injected into the DOM must be static, proven by " +
+            "the configured sanitizer policy, or have an adjacent " +
+            "`// safe-html: <provenance>` comment naming the trusted source. " +
+            "Function names outside the allowlist are not proof because a " +
+            "local identity function can shadow them.",
           unsafeInnerHtmlSpread:
-            "Do not spread an object into dangerouslySetInnerHTML. Keep " +
+            "Do not spread an object in dangerouslySetInnerHTML. Keep " +
             "`__html` inline so this rule can prove the HTML value is " +
             "sanitized or escaped.",
+          unsafeInnerHtmlComputedKey:
+            "Do not use an unresolved computed key in " +
+            "dangerouslySetInnerHTML. Write an explicit `__html` property " +
+            "so this rule can " +
+            "prove the HTML value is sanitized or escaped.",
         },
       },
       createOnce(context) {
-        const escapeHatchLines = new Set();
-
-        const recordEscapeHatches = (node) => {
-          const comments =
-            node && Array.isArray(node.comments)
-              ? node.comments.filter(isComment)
-              : [];
-          for (const comment of comments) {
-            if (ESCAPE_HATCH_RE.test(comment.value)) {
-              escapeHatchLines.add(comment.loc.end.line);
+        type BindingOptions = {
+          node: unknown;
+          scope: Scope;
+          seen: Set<Variable>;
+        };
+        type BindingSource = {
+          kind: "expression" | "iteration";
+          node: AstNode | null;
+          scope: Scope;
+        };
+        // All document, element and collection checks share one stable-binding path.
+        const resolveStableBinding = ({
+          node,
+          scope,
+          seen,
+        }: BindingOptions): BindingSource | null => {
+          let target = unwrapExpression(node);
+          while (isIdentifier(target)) {
+            let current: Scope | null = scope;
+            let variable: Variable | undefined;
+            while (current !== null) {
+              variable = current.set.get(target.name);
+              if (variable !== undefined) break;
+              current = current.upper;
             }
-          }
-        };
-
-        // The escape-hatch comment sits on the line directly above the
-        // reported node's first line. Sink expressions inside JSX object
-        // literals span multiple lines, so anchor on the node's start line.
-        const hasEscapeHatchAbove = (node) =>
-          escapeHatchLines.has(node.loc.start.line - 1);
-
-        const reportIfUnsafe = (node) => {
-          if (isProvenSafeValue(node)) {
-            return;
-          }
-          if (hasEscapeHatchAbove(node)) {
-            return;
-          }
-          context.report({ node, messageId: "unsafeInnerHtml" });
-        };
-
-        const reportPayloadSpreads = (objectNode) => {
-          for (const property of objectNode.properties) {
-            if (property?.type !== "SpreadElement") {
+            if (variable === undefined || variable.defs.length === 0) {
+              return { kind: "expression", node: target, scope };
+            }
+            if (seen.has(variable)) return null;
+            seen.add(variable);
+            const definition = variable.defs.at(0);
+            // A never-reassigned class or function declaration holds a
+            // function, which is neither an element nor a document.
+            if (
+              variable.defs.length === 1 &&
+              (definition?.type === "ClassName" ||
+                definition?.type === "FunctionName") &&
+              (definition.node.type === "ClassDeclaration" ||
+                definition.node.type === "FunctionDeclaration") &&
+              !variable.references.some((reference) => reference.isWrite())
+            ) {
+              return {
+                kind: "expression",
+                node: unwrapExpression(definition.node),
+                scope,
+              };
+            }
+            if (
+              variable.defs.length !== 1 ||
+              definition?.type !== "Variable" ||
+              definition.node.type !== "VariableDeclarator" ||
+              definition.node.id.type !== "Identifier" ||
+              variable.references.some(
+                (reference) => reference.isWrite() && !reference.init,
+              )
+            ) {
+              return null;
+            }
+            const declarator = definition.node;
+            if (declarator.init !== null) {
+              target = unwrapExpression(declarator.init);
+              scope = context.sourceCode.getScope(declarator);
               continue;
             }
-            context.report({
-              node: property,
-              messageId: "unsafeInnerHtmlSpread",
+            const declaration = declarator.parent;
+            if (declaration.type !== "VariableDeclaration") return null;
+            const loop = declaration.parent;
+            if (loop.type !== "ForOfStatement" || loop.left !== declaration) {
+              return null;
+            }
+            return {
+              kind: "iteration",
+              node: unwrapExpression(loop.right),
+              scope: context.sourceCode.getScope(loop.right),
+            };
+          }
+          return { kind: "expression", node: target, scope };
+        };
+        const isKnownNonEmptyNamespace = (
+          namespace: unknown,
+          scope: Scope,
+        ): boolean => {
+          const source = resolveStableBinding({
+            node: namespace,
+            scope,
+            seen: new Set<Variable>(),
+          });
+          if (source?.kind !== "expression") return false;
+          const text = staticStringValue(source.node);
+          // DOM normalizes the empty namespace to null. Unknowns stay checked.
+          if (text !== null) return text !== "";
+          if (source.node?.type !== "Literal") return false;
+          const { value } = source.node;
+          return (
+            typeof value === "number" ||
+            typeof value === "boolean" ||
+            typeof value === "bigint"
+          );
+        };
+
+        const variableFor = (
+          identifier: { name: string },
+          initialScope: Scope,
+        ): Variable | undefined => {
+          let current: Scope | null = initialScope;
+          while (current !== null) {
+            const variable = current.set.get(identifier.name);
+            if (variable !== undefined) return variable;
+            current = current.upper;
+          }
+          return undefined;
+        };
+        const isKnownNonDocumentReceiver = (
+          node: unknown,
+          scope: Scope,
+        ): boolean => {
+          const isUnshadowedGlobal = (
+            identifier: unknown,
+            name: string,
+          ): boolean =>
+            isIdentifier(identifier, name) &&
+            variableFor(identifier, scope) === undefined;
+          const isFileSystemImport = (identifier: unknown): boolean => {
+            if (!isIdentifier(identifier)) return false;
+            const variable = variableFor(identifier, scope);
+            if (variable?.defs.length !== 1) return false;
+            const definition = variable.defs.at(0);
+            return (
+              definition?.type === "ImportBinding" &&
+              definition.parent?.type === "ImportDeclaration" &&
+              FILE_SYSTEM_MODULES.has(definition.parent.source.value)
+            );
+          };
+          // A const bound once to a child process factory call: a node
+          // child_process import or the unshadowed Bun.spawn.
+          const isChildProcess = (identifier: unknown): boolean => {
+            if (!isIdentifier(identifier)) return false;
+            const variable = variableFor(identifier, scope);
+            const definition = variable?.defs.at(0);
+            if (
+              variable?.defs.length !== 1 ||
+              definition?.type !== "Variable" ||
+              definition.node.type !== "VariableDeclarator" ||
+              definition.node.id.type !== "Identifier" ||
+              definition.node.parent.type !== "VariableDeclaration" ||
+              definition.node.parent.kind !== "const"
+            )
+              return false;
+            const init = unwrapExpression(definition.node.init);
+            if (init?.type !== "CallExpression") return false;
+            const callee = unwrapExpression(init.callee);
+            if (callee?.type === "MemberExpression")
+              return (
+                memberPropertyName(callee) === "spawn" &&
+                isUnshadowedGlobal(unwrapExpression(callee.object), "Bun")
+              );
+            if (!isIdentifier(callee)) return false;
+            const factory = variableFor(callee, scope);
+            const binding = factory?.defs.at(0);
+            return (
+              factory?.defs.length === 1 &&
+              binding?.type === "ImportBinding" &&
+              binding.node.type === "ImportSpecifier" &&
+              binding.node.imported.type === "Identifier" &&
+              CHILD_PROCESS_FACTORIES.has(binding.node.imported.name) &&
+              binding.parent?.type === "ImportDeclaration" &&
+              CHILD_PROCESS_MODULES.has(binding.parent.source.value)
+            );
+          };
+          const root = unwrapExpression(node);
+          if (isUnshadowedGlobal(root, "Bun") || isFileSystemImport(root)) {
+            return true;
+          }
+          if (root?.type !== "MemberExpression") return false;
+          const stream = memberPropertyName(root);
+          const owner = unwrapExpression(root.object);
+          return (
+            ((stream === "stdout" || stream === "stderr") &&
+              isUnshadowedGlobal(owner, "process")) ||
+            (stream === "stdin" && isChildProcess(owner))
+          );
+        };
+        const isDocumentReceiver = (node: unknown, scope: Scope): boolean => {
+          if (isKnownNonDocumentReceiver(node, scope)) return false;
+          const source = resolveStableBinding({
+            node,
+            scope,
+            seen: new Set<Variable>(),
+          });
+          if (source === null || source.kind !== "expression") return true;
+          const receiver = source.node;
+          if (isIdentifier(receiver, "document")) return true;
+          if (receiver?.type !== "MemberExpression") return false;
+          const name = memberPropertyName(receiver);
+          return name !== null && DOCUMENT_MEMBERS.has(name);
+        };
+
+        const isDocumentSinkReceiver = (
+          node: unknown,
+          scope: Scope,
+        ): boolean => {
+          if (isKnownNonDocumentReceiver(node, scope)) return false;
+          const receiver = unwrapExpression(node);
+          if (!isIdentifier(receiver)) return true;
+          let current: Scope | null = scope;
+          let variable: Variable | undefined;
+          while (current !== null) {
+            variable = current.set.get(receiver.name);
+            if (variable !== undefined) break;
+            current = current.upper;
+          }
+          if (variable === undefined || variable.defs.length !== 1) return true;
+          const definition = variable.defs.at(0);
+          if (
+            definition?.type !== "Variable" ||
+            definition.node.type !== "VariableDeclarator" ||
+            definition.node.id.type !== "Identifier" ||
+            definition.node.init === null ||
+            unwrapExpression(definition.node.init)?.type !==
+              "ObjectExpression" ||
+            definition.node.parent.type !== "VariableDeclaration" ||
+            definition.node.parent.kind !== "const" ||
+            variable.scope.variableScope !== scope.variableScope ||
+            variable.references.some(
+              (reference) => reference.isWrite() && !reference.init,
+            )
+          ) {
+            return true;
+          }
+          return false;
+        };
+        type DomTargetOptions = {
+          node: unknown;
+          scope: Scope;
+          seen?: Set<Variable>;
+          kind?: "element" | "collection";
+        };
+        const isKnownDomTarget = ({
+          node,
+          scope,
+          seen = new Set<Variable>(),
+          kind = "element",
+        }: DomTargetOptions): boolean => {
+          const source = resolveStableBinding({ node, scope, seen });
+          // An unstable binding may have been reassigned to a DOM target. Fail
+          // closed unless the resolver can prove a stable non-DOM value.
+          if (source === null) return true;
+          if (source.kind === "iteration") {
+            return (
+              kind === "element" &&
+              isKnownDomTarget({
+                node: source.node,
+                scope: source.scope,
+                seen,
+                kind: "collection",
+              })
+            );
+          }
+          const target = source.node;
+          scope = source.scope;
+          const hasProducerReceiver = (
+            receiver: unknown,
+            producer: DomElementProducer,
+          ): boolean => {
+            if (
+              producer.receiver !== "element" &&
+              isDocumentReceiver(receiver, scope)
+            ) {
+              return true;
+            }
+            return (
+              producer.receiver !== "document" &&
+              isKnownDomTarget({ node: receiver, scope, seen })
+            );
+          };
+          const isElementCollection = (collection: unknown): boolean =>
+            isKnownDomTarget({
+              node: collection,
+              scope,
+              seen,
+              kind: "collection",
             });
+          if (target?.type === "MemberExpression") {
+            const property = memberPropertyName(target);
+            const producer = (
+              DOM_ELEMENT_PRODUCERS satisfies readonly DomElementProducer[]
+            ).find(
+              (entry) =>
+                entry.kind ===
+                  (kind === "collection"
+                    ? "collection-property"
+                    : "property") && entry.name === property,
+            );
+            if (producer !== undefined) {
+              return hasProducerReceiver(target.object, producer);
+            }
+            const index = unwrapExpression(target.property);
+            if (
+              kind === "element" &&
+              target.computed === true &&
+              index?.type === "Literal" &&
+              typeof index.value === "number" &&
+              Number.isInteger(index.value) &&
+              index.value >= 0
+            ) {
+              return isElementCollection(target.object);
+            }
+          }
+          if (target?.type === "CallExpression") {
+            const callee = invokedCallee(target);
+            if (callee?.type !== "MemberExpression") return false;
+            const method = memberPropertyName(callee);
+            if (
+              kind === "element" &&
+              method === "item" &&
+              isElementCollection(callee.object)
+            ) {
+              return true;
+            }
+            const producer = DOM_ELEMENT_PRODUCERS.find(
+              (entry) =>
+                entry.kind ===
+                  (kind === "collection" ? "collection" : "method") &&
+                entry.name === method,
+            );
+            return (
+              producer !== undefined &&
+              hasProducerReceiver(callee.object, producer)
+            );
+          }
+          return kind === "element" && isDocumentReceiver(target, scope);
+        };
+
+        let sanitizerPolicy: SanitizerPolicy = SANITIZER_POLICY.allowlist;
+        // Associate waivers after visiting the file, so source position decides
+        // the first covered sink even when AST visitors inspect values out of order.
+        const waiverLines = new Set<number>();
+        type SinkObservation = {
+          node: AstNode;
+          kind:
+            | "safe"
+            | "unsafe"
+            | "opaque-payload-spread"
+            | "opaque-payload-computed-key";
+        };
+        const sinks: SinkObservation[] = [];
+        const observeSink = (
+          node: unknown,
+          kind: SinkObservation["kind"],
+        ): void => {
+          if (isAstNode(node)) sinks.push({ node, kind });
+        };
+        const messageIdFor = (kind: SinkObservation["kind"]) => {
+          if (kind === "opaque-payload-spread") {
+            return "unsafeInnerHtmlSpread";
+          }
+          if (kind === "opaque-payload-computed-key") {
+            return "unsafeInnerHtmlComputedKey";
+          }
+          return "unsafeInnerHtml";
+        };
+
+        const consumeWaiver = (node: unknown): boolean => {
+          const line = startLine(node) - 1;
+          if (!waiverLines.has(line)) {
+            return false;
+          }
+          waiverLines.delete(line);
+          return true;
+        };
+
+        const reportIfUnsafe = (node: unknown): void => {
+          observeSink(
+            node,
+            isProvenSafeValue(node, sanitizerPolicy) ? "safe" : "unsafe",
+          );
+        };
+
+        // The value of a `dangerouslySetInnerHTML` prop: an inline object has
+        // its `__html` checked and its spreads rejected; anything else is a
+        // hoisted payload whose HTML this rule cannot see.
+        const checkDangerousPayload = (
+          value: unknown,
+          htmlKey: string,
+        ): void => {
+          const expression = unwrapExpression(value);
+          if (expression?.type !== "ObjectExpression") {
+            reportIfUnsafe(value);
+            return;
+          }
+          for (const property of objectProperties(expression)) {
+            if (isOpaqueProperty(property)) {
+              observeSink(
+                property,
+                property.type === "SpreadElement"
+                  ? "opaque-payload-spread"
+                  : "opaque-payload-computed-key",
+              );
+              continue;
+            }
+            if (
+              property.type === "Property" &&
+              objectPropertyKey(property) === htmlKey
+            ) {
+              reportIfUnsafe(property.value);
+            }
+          }
+        };
+
+        const checkReactHtmlProp = (
+          prop: ReactHtmlProp,
+          value: unknown,
+        ): void => {
+          switch (prop.kind) {
+            case "payload":
+              checkDangerousPayload(value, prop.htmlKey);
+              return;
+            case "value":
+              reportIfUnsafe(value);
+              return;
+            default: {
+              const exhaustive: never = prop;
+              throw new Error(`Unknown React HTML prop: ${String(exhaustive)}`);
+            }
+          }
+        };
+
+        const checkReactProps = (value: unknown): void => {
+          for (const property of objectProperties(value)) {
+            if (property.type !== "Property") continue;
+            const key = objectPropertyKey(property);
+            const prop = REACT_HTML_PROPS.find((entry) => entry.name === key);
+            // Payload properties are checked once by the Property visitor.
+            if (prop?.kind === "value")
+              checkReactHtmlProp(prop, property.value);
+          }
+        };
+
+        const checkHtmlPropertySources = (
+          sources: unknown[],
+          domTarget: boolean,
+        ): void => {
+          for (const source of sources) {
+            const expression = unwrapExpression(source);
+            // Each branch of a conditional or logical expression may be the
+            // value Object.assign copies from; the condition itself is not,
+            // and the left side of `&&` is copied only when falsy, so never
+            // as an object.
+            if (expression?.type === "ConditionalExpression") {
+              checkHtmlPropertySources(
+                [expression.consequent, expression.alternate],
+                domTarget,
+              );
+              continue;
+            }
+            // Object.assign skips null and undefined sources.
+            if (
+              (expression?.type === "Literal" && expression.value === null) ||
+              isIdentifier(expression, "undefined")
+            ) {
+              continue;
+            }
+            if (expression?.type === "LogicalExpression") {
+              checkHtmlPropertySources(
+                expression.operator === "&&"
+                  ? [expression.right]
+                  : [expression.left, expression.right],
+                domTarget,
+              );
+              continue;
+            }
+            if (expression?.type !== "ObjectExpression") {
+              if (domTarget) {
+                reportIfUnsafe(source);
+              }
+              continue;
+            }
+            for (const property of objectProperties(source)) {
+              if (isOpaqueProperty(property)) {
+                if (domTarget) {
+                  reportIfUnsafe(property);
+                }
+                continue;
+              }
+              const key =
+                property.type === "Property"
+                  ? objectPropertyKey(property)
+                  : null;
+              if (key !== null && HTML_PROPERTIES.has(key)) {
+                reportIfUnsafe(property.value);
+              }
+            }
           }
         };
 
         return {
           before() {
-            escapeHatchLines.clear();
+            sanitizerPolicy = sanitizerPolicyFrom(context.options.at(0));
+            waiverLines.clear();
+            sinks.length = 0;
+          },
+          "Program:exit"() {
+            sinks.sort(
+              (left, right) => left.node.range[0] - right.node.range[0],
+            );
+            for (const { node, kind } of sinks) {
+              const waived = consumeWaiver(node);
+              if (kind === "safe" || (kind === "unsafe" && waived)) continue;
+              context.report({
+                node,
+                messageId: messageIdFor(kind),
+              });
+            }
+            sinks.length = 0;
           },
           Program(node) {
-            recordEscapeHatches(node);
+            const comments: unknown[] = Array.isArray(node.comments)
+              ? node.comments
+              : [];
+            for (const comment of comments) {
+              if (isWaiverComment(comment)) {
+                waiverLines.add(comment.loc.end.line);
+              }
+            }
           },
 
-          // Reject hoisted payloads such as
-          // `dangerouslySetInnerHTML={payload}`. Keeping the `__html` object
-          // inline lets this rule inspect the actual HTML expression.
           JSXAttribute(node) {
-            if (!isJsxIdentifier(node.name, "dangerouslySetInnerHTML")) {
-              return;
-            }
-            const value = node.value;
-            if (value?.type !== "JSXExpressionContainer") {
-              return;
-            }
-            if (!value.expression) {
-              return;
-            }
-            const expression = unwrapExpression(value.expression);
-            if (expression?.type === "ObjectExpression") {
-              reportPayloadSpreads(expression);
-              return;
-            }
-            reportIfUnsafe(value.expression);
+            const name = jsxAttributeName(node.name);
+            const prop = REACT_HTML_PROPS.find((entry) => entry.name === name);
+            if (prop === undefined) return;
+            const value = unwrapExpression(node.value);
+            checkReactHtmlProp(
+              prop,
+              value?.type === "JSXExpressionContainer"
+                ? value.expression
+                : value,
+            );
           },
 
-          // Sink 1: `dangerouslySetInnerHTML={{ __html: <expr> }}`.
+          JSXSpreadAttribute(node) {
+            checkReactProps(node.argument);
+          },
+
+          // Payload objects remain checked when hoisted or spread into JSX.
+          // Direct value props use the JSX and factory props contexts.
           Property(node) {
-            if (!isDangerouslySetInnerHtmlValue(node)) {
-              return;
+            const key = objectPropertyKey(node);
+            const prop = REACT_HTML_PROPS.find((entry) => entry.name === key);
+            if (prop?.kind !== "payload") return;
+            const container = node.parent;
+            if (isAstNode(container) && container.type === "ObjectExpression") {
+              checkReactHtmlProp(prop, node.value);
             }
-            reportIfUnsafe(node.value);
           },
 
-          // Sink 2: `<el>.innerHTML = <expr>` (non-computed member LHS).
           AssignmentExpression(node) {
-            const target = node.left;
-            if (
-              target.type !== "MemberExpression" ||
-              target.computed !== false ||
-              !isIdentifier(target.property, "innerHTML")
-            ) {
+            const target = unwrapExpression(node.left);
+            if (target?.type !== "MemberExpression") {
               return;
             }
-            reportIfUnsafe(node.right);
+            const name = memberPropertyName(target);
+            if (name !== null && HTML_PROPERTIES.has(name)) {
+              reportIfUnsafe(node.right);
+            }
+          },
+
+          CallExpression(node) {
+            const call: unknown = node;
+            const callee = isAstNode(call) ? invokedCallee(call) : null;
+            const invoked = invokedArguments(node);
+            const factory = staticCalleeName(callee);
+            if (factory !== null && REACT_ELEMENT_FACTORIES.has(factory)) {
+              checkReactProps(invoked.args.at(1));
+              return;
+            }
+            if (callee?.type !== "MemberExpression") {
+              return;
+            }
+            const method = memberPropertyName(callee);
+            if (method === null) {
+              return;
+            }
+            if (HTML_FIRST_ARGUMENT_METHODS.has(method)) {
+              if (invoked.status === "opaque") {
+                reportIfUnsafe(node);
+                return;
+              }
+              reportIfUnsafe(invoked.args.at(0));
+              return;
+            }
+            if (method === "insertAdjacentHTML") {
+              if (invoked.status === "opaque") {
+                reportIfUnsafe(node);
+                return;
+              }
+              reportIfUnsafe(invoked.args.at(1));
+              return;
+            }
+            const attributeSink = HTML_ATTRIBUTE_SINKS.find(
+              (entry) => entry.name === method,
+            );
+            if (attributeSink !== undefined) {
+              if (
+                attributeSink.namespaceIndex !== null &&
+                isKnownNonEmptyNamespace(
+                  invoked.args.at(attributeSink.namespaceIndex),
+                  context.sourceCode.getScope(node),
+                )
+              ) {
+                return;
+              }
+              if (invoked.status === "opaque") {
+                reportIfUnsafe(node);
+                return;
+              }
+              const attribute = staticStringValue(
+                invoked.args.at(attributeSink.nameIndex),
+              );
+              if (attribute?.toLowerCase() === "srcdoc") {
+                reportIfUnsafe(invoked.args.at(attributeSink.valueIndex));
+              }
+              return;
+            }
+            if (
+              DOCUMENT_WRITE_METHODS.has(method) &&
+              isDocumentSinkReceiver(
+                callee.object,
+                context.sourceCode.getScope(node),
+              )
+            ) {
+              if (invoked.status === "opaque") {
+                reportIfUnsafe(node);
+                return;
+              }
+              observeSink(
+                node,
+                invoked.args.every((argument) =>
+                  isProvenSafeValue(argument, sanitizerPolicy),
+                )
+                  ? "safe"
+                  : "unsafe",
+              );
+              return;
+            }
+            if (isIdentifier(callee.object, "Object") && method === "assign") {
+              const domTarget = isKnownDomTarget({
+                node: invoked.args.at(0),
+                scope: context.sourceCode.getScope(node),
+              });
+              checkHtmlPropertySources(
+                [
+                  ...invoked.args.slice(1),
+                  ...(invoked.status === "opaque" ? invoked.tail : []),
+                ],
+                domTarget,
+              );
+              if (invoked.status === "opaque" && domTarget) {
+                reportIfUnsafe(invoked.spread);
+              }
+            }
           },
         };
       },
     },
   },
 });
+
+export default plugin;

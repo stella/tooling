@@ -35,7 +35,7 @@ test("project ownership cannot be disabled with a repository opt-out", () => {
       optOuts: [{ rule: nodeProjectRule, reason: "scripts are inferred" }],
     }),
   ).toThrow("cannot be opted out");
-});
+}, 15_000);
 
 test("project ownership flags precisely the unowned part of every script extension set", () => {
   for (let mask = 0; mask < 2 ** sources.length; mask++) {
@@ -52,7 +52,7 @@ test("project ownership flags precisely the unowned part of every script extensi
       diagnostics.map(() => ({ rule: nodeProjectRule, line: 1 })),
     );
   }
-});
+}, 15_000);
 
 test("lint exclusions and untracked files cannot become ownership violations", () => {
   const tracked = ["scripts/ignored.js", "scripts/owned.ts", "README.md"];
@@ -63,7 +63,7 @@ test("lint exclusions and untracked files cannot become ownership violations", (
       projectFiles: new Set(["scripts/owned.ts"]),
     }),
   ).toEqual([]);
-});
+}, 15_000);
 
 test("duplicate lint inventories produce one stable diagnostic per orphan", () => {
   const diagnostics = checkProjectOwnership({
@@ -75,15 +75,15 @@ test("duplicate lint inventories produce one stable diagnostic per orphan", () =
   expect(diagnostics.every(({ message }) => message.includes("tsconfig"))).toBe(
     true,
   );
-});
+}, 15_000);
 
 const require = createRequire(import.meta.url);
+// The consumer installs no TypeScript: tsrs from the shared tooling resolves configs.
 const fixtureManifest = {
   scripts: { lint: "oxlint --config .oxlintrc.json --type-aware scripts" },
   devDependencies: {
     oxlint: "1.87.0",
     "oxlint-tsgolint": "7.0.2003",
-    typescript: "7.0.2",
   },
 };
 const withInventoryFixture = (
@@ -94,7 +94,7 @@ const withInventoryFixture = (
   try {
     mkdirSync(path.join(root, "node_modules"));
     mkdirSync(path.join(root, "scripts"));
-    for (const dependency of ["oxlint", "oxlint-tsgolint", "typescript"])
+    for (const dependency of ["oxlint", "oxlint-tsgolint"])
       symlinkSync(
         path.dirname(require.resolve(`${dependency}/package.json`)),
         path.join(root, "node_modules", dependency),
@@ -165,7 +165,7 @@ test("real inventories honor inherited JSONC includes, compiler excludes and lin
       checkNodeProjects({ root, manifest: fixtureManifest, trackedFiles }),
     ).toEqual([]);
   });
-});
+}, 15_000);
 
 test("an unreferenced nondefault config cannot claim ownership but a solution reference can", () => {
   withInventoryFixture((root, trackedFiles) => {
@@ -193,7 +193,47 @@ test("an unreferenced nondefault config cannot claim ownership but a solution re
       checkNodeProjects({ root, manifest: fixtureManifest, trackedFiles }),
     ).toEqual([]);
   });
-});
+}, 15_000);
+
+test("directory references own their default config, and unreadable configs report the compiler error", () => {
+  withInventoryFixture((root, trackedFiles) => {
+    mkdirSync(path.join(root, "config/tools"), { recursive: true });
+    const source = "scripts/owned.ts";
+    const project = "config/tools/tsconfig.json";
+    writeFileSync(path.join(root, source), "export const value = 1;\n");
+    writeFileSync(
+      path.join(root, project),
+      '{"include":["../../scripts/*.ts"]}',
+    );
+    writeFileSync(
+      path.join(root, "tsconfig.json"),
+      '{"files":[],"references":[{"path":"./config/tools"}]}',
+    );
+    for (const file of [source, project, "tsconfig.json"])
+      trackedFiles.add(file);
+    expect(
+      checkNodeProjects({ root, manifest: fixtureManifest, trackedFiles }),
+    ).toEqual([]);
+
+    writeFileSync(
+      path.join(root, project),
+      '{"extends":"./missing.json","include":["../../scripts/*.ts"]}',
+    );
+    const diagnostics = checkNodeProjects({
+      root,
+      manifest: fixtureManifest,
+      trackedFiles,
+    });
+    expect(diagnostics).toContainEqual(
+      expect.objectContaining({
+        rule: nodeProjectRule,
+        path: project,
+        message: expect.stringContaining("configuration discovery failed: TS"),
+      }),
+    );
+    expect(diagnostics.map(({ path: file }) => file)).toContain(source);
+  });
+}, 15_000);
 
 test("workspace inventories preserve package cwd and ignore validation-only tasks and root orphans", () => {
   withInventoryFixture((root, trackedFiles) => {
@@ -252,7 +292,7 @@ test("workspace inventories preserve package cwd and ignore validation-only task
     writeTracked("packages/a/tsconfig.json", JSON.stringify(project));
     expect(checkNodeProjects({ root, manifest, trackedFiles })).toEqual([]);
   });
-});
+}, 15_000);
 
 test("import-resolution tsconfig flags cannot claim files excluded by the nearest project", () => {
   withInventoryFixture((root, trackedFiles) => {
@@ -343,7 +383,7 @@ test("import-resolution tsconfig flags cannot claim files excluded by the neares
       ),
     ).toEqual([workspaceOrphan]);
   });
-});
+}, 15_000);
 
 test("ancestor roots can own nearest misses while unreferenced sibling projects cannot", () => {
   withInventoryFixture((root, trackedFiles) => {
@@ -401,7 +441,7 @@ test("ancestor roots can own nearest misses while unreferenced sibling projects 
       checkNodeProjects({ root, manifest: fixtureManifest, trackedFiles }),
     ).toEqual([]);
   });
-});
+}, 15_000);
 
 test("imports do not establish root membership but ancestor roots can claim imported files", () => {
   withInventoryFixture((root, trackedFiles) => {
@@ -432,7 +472,7 @@ test("imports do not establish root membership but ancestor roots can claim impo
       checkNodeProjects({ root, manifest: fixtureManifest, trackedFiles }),
     ).toEqual([]);
   });
-});
+}, 15_000);
 
 const documentedNodeProject = () => {
   const readme = readFileSync(
@@ -524,7 +564,7 @@ test("the documented Node script layout gives GitHub tools their own nearest pro
     trackedFiles.add(".github/tools/tsconfig.json");
     expect(checkNodeProjects({ root, manifest, trackedFiles })).toEqual([]);
   });
-});
+}, 15_000);
 
 test("caller thread options retain real inventory ownership at root and workspace cwd", () => {
   for (const threads of ["--threads 4", "--threads=4"]) {
@@ -563,7 +603,7 @@ test("caller thread options retain real inventory ownership at root and workspac
       });
     }
   }
-});
+}, 15_000);
 
 test("real inventory flags a source selected only by an npm prelint alias", () => {
   for (const [manager, version, runsHooks] of [
@@ -612,7 +652,7 @@ test("real inventory flags a source selected only by an npm prelint alias", () =
       }
     });
   }
-});
+}, 15_000);
 
 test("workspace hooks use the root manager and unresolved pnpm configuration fails closed", () => {
   withInventoryFixture((root, trackedFiles) => {
@@ -660,7 +700,7 @@ test("workspace hooks use the root manager and unresolved pnpm configuration fai
     trackedFiles.add("pnpm-workspace.yaml");
     expect(checkNodeProjects({ root, manifest, trackedFiles })).toEqual([]);
   });
-});
+}, 15_000);
 
 test("workspace lint tasks read pnpm-workspace.yaml membership and exclusions", () => {
   withInventoryFixture((root, trackedFiles) => {
@@ -682,7 +722,8 @@ test("workspace lint tasks read pnpm-workspace.yaml membership and exclusions", 
       }),
     });
     const files = {
-      "pnpm-workspace.yaml": "packages:\n  - 'packages/*'\n  - '!packages/skipped'\n",
+      "pnpm-workspace.yaml":
+        "packages:\n  - 'packages/*'\n  - '!packages/skipped'\n",
       ...member("a"),
       ...member("skipped"),
     };
@@ -711,7 +752,7 @@ test("workspace lint tasks read pnpm-workspace.yaml membership and exclusions", 
       }).map(({ path: file }) => file),
     ).toEqual(["packages/a/orphan.mjs"]);
   });
-});
+}, 15_000);
 
 test("filtered Bun builds select package.json workspaces even under pnpm", () => {
   withInventoryFixture((root, trackedFiles) => {
@@ -765,7 +806,7 @@ test("filtered Bun builds select package.json workspaces even under pnpm", () =>
       ),
     ).toBe(true);
   });
-});
+}, 15_000);
 
 test("a nearest project that owns no roots defers to its ancestor", () => {
   withInventoryFixture((root, trackedFiles) => {
@@ -788,7 +829,7 @@ test("a nearest project that owns no roots defers to its ancestor", () => {
     }
     expect(checkNodeProjects({ root, manifest, trackedFiles })).toEqual([]);
   });
-});
+}, 15_000);
 
 test("filtered Bun build preparation cannot hide selected workspace lifecycle hooks", () => {
   withInventoryFixture((root, trackedFiles) => {
@@ -836,7 +877,10 @@ test("filtered Bun build preparation cannot hide selected workspace lifecycle ho
         trackedFiles,
       }).map(({ path: file, message }) => [file, message]),
     ).toEqual([
-      ["package.json", "root lint scripts contain no supported oxlint invocation"],
+      [
+        "package.json",
+        "root lint scripts contain no supported oxlint invocation",
+      ],
     ]);
     writeFileSync(
       path.join(root, "packages/a/orphan.mjs"),
@@ -914,7 +958,7 @@ test("filtered Bun build preparation cannot hide selected workspace lifecycle ho
     expect(unknown).toHaveLength(1);
     expect(unknown.at(0)?.message).toContain("one declared workspace package");
   });
-});
+}, 15_000);
 
 test("nested workspace lifecycle settings cannot silently override root hook selection", () => {
   for (const lint of [
@@ -961,7 +1005,7 @@ test("nested workspace lifecycle settings cannot silently override root hook sel
       expect(findings).toHaveLength(1);
       expect(findings.at(0)?.message).toContain("nested workspace overrides");
     });
-});
+}, 15_000);
 
 test("declared inventory runtimes load real configs independently of the checker parent", async () => {
   const bundleRoot = mkdtempSync(path.join(tmpdir(), "stll-inventory-parent-"));
@@ -981,9 +1025,18 @@ test("declared inventory runtimes load real configs independently of the checker
       outdir: bundleRoot,
       naming: "checker.mjs",
       target: "node",
+      // tsrs resolves at run time, from the installation the checker runs in.
+      external: ["tsrs", "tsrs/*"],
     });
     expect(build.success).toBe(true);
     withInventoryFixture((root, trackedFiles) => {
+      // The bundle sits outside the package, so tsrs resolves from the
+      // repository: link the package's own installed tsrs.
+      symlinkSync(
+        path.join(import.meta.dir, "../node_modules/tsrs"),
+        path.join(root, "node_modules/tsrs"),
+        "dir",
+      );
       writeFileSync(
         path.join(root, "scripts/owned.mjs"),
         "export const owned = true;\n",
@@ -1032,7 +1085,9 @@ test("declared inventory runtimes load real configs independently of the checker
           const result = spawnSync(
             parent,
             [
-              ...(parent === "bun" ? ["--bun"] : []),
+              // Without --no-install, Bun would satisfy the bundle's missing
+              // tsrs from its global cache instead of the repository.
+              ...(parent === "bun" ? ["--bun", "--no-install"] : []),
               path.join(bundleRoot, "checker.mjs"),
               input,
             ],
@@ -1053,4 +1108,4 @@ test("declared inventory runtimes load real configs independently of the checker
   } finally {
     rmSync(bundleRoot, { recursive: true, force: true });
   }
-});
+}, 15_000);

@@ -1,6 +1,6 @@
 import path from "node:path";
 import picomatch from "picomatch";
-import { satisfies, valid, validRange } from "semver";
+import { satisfies, validRange } from "semver";
 import { isNode, LineCounter, parseDocument } from "yaml";
 
 import { nodeSupportRangeMatches } from "./toolchain-node";
@@ -13,29 +13,23 @@ export const packageRules = [
   "node-engine",
 ] as const;
 
-type Layout =
-  | {
-      type: "direct";
-      compilerPackage: string;
-      compilerSpecifier: string;
-      typecheckCommand: string;
-    }
-  | {
-      type: "split-compatibility";
-      compilerPackage: string;
-      compilerSpecifier: string;
-      compatibilityPackage: string;
-      compatibilitySpecifier: string;
-      typecheckCommand: string;
-    };
-
 type PackagePolicy = {
   bun: string;
   packages: Record<string, string>;
-  typescriptInstallLayouts: readonly Layout[];
-  typescript6Compatibility: { version: string; packageAlias: string };
+  typescript: string;
+  typescript6Compatibility: {
+    version: string;
+    packageAlias: string;
+    peerBlockers: readonly string[];
+  };
   node: string;
 };
+
+/** Native compiler packages that `bun check` replaces; no manifest installs them. */
+const retiredCompilerPackages = ["@typescript/native"] as const;
+const typecheckCommand = "bun check";
+const typescriptGuidance =
+  "type check with `bun check --no-pretty --all --project=<tsconfig>`, use tsrs for programs and type checkers, and oxc-parser for syntax-only reads";
 
 type Diagnostic = {
   rule: (typeof packageRules)[number];
@@ -908,113 +902,37 @@ export const checkPackageFiles = ({
       ? "matched"
       : "mismatch";
   };
-  const tsSpecifiers = new Map<string, Set<string>>();
-  for (const layout of policy.typescriptInstallLayouts) {
-    const values =
-      tsSpecifiers.get(layout.compilerPackage) ?? new Set<string>();
-    values.add(layout.compilerSpecifier);
-    tsSpecifiers.set(layout.compilerPackage, values);
-    if (layout.type !== "split-compatibility") continue;
-    const compatibility =
-      tsSpecifiers.get(layout.compatibilityPackage) ?? new Set<string>();
-    compatibility.add(layout.compatibilitySpecifier);
-    tsSpecifiers.set(layout.compatibilityPackage, compatibility);
-  }
-  tsSpecifiers.set(
-    policy.typescript6Compatibility.packageAlias,
-    new Set([`npm:typescript@${policy.typescript6Compatibility.version}`]),
-  );
-  const layoutFor = (specifiers: Map<string, Set<unknown>>) =>
-    policy.typescriptInstallLayouts.find((layout) => {
-      const compiler = specifiers.get(layout.compilerPackage);
-      if (compiler?.size !== 1 || !compiler.has(layout.compilerSpecifier))
-        return false;
-      if (layout.type === "split-compatibility") {
-        const compatibility = specifiers.get(layout.compatibilityPackage);
-        return (
-          compatibility?.size === 1 &&
-          compatibility.has(layout.compatibilitySpecifier)
-        );
-      }
-      return policy.typescriptInstallLayouts.every(
-        (other) =>
-          other.compilerPackage === layout.compilerPackage ||
-          !specifiers.has(other.compilerPackage),
-      );
-    });
+  const compatibility = policy.typescript6Compatibility;
+  // TypeScript 6 stays installable only for peer blockers; nothing else is.
+  const compatibilitySpecifiers = new Map<string, string>([
+    ["typescript", compatibility.version],
+    [compatibility.packageAlias, `npm:typescript@${compatibility.version}`],
+  ]);
+  const typescriptNames = new Set<string>([
+    ...compatibilitySpecifiers.keys(),
+    ...retiredCompilerPackages,
+  ]);
+  // Peer ranges, exact versions included, state support: `typescript` must
+  // cover the checker's release, the alias its TypeScript 6 release; retired
+  // packages have none.
+  const peerReleases = new Map<string, string>([
+    ["typescript", policy.typescript],
+    [compatibility.packageAlias, compatibility.version],
+  ]);
+  const peerBlockerList = compatibility.peerBlockers.join(", ");
+  const typescriptMessage = (name: string, value: unknown) => {
+    const allowed = compatibilitySpecifiers.get(name);
+    return allowed === undefined
+      ? `${name} is not needed: ${typescriptGuidance}`
+      : `${name} ${String(value)} is not needed: ${typescriptGuidance}; only a package that uses a TypeScript 6 peer blocker (${peerBlockerList}) declares ${name} ${allowed}`;
+  };
   const peerRange = (value: unknown): value is string =>
-    typeof value === "string" &&
-    valid(value) === null &&
-    validRange(value) !== null;
-  const toolchainEntries = (file: string, json: Record<string, unknown>) => {
-    const entries: { section: string; name: string; value: unknown }[] = [];
-    for (const section of [
-      "dependencies",
-      "devDependencies",
-      "optionalDependencies",
-      "peerDependencies",
-    ]) {
-      const dependencies = json[section];
-      if (!record(dependencies)) continue;
-      for (const [name, value] of Object.entries(dependencies)) {
-        if (!tsSpecifiers.has(name)) continue;
-        const resolved = resolve(file, name, value);
-        if (section === "peerDependencies" && peerRange(resolved)) continue;
-        entries.push({ section, name, value: resolved });
-      }
-    }
-    return entries;
-  };
-  const specifierMap = (entries: { name: string; value: unknown }[]) => {
-    const specifiers = new Map<string, Set<unknown>>();
-    for (const { name, value } of entries) {
-      const values = specifiers.get(name) ?? new Set<unknown>();
-      values.add(value);
-      specifiers.set(name, values);
-    }
-    return specifiers;
-  };
-  const workspaceLayouts = new Map<
-    string,
-    { layout: Layout | undefined; directory: string }
-  >();
-  const workspaceLayoutFor = (file: string) => {
-    const owner = workspaceOwnerFor(file);
-    if (
-      owner === undefined ||
-      !workspaceContains({ ...owner, file, rootMembership: "implicit" })
-    )
-      return undefined;
-    const key = `${owner.source}:${owner.directory}`;
-    const cached = workspaceLayouts.get(key);
-    if (cached !== undefined) return cached;
-    const entries: { name: string; value: unknown }[] = [];
-    for (const [candidate, member] of manifests) {
-      if (path.posix.basename(candidate) !== "package.json") continue;
-      const memberOwner = workspaceOwnerFor(candidate);
-      if (
-        memberOwner?.directory !== owner.directory ||
-        memberOwner.source !== owner.source ||
-        !workspaceContains({
-          ...owner,
-          file: candidate,
-          rootMembership: "implicit",
-        })
-      )
-        continue;
-      entries.push(
-        ...toolchainEntries(candidate, member).filter(
-          ({ section }) => section === "devDependencies",
-        ),
-      );
-    }
-    const result = {
-      layout: layoutFor(specifierMap(entries)),
-      directory: owner.directory,
-    };
-    workspaceLayouts.set(key, result);
-    return result;
-  };
+    typeof value === "string" && validRange(value) !== null;
+  const installSections = [
+    "dependencies",
+    "devDependencies",
+    "optionalDependencies",
+  ] as const;
   for (const [file, json] of manifests) {
     const manager = json["packageManager"];
     if (manager !== undefined && manager !== `bun@${policy.bun}`)
@@ -1023,7 +941,7 @@ export const checkPackageFiles = ({
         rule: "bun-pins",
         key: "packageManager",
         value: manager,
-        message: `packageManager Bun version must be ${policy.bun}, found ${JSON.stringify(manager)}`,
+        message: `packageManager Bun version must be ${policy.bun} (one exact release at or above the shared minimum, the same in every manifest), found ${JSON.stringify(manager)}`,
       });
     const checkEntries = (
       entries: unknown,
@@ -1032,15 +950,14 @@ export const checkPackageFiles = ({
       if (!record(entries)) return;
       for (const [name, raw] of Object.entries(entries)) {
         const value = resolve(file, name, raw);
-        const tsAllowed = tsSpecifiers.get(name);
-        if (tsAllowed !== undefined) {
-          if (typeof value !== "string" || !tsAllowed.has(value))
+        if (typescriptNames.has(name)) {
+          if (value !== compatibilitySpecifiers.get(name))
             add({
               file,
               rule: "typescript-layout",
               key: location?.key ?? name,
               value: location === undefined ? raw : location.value,
-              message: `${name} must use a declared TypeScript specifier, found ${String(value)}`,
+              message: typescriptMessage(name, value),
             });
           continue;
         }
@@ -1064,15 +981,10 @@ export const checkPackageFiles = ({
         });
       }
     };
-    for (const key of [
-      "dependencies",
-      "devDependencies",
-      "optionalDependencies",
-    ])
-      checkEntries(json[key]);
+    for (const key of installSections) checkEntries(json[key]);
     if (record(json["peerDependencies"]))
       for (const [name, value] of Object.entries(json["peerDependencies"])) {
-        if (tsSpecifiers.has(name) && !peerRange(resolve(file, name, value)))
+        if (typescriptNames.has(name) && !peerRange(resolve(file, name, value)))
           checkEntries({ [name]: value });
       }
     for (const source of catalogSources(json)) {
@@ -1081,7 +993,7 @@ export const checkPackageFiles = ({
       for (const catalog of Object.values(source["catalogs"]))
         checkEntries(catalog);
     }
-    const ownedNames = new Set([...pins.keys(), ...tsSpecifiers.keys()]);
+    const ownedNames = new Set([...pins.keys(), ...typescriptNames]);
     const resolutionDependencies: Record<string, unknown> = {};
     const resolutionRoot = manifests.get(
       path.posix.join(path.posix.dirname(file), "package.json"),
@@ -1097,44 +1009,6 @@ export const checkPackageFiles = ({
         for (const [name, value] of Object.entries(entries))
           resolutionDependencies[name] = resolve(file, name, value);
       }
-    const affectedSpecifiers = new Map<string, Set<unknown>>();
-    const owner = workspaceOwnerFor(file);
-    for (const [candidate, member] of manifests) {
-      if (path.posix.basename(candidate) !== "package.json") continue;
-      const memberOwner = workspaceOwnerFor(candidate);
-      const ownManifest =
-        candidate === path.posix.join(path.posix.dirname(file), "package.json");
-      if (
-        !ownManifest &&
-        !(
-          owner !== undefined &&
-          owner.directory === path.posix.dirname(file) &&
-          memberOwner?.directory === owner.directory &&
-          memberOwner.source === owner.source &&
-          workspaceContains({
-            directory: owner.directory,
-            file: candidate,
-            patterns: owner.patterns,
-            rootMembership: "implicit",
-          })
-        )
-      )
-        continue;
-      for (const section of [
-        "dependencies",
-        "devDependencies",
-        "optionalDependencies",
-      ]) {
-        const entries = member[section];
-        if (!record(entries)) continue;
-        for (const [name, value] of Object.entries(entries)) {
-          if (!tsSpecifiers.has(name)) continue;
-          const values = affectedSpecifiers.get(name) ?? new Set<unknown>();
-          values.add(resolve(candidate, name, value));
-          affectedSpecifiers.set(name, values);
-        }
-      }
-    }
     const checkResolutionMap = (entries: unknown, parent?: string) => {
       if (!record(entries)) return;
       for (const [selector, replacement] of Object.entries(entries)) {
@@ -1148,11 +1022,8 @@ export const checkPackageFiles = ({
             .at(-1)
             ?.trim() ?? "";
         const version = pattern.lastIndexOf("@");
-        let qualifier: string | undefined;
-        if (version > pattern.lastIndexOf("/")) {
-          qualifier = pattern.slice(version + 1).replace(/^npm:/, "");
+        if (version > pattern.lastIndexOf("/"))
           pattern = pattern.slice(0, version);
-        }
         const parts = pattern.split("/");
         pattern = parts.at(-2)?.startsWith("@")
           ? parts.slice(-2).join("/")
@@ -1178,7 +1049,6 @@ export const checkPackageFiles = ({
             const reference = replacement.slice(1);
             value = resolutionDependencies[reference];
           }
-          const resolved = resolve(file, name, value);
           checkEntries(
             { [name]: value },
             {
@@ -1186,163 +1056,88 @@ export const checkPackageFiles = ({
               value: replacement,
             },
           );
-          if (
-            tsSpecifiers.has(name) &&
-            [...(affectedSpecifiers.get(name) ?? [])].some((specifier) => {
-              if (resolved === specifier) return false;
-              if (qualifier === undefined || validRange(qualifier) === null)
-                return true;
-              if (typeof specifier !== "string") return false;
-              const versionSpecifier = specifier.startsWith("npm:")
-                ? specifier.slice(specifier.lastIndexOf("@") + 1)
-                : specifier;
-              const release = valid(versionSpecifier);
-              return release !== null && satisfies(release, qualifier);
-            }) &&
-            typeof resolved === "string" &&
-            tsSpecifiers.get(name)?.has(resolved)
-          )
-            add({
-              file,
-              rule: "typescript-layout",
-              key: selector,
-              value: replacement,
-              message: `${name} resolution must preserve its declared TypeScript install specifier`,
-            });
         }
       }
     };
     checkResolutionMap(json["overrides"]);
     checkResolutionMap(json["resolutions"]);
     if (record(json["pnpm"])) checkResolutionMap(json["pnpm"]["overrides"]);
-    const localEntries = toolchainEntries(file, json);
-    const usesCompiler = policy.typescriptInstallLayouts.some((layout) =>
-      localEntries.some(({ name }) => name === layout.compilerPackage),
-    );
-    let selectedLayout = layoutFor(specifierMap(localEntries));
-    if (usesCompiler) {
-      if (
-        layoutFor(
-          specifierMap(
-            localEntries.filter(
-              ({ section }) => section !== "peerDependencies",
-            ),
-          ),
-        ) === undefined
-      )
-        selectedLayout = undefined;
-      if (selectedLayout === undefined) {
-        const workspace = workspaceLayoutFor(file);
-        const layout = workspace?.layout;
-        if (workspace !== undefined && layout !== undefined) {
-          const expected = new Map([
-            [layout.compilerPackage, layout.compilerSpecifier],
-          ]);
-          if (layout.type === "split-compatibility")
-            expected.set(
-              layout.compatibilityPackage,
-              layout.compatibilitySpecifier,
-            );
-          expected.set(
-            policy.typescript6Compatibility.packageAlias,
-            `npm:typescript@${policy.typescript6Compatibility.version}`,
-          );
-          const developmentOnly = localEntries.every(
-            ({ section, name, value }) =>
-              section === "devDependencies" && expected.get(name) === value,
-          );
-          const runtimeCompatibilityOnly =
-            layout.type === "split-compatibility" &&
-            path.posix.dirname(file) !== workspace.directory &&
-            localEntries.every(
-              ({ section, name, value }) =>
-                (section === "dependencies" ||
-                  section === "devDependencies" ||
-                  section === "peerDependencies") &&
-                name === layout.compatibilityPackage &&
-                value === layout.compatibilitySpecifier,
-            );
-          if (developmentOnly || runtimeCompatibilityOnly)
-            selectedLayout = layout;
-        }
-      }
-      if (selectedLayout === undefined)
-        add({
-          file,
-          rule: "typescript-layout",
-          key: "dependencies",
-          message:
-            "TypeScript compiler and compatibility packages must match one complete declared install layout",
-        });
-      const command = record(json["scripts"])
-        ? json["scripts"]["typecheck"]
-        : undefined;
-      if (selectedLayout !== undefined && typeof command === "string") {
-        const normalizedExpected = selectedLayout.typecheckCommand
-          .replace(/\s+/g, " ")
-          .trim();
-        for (const words of compilerCommandSegments(command)) {
-          if (!invokesCompiler(words)) continue;
-          const normalized = words.join(" ");
-          if (
-            !words.some((word) => word === "(" || word === ")") &&
-            shellSubstitutions(normalized).length === 0 &&
-            (normalized === normalizedExpected ||
-              normalized.startsWith(`${normalizedExpected} `))
-          )
+    // A TypeScript 6 install belongs to the package whose peer blocker needs it;
+    // no root or workspace counterpart is required.
+    const usesPeerBlocker = installSections.some((section) => {
+      const entries = json[section];
+      return (
+        record(entries) &&
+        compatibility.peerBlockers.some((blocker) =>
+          Object.hasOwn(entries, blocker),
+        )
+      );
+    });
+    if (!usesPeerBlocker)
+      for (const section of installSections) {
+        const entries = json[section];
+        if (!record(entries)) continue;
+        for (const [name, raw] of Object.entries(entries)) {
+          const allowed = compatibilitySpecifiers.get(name);
+          if (allowed === undefined || resolve(file, name, raw) !== allowed)
             continue;
           add({
             file,
             rule: "typescript-layout",
-            key: "typecheck",
-            value: command,
-            message: `typecheck compiler invocation must use ${selectedLayout.typecheckCommand}`,
+            key: name,
+            value: raw,
+            message: `${name} ${allowed} is only for a package that uses a TypeScript 6 peer blocker (${peerBlockerList}); remove it and ${typescriptGuidance}`,
           });
-          break;
         }
       }
-    }
-    if (record(json["peerDependencies"])) {
-      const peerLayout = selectedLayout ?? workspaceLayoutFor(file)?.layout;
+    const command = record(json["scripts"])
+      ? json["scripts"]["typecheck"]
+      : undefined;
+    if (typeof command === "string")
+      for (const words of compilerCommandSegments(command)) {
+        if (!invokesCompiler(words)) continue;
+        const normalized = words.join(" ");
+        if (
+          !words.some((word) => word === "(" || word === ")") &&
+          shellSubstitutions(normalized).length === 0 &&
+          (normalized === typecheckCommand ||
+            normalized.startsWith(`${typecheckCommand} `))
+        )
+          continue;
+        add({
+          file,
+          rule: "typescript-layout",
+          key: "typecheck",
+          value: command,
+          message: `typecheck must run \`${typecheckCommand} --no-pretty --all --project=<tsconfig>\`, not a TypeScript compiler package`,
+        });
+        break;
+      }
+    if (record(json["peerDependencies"]))
       for (const [name, raw] of Object.entries(json["peerDependencies"])) {
-        if (!tsSpecifiers.has(name)) continue;
+        if (!typescriptNames.has(name)) continue;
         const range = resolve(file, name, raw);
         if (!peerRange(range)) continue;
-        const releases = new Set<string>();
-        for (const layout of policy.typescriptInstallLayouts) {
-          if (
-            layout.compilerPackage !== name &&
-            !(
-              layout.type === "split-compatibility" &&
-              layout.compatibilityPackage === name
-            )
-          )
-            continue;
-          const specifier = layout.compilerSpecifier;
-          releases.add(
-            specifier.startsWith("npm:")
-              ? specifier.slice(specifier.lastIndexOf("@") + 1)
-              : specifier,
-          );
-        }
-        if (name === policy.typescript6Compatibility.packageAlias)
-          releases.add(policy.typescript6Compatibility.version);
-        if (
-          peerLayout?.type === "split-compatibility" &&
-          name === peerLayout.compatibilityPackage
-        )
-          releases.add(peerLayout.compatibilitySpecifier);
-        if ([...releases].every((release) => satisfies(release, range)))
+        const release = peerReleases.get(name);
+        if (release === undefined) {
+          add({
+            file,
+            rule: "typescript-layout",
+            key: name,
+            value: raw,
+            message: typescriptMessage(name, range),
+          });
           continue;
+        }
+        if (satisfies(release, range)) continue;
         add({
           file,
           rule: "typescript-layout",
           key: name,
           value: raw,
-          message: `${name} peer support range must include ${[...releases].join(" and ")}, found ${range}`,
+          message: `${name} peer support range must include ${release}, found ${range}`,
         });
       }
-    }
     if (
       record(json["engines"]) &&
       json["engines"]["node"] !== undefined &&

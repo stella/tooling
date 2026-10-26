@@ -38,15 +38,29 @@ introduce requirements.
 
 Schema version 1 contains these fields:
 
-| Fields                                                                                     | Contract                                                                                                                                                                                                                                                                                                                                                                              |
-| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schemaVersion`                                                                            | Supported policy schema version (`1`).                                                                                                                                                                                                                                                                                                                                                |
-| `bun`                                                                                      | Exact `packageManager`, `bun-types`, image and manager pin.                                                                                                                                                                                                                                                                                                                           |
-| `oxlint`, `oxlint-tsgolint`, `@oxlint/plugins`, `@stll/oxlint-plugin`, `oxfmt`, `lefthook` | Exact dependency and catalog pins. Declared local workspace packages must resolve to the same version.                                                                                                                                                                                                                                                                                |
-| `typescript`, `typescriptInstallLayouts`, `typescript6Compatibility`                       | Exact compiler pins and complete direct or split install layouts; the optional compatibility alias is exact too.                                                                                                                                                                                                                                                                      |
-| `node`, `python`, `rust`                                                                   | Runtime selectors and version-manager pins. Node selects the policy major (`26.x`); static minor and patch selectors within that major are allowed. A Python minor pin preserves existing patch selectors within that release series; a patch policy requires the exact patch. Rust selects one exact stable release across toolchain files, commands, workflow selectors and images. |
-| `actions`                                                                                  | Approved action names mapped to full `sha` and `version` comment.                                                                                                                                                                                                                                                                                                                     |
-| `dependabot`                                                                               | Shared schedule, cooldown and groups. Package and action ignores derive from the owned pins.                                                                                                                                                                                                                                                                                          |
+| Fields                                                                            | Contract                                                                                                                                                                                                                                                                                                                                                                              |
+| --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schemaVersion`                                                                   | Supported policy schema version (`1`).                                                                                                                                                                                                                                                                                                                                                |
+| `bun`                                                                             | Minimum Bun; the repository pins one exact release at or above it everywhere.                                                                                                                                                                                                                                                                                                         |
+| `oxlint`, `oxlint-tsgolint`, `@oxlint/plugins`, `@stll/oxlint-plugin`, `lefthook` | Exact dependency and catalog pins. Declared local workspace packages must resolve to the same version.                                                                                                                                                                                                                                                                                |
+| `typescript`, `typescript6Compatibility`                                          | The TypeScript release `bun check` implements, and the exact TypeScript 6 release and alias allowed beside a listed peer blocker.                                                                                                                                                                                                                                                     |
+| `node`, `python`, `rust`                                                          | Runtime selectors and version-manager pins. Node selects the policy major (`26.x`); static minor and patch selectors within that major are allowed. A Python minor pin preserves existing patch selectors within that release series; a patch policy requires the exact patch. Rust selects one exact stable release across toolchain files, commands, workflow selectors and images. |
+| `actions`                                                                         | Approved action names mapped to full `sha` and `version` comment.                                                                                                                                                                                                                                                                                                                     |
+| `dependabot`                                                                      | Shared schedule, cooldown and groups. Package and action ignores derive from the owned pins. `actionGroups` come first in every GitHub Actions entry, so first-party reusable workflows that move by commit arrive as one update.                                                                                                                                                     |
+| `formatter`                                                                       | `bun fmt` is the only formatter. `style` is the one `[fmt]` style (line width, import groups) every Bun repository's root `bunfig.toml` repeats exactly; `ignorePatterns` lists the generated files every repository leaves to their generators. A repository adds only its own ignore patterns and, where it uses Tailwind, `sortTailwindcss`.                                       |
+
+The `formatter-policy` rule makes `bun fmt` the only formatter. It fails on an
+oxfmt, Prettier, Biome or dprint dependency, catalog entry, script or command
+anywhere in the repository; on `.oxfmtrc*`, `oxfmt.config.*`, `.prettierrc*`,
+`prettier.config.*`, `.prettierignore`, `biome.json` and `dprint.json` files and
+on a `prettier` key in `package.json`; on a package script named `fmt` (it
+would shadow `bun fmt`); and on a changesets `format` other than `false`. In a
+Bun repository the root `bunfig.toml` holds the only formatter configuration in
+its `[fmt]` table: exactly the shared style from `toolchain.json`, the shared
+ignore patterns, and nothing repository-specific beyond extra ignores and
+`sortTailwindcss`; lefthook
+`pre-commit` runs `bun fmt --staged`, and a workflow runs `bun fmt --check`
+without path operands, so CI always checks the whole repository.
 
 Configure `oven-sh/setup-bun` with `bun-version-file: package.json` and a
 matching `packageManager`. Configure setup-node/setup-python with
@@ -120,8 +134,8 @@ Rust exceptions use one closed declaration in root `stll-toolchain.json`:
 ```
 
 Replace the example with a verified compatibility constraint and its tracking
-issue. Each exception permits only that exact release and must expire in the
-future. Floating channels, duplicate pins, extra fields and `rust-version`
+issue. Each exception permits only that exact release until its expiry date;
+expired exceptions follow the quarantine expiry scope below. Floating channels, duplicate pins, extra fields and `rust-version`
 opt-outs fail validation. The same exception applies to toolchain files,
 workflow Rust inputs and environments, Cargo/rustup commands and Rust images.
 
@@ -140,11 +154,10 @@ series. Python comparisons, compatible releases, wildcard exclusions,
 and comma intersections are supported for final releases; unsupported syntax
 produces a diagnostic.
 
-Direct compiler invocations in `scripts.typecheck` must use the selected
-layout command. Classification decodes shell tokens to find compiler calls;
-acceptance requires the declared command text after leading environment
-prefixes are removed, including its option spelling and quoting. Delegated wrappers and workspace runners are checked by the
-consumer typecheck parity contract rather than inferred from manifests.
+Direct compiler invocations in `scripts.typecheck` must use `bun check`.
+Classification decodes shell tokens to find compiler calls; acceptance requires
+`bun check` after leading environment prefixes are removed. Delegated wrappers
+and workspace runners are not inferred from manifests.
 
 Listed shared actions require their approved SHA and matching `# vX` comment.
 CI also checks the shared release policy's runtime selector action set against
@@ -171,13 +184,11 @@ tracked root `stll-toolchain.json` listing the rule and its reason:
 }
 ```
 
-Workspace TypeScript toolchains combine the root and declared members' devDependencies.
-An included member may declare the exact TypeScript 6 compatibility API across
-dependencies, devDependencies, and peerDependencies when that shared install uses
-the complete split layout. Ambiguous or partial layouts do not grant this allowance.
-Peer ranges declare support: they must include the policy compiler release and the
-compatibility release when the selected layout uses it. Ranges do not contribute
-to the installed compiler inventory.
+Each manifest answers for its own TypeScript install: a member that uses a
+listed peer blocker may declare the exact TypeScript 6 compatibility release in
+its dependencies or devDependencies, without a root or workspace counterpart.
+Peer ranges, exact versions included, declare support: a `typescript` range
+must include the policy release. Ranges do not count as installs.
 
 JavaScript update roots include the repository root, declared workspace membership,
 and directories with their own `bun.lock`, `package-lock.json`, `yarn.lock`, or
@@ -209,7 +220,9 @@ repository root; the command reads tracked declarations and writes canonical
 rejects missing coverage and policy drift. Use `stll-dependabot --check` in CI for
 read-only byte drift detection. Pass `--config stll-dependabot.json` to declare
 ecosystems and directories explicitly; the declaration cannot change shared
-schedule, cooldown, groups, or owned-tool ignores. See the
+schedule, cooldown, groups, or owned-tool ignores. Repository holds on other
+dependencies go in `stll-toolchain.json` `dependabotIgnores`, each with a reason;
+they cannot name or match a shared pin. See the
 [package guide](packages/oxlint-config/README.md#generate-dependency-update-configuration)
 for the input format. The published `@stll/oxlint-config/dependabot` subpath exports
 `generateDependabotConfig` and `parseToolchainPolicy` for programmatic generation. Owned package pins follow
@@ -219,69 +232,113 @@ synchronizes pins through `bun scripts/check-lockfile-workspace-versions.ts
 --write`, which also refreshes cached workspace versions without regenerating
 the dependency graph.
 
+## Package quarantine
+
+Before installing dependencies, run the CLI from the exact published
+`@stll/oxlint-config` release that includes `stll-quarantine`. Replace `X.Y.Z`
+with that release's exact version; `bunx` installs the pinned package when it is
+not already available:
+
+```sh
+bunx --bun --package @stll/oxlint-config@X.Y.Z stll-quarantine --sync
+bun install
+```
+
+`stll-quarantine --sync` creates or updates the Bun quarantine preset. The
+preset keeps the five-day release-age gate for third-party packages and writes
+permanent exemptions for exact registry-backed `@stll/` package names from declarations and the lockfile, including native platform
+packages. Wildcards and version selectors are rejected. Creation timestamps
+record audit history; they never expire.
+
+Third-party exceptions require an inline exact UTC expiry:
+
+```toml
+[install]
+minimumReleaseAge = 432_000
+minimumReleaseAgeExcludes = [
+  "@stll/oxlint-config", # quarantine-excluded-since: 2026-10-17T00:00:00.000Z
+  "third-party-package", # quarantine-expires: 2026-10-20T00:00:00.000Z
+]
+```
+
+`stll-toolchain-check` validates tracked root `bunfig.toml` and warns starting
+48 hours before a temporary exception expires. Expired exceptions warn during
+the existing 24-hour removal grace period, then fail validation on default-branch
+pushes, schedules and dispatches. Pull requests and merge groups fail only when
+the change adds or edits the overdue entry (inherited ones warn; a shallow
+checkout fetches just the base commit to decide); local runs warn. The standalone
+`stll-quarantine --check` command performs the same policy check without writes;
+`--prune` removes expired third-party entries and retains first-party entries.
+Only `--sync` changes the generated first-party set. Unrelated Bun settings and
+temporary third-party entries remain repository inputs.
+
+The shared scheduled quarantine workflow runs the same tooling-owned core from
+an immutable source checkout, before installing consumer dependencies. It opens
+or refreshes the existing removal branch, so each repository has one removal
+PR. Consumers retain the pinned `stella/.github` policy and scheduled-prune
+callers; adopt the workflow revision that delegates to this core.
+
 ## Usage
 
 Install the shared TypeScript and oxlint packages:
 
 ```bash
-bun add -d @stll/typescript-config @stll/oxlint-config @stll/oxlint-plugin @oxlint/plugins oxlint oxlint-tsgolint typescript
+bun add -d @stll/typescript-config @stll/oxlint-config @stll/oxlint-plugin @oxlint/plugins oxlint oxlint-tsgolint
 ```
 
-The shared defaults require TypeScript 7.0.2 or newer, oxlint 1.87.0 or
-newer, and oxlint-tsgolint 7.0.2003 or newer. Pin the current versions from
+The shared defaults require oxlint 1.87.0 or newer and oxlint-tsgolint
+7.0.2003 or newer. Pin the current versions from
 `@stll/oxlint-config/toolchain.json`; do not use the deprecated
 oxlint-tsgolint 0.x line.
 
-`toolchain.json` defines two supported TypeScript install layouts:
+### TypeScript toolchain
 
-- `direct` installs TypeScript 7 as `typescript` for compiler-API consumers
-  and declaration generation. Prefer this when every framework supports
-  TypeScript 7.
-- `split-compatibility` keeps TypeScript 6 as `typescript` for incompatible
-  compiler-API consumers, then installs TypeScript 7 as `@typescript/native`
-  for tools that explicitly require that compiler.
+Every repository that uses these configs follows one toolchain:
 
-TypeScript 6 is compatibility-only. Use the split layout only for a command
-that loads one of the peer blockers listed in `toolchain.json`, or for code
-that imports the TypeScript compiler API. Remove the compatibility install when
-the blocker accepts TypeScript 7. The shared config's peer range accepts both
-layouts. Both layouts use `bun check` with Bun 1.4.3 for typechecking; retain
-TypeScript wherever a tool needs its compiler API or declaration generation.
-`stll-typecheck-parity` runs from a consumer repository root. It uses that repo's
-TypeScript compiler (including the declared split layout), compares repository
-diagnostics by file, line, and code, then checks 31 shipped fixture classes under
-the consumer tsconfig flags. TypeScript diagnostics determine each class's
-activation; inactive classes are identified in the table, and zero active classes
-fail the check. The command fails on diagnostic differences or lost seeded coverage and reports wall
-time and peak RSS for TypeScript and Bun. It requires Bun and `/usr/bin/time`
-on Linux or macOS, and runs with Node or Bun. Tooling invokes the same bin through
-`bun run check:typecheck-parity`. The bin invokes
-`bun check` with its dedicated project/build flags. Consumer repositories must
-not define a `check` script: it shadows Bun's checker, so the parity bin fails
-with a clear error until that script is renamed. Standalone `bun --check`
-checks the current project but does not forward these checker options.
-Without flags, the command checks the root `tsconfig.json` and uses build mode
-for project references. To check selected configs, repeat `--project`, for example
-`stll-typecheck-parity --project packages/api/tsconfig.json --project packages/web/tsconfig.json`.
-Selected configs run independently without discovering or building their references;
-reference metadata is retained for ordinary project checks. No root tsconfig is
-required in this mode, and the compiler always comes from the repository-root
-installation. Missing, unreadable, and zero-input selected configs fail the check.
-`--help` prints usage and exits successfully. In default mode, referenced
-configs are discovered recursively and grouped by effective compiler options.
-Each group copies its representative config's effective options, removes emit-only
-and build settings, and sets `noEmit` for the seeded projects. Type-checking options
-and consumer type/module resolution are preserved. Each group must
-activate at least one seeded class. The installed compiler and Bun runtime must match their selected toolchain policy versions.
-Both compilers check the same temporary project graph. TypeScript declarations
-and build metadata stay in that temporary tree; consumer files remain untouched.
-The parity bin does not validate the consumer project graph; the repository's own typecheck does.
-Source errors normalize TypeScript's diagnostic exit `2` (including declaration-only inputs) to Bun's
-diagnostic exit `1`; the report retains both raw exit codes. Other exit statuses
-compare exactly. Comparisons retain source diagnostic locations, normalize bundled standard-library
-paths, and distinguish locationless messages. Fixtures preserve the consumer package
-module context and reject configuration errors. Tagged agent diagnostics are normalized
-into the same comparison set.
+- **Type checking is `bun check`**, Bun's built-in TypeScript 7 checker. Each
+  package's `typecheck` script runs
+  `bun check --no-pretty --all --project=<tsconfig>`; do not call `tsc --noEmit`
+  or wrap `tsc` in a custom script.
+- **No `typescript` package.** `bun check` embeds the checker, oxlint-tsgolint
+  embeds its own, and `stll-toolchain-check` resolves tsconfig projects with
+  tsrs, so no manifest installs `typescript` 7 or `@typescript/native`. Keep
+  `typescript` only in a package that uses a tool which imports or peers on it
+  (the `peerBlockers` in `toolchain.json`: `@astrojs/check`,
+  `@typescript-eslint/utils`, dependency-cruiser and `vite-plugin-dts`), pinned
+  to the TypeScript 6 compatibility release, with a note naming that tool.
+- **Declarations** built with tsdown use `dts: { generator: "oxc" }`, which
+  needs explicit types on exported declarations. A package that cannot provide
+  them points tsdown at tsrs instead:
+  `dts: { generator: "tsgo", tsgo: { path: <tsrs bin> } }`.
+- **Compiler-API code does not import `typescript`.** Programs, the type
+  checker and tsconfig resolution use `tsrs` `0.18.0-ts7.1.0-dev.20260929`
+  through its async API only (`import { API } from "tsrs/unstable/async"`; close
+  the API with `await api.close()` on every path). The `tsrs` CLI accepts
+  `--noEmit`, `--pretty false`, `-p`, `--build --force`, `--listFilesOnly`,
+  `--extendedDiagnostics` and `--declaration --emitDeclarationOnly --outDir`;
+  it rejects `--showConfig`, so read configs with `api.parseConfigFile`.
+  Syntax-only reads (walking an AST, matching node kinds) use `oxc-parser`
+  `0.155.0` (`parseSync`). Plain import scans that may ignore type-only imports
+  use `new Bun.Transpiler({ loader: "tsx" }).scanImports(text)`; otherwise read
+  oxc-parser's `module` record. Pin both packages exactly.
+
+`stll-toolchain-check` enforces this with the `typescript-layout` rule:
+
+- A manifest, catalog or resolution that declares `typescript` 7,
+  `@typescript/native` or any other TypeScript specifier fails, with a message
+  pointing at `bun check`, tsrs and oxc-parser.
+- `typescript` `6.0.3` (or the `typescript-compat` alias,
+  `npm:typescript@6.0.3`) passes only in a manifest that also depends on one of
+  the listed peer blockers. The install belongs to that package; no root or
+  workspace counterpart is required.
+- A `typecheck` script that runs a compiler (`tsc`, `tsgo`, a launcher around
+  them) fails; `bun check` with any arguments passes.
+- A peer range on `typescript` must include the TypeScript release `bun check`
+  implements (`typescript` in `toolchain.json`).
+
+When the root manifest declares `oxlint-tsgolint`, the same command lists the
+files each lint script covers and reads every tsconfig with tsrs; the consumer
+installs no compiler for it.
 
 Use the library TypeScript preset:
 
@@ -291,6 +348,37 @@ Use the library TypeScript preset:
   "include": ["src"]
 }
 ```
+
+The package also exports `base.json`, `node.json`, `bun.json`,
+`published.json` (JavaScript disabled, isolated declarations enabled), and
+`react-library.json` (DOM libraries and the React JSX runtime). These profiles
+inherit errors for unreachable code and unused labels.
+
+With the TypeScript 7 native compiler, opt into one checker per project by
+adding `@stll/typescript-config/single-checker.json` after the main profile in
+an `extends` array. This additive profile changes only the checker count:
+
+```json
+{
+  "extends": [
+    "@stll/typescript-config/react-library.json",
+    "@stll/typescript-config/single-checker.json"
+  ],
+  "include": ["src"]
+}
+```
+
+`checkers: 1` also applies to native checker consumers that read tsconfig, such
+as oxlint-tsgolint. This profile requires the native compiler; TypeScript 6 does
+not recognize `checkers`. A repository-recorded application measurement compared
+one checker at 82 seconds / 3.0 GB / 12.0 million instantiations with four at
+87 seconds / 5.3 GB / 31.3 million instantiations. These results are specific to
+that project, not a benchmark of every consumer.
+
+Import-extension rewriting, symlink preservation, incremental compilation, and
+`tsBuildInfoFile` placement remain explicit consumer options: they depend on
+emit requirements, module identity, and cache ownership. The shared base sets
+none of them.
 
 Node scripts need an explicit TypeScript project when the library project's
 `include` does not cover them. Install `@types/node` as a direct development
@@ -415,9 +503,11 @@ export default defineConfig({
 `no-raw-route-query-client` requires route freshness helpers instead of raw
 TanStack Query client calls and keeps pending components synchronous.
 
-When using `no-unsafe-inner-html`, disable the blanket `react/no-danger` rule;
-the portable rule permits static and provably sanitized HTML while rejecting
-untrusted values.
+When using `no-unsafe-inner-html`, disable the blanket `react/no-danger` rule.
+Its default `sanitizerPolicy: "allowlist"` permits static HTML and calls whose
+names match the shared HTML sanitizer allowlist. Set
+`sanitizerPolicy: "provenance"` to require a `// safe-html: <provenance>`
+comment for dynamic values, including calls to sanitizer-named functions.
 
 Oxlint 1.80 replaced `react/react-compiler` with category-specific React
 Compiler rules. Enable the actionable categories explicitly with
@@ -479,7 +569,7 @@ Recommended scripts:
 ```json
 {
   "scripts": {
-    "typecheck": "bun check",
+    "typecheck": "bun check --no-pretty --all --project=tsconfig.json",
     "lint": "bun --bun oxlint -c oxlint.config.ts --report-unused-disable-directives-severity=error --deny-warnings --type-aware .",
     "lint:fix": "bun --bun oxlint -c oxlint.config.ts --type-aware --fix ."
   }
@@ -585,7 +675,7 @@ Bun runtime/compiler requirements are rejected. JSON and declaration-only packag
 record `{"type":"types-only"}` explicitly.
 
 Build adapters use the installed configuration loaders and bind their behavior to
-tsdown 0.22.9, Vite 8.1.5, or @nuxt/module-builder 1.0.3 (unbuild 3.6.1 and
+tsdown 0.23.1, Vite 8.3.4, or @nuxt/module-builder 1.0.3 (unbuild 3.6.1 and
 mkdist 2.4.1). They record final transform targets, including separate Nuxt module
 and runtime entries. No syntax lowering records `esnext`.
 Only exact single build invocations (`tsdown`, `vite build`, or
@@ -776,29 +866,29 @@ Workflows with no declared trust job retain their existing fork-CI policy.
 
 The comparison includes Bun declarations, Node selectors and support ranges,
 resolved TypeScript compiler versions (including workspace and compatibility
-aliases), oxlint, oxlint-tsgolint, oxfmt, and shared tooling pins. Lockfile
+aliases), oxlint, oxlint-tsgolint, and shared tooling pins. Lockfile
 resolutions determine installed package versions; manifest ranges alone do not.
 Resolution locations and importer bindings are retained: swapping compiler
 versions between workspaces cannot look unchanged. Compiler specifier changes
-run parity even when the resolved release version is unchanged. Unknown lock
-shapes and ambiguous resolutions report an unreadable snapshot. Supported text
-locks include Bun JSONC (schema 0/1), pnpm YAML (5.4/6/9), npm package-lock/
+report `typescript` even when the resolved release version is unchanged. Unknown
+lock shapes and ambiguous resolutions report an unreadable snapshot. Supported
+text locks include Bun JSONC (schema 0/1), pnpm YAML (5.4/6/9), npm package-lock/
 shrinkwrap (1/2/3), and bounded Yarn Classic/Berry shapes; a binary-only Bun lock
 cannot be compared without executing Bun.
 Workflow/action and Docker definition edits conservatively force full CI.
-Unrelated application dependency changes do not force compiler parity.
+Unrelated application dependency changes do not report a compiler change.
 Setup-action runtime selectors and their tracked version-file contents must
 identify an exact stable release. Floating selectors,
 ranges, expressions, empty
-values, or omitted runtime versions report an unreadable snapshot and run parity
-even when their committed text is unchanged.
+values, or omitted runtime versions report an unreadable snapshot even when
+their committed text is unchanged.
 
-On pull requests, run the repository's ordinary Bun typecheck and select
-parity with the same detector; run the probe on demand:
+On pull requests, run the repository's ordinary Bun typecheck and the probe. The
+shared `rust-napi-ci.yml` workflow runs both when called with `typecheck: true`;
+elsewhere, run:
 
 ```sh
 stll-typecheck-probe --project packages/api/tsconfig.json --seed-dir packages/api/src -- bun run typecheck
-stll-typecheck-parity --changed-since origin/main --project packages/api/tsconfig.json
 ```
 
 The probe writes an exclusive temporary TypeScript file in the declared
@@ -809,25 +899,13 @@ excluded seeds fail instead of producing a vacuous pass. Commands are argv,
 not shell expressions. Cleanup also runs on failure and handled termination.
 Repeat the probe for independently checked projects as needed.
 
-Conditional parity runs when Bun, TypeScript, or shared declarations change;
-otherwise it prints `parity skipped: toolchain unchanged since ...`. An unreadable
-reference runs full parity. Omit `--changed-since` to run full parity on demand.
-This repository runs conditional parity in CI, so a change to the compiler or
-toolchain is proven on the pull request that makes it. The probe, timed
-TypeScript checks and full parity run only through
-`.github/workflows/typecheck-proofs.yml` (`workflow_dispatch`), whose required
-`changed_since` input names the base of the change to prove: the detector
-compares the toolchain at that base with the head, so a default such as the
-previous commit could miss a change made earlier on the branch. It has no
-automatic or scheduled trigger. Node and lint-tool changes still force full CI
-through the shared detector.
-
 Workflow, composite-action, Docker, mise, and tool-version declarations are
-conservatively fingerprinted for compiler parity, including referenced tracked
+conservatively fingerprinted as `shared` changes, including referenced tracked
 setup-action version files (Node, Bun, Python, Go, Java and other runtimes).
 Rust toolchain-file selectors and conventional runtime files are included;
 cache-dependency-path is not a runtime selector. Compose and Kubernetes image
-definitions are conservatively fingerprinted alongside Dockerfiles. Catalog and unresolved declaration changes also force parity;
-an unclassifiable reference runs full parity. This may run parity for unrelated
-edits to these declaration files. Active installed compiler comparisons still
-use the owning lockfile resolutions.
+definitions are conservatively fingerprinted alongside Dockerfiles. Catalog and
+unresolved declaration changes also report a change; an unclassifiable reference
+reports an unreadable snapshot. This may report a change for unrelated edits to
+these declaration files. Installed compiler comparisons use the owning lockfile
+resolutions.

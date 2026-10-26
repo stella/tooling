@@ -8,7 +8,6 @@ import { stringify } from "yaml";
 import { compilerPackages } from "./compiler-packages";
 import { detectToolchainChanges } from "./toolchain-changed";
 import { parseChangedLock } from "./toolchain-changed-locks";
-import { runSelectedTypecheckParity } from "./typecheck-parity-selection";
 
 const integrity = (value: string) =>
   `sha512-${Buffer.alloc(64, value).toString("base64")}`;
@@ -89,7 +88,7 @@ for (const name of Object.values(compilerPackages))
       expect(current.sourceProof.type).toBe("immutable");
       expect(single(file, after).identity).toBe(current.identity);
     }
-  });
+  }, 15_000);
 
 test("npm aliases retain actual compiler identity", () => {
   const before = single(
@@ -117,7 +116,7 @@ test("npm aliases retain actual compiler identity", () => {
   expect(after.name).toBe("typescript");
   expect(after.dependency).toBe("compiler");
   expect(after.identity).not.toBe(before.identity);
-});
+}, 15_000);
 
 test("Yarn Classic compiler source and checksum are retained", () => {
   const classic = (hash: string) =>
@@ -125,7 +124,7 @@ test("Yarn Classic compiler source and checksum are retained", () => {
   expect(single("yarn.lock", classic("first")).identity).not.toBe(
     single("yarn.lock", classic("second")).identity,
   );
-});
+}, 15_000);
 
 test("compiler source proof ignores unrelated nested dependency integrity", () => {
   expect(() =>
@@ -137,7 +136,7 @@ test("compiler source proof ignores unrelated nested dependency integrity", () =
       }),
     }),
   ).toThrow("immutable identity");
-});
+}, 15_000);
 
 for (const resolved of [
   "file:../compiler",
@@ -151,7 +150,7 @@ for (const resolved of [
         text: npmLock({ resolved }),
       }),
     ).toThrow("immutable identity");
-  });
+  }, 15_000);
 
 test("compiler link directory fails closed even with a package version", () => {
   expect(() =>
@@ -160,7 +159,7 @@ test("compiler link directory fails closed even with a package version", () => {
       text: npmLock({ link: true, resolved: "../compiler" }),
     }),
   ).toThrow("immutable identity");
-});
+}, 15_000);
 
 test("full Git commit is immutable source evidence", () => {
   const result = single(
@@ -170,7 +169,7 @@ test("full Git commit is immutable source evidence", () => {
     }),
   );
   expect(result.sourceProof.type).toBe("immutable");
-});
+}, 15_000);
 
 test("object key order does not change compiler identity", () => {
   const before = npmLock({
@@ -184,7 +183,7 @@ test("object key order does not change compiler identity", () => {
   expect(single("package-lock.json", before).identity).toBe(
     single("package-lock.json", after).identity,
   );
-});
+}, 15_000);
 
 const withCommittedLocks = async ({
   before,
@@ -255,7 +254,7 @@ const withCommittedLocks = async ({
 };
 
 for (const source of ["file", "git", "integrity"])
-  test(`committed same-version compiler ${source} identity changes run parity`, async () => {
+  test(`committed same-version compiler ${source} identity changes are TypeScript changes`, async () => {
     const lock = (next: boolean) => {
       if (source === "git")
         return npmLock({
@@ -273,22 +272,11 @@ for (const source of ["file", "git", "integrity"])
         const result = await detectToolchainChanges({ repo, since });
         expect(result.status).toBe("compared");
         expect(result.tools).toContain("typescript");
-        let runs = 0;
-        await runSelectedTypecheckParity({
-          repo,
-          since,
-          run: async () => {
-            runs++;
-            return true;
-          },
-          output: () => {},
-        });
-        expect(runs).toBe(1);
       },
     });
-  });
+  }, 15_000);
 
-test("identical committed compiler source identity skips parity", async () => {
+test("identical committed compiler source identity reports no change", async () => {
   const lock = npmLock({
     resolved: "file:compiler.tgz",
     integrity: integrity("same"),
@@ -302,22 +290,11 @@ test("identical committed compiler source identity skips parity", async () => {
         changed: false,
         tools: [],
       });
-      let runs = 0;
-      await runSelectedTypecheckParity({
-        repo,
-        since,
-        run: async () => {
-          runs++;
-          return true;
-        },
-        output: () => {},
-      });
-      expect(runs).toBe(0);
     },
   });
-});
+}, 15_000);
 
-test("committed compiler source without byte identity runs parity fail closed", async () => {
+test("committed compiler source without byte identity fails closed as unreadable", async () => {
   await withCommittedLocks({
     before: npmLock({ integrity: integrity("before") }),
     after: npmLock({ resolved: "file:compiler" }),
@@ -326,20 +303,9 @@ test("committed compiler source without byte identity runs parity fail closed", 
         status: "unreadable",
         changed: true,
       });
-      let runs = 0;
-      await runSelectedTypecheckParity({
-        repo,
-        since,
-        run: async () => {
-          runs++;
-          return true;
-        },
-        output: () => {},
-      });
-      expect(runs).toBe(1);
     },
   });
-});
+}, 15_000);
 
 test("malformed digest strings are not immutable source evidence", () => {
   for (const digest of [
@@ -354,7 +320,7 @@ test("malformed digest strings are not immutable source evidence", () => {
         text: npmLock({ resolved: "file:compiler.tgz", integrity: digest }),
       }),
     ).toThrow("immutable identity");
-});
+}, 15_000);
 
 for (const [file, manager, before, after] of [
   [
@@ -402,7 +368,7 @@ for (const [file, manager, before, after] of [
           expect(result.tools.includes("typescript")).toBe(changed);
         },
       });
-  });
+  }, 15_000);
 }
 
 test("pnpm compiler Git and directory metadata fail closed without evidence", () => {
@@ -416,7 +382,7 @@ test("pnpm compiler Git and directory metadata fail closed without evidence", ()
         text: pnpmLock({ resolution }),
       }),
     ).toThrow("immutable identity");
-});
+}, 15_000);
 
 test("committed manifest compiler source changes are retained with an unchanged lock hash", async () => {
   const lock = npmLock({ integrity: integrity("same") });
@@ -431,7 +397,7 @@ test("committed manifest compiler source changes are retained with an unchanged 
       expect(result.tools).toContain("typescript");
     },
   });
-});
+}, 15_000);
 
 test("manifest compiler directory cannot borrow a minimal registry lock as source evidence", async () => {
   const lock = npmLock({});
@@ -446,7 +412,7 @@ test("manifest compiler directory cannot borrow a minimal registry lock as sourc
       });
     },
   });
-});
+}, 15_000);
 
 for (const resolved of [
   "git@example.test:compiler.git#main",
@@ -459,7 +425,7 @@ for (const resolved of [
         text: npmLock({ resolved }),
       }),
     ).toThrow("immutable identity");
-  });
+  }, 15_000);
 
 test("pnpm compiler descriptor protocols cannot borrow a registry proof", () => {
   for (const descriptor of [
@@ -476,7 +442,7 @@ test("pnpm compiler descriptor protocols cannot borrow a registry proof", () => 
         }),
       }),
     ).toThrow("immutable identity");
-});
+}, 15_000);
 
 test("compiler directory protocols cannot borrow archive integrity or unrelated commits", () => {
   const digest = integrity("archive");
@@ -519,7 +485,7 @@ test("compiler directory protocols cannot borrow archive integrity or unrelated 
   expect(() =>
     parseChangedLock({ file: "bun.lock", text: bunDirectory }),
   ).toThrow("immutable identity");
-});
+}, 15_000);
 
 test("local compiler archives require archive integrity rather than unrelated Git commits", () => {
   for (const archive of ["file:compiler.tgz", "file:compiler.tar.gz"])
@@ -539,7 +505,7 @@ test("local compiler archives require archive integrity rather than unrelated Gi
     single("package-lock.json", npmLock({ commit: "a".repeat(40) })).sourceProof
       .type,
   ).toBe("registry");
-});
+}, 15_000);
 
 const peerSnapshotLock = (
   peerVersion: string,
@@ -584,9 +550,9 @@ test("pnpm compiler identity retains every peer and patch snapshot variant", () 
     single("pnpm-lock.yaml", peerSnapshotLock("1.0.0", "1.0.0", "1.0.1"))
       .identity,
   ).toBe(before.identity);
-});
+}, 15_000);
 
-test("committed pnpm peer snapshot edits run parity with compiler release unchanged", async () => {
+test("committed pnpm peer snapshot edits are TypeScript changes with the compiler release unchanged", async () => {
   await withCommittedLocks({
     file: "pnpm-lock.yaml",
     manager: "pnpm@12.9.1",
@@ -596,20 +562,9 @@ test("committed pnpm peer snapshot edits run parity with compiler release unchan
       const result = await detectToolchainChanges({ repo, since });
       expect(result).toEqual(expect.objectContaining({ status: "compared" }));
       expect(result.tools).toContain("typescript");
-      let runs = 0;
-      await runSelectedTypecheckParity({
-        repo,
-        since,
-        run: async () => {
-          runs++;
-          return true;
-        },
-        output: () => {},
-      });
-      expect(runs).toBe(1);
     },
   });
-});
+}, 15_000);
 
 for (const location of ["../local-compiler", "packages/compiler", ""])
   test(`canonical compiler directory metadata at ${location || "."} fails closed`, () => {
@@ -627,7 +582,7 @@ for (const location of ["../local-compiler", "packages/compiler", ""])
     expect(() => parseChangedLock({ file: "package-lock.json", text })).toThrow(
       "Compiler directory lock entry has no tracked byte identity",
     );
-  });
+  }, 15_000);
 
 test("ordinary local directory package metadata remains outside compiler inventory", () => {
   const text = JSON.stringify({
@@ -640,7 +595,7 @@ test("ordinary local directory package metadata remains outside compiler invento
   expect(
     parseChangedLock({ file: "package-lock.json", text }).resolutions,
   ).toEqual([]);
-});
+}, 15_000);
 
 test("Git commit evidence accepts exactly SHA-1 or SHA-256 lengths", () => {
   for (const length of [39, 40, 41, 63, 64, 65]) {
@@ -660,7 +615,7 @@ test("Git commit evidence accepts exactly SHA-1 or SHA-256 lengths", () => {
         ).toThrow("immutable identity");
     }
   }
-});
+}, 15_000);
 
 test("mutable Git branches cannot borrow archive integrity or cache checksums", () => {
   expect(() =>
@@ -695,7 +650,7 @@ test("mutable Git branches cannot borrow archive integrity or cache checksums", 
   expect(() => parseChangedLock({ file: "yarn.lock", text })).toThrow(
     "immutable identity",
   );
-});
+}, 15_000);
 
 test("Yarn compiler patch protocols require tracked patch contents despite cache checksums", () => {
   for (const name of ["typescript", "@typescript/native", "bun-types"])
@@ -724,7 +679,7 @@ test("Yarn compiler patch protocols require tracked patch contents despite cache
   expect(() =>
     parseChangedLock({ file: "yarn.lock", text: resolutionOnly }),
   ).toThrow("Yarn compiler patch identity requires tracked patch bytes");
-});
+}, 15_000);
 
 test("ordinary Yarn patch protocols stay outside compiler inventory", () => {
   const descriptor = "ordinary@patch:ordinary@npm%3A1.0.0#./ordinary.patch";
@@ -737,4 +692,4 @@ test("ordinary Yarn patch protocols stay outside compiler inventory", () => {
     },
   });
   expect(parseChangedLock({ file: "yarn.lock", text }).resolutions).toEqual([]);
-});
+}, 15_000);

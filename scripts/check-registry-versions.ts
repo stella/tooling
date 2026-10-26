@@ -6,10 +6,7 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 
-import {
-  checkReleaseVersion,
-  parseNpmVersions,
-} from "./lib/registry-versions";
+import { checkReleaseVersion, parseNpmVersions } from "./lib/registry-versions";
 
 const ROOT = join(import.meta.dirname, "..");
 const PACKAGES_DIRECTORY = join(ROOT, "packages");

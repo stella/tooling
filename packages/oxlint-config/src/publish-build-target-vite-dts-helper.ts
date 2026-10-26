@@ -6,10 +6,11 @@ import type { Plugin } from "vite";
 import { compilerPackages } from "./compiler-packages";
 import {
   createDeclarationEmissionLedger,
+  declarationHookParts,
   guardDeclarationHook,
+  type ReviewedViteDtsOptions,
   reviewedViteDtsOptions,
   reviewedViteDtsVersions,
-  type ReviewedViteDtsOptions,
 } from "./publish-build-target-vite-dts";
 
 type DeclarationOnlyDtsOptions = { directory: string } & ReviewedViteDtsOptions;
@@ -106,11 +107,14 @@ export const declarationOnlyDts = ({
   const ledger = createDeclarationEmissionLedger();
   const hook = (name: (typeof hookNames)[number]) =>
     guardDeclarationHook({
-      hook: plugin[name],
+      hook: declarationHookParts(plugin[name]).handler,
       hookName: name,
       outputDirectories,
       ledger,
     });
+  // The object form's static id filter is kept; its handler stays guarded.
+  const transformFilter = declarationHookParts(plugin["transform"]).filter;
+  const transform = hook("transform");
   const configResolved = hook("configResolved");
   return {
     name: "stll:declaration-only-dts",
@@ -159,7 +163,10 @@ export const declarationOnlyDts = ({
       await configResolved.call(this, config);
     },
     buildStart: hook("buildStart"),
-    transform: hook("transform"),
+    transform:
+      transformFilter === undefined
+        ? transform
+        : { filter: transformFilter, handler: transform },
     watchChange: hook("watchChange"),
     generateBundle: {
       order: "post",
