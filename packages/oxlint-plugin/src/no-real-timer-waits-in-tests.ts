@@ -1,3 +1,5 @@
+import type { Plugin } from "@oxlint/plugins";
+
 import {
   createBindingResolver,
   isNode,
@@ -7,7 +9,7 @@ import {
 
 const timerModules = new Set(["timers/promises", "node:timers/promises"]);
 
-export default testOnlyPlugin(
+const plugin: Plugin = testOnlyPlugin(
   "no-real-timer-waits-in-tests",
   "noRealTimerWait",
   "Use @stll/test-kit's fake timers or bounded wait instead of real timer waits.",
@@ -59,3 +61,5 @@ export default testOnlyPlugin(
     };
   },
 );
+
+export default plugin;

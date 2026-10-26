@@ -1085,7 +1085,7 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
     for (const field of ["catalog", "catalogs"]) {
       if (value[field] === undefined) continue;
       // Catalog names and aliases need their owner's lockfile to classify; unknown
-      // entries conservatively force parity through the shared category.
+      // entries conservatively report a change through the shared category.
       tools.shared.add(`${file}:${field}:${stableJson(value[field])}`);
       const visit = (entry: unknown, at: string) => {
         if (!changedRecord(entry)) return;

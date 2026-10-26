@@ -61,17 +61,34 @@ describe("shared toolchain policy", () => {
     );
   });
 
-  test("supports both TypeScript install layouts", async () => {
-    const typescriptPackage = await readJson(
+  test("no repository manifest installs or peers on TypeScript", async () => {
+    for (const manifest of [
+      "package.json",
       "packages/typescript-config/package.json",
-    );
-
-    expect(typescriptPackage).toEqual(
-      expect.objectContaining({
-        peerDependencies: {
-          typescript: ">=6.0.3 <8",
-        },
-      }),
-    );
+      "packages/oxlint-config/package.json",
+      "packages/oxlint-plugin/package.json",
+      "packages/time/package.json",
+      "packages/test-kit/package.json",
+    ]) {
+      const json = await readJson(manifest);
+      if (typeof json !== "object" || json === null)
+        throw new Error(`${manifest} must be an object`);
+      for (const section of [
+        "dependencies",
+        "devDependencies",
+        "optionalDependencies",
+        "peerDependencies",
+      ]) {
+        const entries: unknown = Reflect.get(json, section);
+        if (typeof entries !== "object" || entries === null) continue;
+        for (const name of ["typescript", "@typescript/native"])
+          expect({
+            manifest,
+            section,
+            name,
+            declared: name in entries,
+          }).toEqual({ manifest, section, name, declared: false });
+      }
+    }
   });
 });

@@ -17,7 +17,6 @@
     "stll-quarantine": "./dist/quarantine-cli.mjs",
     "stll-toolchain-changed": "./dist/toolchain-changed-cli.mjs",
     "stll-toolchain-check": "./dist/toolchain-check-cli.mjs",
-    "stll-typecheck-parity": "./dist/typecheck-parity-cli.mjs",
     "stll-typecheck-probe": "./dist/typecheck-probe-cli.mjs",
     "stll-normalize-wasi-loaders": "./dist/wasi-loader-normalizer-cli.mjs"
   },
@@ -125,7 +124,7 @@
   },
   "scripts": {
     "build": "tsdown",
-    "typecheck": "bun check",
+    "typecheck": "bun check --no-pretty --all --project=tsconfig.json",
     "test": "bun test"
   },
   "dependencies": {
@@ -138,6 +137,7 @@
     "picomatch": "4.0.7",
     "semver": "7.8.5",
     "smol-toml": "1.9.1",
+    "tsrs": "0.18.0-ts7.1.0-dev.20260929",
     "tsx": "4.23.15",
     "yaml": "2.9.1"
   },
@@ -146,7 +146,6 @@
     "@types/picomatch": "4.0.3",
     "@types/semver": "7.8.0",
     "oxlint": "1.87.0",
-    "typescript": "7.0.2",
     "unplugin-dts": "1.1.2",
     "vite": "8.3.4",
     "vite-plugin-dts": "5.1.2"

@@ -1,3 +1,4 @@
+import { type ExpiryScope, overdueVerdict } from "./dated-entry-scope";
 import { parseJsonc } from "./jsonc";
 
 export const REQUIRED_RELEASE_AGE_SECONDS = 5 * 24 * 60 * 60;
@@ -305,7 +306,23 @@ type CheckOptions = {
   npmrcPresent?: boolean;
   now?: Date;
   firstPartyPackages?: FirstPartyPackages;
+  expiry?: ExpiryScope;
 };
+/** Whether the base bunfig declares this temporary exclude with the same expiry. */
+const declaresTemporary = (
+  baseBunfig: string,
+  parseToml: ParseToml,
+  name: string,
+  timestamp: string,
+) =>
+  readSourceArray(baseBunfig, parseToml).entries.some((entry) => {
+    const annotation = annotationOf(entry);
+    return (
+      entry.name === name &&
+      annotation.type === "expires" &&
+      annotation.timestamp === timestamp
+    );
+  });
 export const checkQuarantinePolicy = ({
   bunfig,
   lockfile,
@@ -313,6 +330,7 @@ export const checkQuarantinePolicy = ({
   npmrcPresent = false,
   now = new Date(),
   firstPartyPackages,
+  expiry = { kind: "enforce" },
 }: CheckOptions): CheckResult => {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -356,11 +374,21 @@ export const checkQuarantinePolicy = ({
         );
         continue;
       }
-      if (nowMs >= timestampMs + 24 * HOUR_MS)
-        errors.push(
-          `bunfig.toml temporary quarantine exclude "${entry.name}" expired at ${annotation.timestamp} and is still present`,
+      if (nowMs >= timestampMs + 24 * HOUR_MS) {
+        const overdue = `bunfig.toml temporary quarantine exclude "${entry.name}" expired at ${annotation.timestamp} and is still present`;
+        const verdict = overdueVerdict(expiry, "bunfig.toml", (base) =>
+          declaresTemporary(base, parseToml, entry.name, annotation.timestamp),
         );
-      else if (nowMs >= timestampMs)
+        if (!verdict.fail)
+          warnings.push(
+            `${overdue}; merge its removal PR (default-branch and scheduled runs fail, as do changes that add or edit it)`,
+          );
+        else if (verdict.unavailable === undefined) errors.push(overdue);
+        else
+          errors.push(
+            `${overdue}; cannot tell whether this change adds it: ${verdict.unavailable}`,
+          );
+      } else if (nowMs >= timestampMs)
         warnings.push(
           `bunfig.toml temporary quarantine exclude "${entry.name}" expired at ${annotation.timestamp}; its removal PR should be merged`,
         );

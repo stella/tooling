@@ -1,6 +1,6 @@
 export const setProcessEnvironment = (
   values: Record<string, string | undefined>,
-) => {
+): (() => void) => {
   const originals = Object.entries(values).map(([key]) => ({
     key,
     present: Object.hasOwn(process.env, key),

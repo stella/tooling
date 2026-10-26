@@ -1,4 +1,13 @@
+import { createRequire } from "node:module";
+import path from "node:path";
 import { defineConfig } from "tsdown";
+
+// About 200 exported declarations here rely on inferred types, which the oxc
+// generator cannot emit; tsrs emits them from the program instead.
+const tsrs = path.join(
+  path.dirname(createRequire(import.meta.url).resolve("tsrs/package.json")),
+  "bin/tsrs",
+);
 
 export default defineConfig({
   entry: [
@@ -17,13 +26,12 @@ export default defineConfig({
     "src/publish-build-target-nuxt-helper.ts",
     "src/publish-build-target-vite-dts-helper.ts",
     "src/consumer-compat-cli.ts",
-    "src/typecheck-parity-cli.ts",
     "src/toolchain-changed-cli.ts",
     "src/typecheck-probe-cli.ts",
     "src/wasi-loader-normalizer-cli.ts",
   ],
   format: ["esm", "cjs"],
-  dts: true,
+  dts: { generator: "tsgo", tsgo: { path: tsrs } },
   clean: true,
   sourcemap: true,
   hash: false,

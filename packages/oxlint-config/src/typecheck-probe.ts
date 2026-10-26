@@ -2,8 +2,70 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { open, realpath, stat, unlink } from "node:fs/promises";
 import path, { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 
-import { diagnosticSet } from "./typecheck-parity";
+const diagnosticLocation = (file: string, repo: string) => {
+  const normalized = file.replaceAll("\\", "/");
+  const bundled = /^bundled:\/\/\/libs\/(lib\.[^/]+\.d\.ts)$/.exec(normalized);
+  const installed =
+    /(?:^|\/)node_modules\/(?:typescript|@typescript\/(?:native|typescript-[^/]+))\/(?:.*\/)?(lib\.[^/]+\.d\.ts)$/.exec(
+      normalized,
+    );
+  const library = bundled?.at(1) ?? installed?.at(1);
+  return library === undefined
+    ? relative(repo, resolve(repo, file)).replaceAll("\\", "/")
+    : `<lib>/${library}`;
+};
+const globalDiagnosticKey = (code: string, message: string) =>
+  `<config>:0:${code}:${message.trim().replaceAll(/\s+/g, " ")}`;
+
+/** Normalizes checker output to sorted `file:line:code` keys. */
+export const diagnosticSet = (output: string, repo: string): string[] => {
+  const clean = stripVTControlCharacters(output);
+  const diagnostics = new Set<string>();
+  for (const block of clean.matchAll(/<error\b([^>]*)>([\s\S]*?)<\/error>/g)) {
+    const attributes = new Map(
+      [...(block.at(1) ?? "").matchAll(/(\w+)="([^"]*)"/g)].map((match) => [
+        match.at(1),
+        match.at(2),
+      ]),
+    );
+    const file = attributes.get("file");
+    const row = attributes.get("line");
+    const code = attributes.get("code");
+    if (code === undefined || !/^TS\d+$/.test(code)) continue;
+    if (file !== undefined && row !== undefined && row !== "0")
+      diagnostics.add(
+        `${diagnosticLocation(file, repo)}:${row}:${code.slice(2)}`,
+      );
+    else {
+      const message =
+        (block.at(2) ?? "").split(/<(?:source|related)\b/).at(0) ?? "";
+      diagnostics.add(globalDiagnosticKey(code.slice(2), message));
+    }
+  }
+  for (const rawLine of clean.split("\n")) {
+    const line = rawLine.replace(
+      /^(?!(?:error|warning) TS\d+:)(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]* [a-zA-Z0-9_.:-]+: /,
+      "",
+    );
+    if (line.startsWith("<error ")) continue;
+    const match =
+      /^(.*?)\((\d+),\d+\):\s*(?:error|warning) TS(\d+)/.exec(line) ??
+      /^(.*?):(\d+):\d+:\s*(?:error|warning) (?:TS)?(\d+)/.exec(line);
+    if (match) {
+      const [, file = "", row = "", code = ""] = match;
+      diagnostics.add(`${diagnosticLocation(file, repo)}:${row}:${code}`);
+    } else {
+      const global = /^(?:error|warning) TS(\d+):\s*(.*)/.exec(line);
+      if (global)
+        diagnostics.add(
+          globalDiagnosticKey(global.at(1) ?? "", global.at(2) ?? ""),
+        );
+    }
+  }
+  return [...diagnostics].sort();
+};
 
 type ProbeCommandOptions = {
   command: readonly string[];

@@ -61,30 +61,14 @@
       }
     }
   },
-  "typescriptInstallLayouts": [
-    {
-      "type": "direct",
-      "compilerPackage": "typescript",
-      "compilerSpecifier": "7.0.2",
-      "typecheckCommand": "bun check"
-    },
-    {
-      "type": "split-compatibility",
-      "compilerPackage": "@typescript/native",
-      "compilerSpecifier": "npm:typescript@7.0.2",
-      "compatibilityPackage": "typescript",
-      "compatibilitySpecifier": "6.0.3",
-      "typecheckCommand": "bun check"
-    }
-  ],
   "typescript6Compatibility": {
     "version": "6.0.3",
     "packageAlias": "typescript-compat",
-    "apiConsumers": ["TypeScript compiler API"],
     "peerBlockers": [
       "@astrojs/check",
       "@typescript-eslint/utils",
-      "dependency-cruiser"
+      "dependency-cruiser",
+      "vite-plugin-dts"
     ]
   },
   "@stll/oxlint-plugin": "0.6.2",

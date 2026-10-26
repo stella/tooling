@@ -13,6 +13,7 @@ import {
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { API } from "tsrs/unstable/async";
 
 const require = createRequire(import.meta.url);
 const configDirectory = path.resolve(
@@ -172,7 +173,7 @@ test.each(["js", "mjs", "cjs"] as const)(
   },
 );
 
-test("imported program files still need root membership, including combined inventory", () => {
+test("imported program files still need root membership, including combined inventory", async () => {
   const root = mkdtempSync(path.join(tmpdir(), "stll-import-membership-"));
   try {
     prepareNodeFixture(root);
@@ -192,8 +193,8 @@ test("imported program files still need root membership, including combined inve
       'import { existsSync } from "node:fs"; export const description = existsSync(".") ? "present" : "missing";\n',
     );
     const compiler = path.join(
-      path.dirname(require.resolve("typescript/package.json")),
-      "bin/tsc",
+      path.dirname(require.resolve("tsrs/package.json")),
+      "bin/tsrs",
     );
     const invoke = (executable: string, args: string[]) => {
       const result = spawnSync(process.execPath, [executable, ...args], {
@@ -204,19 +205,24 @@ test("imported program files still need root membership, including combined inve
       if (result.error !== undefined) throw result.error;
       return { status: result.status, output: result.stdout + result.stderr };
     };
-    const roots = invoke(compiler, [
-      "--showConfig",
-      "-p",
-      "scripts/tsconfig.json",
-    ]);
+    const api = new API({ cwd: root });
+    try {
+      const roots = await api.parseConfigFile(
+        path.join(root, "scripts/tsconfig.json"),
+      );
+      expect(roots.errors).toEqual([]);
+      // The roots are exactly the included file; the imported helper is not one.
+      expect(roots.fileNames.map((file) => path.basename(file))).toEqual([
+        "index.ts",
+      ]);
+    } finally {
+      await api.close();
+    }
     const program = invoke(compiler, [
       "--listFilesOnly",
       "-p",
       "scripts/tsconfig.json",
     ]);
-    expect(roots.status, roots.output).toBe(0);
-    expect(roots.output).toContain('"./index.ts"');
-    expect(roots.output).not.toContain('"./helper.ts"');
     expect(program.status, program.output).toBe(0);
     expect(program.output).toContain(path.join(root, "scripts/helper.ts"));
     const oxlint = path.join(oxlintDirectory, "bin/oxlint");

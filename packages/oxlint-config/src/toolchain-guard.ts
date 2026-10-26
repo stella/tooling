@@ -18,6 +18,7 @@ import {
   hasCloudSessionStartHook,
 } from "./cloud-setup-claude";
 import { parseCloudSetup } from "./cloud-setup-schema";
+import type { ExpiryScope } from "./dated-entry-scope";
 import { readGitTrackedOutput } from "./git-tracked-output";
 import { checkRepositoryQuarantine } from "./quarantine-policy";
 import { repositoryBun } from "./toolchain-bun";
@@ -49,7 +50,10 @@ import {
   type RuntimeDelegation,
   runtimeRules,
 } from "./toolchain-runtime";
-import { parseRustExceptions } from "./toolchain-rust";
+import {
+  checkRustExceptionExpiry,
+  parseRustExceptions,
+} from "./toolchain-rust";
 import { parseToolchainPolicy } from "./toolchain-schema";
 
 export const toolchainRules = [
@@ -244,6 +248,8 @@ type CheckSharedToolchainOptions = {
   onDelegated?: ((report: RuntimeDelegation) => void) | undefined;
   onWarning?: ((report: SharedToolchainDiagnostic) => void) | undefined;
   now?: Date | undefined;
+  /** Defaults to failing every overdue dated entry; CLIs derive it from the run context. */
+  expiryScope?: ExpiryScope | undefined;
 };
 
 export const checkToolchain = ({
@@ -252,6 +258,7 @@ export const checkToolchain = ({
   onDelegated,
   onWarning,
   now,
+  expiryScope = { kind: "enforce" },
 }: CheckSharedToolchainOptions) => {
   const { files, trackedFiles, diagnostics } = readToolchainInputs(root, {
     bunLock: "content",
@@ -286,6 +293,25 @@ export const checkToolchain = ({
         JSON.parse(files["stll-toolchain.json"]),
       );
       dynamicSelectors = configuration.dynamicSelectors;
+      const expiry = checkRustExceptionExpiry({
+        exceptions: configuration.rustExceptions,
+        now,
+        scope: expiryScope,
+      });
+      for (const message of expiry.errors)
+        diagnostics.push({
+          rule: "configuration",
+          path: "stll-toolchain.json",
+          line: 1,
+          message,
+        });
+      for (const message of expiry.warnings)
+        onWarning?.({
+          rule: "configuration",
+          path: "stll-toolchain.json",
+          line: 1,
+          message,
+        });
       for (const entry of configuration.engineFloors)
         engineFloors.push(resolveEngineFloor(entry, files));
     } catch (error) {
@@ -392,6 +418,7 @@ export const checkToolchain = ({
         files,
         now,
         npmrcPresent: trackedFiles.has(".npmrc"),
+        expiry: expiryScope,
       });
       for (const message of result.errors)
         diagnostics.push({

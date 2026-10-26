@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
 
+import { resolveExpiryScope } from "./dated-entry-scope";
 import { checkToolchain } from "./toolchain-guard";
 import { parseToolchainPolicy } from "./toolchain-schema";
 
@@ -21,6 +22,7 @@ try {
   const diagnostics = checkToolchain({
     root: process.cwd(),
     policy,
+    expiryScope: resolveExpiryScope(process.cwd()),
     onWarning: ({ path, line, rule, message }) =>
       process.stderr.write(`${path}:${line}: [${rule}] warning: ${message}\n`),
     onDelegated: ({ path, line, tool, selector, ref }) =>

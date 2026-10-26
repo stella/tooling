@@ -18,7 +18,7 @@ export default defineConfig({
     "src/no-wall-clock-bound.ts",
   ],
   format: ["esm", "cjs"],
-  dts: true,
+  dts: { generator: "oxc" },
   clean: true,
   sourcemap: true,
   hash: false,
