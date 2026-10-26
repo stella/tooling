@@ -14,8 +14,8 @@ consumer files; consumers check drift in CI.
 - `clippy.toml`: portable disallowed APIs and lint thresholds.
 - `cargo-root.toml`: root `Cargo.toml` snippets for single-crate packages.
 - `cargo-workspace.toml`: root `Cargo.toml` snippets for workspaces.
-- `cargo-config.toml`: optional `.cargo/config.toml` aliases for local and CI
-  checks.
+- `cargo-config.toml`: `.cargo/config.toml` aliases for local and CI checks
+  (`ci-fmt`, `ci-clippy`, `ci-stella-lint`, `ci-test`).
 
 ## Recommended Checks
 
