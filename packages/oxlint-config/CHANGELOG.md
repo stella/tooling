@@ -1,5 +1,19 @@
 # @stll/oxlint-config
 
+## 3.5.0
+
+### Minor Changes
+
+- [#249](https://github.com/stella/tooling/pull/249) [`249e608`](https://github.com/stella/tooling/commit/249e60828f6c3142dc9eb98c6fd0654043831d1e) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Support exact reviewed checkout-source declarations for historical release and delegated workflow consumers. Bind the checkout reference, destination, condition and consumer, verify the last overlapping writer, and reject stale declarations or changed provenance.
+
+### Patch Changes
+
+- [#255](https://github.com/stella/tooling/pull/255) [`755986c`](https://github.com/stella/tooling/commit/755986ca629dd419a32883960e5bb3c42b01acff) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Allow reviewed local actions at a checkout destination and in directory-only sparse selections while preserving version-file containment.
+
+- [#258](https://github.com/stella/tooling/pull/258) [`211d251`](https://github.com/stella/tooling/commit/211d25135a46bdedbecdc1b673000e12a534033e) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Recognize reviewed checkout consumers whose status-overriding condition proves the selected checkout completed successfully.
+
+- [#256](https://github.com/stella/tooling/pull/256) [`d83b9ae`](https://github.com/stella/tooling/commit/d83b9ae7fb7785366d230ed431bcde0766454fa3) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Track the working directory through bounded conditional Bun generator preparation and inventory the generator's possible nested lint scopes without executing shell conditions.
+
 ## 3.4.1
 
 ### Patch Changes
