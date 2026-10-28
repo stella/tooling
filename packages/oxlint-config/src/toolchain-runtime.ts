@@ -11,6 +11,17 @@ import {
 } from "yaml";
 
 import {
+  type CheckoutSource,
+  proveCheckoutSource,
+} from "./toolchain-checkout-sources";
+import {
+  checkoutActionRef,
+  literalSparseCheckoutPath,
+  normalizeCheckoutPath,
+  selfCheckoutRepository,
+  sparseCheckoutPaths,
+} from "./toolchain-checkout-syntax";
+import {
   containerDocumentImages,
   isComposeDefinitionPath,
   isKubernetesDefinitionPath,
@@ -85,6 +96,8 @@ type CheckRuntimeFileOptions = {
   dynamicSelectors?: readonly DynamicSelector[] | undefined;
   nodeCompatibility?: readonly NodeCompatibility[] | undefined;
   onNodeCompatibility?: ((entry: NodeCompatibility) => void) | undefined;
+  checkoutSources?: readonly CheckoutSource[] | undefined;
+  onCheckoutSource?: ((entry: CheckoutSource) => void) | undefined;
   onDynamicSelector?: ((entry: DynamicSelector) => void) | undefined;
   rustExceptions?: readonly RustException[] | undefined;
   rustInstallFixtures?: readonly RustInstallFixture[] | undefined;
@@ -311,6 +324,8 @@ export const checkRuntimeFile = ({
   dynamicSelectors = [],
   nodeCompatibility = [],
   onNodeCompatibility,
+  checkoutSources = [],
+  onCheckoutSource,
   onDynamicSelector,
   rustExceptions = [],
   rustInstallFixtures = [],
@@ -1099,8 +1114,6 @@ export const checkRuntimeFile = ({
     !value.includes(":") &&
     !path.posix.isAbsolute(value) &&
     !value.split("/").includes("..");
-  const normalizeCheckoutPath = (prefix: string) =>
-    path.posix.normalize(prefix).replace(/\/$/, "") || ".";
   type RuntimeReferenceOptions = {
     value: unknown;
     tool: "node" | "python" | "bun";
@@ -1143,6 +1156,41 @@ export const checkRuntimeFile = ({
           selector.startsWith(`${prefix}/`)),
     );
   };
+  let reviewedWorkflow: unknown;
+  const reviewedCheckout = (
+    selector: string,
+    tool: RuntimeDelegation["tool"],
+    line: number,
+  ) => {
+    const entry = checkoutSources.find(
+      (candidate) =>
+        candidate.path === file &&
+        currentLocation === `jobs.${candidate.job}.steps.${candidate.consumer}`,
+    );
+    const checkoutSha = policy.actions["actions/checkout"]?.sha;
+    if (
+      entry === undefined ||
+      checkoutSha === undefined ||
+      !proveCheckoutSource({
+        declaration: entry,
+        workflow: reviewedWorkflow,
+        checkoutSha,
+        selector,
+        repository,
+      })
+    )
+      return false;
+    onCheckoutSource?.(entry);
+    onDelegated?.({
+      path: file,
+      line,
+      tool,
+      selector,
+      checkoutPath: entry.destination,
+      ref: entry.ref ?? "<event default>",
+    });
+    return true;
+  };
   const checkReference = ({ value, tool, line }: RuntimeReferenceOptions) => {
     const selectors = {
       node: [".node-version", ".nvmrc"],
@@ -1154,6 +1202,12 @@ export const checkRuntimeFile = ({
     const selector = staticRepositoryPath(value)
       ? path.posix.normalize(value)
       : undefined;
+    if (
+      selector !== undefined &&
+      allowed.includes(path.posix.basename(selector)) &&
+      reviewedCheckout(selector, tool, line)
+    )
+      return;
     const providers = checkoutProvidersFor(selector);
     const binding = selector === undefined ? undefined : providers.at(-1);
     const dynamicSource = providers.some((entry) => entry.dynamicSource);
@@ -1439,8 +1493,6 @@ export const checkRuntimeFile = ({
     while (position < entry.length) {
       const start = entry.indexOf("${{", position);
       const literal = entry.slice(position, start < 0 ? entry.length : start);
-      if (/[!$*?[\]\\:]/.test(literal) || literal.split("/").includes(".."))
-        return false;
       literalPath += literal;
       if (start < 0) break;
       const expression = expressionAt(entry, start);
@@ -1448,7 +1500,7 @@ export const checkRuntimeFile = ({
       literalPath += "expression";
       position = expression.end;
     }
-    return staticRepositoryPath(literalPath);
+    return literalSparseCheckoutPath(literalPath);
   };
   const checkoutPrefixOf = (node: unknown) => {
     const destination = getInput(node, "path");
@@ -1480,10 +1532,7 @@ export const checkRuntimeFile = ({
             cone.value !== "false")))
     )
       return { mode: "invalid" };
-    const paths = value.value
-      .split(/\r?\n/)
-      .map((entry) => entry.trim().replace(/^\//, ""))
-      .filter((entry) => entry !== "");
+    const paths = sparseCheckoutPaths(value.value);
     if (paths.length === 0 || paths.some((entry) => !sparseEntryIsValid(entry)))
       return { mode: "invalid" };
     const literalPaths = new Set(paths.filter((entry) => !dynamic(entry)));
@@ -1531,6 +1580,8 @@ export const checkRuntimeFile = ({
       const selector = staticRepositoryPath(value)
         ? path.posix.normalize(value)
         : undefined;
+      if (selector !== undefined && reviewedCheckout(selector, "action", line))
+        return;
       const providers = checkoutProvidersFor(selector);
       const binding = selector === undefined ? undefined : providers.at(-1);
       if (
@@ -1628,12 +1679,7 @@ export const checkRuntimeFile = ({
       let repo: unknown;
       if (checkoutRepository !== undefined)
         repo = isScalar(checkoutRepository) ? checkoutRepository.value : null;
-      const self =
-        repo === undefined ||
-        repo === "${{ github.repository }}" ||
-        (typeof repo === "string" &&
-          repository !== undefined &&
-          repo.toLowerCase() === repository.toLowerCase());
+      const self = selfCheckoutRepository(repo, repository);
       const workflowSource =
         repo === "${{ job.workflow_repository }}" &&
         isScalar(checkoutRef) &&
@@ -1857,7 +1903,7 @@ export const checkRuntimeFile = ({
       if (
         !isScalar(uses) ||
         typeof uses.value !== "string" ||
-        !uses.value.toLowerCase().startsWith("actions/checkout@")
+        checkoutActionRef(uses.value) === undefined
       )
         continue;
       const prefix = checkoutPrefixOf(step);
@@ -1889,6 +1935,7 @@ export const checkRuntimeFile = ({
   try {
     // Resolve aliases first with an expansion bound before visiting executable fields.
     const workflow = document.toJS({ maxAliasCount: 100 });
+    reviewedWorkflow = workflow;
     if (automationKind === "workflow") {
       for (const finding of checkWorkflowTrust(workflow)) {
         const jobNode = getNode(
