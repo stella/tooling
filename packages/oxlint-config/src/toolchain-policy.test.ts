@@ -45,6 +45,9 @@ describe("shared toolchain policy", () => {
   });
 
   test("rejects pre-TS7 tsgolint consumers", async () => {
+    expect(
+      Number(toolchainPolicy["oxlint-tsgolint"].split(".").at(0)),
+    ).toBeGreaterThanOrEqual(7);
     const oxlintPackage = await readJson("packages/oxlint-config/package.json");
     if (typeof oxlintPackage !== "object" || oxlintPackage === null)
       throw new Error(
