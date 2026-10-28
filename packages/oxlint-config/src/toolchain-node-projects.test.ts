@@ -1109,3 +1109,58 @@ test("declared inventory runtimes load real configs independently of the checker
     rmSync(bundleRoot, { recursive: true, force: true });
   }
 }, 15_000);
+
+test("cross-workspace Bun scripts retain their own lint scopes and cd scopes resolve from repository root", () => {
+  withInventoryFixture((root, trackedFiles) => {
+    const manifest = {
+      ...fixtureManifest,
+      packageManager: "bun@1.4.4",
+      workspaces: ["packages/*"],
+      scripts: { lint: "turbo run lint" },
+    };
+    const write = (file: string, contents: string) => {
+      mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+      writeFileSync(path.join(root, file), contents);
+      trackedFiles.add(file);
+    };
+    write("package.json", JSON.stringify(manifest));
+    write(
+      "packages/api/package.json",
+      JSON.stringify({
+        name: "@fixture/api",
+        scripts: {
+          lint: "bun --cwd=../generator run generate && cd ../.. && bun --bun oxlint -c .oxlintrc.json packages/api",
+        },
+      }),
+    );
+    write(
+      "packages/generator/package.json",
+      JSON.stringify({
+        name: "@fixture/generator",
+        scripts: { generate: "oxlint -c ../../.oxlintrc.json ." },
+      }),
+    );
+    for (const directory of ["packages/api", "packages/generator"]) {
+      write(`${directory}/orphan.ts`, "export const value = 1;\n");
+      write(`${directory}/tsconfig.json`, '{"files":[]}');
+    }
+    trackedFiles.add(".oxlintrc.json");
+    const diagnostics = checkNodeProjects({ root, manifest, trackedFiles });
+    expect(diagnostics.map(({ path: file }) => file).sort()).toEqual([
+      "packages/api/orphan.ts",
+      "packages/generator/orphan.ts",
+    ]);
+    write(
+      "packages/generator/package.json",
+      JSON.stringify({
+        name: "@fixture/generator",
+        scripts: { generate: "bun --cwd=../api run lint" },
+      }),
+    );
+    expect(
+      checkNodeProjects({ root, manifest, trackedFiles }).some(({ message }) =>
+        message.includes("Cyclic workspace script delegation"),
+      ),
+    ).toBe(true);
+  });
+}, 15_000);

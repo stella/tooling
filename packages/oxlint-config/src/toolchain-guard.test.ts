@@ -1250,3 +1250,25 @@ test("historical install declarations must match a tracked install probe", () =>
       }),
     );
 });
+
+test("staged selector declarations cannot use untracked source evidence", () => {
+  const selector = "scripts/select-staged.ts";
+  const configuration = JSON.stringify({
+    formatterStagedSelector: {
+      script: selector,
+      reason: "Author-written staged paths.",
+    },
+  });
+  const files = {
+    "stll-toolchain.json": configuration,
+    "lefthook.yml": `pre-commit:\n  commands:\n    format:\n      files: bun ${selector}\n      run: bun fmt --staged {files}\n`,
+  };
+  expect(fixture(files, { [selector]: "export {};" })).toContainEqual(
+    expect.objectContaining({ rule: "configuration", path: selector }),
+  );
+  expect(
+    fixture({ ...files, [selector]: "export {};" }).filter(
+      ({ rule }) => rule === "configuration",
+    ),
+  ).toEqual([]);
+});

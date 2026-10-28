@@ -9,6 +9,9 @@ export type LifecycleFile =
   | { type: "unknown" };
 
 export type ScriptLifecycleContext = {
+  directory?: string;
+  assertDirectory?: (directory: string) => void;
+  invokeBunScript?: (directory: string, script: string) => void;
   packageManager?: unknown;
   npmrc?: LifecycleFile;
   pnpmWorkspace?: LifecycleFile;

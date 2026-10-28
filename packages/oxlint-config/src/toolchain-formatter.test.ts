@@ -3,7 +3,9 @@ import { expect, test } from "bun:test";
 import toolchain from "../toolchain.json";
 import {
   checkFormatter,
+  parseFormatterCheckSource,
   parseFormatterPolicy,
+  parseFormatterStagedSelector,
   sharedFormatTables,
 } from "./toolchain-formatter";
 import { toolchainInputKind } from "./toolchain-inputs";
@@ -343,4 +345,179 @@ test("an ignore pattern that covers a workspace package is rejected", () => {
     "bunfig.toml: bunfig.toml [fmt] ignorePatterns entry mcp/ covers workspace packages (packages/mcp); ignore only their generated or vendored paths",
     "bunfig.toml: bunfig.toml [fmt] ignorePatterns entry packages/*/src/** covers workspace packages (packages/mcp, packages/benchmark); ignore only their generated or vendored paths",
   ]);
+});
+
+test("only an empty root Prettier YAML mapping may stop ancestor lookup", () => {
+  for (const text of [
+    "{}\n",
+    "# Checkout boundary; options belong in bunfig.toml.\n{}\n",
+  ]) {
+    expect(
+      checkFormatter({
+        files: { ...repository, ".prettierrc.yml": text },
+        policy,
+        usesBun: true,
+      }),
+    ).toEqual([]);
+  }
+  for (const [file, text] of [
+    [".prettierrc.yml", "semi: false\n"],
+    [".prettierrc.yml", "overrides: []\n"],
+    [".prettierrc.yml", "null\n"],
+    [".prettierrc.yml", "[]\n"],
+    [".prettierrc.yml", ""],
+    [".prettierrc.yml", "{\n"],
+    ["packages/core/.prettierrc.yml", "{}\n"],
+    [".prettierrc.json", "{}\n"],
+  ] as const) {
+    expect(
+      checkFormatter({
+        files: { ...repository, [file]: text },
+        policy,
+        usesBun: true,
+      }).some((diagnostic) => diagnostic.path === file),
+    ).toBe(true);
+  }
+});
+
+test("declared staged selectors bind the exact hook and never narrow CI", () => {
+  const stagedSelector = parseFormatterStagedSelector({
+    script: "scripts/staged.ts",
+    reason: "Select author-written staged paths, including merge resolutions.",
+  });
+  const hook =
+    "pre-commit:\n  commands:\n    format:\n      files: bun scripts/staged.ts\n      run: bun fmt --staged --ignore-unknown {files}\n";
+  const files = {
+    ...repository,
+    "scripts/staged.ts": "export {};",
+    "lefthook.yml": hook,
+  };
+  expect(
+    checkFormatter({ files, policy, usesBun: true, stagedSelector }),
+  ).toEqual([]);
+  for (const changed of [
+    hook.replace("scripts/staged.ts", "scripts/other.ts"),
+    hook.replace("{files}", "{staged_files}"),
+    hook.replace("{files}", "src/"),
+    hook.replace("--staged", "--check"),
+    hook.replace("      files:", "      glob: '*.ts'\n      files:"),
+    hook.replace("      files:", "      root: packages/core\n      files:"),
+    hook.replace("{files}", "{files} || true"),
+  ])
+    expect(
+      checkFormatter({
+        files: { ...files, "lefthook.yml": changed },
+        policy,
+        usesBun: true,
+        stagedSelector,
+      }).length,
+    ).toBeGreaterThan(0);
+  expect(
+    checkFormatter({
+      files: {
+        ...files,
+        ".github/workflows/ci.yml": workflow.replace(
+          "bun fmt --check",
+          "bun fmt --check {files}",
+        ),
+      },
+      policy,
+      usesBun: true,
+      stagedSelector,
+    }).length,
+  ).toBeGreaterThan(0);
+  expect(
+    checkFormatter({
+      files: { ...repository, "lefthook.yml": hook },
+      policy,
+      usesBun: true,
+      stagedSelector,
+    }).length,
+  ).toBeGreaterThan(0);
+  for (const input of [
+    { script: "../outside.ts", reason: "test" },
+    { script: "scripts/*.ts", reason: "test" },
+    { script: "scripts/a.ts", reason: "" },
+    { script: "scripts/a.ts", reason: "test", extra: true },
+  ])
+    expect(() => parseFormatterStagedSelector(input)).toThrow();
+});
+
+test("delegated CI formatting requires declared files and an executable workflow reference", () => {
+  const checkSource = parseFormatterCheckSource({
+    source: ".github/checks/policy.yml",
+    workflow: ".github/workflows/ci.yml",
+    job: "policy",
+    runner: "scripts/check-pool.ts",
+    argument: "policy",
+    reason: "The tested pool owns policy check execution.",
+  });
+  const files = {
+    ...repository,
+    "scripts/check-pool.ts": "export {};",
+    ".github/checks/policy.yml": "checks:\n  - run: bun fmt --check\n",
+    ".github/workflows/ci.yml":
+      "jobs:\n  policy:\n    steps:\n      - run: CONTEXT=literal exec bun scripts/check-pool.ts run policy\n",
+  };
+  expect(checkFormatter({ files, policy, usesBun: true, checkSource })).toEqual(
+    [],
+  );
+  for (const command of [
+    "echo bun scripts/check-pool.ts run policy",
+    "bun scripts/other.ts run policy",
+    "bun scripts/check-pool.ts run other",
+    "bun scripts/check-pool.ts run $JOB",
+  ]) {
+    expect(
+      checkFormatter({
+        files: {
+          ...files,
+          ".github/workflows/ci.yml": `jobs:\n  policy:\n    steps:\n      - run: ${command}\n`,
+        },
+        policy,
+        usesBun: true,
+        checkSource,
+      }).length,
+    ).toBeGreaterThan(0);
+  }
+  for (const source of [
+    "defaults:\n  run:\n    working-directory: packages/core\n" +
+      files[".github/workflows/ci.yml"],
+    files[".github/workflows/ci.yml"].replace(
+      "      - run:",
+      "      - working-directory: packages/core\n        run:",
+    ),
+  ])
+    expect(
+      checkFormatter({
+        files: { ...files, ".github/workflows/ci.yml": source },
+        policy,
+        usesBun: true,
+        checkSource,
+      }).length,
+    ).toBeGreaterThan(0);
+  for (const omitted of [
+    "scripts/check-pool.ts",
+    ".github/checks/policy.yml",
+    ".github/workflows/ci.yml",
+  ]) {
+    const incomplete = Object.fromEntries(
+      Object.entries(files).filter(([file]) => file !== omitted),
+    );
+    expect(
+      checkFormatter({ files: incomplete, policy, usesBun: true, checkSource })
+        .length,
+    ).toBeGreaterThan(0);
+  }
+  expect(
+    checkFormatter({
+      files: {
+        ...files,
+        ".github/checks/policy.yml": "checks:\n  - run: bun fmt --check src/\n",
+      },
+      policy,
+      usesBun: true,
+      checkSource,
+    }).length,
+  ).toBeGreaterThan(0);
 });
