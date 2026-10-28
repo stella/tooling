@@ -357,3 +357,44 @@ test("directory-only sparse patterns never prove a version file", () => {
     ).toBe(true);
   }
 });
+
+test("an action at the checkout root is valid without treating its directory as a version file", () => {
+  const selector = "snapshot";
+  const entry = { ...declaration, selector, destination: selector };
+  const source = { ...checkout, with: { ...checkout.with, path: selector } };
+  expect(
+    proveCheckoutSource({
+      declaration: entry,
+      checkoutSha: sha,
+      selector,
+      workflow: workflow([source, { ...consumer, uses: "./snapshot" }]),
+    }),
+  ).toBe(true);
+  expect(
+    proveCheckoutSource({
+      declaration: entry,
+      checkoutSha: sha,
+      selector,
+      workflow: workflow([
+        source,
+        { ...consumer, uses: "actions/setup-node@" + sha },
+      ]),
+    }),
+  ).toBe(false);
+});
+
+test("directory-only sparse equality covers a local action directory", () => {
+  expect(
+    prove([
+      {
+        ...checkout,
+        with: {
+          ...checkout.with,
+          "sparse-checkout": `${declaration.selector}/`,
+          "sparse-checkout-cone-mode": false,
+        },
+      },
+      consumer,
+    ]),
+  ).toBe(true);
+});
