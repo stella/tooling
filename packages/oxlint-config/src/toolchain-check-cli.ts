@@ -27,7 +27,9 @@ try {
       process.stderr.write(`${path}:${line}: [${rule}] warning: ${message}\n`),
     onDelegated: ({ path, line, tool, selector, ref }) =>
       process.stdout.write(
-        `${path}:${line}: [runtime-delegated] setup-${tool} ${selector} delegates its version to checkout ref ${ref}\n`,
+        tool === "action"
+          ? `${path}:${line}: [runtime-delegated] local action ${selector} delegates source validation to checkout ref ${ref}\n`
+          : `${path}:${line}: [runtime-delegated] setup-${tool} ${selector} delegates its version to checkout ref ${ref}\n`,
       ),
   });
   for (const diagnostic of diagnostics)

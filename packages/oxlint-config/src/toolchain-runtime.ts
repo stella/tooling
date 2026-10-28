@@ -66,7 +66,7 @@ type RuntimeDiagnostic = {
 export type RuntimeDelegation = {
   path: string;
   line: number;
-  tool: "node" | "python" | "bun";
+  tool: "node" | "python" | "bun" | "action";
   selector: string;
   checkoutPath: string;
   ref: string;
@@ -1091,7 +1091,7 @@ export const checkRuntimeFile = ({
     path.posix.normalize(prefix).replace(/\/$/, "") || ".";
   type RuntimeReferenceOptions = {
     value: unknown;
-    tool: "node" | "python" | "bun";
+    tool: "node" | "python" | "bun" | "action";
     line: number;
   };
   const checkoutProvidersFor = (selector: string | undefined) => {
@@ -1524,15 +1524,27 @@ export const checkRuntimeFile = ({
       if (
         selector === undefined ||
         unknownCheckoutDestination ||
-        (binding !== undefined && binding.source !== "tracked") ||
+        binding?.source === "untrusted" ||
         hasAmbiguousCheckoutWriters(selector, providers)
-      )
+      ) {
         add({
           rule: "action-pins",
           line,
           message:
             "local actions require an unambiguous checkout of the current source snapshot",
         });
+        return;
+      }
+      if (binding?.source === "delegated") {
+        onDelegated?.({
+          path: file,
+          line,
+          tool: "action",
+          selector,
+          checkoutPath: binding.path,
+          ref: binding.ref,
+        });
+      }
       return;
     }
     if (value.startsWith("docker://")) {
