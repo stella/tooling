@@ -803,12 +803,36 @@ test("workflow and composite local actions share checkout source provenance", ()
         ).some((entry) => entry.rule === rule),
       ).toBe(true);
     }
-    expect(
-      check(
-        file,
-        wrap(`${checkout("ref: '${{ inputs.ref }}', path: source")}\n${local}`),
-      ),
-    ).toMatchObject([{ rule: "action-pins" }]);
+    for (const ref of [
+      "${{ inputs.ref }}",
+      "${{ github.event.workflow_run.head_sha }}",
+    ]) {
+      const reports: unknown[] = [];
+      expect(
+        checkRuntimeFile({
+          file,
+          text: wrap(`${checkout(`ref: '${ref}', path: source`)}\n${local}`),
+          policy,
+          trackedFiles: new Set(),
+          readFile: () => {
+            throw new Error(
+              "Delegation must not inspect current action source",
+            );
+          },
+          onDelegated: (report) => reports.push(report),
+        }),
+      ).toEqual([]);
+      expect(reports).toEqual([
+        {
+          path: file,
+          line: 6,
+          tool: "action",
+          selector: "source/action",
+          checkoutPath: "source",
+          ref,
+        },
+      ]);
+    }
     expect(check(file, wrap(local))).toEqual([]);
   }
 });

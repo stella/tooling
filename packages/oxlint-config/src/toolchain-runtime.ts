@@ -66,7 +66,7 @@ type RuntimeDiagnostic = {
 export type RuntimeDelegation = {
   path: string;
   line: number;
-  tool: "node" | "python" | "bun";
+  tool: "node" | "python" | "bun" | "action";
   selector: string;
   checkoutPath: string;
   ref: string;
@@ -1524,15 +1524,31 @@ export const checkRuntimeFile = ({
       if (
         selector === undefined ||
         unknownCheckoutDestination ||
-        (binding !== undefined && binding.source !== "tracked") ||
+        binding?.source === "untrusted" ||
+        (binding?.source === "delegated" &&
+          !/^(?:inputs\.[A-Za-z_][A-Za-z0-9_]*|github\.event\.workflow_run\.head_sha)$/.test(
+            dynamicRefBody(binding.ref) ?? "",
+          )) ||
         hasAmbiguousCheckoutWriters(selector, providers)
-      )
+      ) {
         add({
           rule: "action-pins",
           line,
           message:
             "local actions require an unambiguous checkout of the current source snapshot",
         });
+        return;
+      }
+      if (binding?.source === "delegated") {
+        onDelegated?.({
+          path: file,
+          line,
+          tool: "action",
+          selector,
+          checkoutPath: binding.path,
+          ref: binding.ref,
+        });
+      }
       return;
     }
     if (value.startsWith("docker://")) {
