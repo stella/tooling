@@ -287,6 +287,8 @@ file or action directory without expressions or glob patterns. Version-file
 selectors still require the tool's supported filename. This declaration reports
 runtime delegation; it does not claim a historical manifest uses today's pin.
 Unused, changed, or ambiguous declarations fail configuration validation.
+Use `ref: null` only to bind the checkout's omitted, event-default reference;
+adding any explicit reference invalidates that declaration.
 
 Run the installed checker from the repository root in CI:
 

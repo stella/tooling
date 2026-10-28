@@ -11,7 +11,7 @@ export type CheckoutSource = {
   checkout: string;
   consumer: string;
   destination: string;
-  ref: string;
+  ref: string | null;
   condition: string | null;
   selector: string;
   reason: string;
@@ -59,8 +59,10 @@ export const parseCheckoutSources = (input: unknown): CheckoutSource[] => {
       !identifier(value["consumer"]) ||
       !repositoryPath(value["destination"]) ||
       !repositoryPath(value["selector"]) ||
-      typeof value["ref"] !== "string" ||
-      value["ref"].trim() === "" ||
+      !(
+        value["ref"] === null ||
+        (typeof value["ref"] === "string" && value["ref"].trim() !== "")
+      ) ||
       !(
         value["condition"] === null ||
         (typeof value["condition"] === "string" &&
@@ -150,7 +152,7 @@ export const proveCheckoutSource = ({
   const destination = options["path"] ?? ".";
   if (
     destination !== declaration.destination ||
-    options["ref"] !== declaration.ref ||
+    (options["ref"] ?? null) !== declaration.ref ||
     (checkout["if"] ?? null) !== declaration.condition ||
     (declaration.condition !== null &&
       consumer["if"] !== declaration.condition) ||

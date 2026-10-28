@@ -1186,7 +1186,7 @@ export const checkRuntimeFile = ({
       tool,
       selector,
       checkoutPath: entry.destination,
-      ref: entry.ref,
+      ref: entry.ref ?? "<event default>",
     });
     return true;
   };

@@ -37,6 +37,15 @@ const prove = (steps: unknown[], entry: CheckoutSource = declaration) =>
 
 test("exact reviewed selection permits historical source and sequential replacement", () => {
   expect(prove([checkout, consumer])).toBe(true);
+  const implicit = { ...declaration, ref: null };
+  expect(parseCheckoutSources([implicit])).toEqual([implicit]);
+  expect(
+    prove(
+      [{ ...checkout, with: { "persist-credentials": false } }, consumer],
+      implicit,
+    ),
+  ).toBe(true);
+  expect(prove([checkout, consumer], implicit)).toBe(false);
   expect(
     prove([
       { ...checkout, id: "old", with: { ref: "main" } },
