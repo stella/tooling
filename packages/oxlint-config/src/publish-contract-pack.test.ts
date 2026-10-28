@@ -36,7 +36,10 @@ const pnpmExecutable = async () => {
     throw new Error(
       `pack contract fixture requires pnpm ${policy.consumerPnpm}`,
     );
-  return resolveInstalledManagerNodeEntry({ directory: path.dirname(packageFile), name: "pnpm" });
+  return resolveInstalledManagerNodeEntry({
+    directory: path.dirname(packageFile),
+    name: "pnpm",
+  });
 };
 
 test("pnpm pack preserves the modeled published contract projection", async () => {
