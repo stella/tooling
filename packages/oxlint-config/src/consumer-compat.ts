@@ -133,7 +133,7 @@ type ResolveInstalledManagerBinOptions = {
   directory: string;
   name: "npm" | "pnpm";
 };
-export const resolveInstalledManagerBin = async ({
+export const resolveInstalledManagerNodeEntry = async ({
   directory,
   name,
 }: ResolveInstalledManagerBinOptions) => {
@@ -143,7 +143,17 @@ export const resolveInstalledManagerBin = async ({
   if (typeof selector !== "string" || selector.length === 0)
     throw new Error(`Installed ${name} package must declare its ${name} bin`);
   const root = await realpath(directory);
-  const resolved = path.resolve(root, selector);
+  // pnpm 12.15 publishes a native executable as its declared bin. Its
+  // documented Corepack entry retains Node execution and finds the same binary.
+  let nodeSelector = selector;
+  if (name === "pnpm" && selector === "pnpm") {
+    if (manifest["version"] !== "12.15.0")
+      throw new Error(
+        "Unsupported native pnpm entry; verify its Node launcher contract",
+      );
+    nodeSelector = "bin/pnpm.mjs";
+  }
+  const resolved = path.resolve(root, nodeSelector);
   const relative = path.relative(root, resolved);
   if (
     relative === ".." ||
@@ -270,11 +280,11 @@ export const provisionConsumerTools = async (
     ],
     { cwd: scratch, env },
   );
-  const npm = await resolveInstalledManagerBin({
+  const npm = await resolveInstalledManagerNodeEntry({
     directory: path.join(prefix, "node_modules/npm"),
     name: "npm",
   });
-  const pnpm = await resolveInstalledManagerBin({
+  const pnpm = await resolveInstalledManagerNodeEntry({
     directory: path.join(prefix, "node_modules/pnpm"),
     name: "pnpm",
   });
@@ -509,7 +519,7 @@ const provisionConsumerReleasePacker = async ({
     ],
     { cwd: scratch, env },
   );
-  const cli = await resolveInstalledManagerBin({
+  const cli = await resolveInstalledManagerNodeEntry({
     directory: path.join(prefix, "node_modules", release.manager),
     name: release.manager,
   });

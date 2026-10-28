@@ -24,7 +24,7 @@ import {
   consumerCommandEnvironment,
   consumerFixtureCommands,
   consumerReservedToolBins,
-  resolveInstalledManagerBin,
+  resolveInstalledManagerNodeEntry,
   runConsumerCompat,
   stageConsumerWorkspace,
   verifyConsumerNodeArchive,
@@ -1435,6 +1435,7 @@ test("installed manager bins come from declared package metadata across versions
     for (const [version, selector] of [
       ["10.0.0", "bin/pnpm.cjs"],
       ["12.9.1", "bin/pnpm.mjs"],
+      ["12.15.0", "pnpm"],
     ]) {
       if (version === undefined || selector === undefined)
         throw new Error("missing manager fixture");
@@ -1444,17 +1445,23 @@ test("installed manager bins come from declared package metadata across versions
         path.join(directory, selector),
         "console.log('declared bin');\n",
       );
+      const entry = version === "12.15.0" ? "bin/pnpm.mjs" : selector;
+      if (entry !== selector)
+        await writeFile(
+          path.join(directory, entry),
+          "console.log('Corepack entry');\n",
+        );
       const file = path.join(directory, "package.json");
       for (const bin of [{ pnpm: selector }, selector]) {
         await writeFile(file, JSON.stringify({ name: "pnpm", version, bin }));
         expect(
-          await resolveInstalledManagerBin({ directory, name: "pnpm" }),
-        ).toBe(await realpath(path.join(directory, selector)));
+          await resolveInstalledManagerNodeEntry({ directory, name: "pnpm" }),
+        ).toBe(await realpath(path.join(directory, entry)));
       }
       for (const bin of [{ pnpx: selector }, {}, "../outside.js"]) {
         await writeFile(file, JSON.stringify({ name: "pnpm", version, bin }));
         await assert.rejects(
-          resolveInstalledManagerBin({ directory, name: "pnpm" }),
+          resolveInstalledManagerNodeEntry({ directory, name: "pnpm" }),
           /must declare|leaves its package/,
         );
       }
