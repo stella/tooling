@@ -47,6 +47,16 @@ test("exact reviewed selection permits historical source and sequential replacem
   ).toBe(true);
   expect(prove([checkout, consumer], implicit)).toBe(false);
   expect(
+    prove([{ id: "source", uses: checkout.uses }, consumer], implicit),
+  ).toBe(true);
+  for (const options of [null, "invalid", []])
+    expect(
+      prove(
+        [{ id: "source", uses: checkout.uses, with: options }, consumer],
+        implicit,
+      ),
+    ).toBe(false);
+  expect(
     prove([
       { ...checkout, id: "old", with: { ref: "main" } },
       checkout,
@@ -58,12 +68,58 @@ test("exact reviewed selection permits historical source and sequential replacem
   expect(
     prove(
       [
+        { id: "resolve", run: "echo build=true >> $GITHUB_OUTPUT" },
         { ...checkout, if: condition },
         { ...consumer, if: condition },
       ],
       { ...declaration, condition },
     ),
   ).toBe(true);
+});
+
+test("conditional checkout proofs require immutable operands available before checkout", () => {
+  const condition = "steps.resolve.outputs.build == 'true'";
+  const declared = { ...declaration, condition };
+  const selected = { ...checkout, if: condition };
+  const use = { ...consumer, if: condition };
+  const producer = { id: "resolve", run: "echo build=true >> $GITHUB_OUTPUT" };
+  expect(prove([selected, producer, use], declared)).toBe(false);
+  expect(prove([producer, selected, use], declared)).toBe(true);
+  expect(prove([producer, selected, producer, use], declared)).toBe(false);
+  for (const predicate of [
+    "env.BUILD == 'true'",
+    "github.action == 'build'",
+    "failure()",
+    "cancelled()",
+    "always()",
+    "steps['resolve'].outputs.build == 'true'",
+  ])
+    expect(
+      prove(
+        [
+          producer,
+          { ...checkout, if: predicate },
+          { ...consumer, if: predicate },
+        ],
+        { ...declaration, condition: predicate },
+      ),
+    ).toBe(false);
+  for (const predicate of [
+    "inputs.build == true",
+    "needs.resolve.outputs.build == 'true'",
+    "github.event_name == 'workflow_dispatch'",
+    "github.event.inputs.build == 'true'",
+    "matrix.build == true",
+  ])
+    expect(
+      prove(
+        [
+          { ...checkout, if: predicate },
+          { ...consumer, if: predicate },
+        ],
+        { ...declaration, condition: predicate },
+      ),
+    ).toBe(true);
 });
 
 test("every changed source field fails closed", () => {

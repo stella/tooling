@@ -101,6 +101,45 @@ type CheckoutSourceProof = {
   repository?: string | undefined;
 };
 
+/** Identical predicates are sufficient only when their operands cannot change between steps. */
+const stableCheckoutCondition = (
+  condition: string,
+  steps: unknown[],
+  checkoutIndex: number,
+) => {
+  const expression = condition.trim().replace(/^\$\{\{([\s\S]*)\}\}$/, "$1");
+  const tokens =
+    expression.match(
+      /'(?:[^']|'')*'|[A-Za-z_][\w-]*(?:\.[A-Za-z_][\w-]*)*|\d+|&&|\|\||==|!=|[!()<>]|\s+|./g,
+    ) ?? [];
+  return tokens.every((token) => {
+    if (
+      /^(?:\s+|'(?:[^']|'')*'|\d+|true|false|null|&&|\|\||==|!=|[!()<>])$/.test(
+        token,
+      )
+    )
+      return true;
+    if (/^(?:inputs|needs|matrix|strategy)\.[A-Za-z_][\w.-]*$/.test(token))
+      return true;
+    if (
+      /^github\.(?:event_name|repository|ref|sha|workflow_sha)$/.test(token) ||
+      /^github\.event\.[A-Za-z_][\w.-]*$/.test(token)
+    )
+      return true;
+    const referenced =
+      /^steps\.([A-Za-z_][\w-]*)\.(?:outputs\.[A-Za-z_][\w.-]*|outcome|conclusion)$/
+        .exec(token)
+        ?.at(1);
+    if (referenced === undefined) return false;
+    const indices = steps.flatMap((step, index) =>
+      record(step) && step["id"] === referenced ? [index] : [],
+    );
+    return (
+      indices.length === 1 && (indices.at(0) ?? checkoutIndex) < checkoutIndex
+    );
+  });
+};
+
 /** Resolve the last overlapping writer before this consumer; later writers cannot alter its input. */
 export const proveCheckoutSource = ({
   declaration,
@@ -143,7 +182,7 @@ export const proveCheckoutSource = ({
     Object.hasOwn(checkout, "continue-on-error")
   )
     return false;
-  const options = checkout["with"];
+  const options = checkout["with"] === undefined ? {} : checkout["with"];
   if (
     !record(options) ||
     Object.keys(options).some((key) => key !== key.toLowerCase())
@@ -162,6 +201,11 @@ export const proveCheckoutSource = ({
     (options["repository"] !== undefined &&
       options["repository"] !== "${{ github.repository }}" &&
       options["repository"] !== repository)
+  )
+    return false;
+  if (
+    declaration.condition !== null &&
+    !stableCheckoutCondition(declaration.condition, steps, checkoutIndex)
   )
     return false;
   const selected = path.posix.normalize(selector);

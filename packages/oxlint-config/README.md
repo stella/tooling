@@ -277,7 +277,9 @@ selection explicitly when the default current-source proof cannot resolve it:
 
 Both step IDs must be unique in the named job. The reference, destination and
 checkout condition must match exactly; a conditional checkout requires the
-consumer to have the identical condition. The selected checkout must precede
+consumer to have the identical condition with immutable operands. Step-output
+references must name a unique producer before the checkout; mutable contexts,
+status functions and dynamic property access are rejected. The selected checkout must precede
 the consumer, use the approved checkout pin and the same repository, retain
 cleaning, and omit `continue-on-error`. A later overlapping or unknown checkout
 destination before the consumer invalidates the proof. An earlier writer is
