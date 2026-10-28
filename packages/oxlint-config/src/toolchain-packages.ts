@@ -4,6 +4,7 @@ import { satisfies, valid, validRange } from "semver";
 import { isNode, LineCounter, parseDocument } from "yaml";
 
 import { nodeSupportRangeMatches } from "./toolchain-node";
+import { sourceApiImportProblem } from "./toolchain-typescript-source-api";
 import { workspaceContains } from "./toolchain-workspaces";
 
 export const packageRules = [
@@ -60,13 +61,17 @@ const isTypescriptInstall = (name: string, value: unknown) =>
   typescriptPackages.has(name) || typescriptAliasVersion(value) !== undefined;
 
 /** One repository-declared TypeScript install: where, what, and which dependency needs it. */
-export type TypescriptAllowlistEntry = {
+type TypescriptAllowlistBase = {
   workspace: string;
   name: string;
   spec: string;
-  dependency: string;
   reason: string;
 };
+export type TypescriptAllowlistEntry = TypescriptAllowlistBase &
+  (
+    | { kind?: "dependency"; dependency: string }
+    | { kind: "source-api"; sources: readonly string[] }
+  );
 
 const allowlistKeys = [
   "workspace",
@@ -92,7 +97,7 @@ export const parseTypescriptAllowlist = (
   const seen = new Set<string>();
   return input.map((entry: unknown) => {
     const shown = JSON.stringify(entry);
-    const text = (key: (typeof allowlistKeys)[number]) => {
+    const text = (key: string) => {
       const value = record(entry) ? entry[key] : undefined;
       return typeof value === "string" && value.trim() !== ""
         ? value
@@ -102,14 +107,22 @@ export const parseTypescriptAllowlist = (
     const name = text("name");
     const spec = text("spec");
     const dependency = text("dependency");
+    const sourceApi = record(entry) && entry["kind"] === "source-api";
+    const keys = sourceApi
+      ? ["workspace", "name", "spec", "reason", "kind", "sources"]
+      : [
+          ...allowlistKeys,
+          ...(record(entry) && entry["kind"] === "dependency" ? ["kind"] : []),
+        ];
     const reason = text("reason");
     if (
       !record(entry) ||
-      Object.keys(entry).length !== allowlistKeys.length ||
+      Object.keys(entry).length !== keys.length ||
+      Object.keys(entry).some((key) => !keys.includes(key)) ||
       workspace === undefined ||
       name === undefined ||
       spec === undefined ||
-      dependency === undefined ||
+      (!sourceApi && dependency === undefined) ||
       reason === undefined
     )
       throw new Error(
@@ -134,7 +147,10 @@ export const parseTypescriptAllowlist = (
       throw new Error(
         `typescriptAllowlist entry ${shown}: name must be typescript or @typescript/native, or an alias whose spec is npm:typescript@<version> or npm:@typescript/native@<version>`,
       );
-    if (typescriptPackages.has(dependency) || dependency === name)
+    if (
+      dependency !== undefined &&
+      (typescriptPackages.has(dependency) || dependency === name)
+    )
       throw new Error(
         `typescriptAllowlist entry ${shown}: dependency must name the package in that workspace that needs ${name}, not a TypeScript package`,
       );
@@ -144,6 +160,35 @@ export const parseTypescriptAllowlist = (
         `typescriptAllowlist declares ${name} for ${workspace} more than once; keep one entry`,
       );
     seen.add(key);
+    if (sourceApi) {
+      const sources: unknown = entry["sources"];
+      if (
+        !Array.isArray(sources) ||
+        sources.length === 0 ||
+        !sources.every(
+          (source: unknown): source is string =>
+            typeof source === "string" &&
+            path.posix.normalize(source) === source &&
+            !source.startsWith("/") &&
+            source !== ".." &&
+            !source.startsWith("../") &&
+            !source.includes("\\") &&
+            !/[?*{}\[\]]/.test(source) &&
+            /\.[cm]?[jt]sx?$/.test(source) &&
+            !/\.d\.[cm]?ts$/.test(source) &&
+            !source
+              .split("/")
+              .some((part) => ["node_modules", "vendor"].includes(part)),
+        ) ||
+        new Set(sources).size !== sources.length
+      )
+        throw new Error(
+          `typescriptAllowlist source-api entry ${shown} requires unique normalized source file paths`,
+        );
+      return { kind: "source-api", workspace, name, spec, reason, sources };
+    }
+    if (dependency === undefined)
+      throw new Error("Missing TypeScript dependency owner");
     return { workspace, name, spec, dependency, reason };
   });
 };
@@ -1096,7 +1141,7 @@ export const checkPackageFiles = ({
     }
     return value === entry.spec
       ? undefined
-      : `${name} in ${file} resolves to ${shown}, but typescriptAllowlist in ${allowlistFile} allows ${entry.spec} for ${entry.dependency}; declare ${entry.spec} or update the entry's spec`;
+      : `${name} in ${file} resolves to ${shown}, but typescriptAllowlist in ${allowlistFile} allows ${entry.spec} for ${entry.kind === "source-api" ? "source API imports" : entry.dependency}; declare ${entry.spec} or update the entry's spec`;
   };
   const peerRange = (value: unknown): value is string =>
     typeof value === "string" && validRange(value) !== null;
@@ -1319,6 +1364,22 @@ export const checkPackageFiles = ({
       });
     if (!declares(entry.name))
       return `${file} no longer declares ${entry.name} in dependencies, devDependencies or optionalDependencies; remove the entry`;
+    if (entry.kind === "source-api") {
+      for (const source of entry.sources) {
+        let owner = path.posix.dirname(source);
+        while (owner !== "." && !manifests.has(`${owner}/package.json`))
+          owner = path.posix.dirname(owner);
+        if (owner !== entry.workspace)
+          return `${source} belongs to workspace ${owner}, not ${entry.workspace}`;
+        const problem = sourceApiImportProblem({
+          source,
+          content: files[source],
+          name: entry.name,
+        });
+        if (problem !== undefined) return `${source}: ${problem}`;
+      }
+      return undefined;
+    }
     if (!declares(entry.dependency))
       return `${file} no longer depends on ${entry.dependency}; remove the entry and the ${entry.name} declaration, or name the dependency that still needs it`;
     return undefined;

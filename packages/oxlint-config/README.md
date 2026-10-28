@@ -262,6 +262,32 @@ workspace that needs it, and a reason:
 }
 ```
 
+First-party compiler API tools can instead declare `kind: "source-api"` with
+explicit repository-relative importer paths. Each source must be tracked,
+regular, readable without symlinks, belong to that workspace's nearest package
+manifest, and contain a static value import from the declared name. Type-only
+imports, side-effect imports, comments, examples, globs and missing files do not
+establish an API consumer. All listed importers must remain valid; this does not
+permit compiler invocations in `typecheck` scripts.
+
+```json
+{
+  "typescriptAllowlist": [
+    {
+      "kind": "source-api",
+      "workspace": ".",
+      "name": "typescript6",
+      "spec": "npm:typescript@6.0.3",
+      "sources": ["scripts/generate-symbols.ts"],
+      "reason": "The generator inspects compiler symbols through the TypeScript 6 API."
+    }
+  ]
+}
+```
+
+Dependency-owned entries above remain compatible; `kind: "dependency"` is also
+accepted. Source declarations have no `dependency` field.
+
 The workspace's `dependencies`, `devDependencies` or `optionalDependencies`
 may declare the entry directly or through a catalog (`catalog:`,
 `catalog:ts6`); it must resolve to `spec`. A catalog holds a TypeScript entry

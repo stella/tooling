@@ -13,13 +13,7 @@ import { parseToolchainPolicy } from "./toolchain-schema";
 const policy = parseToolchainPolicy(toolchain);
 const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
 
-type AllowlistEntry = {
-  workspace: string;
-  name: string;
-  spec: string;
-  dependency: string;
-  reason: string;
-};
+import type { TypescriptAllowlistEntry as AllowlistEntry } from "./toolchain-packages";
 
 /** Runs the real checker on a temporary Git repository built from `files`. */
 const typescriptDiagnostics = (
@@ -37,7 +31,10 @@ const typescriptDiagnostics = (
     };
     for (const [file, value] of Object.entries(tracked)) {
       mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
-      writeFileSync(path.join(root, file), json(value));
+      writeFileSync(
+        path.join(root, file),
+        typeof value === "string" ? value : json(value),
+      );
     }
     execFileSync("git", ["add", "."], { cwd: root });
     return checkToolchain({ root, policy }).filter(
@@ -247,4 +244,78 @@ test("a malformed allowlist is a configuration error", () => {
       message: expect.stringContaining("exact spec"),
     },
   ]);
+});
+
+const sourceApi = {
+  kind: "source-api",
+  workspace: ".",
+  name: "typescript6",
+  spec: "npm:typescript@6.0.3",
+  reason: "The generator consumes the compiler API to inspect symbols.",
+  sources: ["scripts/generate.ts"],
+} as const;
+const sourceFiles = {
+  "package.json": { devDependencies: { typescript6: "npm:typescript@6.0.3" } },
+  "scripts/generate.ts":
+    'import ts from "typescript6"; export const program = ts.createProgram([], {});',
+};
+
+test("source API declarations bind exact installs to tracked value importers", () => {
+  expect(
+    typescriptDiagnostics(sourceFiles, [
+      { ...sourceApi, sources: [...sourceApi.sources] },
+    ]),
+  ).toEqual([]);
+  for (const content of [
+    '// import ts from "typescript6";',
+    "const example = 'import ts from \"typescript6\";';",
+    'import type ts from "typescript6";',
+    'import "typescript6";',
+    'import ts from "typescript";',
+    'import { type Program } from "typescript6";',
+    "import {",
+  ]) {
+    expect(
+      typescriptDiagnostics(
+        { ...sourceFiles, "scripts/generate.ts": content },
+        [{ ...sourceApi, sources: [...sourceApi.sources] }],
+      ),
+    ).not.toEqual([]);
+  }
+  expect(
+    typescriptDiagnostics({ "package.json": sourceFiles["package.json"] }, [
+      { ...sourceApi, sources: [...sourceApi.sources] },
+    ]),
+  ).not.toEqual([]);
+  expect(
+    typescriptDiagnostics(
+      { ...sourceFiles, "scripts/package.json": { name: "other" } },
+      [{ ...sourceApi, sources: [...sourceApi.sources] }],
+    ),
+  ).not.toEqual([]);
+});
+
+test("source API declarations reject broad paths, malformed owners and stale specs", () => {
+  for (const sources of [
+    [],
+    ["../escape.ts"],
+    ["/tmp/importer.ts"],
+    ["scripts/*.ts"],
+    ["scripts/generate.ts", "scripts/generate.ts"],
+    ["scripts/types.d.ts"],
+    ["node_modules/importer.ts"],
+  ]) {
+    expect(
+      typescriptDiagnostics(sourceFiles, [{ ...sourceApi, sources }]),
+    ).not.toEqual([]);
+  }
+  expect(
+    typescriptDiagnostics(sourceFiles, [
+      {
+        ...sourceApi,
+        sources: [...sourceApi.sources],
+        spec: "npm:typescript@7.0.2",
+      },
+    ]),
+  ).not.toEqual([]);
 });
