@@ -1472,3 +1472,93 @@ describe("Dependabot policy", () => {
       expect(check(text).length).toBeGreaterThan(0);
   });
 });
+
+describe("Tauri dependency alignment", () => {
+  test("detected JavaScript and Cargo owners share generated and guarded cohorts", () => {
+    for (const [file, text] of [
+      [
+        "package.json",
+        JSON.stringify({
+          packageManager: "bun@1.4.4",
+          dependencies: { "@tauri-apps/api": "2.0.0" },
+        }),
+      ],
+      [
+        "package.json",
+        JSON.stringify({ devDependencies: { "@tauri-apps/cli": "2.0.0" } }),
+      ],
+      [
+        "Cargo.toml",
+        '[package]\nname="desktop"\nversion="0.1.0"\n[dependencies]\ntauri="2"',
+      ],
+      ["Cargo.toml", '[workspace.dependencies]\ntauri-build="2"'],
+      [
+        "Cargo.toml",
+        '[target.windows.dependencies]\nbridge={package="tauri",version="2"}',
+      ],
+    ] as const) {
+      const files = { [file]: text };
+      const generated = generateDependabotConfig({ files, policy });
+      const document = parseDocument(generated);
+      const types = document.getIn([
+        "updates",
+        0,
+        "groups",
+        "tauri",
+        "update-types",
+      ]);
+      const exclusions = document.getIn([
+        "updates",
+        0,
+        "groups",
+        "dependencies",
+        "exclude-patterns",
+      ]);
+      const patterns = document.getIn([
+        "updates",
+        0,
+        "groups",
+        "tauri",
+        "patterns",
+      ]);
+      if (!isSeq(types) || !isSeq(exclusions) || !isSeq(patterns))
+        throw new Error("expected alignment group sequences");
+      expect(types.toJSON()).toEqual(["major", "minor", "patch"]);
+      expect(exclusions.toJSON()).toEqual(patterns.toJSON());
+      expect(check(generated, files)).toEqual([]);
+      for (const key of [
+        ["updates", 0, "groups", "dependencies", "exclude-patterns"],
+        ["updates", 0, "groups", "tauri"],
+        ["updates", 0, "groups", "tauri", "update-types", 0],
+      ]) {
+        const invalid = parseDocument(generated);
+        invalid.deleteIn(key);
+        expect(
+          check(invalid.toString(), files).some(({ message }) =>
+            message.includes("groups"),
+          ),
+        ).toBeTrue();
+      }
+    }
+  });
+
+  test("unrelated manifests and Cargo metadata do not create an alignment cohort", () => {
+    for (const [file, text] of [
+      [
+        "package.json",
+        JSON.stringify({ description: "tauri", dependencies: { react: "19" } }),
+      ],
+      [
+        "Cargo.toml",
+        '[package]\nname="tauri-example"\nversion="0.1.0"\n[package.metadata.dependencies]\ntauri="2"',
+      ],
+    ] as const) {
+      const files = { [file]: text };
+      const generated = generateDependabotConfig({ files, policy });
+      expect(
+        parseDocument(generated).hasIn(["updates", 0, "groups", "tauri"]),
+      ).toBeFalse();
+      expect(check(generated, files)).toEqual([]);
+    }
+  });
+});

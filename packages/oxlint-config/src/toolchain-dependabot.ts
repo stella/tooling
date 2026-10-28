@@ -85,18 +85,101 @@ type DependabotPolicy = {
 type DependabotGroup = {
   patterns: readonly string[];
   updateTypes?: readonly string[] | undefined;
+  excludePatterns?: readonly string[] | undefined;
 };
 
-/** Ordered groups for one ecosystem: GitHub Actions first gathers first-party refs. */
-const groupsFor = (
+const tauriPatterns = (ecosystem: string): readonly string[] => {
+  if (ecosystem === "cargo") return ["tauri", "tauri-*"];
+  if (ecosystem === "bun" || ecosystem === "npm") return ["@tauri-apps/*"];
+  return [];
+};
+
+const ownsTauriDependencies = (
   ecosystem: string,
-  policy: DependabotPolicy,
-): [string, DependabotGroup][] => [
-  ...(ecosystem === "github-actions"
-    ? Object.entries(policy.actionGroups)
-    : []),
-  ...Object.entries(policy.groups),
-];
+  files: Readonly<Record<string, string>>,
+) => {
+  const patterns = tauriPatterns(ecosystem);
+  if (patterns.length === 0) return false;
+  const matches = picomatch([...patterns]);
+  const dependencyTables =
+    ecosystem === "cargo"
+      ? ["dependencies", "dev-dependencies", "build-dependencies"]
+      : [
+          "dependencies",
+          "devDependencies",
+          "optionalDependencies",
+          "peerDependencies",
+        ];
+  const owns = (owner: unknown) => {
+    if (!record(owner)) return false;
+    for (const key of dependencyTables) {
+      const dependencies = owner[key];
+      if (!record(dependencies)) continue;
+      if (
+        Object.entries(dependencies).some(([name, value]) =>
+          matches(
+            record(value) && typeof value["package"] === "string"
+              ? value["package"]
+              : name,
+          ),
+        )
+      )
+        return true;
+    }
+    return false;
+  };
+  return Object.entries(files).some(([file, text]) => {
+    const manifest = ecosystem === "cargo" ? "Cargo.toml" : "package.json";
+    if (path.posix.basename(file) !== manifest || !text.includes("tauri"))
+      return false;
+    const manifestValue: unknown =
+      ecosystem === "cargo" ? parseToml(text) : JSON.parse(text);
+    if (owns(manifestValue)) return true;
+    if (ecosystem !== "cargo" || !record(manifestValue)) return false;
+    // Only Cargo's dependency owners count; package metadata is arbitrary data.
+    if (owns(manifestValue["workspace"])) return true;
+    const targets = manifestValue["target"];
+    return record(targets) && Object.values(targets).some(owns);
+  });
+};
+
+type DependabotGroupsOptions = {
+  ecosystem: string;
+  policy: DependabotPolicy;
+  files: Readonly<Record<string, string>>;
+};
+
+/** Alignment cohorts precede semver groups so coupled major updates stay together. */
+const groupsFor = ({
+  ecosystem,
+  policy,
+  files,
+}: DependabotGroupsOptions): [string, DependabotGroup][] => {
+  const alignment = ownsTauriDependencies(ecosystem, files)
+    ? tauriPatterns(ecosystem)
+    : [];
+  return [
+    ...(ecosystem === "github-actions"
+      ? Object.entries(policy.actionGroups)
+      : []),
+    ...(alignment.length === 0
+      ? []
+      : ([
+          [
+            "tauri",
+            { patterns: alignment, updateTypes: ["major", "minor", "patch"] },
+          ],
+        ] satisfies [string, DependabotGroup][])),
+    ...Object.entries(policy.groups).map(
+      ([name, group]): [string, DependabotGroup] => [
+        name,
+        alignment.length === 0
+          ? group
+          : { ...group, excludePatterns: alignment },
+      ],
+    ),
+  ];
+};
 
 type Diagnostic = {
   rule: (typeof dependabotRules)[number];
@@ -820,11 +903,13 @@ export const generateDependabotConfig = ({
         },
         cooldown: { "default-days": policy.cooldown.defaultDays },
         groups: Object.fromEntries(
-          groupsFor(ecosystem, policy).map(([name, group]) => [
+          groupsFor({ ecosystem, policy, files }).map(([name, group]) => [
             name,
-            group.updateTypes === undefined
-              ? { patterns: group.patterns }
-              : { patterns: group.patterns, "update-types": group.updateTypes },
+            {
+              patterns: group.patterns,
+              "update-types": group.updateTypes,
+              "exclude-patterns": group.excludePatterns,
+            },
           ]),
         ),
         ignore: ignore.length > 0 ? ignore : undefined,
@@ -1019,7 +1104,7 @@ export const checkDependabot = ({
         `${ecosystem}: cooldown must contain only default-days: ${policy.cooldown.defaultDays}`,
       );
     const groups = update["groups"];
-    const expectedGroups = groupsFor(ecosystem, policy);
+    const expectedGroups = groupsFor({ ecosystem, policy, files });
     if (
       !record(groups) ||
       // Dependabot assigns an update to the first matching group.
@@ -1030,8 +1115,15 @@ export const checkDependabot = ({
         return (
           !record(group) ||
           Object.keys(group).length !==
-            (expected.updateTypes === undefined ? 1 : 2) ||
+            1 +
+              Number(expected.updateTypes !== undefined) +
+              Number(expected.excludePatterns !== undefined) ||
           !sameStrings(group["patterns"], expected.patterns) ||
+          (expected.excludePatterns !== undefined &&
+            !sameStrings(
+              group["exclude-patterns"],
+              expected.excludePatterns,
+            )) ||
           (expected.updateTypes !== undefined &&
             !sameStrings(group["update-types"], expected.updateTypes))
         );
