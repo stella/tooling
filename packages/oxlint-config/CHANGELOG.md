@@ -1,5 +1,11 @@
 # @stll/oxlint-config
 
+## 3.3.0
+
+### Minor Changes
+
+- [#248](https://github.com/stella/tooling/pull/248) [`16d5927`](https://github.com/stella/tooling/commit/16d5927b23039d25b3625cf4cb7fc5b25f43ab40) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Support explicit tracked staged formatter selector contracts and empty root formatter lookup boundaries. Support explicitly connected CI pool sources while preserving whole-repository CI formatting. Follow literal lint working-directory changes and cross-workspace Bun script delegation without omitting nested lint scopes.
+
 ## 3.2.2
 
 ### Patch Changes
