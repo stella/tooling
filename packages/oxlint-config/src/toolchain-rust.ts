@@ -4,6 +4,7 @@ import { type ExpiryScope, overdueVerdict } from "./dated-entry-scope";
 import { canonicalDockerRuntime, rustImageVersion } from "./toolchain-images";
 import { githubAutomationFileKind, isShellScript } from "./toolchain-inputs";
 import { decodeShellWord, shellCommandSegments } from "./toolchain-packages";
+import type { RustInstallFixture } from "./toolchain-rust-fixtures";
 
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -109,6 +110,8 @@ export const checkRustExceptionExpiry = ({
 };
 
 type RustReferenceOptions = {
+  installFixtures?: readonly RustInstallFixture[] | undefined;
+  onInstallFixture?: ((entry: RustInstallFixture) => void) | undefined;
   file: string;
   rust: string;
   exceptions: readonly RustException[];
@@ -277,7 +280,19 @@ export const checkRustReferences = (options: RustReferenceOptions) => {
         }
         if (token.value.startsWith("-")) continue;
         selected++;
-        select(token.value, "rustup toolchain", token.line);
+        const installFixture =
+          options.type === "file" &&
+          isShellScript(file, text) &&
+          subcommand === "toolchain" &&
+          invocation.at(1)?.value === "install" &&
+          !invocation.some((word) => word.value === "--default")
+            ? options.installFixtures?.find(
+                (entry) => entry.path === file && entry.pin === token.value,
+              )
+            : undefined;
+        if (installFixture !== undefined)
+          options.onInstallFixture?.(installFixture);
+        else select(token.value, "rustup toolchain", token.line);
         if (firstSelectorOnly) break;
       }
       if (selected === 0 && requiresSelector)

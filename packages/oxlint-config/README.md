@@ -1040,13 +1040,22 @@ Cargo/rustup commands in scripts, and Rust Docker/service images. An omitted
 `dtolnay/rust-toolchain` version selects a floating action default and fails.
 Cargo manifest `rust-version` remains an MSRV floor at or below the shared pin.
 
-Only `rustExceptions` in the consumer's root `stll-toolchain.json` can authorize
+`rustExceptions` in the consumer's root `stll-toolchain.json` can authorize
 another exact stable release. Each record contains exactly `pin`, `reason`,
 `tracking` (a GitHub issue URL) and `expires` (a `YYYY-MM-DD` date).
 Channels and `rust-version` rule opt-outs fail validation. A record expires on
 its date and then follows the same expiry scope as quarantine excludes (see
 [Quarantine preset and expiry checks](#quarantine-preset-and-expiry-checks)).
 See the [root policy guide](../../README.md) for a complete declaration.
+
+Historical offline install probes can instead declare `rustInstallFixtures` with
+an exact tracked shell `path`, stable or dated-nightly `pin`, `reason` (including
+the removal condition), GitHub issue/pull-request `tracking` URL, and `expires`.
+Only `rustup toolchain install` without `--default` in that file is covered;
+compiler execution, environment selectors, workflows and Docker remain checked.
+Unused declarations fail, and expiry follows the same scope as Rust exceptions.
+The fixture owns its isolated Rust home and offline setup; this declaration is
+not a sandbox or a general permission to execute historical compilers.
 
 `stll-toolchain-check` requires tracked JavaScript and TypeScript files selected by type-aware lint to belong to declared TypeScript projects. See the [Node scripts project recipe](https://github.com/stella/tooling/blob/main/README.md) for scripts outside the library project. The check inventories Oxlint-selected files and expands compiler configurations; it does not run lint or type checking.
 

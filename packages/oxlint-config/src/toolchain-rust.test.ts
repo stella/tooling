@@ -6,6 +6,10 @@ import { ownedDockerImageAliases } from "./toolchain-images";
 import { toolchainInputKind } from "./toolchain-inputs";
 import { checkRuntimeFile } from "./toolchain-runtime";
 import { parseRustExceptions } from "./toolchain-rust";
+import {
+  checkRustInstallFixtureExpiry,
+  parseRustInstallFixtures,
+} from "./toolchain-rust-fixtures";
 
 const rust = "1.99.0";
 const sha = "a".repeat(40);
@@ -669,4 +673,112 @@ test("Docker leading heredocs retain stdin redirection order", () => {
       { rule: "rust-version" },
     ]);
   }
+});
+
+const installFixture = {
+  path: "scripts/offline-smoke.sh",
+  pin: "1.96.0",
+  reason:
+    "Verify a retained offline compiler snapshot installs without network access",
+  tracking: "https://github.com/stella/tooling/issues/123",
+  expires: "2099-01-01",
+};
+
+test("historical install declarations authorize only their exact shell file and pin", () => {
+  for (const pin of ["1.96.0", "nightly-2026-04-16"]) {
+    const declaration = { ...installFixture, pin };
+    const inspect = (file: string, text: string) =>
+      checkRuntimeFile({
+        file,
+        text,
+        policy,
+        rustInstallFixtures: parseRustInstallFixtures([declaration]),
+        trackedFiles: new Set([file]),
+        readFile: () => undefined,
+      }).filter(({ rule }) => rule === "rust-version");
+    const source = `rustup toolchain install ${pin} --component clippy --target wasm32-unknown-unknown`;
+    expect(inspect(declaration.path, source)).toEqual([]);
+    for (const [file, text] of [
+      ["scripts/other.sh", source],
+      [declaration.path, source.replace(pin, "1.95.0")],
+      [declaration.path, `cargo +${pin} check`],
+      [declaration.path, `rustup default ${pin}`],
+      [declaration.path, `${source} --default`],
+      [declaration.path, `rustup run ${pin} rustc --version`],
+      [declaration.path, `RUSTUP_TOOLCHAIN=${pin} cargo check`],
+      [
+        declaration.path,
+        `rustup target add wasm32-unknown-unknown --toolchain ${pin}`,
+      ],
+      ["Dockerfile", `RUN ${source}`],
+      [
+        ".github/workflows/ci.yml",
+        workflow(`    steps:\n      - run: ${source}`),
+      ],
+    ] as const)
+      expect(inspect(file, text).length).toBeGreaterThan(0);
+  }
+});
+
+test("install fixture declarations reject ambiguous paths, selectors and expiry dates", () => {
+  for (const mutation of [
+    { path: "../offline.sh" },
+    { path: "/offline.sh" },
+    { path: "scripts/*.sh" },
+    { path: "scripts/../offline.sh" },
+    { path: "scripts/offline.ts" },
+    { pin: "stable" },
+    { pin: "nightly" },
+    { pin: "nightly-2026-02-30" },
+    { pin: "1.96" },
+    { expires: "2026-02-30" },
+    { reason: " " },
+    { tracking: "https://example.com/123" },
+    { extra: true },
+  ])
+    expect(() =>
+      parseRustInstallFixtures([{ ...installFixture, ...mutation }]),
+    ).toThrow("each Rust install fixture requires");
+  expect(() =>
+    parseRustInstallFixtures([installFixture, installFixture]),
+  ).toThrow("must be unique");
+});
+
+test("historical fixture expiry follows the same changed-entry scope as compiler exceptions", () => {
+  const entry = { ...installFixture, expires: "2026-01-01" };
+  const now = new Date("2026-01-01T00:00:00Z");
+  const base = JSON.stringify({ rustInstallFixtures: [entry] });
+  expect(
+    checkRustInstallFixtureExpiry({
+      fixtures: [entry],
+      now,
+      scope: { kind: "enforce" },
+    }).errors,
+  ).toHaveLength(1);
+  expect(
+    checkRustInstallFixtureExpiry({
+      fixtures: [entry],
+      now,
+      scope: { kind: "advisory" },
+    }).warnings,
+  ).toHaveLength(1);
+  expect(
+    checkRustInstallFixtureExpiry({
+      fixtures: [entry],
+      now,
+      scope: { kind: "changed", readBase: () => ({ text: base }) },
+    }).warnings,
+  ).toHaveLength(1);
+  for (const mutation of [
+    { path: "scripts/other.sh" },
+    { pin: "1.95.0" },
+    { expires: "2025-12-31" },
+  ])
+    expect(
+      checkRustInstallFixtureExpiry({
+        fixtures: [{ ...entry, ...mutation }],
+        now,
+        scope: { kind: "changed", readBase: () => ({ text: base }) },
+      }).errors,
+    ).toHaveLength(1);
 });
