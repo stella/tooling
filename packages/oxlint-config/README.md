@@ -410,6 +410,12 @@ Use `stll-dependabot --check` in CI to compare bytes without writing. Missing or
 stale output exits with status 1; current output exits with status 0. Pass the
 same `--config` argument to write and check commands when using explicit input.
 
+Repositories declaring Tauri dependencies receive a `tauri` group before the
+shared semver groups: `@tauri-apps/*` for Bun/npm, and `tauri` plus `tauri-*`
+for Cargo. The cohort includes major, minor, and patch updates; fallback
+groups exclude those patterns. Generator and guard derive this from dependency
+manifest ownership, including Cargo workspace and target dependencies.
+
 An optional `--config stll-dependabot.json` input declares only coverage:
 
 ```json
