@@ -18,6 +18,8 @@ import {
   checkoutActionRef,
   literalSparseCheckoutPath,
   normalizeCheckoutPath,
+  selfCheckoutRepository,
+  sparseCheckoutPaths,
 } from "./toolchain-checkout-syntax";
 import {
   containerDocumentImages,
@@ -1530,10 +1532,7 @@ export const checkRuntimeFile = ({
             cone.value !== "false")))
     )
       return { mode: "invalid" };
-    const paths = value.value
-      .split(/\r?\n/)
-      .map((entry) => entry.trim().replace(/^\//, ""))
-      .filter((entry) => entry !== "");
+    const paths = sparseCheckoutPaths(value.value);
     if (paths.length === 0 || paths.some((entry) => !sparseEntryIsValid(entry)))
       return { mode: "invalid" };
     const literalPaths = new Set(paths.filter((entry) => !dynamic(entry)));
@@ -1680,12 +1679,7 @@ export const checkRuntimeFile = ({
       let repo: unknown;
       if (checkoutRepository !== undefined)
         repo = isScalar(checkoutRepository) ? checkoutRepository.value : null;
-      const self =
-        repo === undefined ||
-        repo === "${{ github.repository }}" ||
-        (typeof repo === "string" &&
-          repository !== undefined &&
-          repo.toLowerCase() === repository.toLowerCase());
+      const self = selfCheckoutRepository(repo, repository);
       const workflowSource =
         repo === "${{ job.workflow_repository }}" &&
         isScalar(checkoutRef) &&

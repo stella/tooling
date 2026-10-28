@@ -314,3 +314,46 @@ test("runtime integration retains undeclared and changed-writer failures", () =>
     ),
   ).toBe(true);
 });
+
+test("directory-only sparse patterns never prove a version file", () => {
+  const selector = ".node-version";
+  const entry = { ...declaration, selector };
+  for (const cone of [false, "false", true, "true"]) {
+    expect(
+      proveCheckoutSource({
+        declaration: entry,
+        checkoutSha: sha,
+        selector,
+        workflow: workflow([
+          {
+            ...checkout,
+            with: {
+              ...checkout.with,
+              "sparse-checkout": `${selector}/`,
+              "sparse-checkout-cone-mode": cone,
+            },
+          },
+          consumer,
+        ]),
+      }),
+    ).toBe(false);
+  }
+  for (const repository of [
+    "stella/tooling",
+    "Stella/Tooling",
+    "STELLA/TOOLING",
+  ]) {
+    expect(
+      proveCheckoutSource({
+        declaration,
+        checkoutSha: sha,
+        selector: declaration.selector,
+        repository: "stella/tooling",
+        workflow: workflow([
+          { ...checkout, with: { ...checkout.with, repository } },
+          consumer,
+        ]),
+      }),
+    ).toBe(true);
+  }
+});

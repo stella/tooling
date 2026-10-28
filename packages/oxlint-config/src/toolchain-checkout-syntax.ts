@@ -14,3 +14,19 @@ export const literalSparseCheckoutPath = (value: string) =>
 
 export const normalizeCheckoutPath = (prefix: string) =>
   path.posix.normalize(prefix).replace(/\/$/, "") || ".";
+
+export const selfCheckoutRepository = (
+  value: unknown,
+  repository: string | undefined,
+) =>
+  value === undefined ||
+  value === "${{ github.repository }}" ||
+  (typeof value === "string" &&
+    repository !== undefined &&
+    value.toLowerCase() === repository.toLowerCase());
+
+export const sparseCheckoutPaths = (value: string) =>
+  value
+    .split(/\r?\n/)
+    .map((entry) => entry.trim().replace(/^\//, ""))
+    .filter((entry) => entry !== "");

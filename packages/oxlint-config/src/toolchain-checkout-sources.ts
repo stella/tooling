@@ -4,6 +4,8 @@ import {
   checkoutActionRef,
   literalSparseCheckoutPath,
   normalizeCheckoutPath,
+  selfCheckoutRepository,
+  sparseCheckoutPaths,
 } from "./toolchain-checkout-syntax";
 
 export type CheckoutSource = {
@@ -199,9 +201,7 @@ export const proveCheckoutSource = ({
     (options["clean"] !== undefined &&
       options["clean"] !== true &&
       options["clean"] !== "true") ||
-    (options["repository"] !== undefined &&
-      options["repository"] !== "${{ github.repository }}" &&
-      options["repository"] !== repository)
+    !selfCheckoutRepository(options["repository"], repository)
   )
     return false;
   if (
@@ -236,13 +236,26 @@ export const proveCheckoutSource = ({
     )
       return false;
   }
+  const cone = options["sparse-checkout-cone-mode"];
+  if (
+    Object.keys(options).some(
+      (key) =>
+        key.startsWith("sparse-checkout") &&
+        key !== "sparse-checkout" &&
+        key !== "sparse-checkout-cone-mode",
+    ) ||
+    (cone !== undefined &&
+      ((cone !== true &&
+        cone !== false &&
+        cone !== "true" &&
+        cone !== "false") ||
+        options["sparse-checkout"] === undefined))
+  )
+    return false;
   const sparse = options["sparse-checkout"];
   if (sparse !== undefined) {
     if (typeof sparse !== "string") return false;
-    const patterns = sparse
-      .split(/\r?\n/)
-      .map((value) => value.trim().replace(/^\//, "").replace(/\/$/, ""))
-      .filter(Boolean);
+    const patterns = sparseCheckoutPaths(sparse);
     if (
       patterns.length === 0 ||
       patterns.some((value) => !literalSparseCheckoutPath(value))
@@ -252,7 +265,9 @@ export const proveCheckoutSource = ({
       prefix === "." ? selected : path.posix.relative(prefix, selected);
     if (
       !patterns.some(
-        (value) => relative === value || relative.startsWith(`${value}/`),
+        (value) =>
+          relative === value ||
+          relative.startsWith(value.endsWith("/") ? value : `${value}/`),
       )
     )
       return false;
