@@ -382,3 +382,19 @@ test("an action at the checkout root is valid without treating its directory as 
     }),
   ).toBe(false);
 });
+
+test("directory-only sparse equality covers a local action directory", () => {
+  expect(
+    prove([
+      {
+        ...checkout,
+        with: {
+          ...checkout.with,
+          "sparse-checkout": `${declaration.selector}/`,
+          "sparse-checkout-cone-mode": false,
+        },
+      },
+      consumer,
+    ]),
+  ).toBe(true);
+});

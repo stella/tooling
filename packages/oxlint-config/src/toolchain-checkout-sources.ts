@@ -222,15 +222,12 @@ export const proveCheckoutSource = ({
   const prefix = normalizeCheckoutPath(declaration.destination);
   if (!checkoutContains({ destination: prefix, selector: selected }))
     return false;
-  if (selected === prefix) {
-    const uses = consumer["uses"];
-    if (
-      typeof uses !== "string" ||
-      !uses.startsWith("./") ||
-      normalizeCheckoutPath(uses.slice(2)) !== selected
-    )
-      return false;
-  }
+  const uses = consumer["uses"];
+  const localAction =
+    typeof uses === "string" &&
+    uses.startsWith("./") &&
+    normalizeCheckoutPath(uses.slice(2)) === selected;
+  if (selected === prefix && !localAction) return false;
   for (const step of steps.slice(checkoutIndex + 1, consumerIndex)) {
     if (!record(step) || checkoutActionRef(step["uses"]) === undefined)
       continue;
@@ -278,6 +275,7 @@ export const proveCheckoutSource = ({
       !patterns.some(
         (value) =>
           relative === value ||
+          (localAction && value === `${relative}/`) ||
           relative.startsWith(value.endsWith("/") ? value : `${value}/`),
       )
     )
