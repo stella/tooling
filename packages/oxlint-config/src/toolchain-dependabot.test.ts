@@ -1474,6 +1474,27 @@ describe("Dependabot policy", () => {
 });
 
 describe("Tauri dependency alignment", () => {
+  test("separate npm roots do not add a cohort to an unrelated Bun workspace", () => {
+    const files = {
+      "package.json": JSON.stringify({
+        packageManager: "bun@1.4.4",
+        dependencies: { react: "19" },
+      }),
+      "standalone/package.json": JSON.stringify({
+        packageManager: "npm@10.9.9",
+        dependencies: { "@tauri-apps/api": "2" },
+      }),
+      "standalone/package-lock.json": "{}",
+    };
+    const generated = generateDependabotConfig({ files, policy });
+    const document = parseDocument(generated);
+    expect(document.getIn(["updates", 0, "package-ecosystem"])).toBe("bun");
+    expect(document.hasIn(["updates", 0, "groups", "tauri"])).toBeFalse();
+    expect(document.getIn(["updates", 1, "package-ecosystem"])).toBe("npm");
+    expect(document.hasIn(["updates", 1, "groups", "tauri"])).toBeTrue();
+    expect(check(generated, files)).toEqual([]);
+  });
+
   test("detected JavaScript and Cargo owners share generated and guarded cohorts", () => {
     for (const [file, text] of [
       [

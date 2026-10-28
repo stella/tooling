@@ -132,6 +132,11 @@ const ownsTauriDependencies = (
     const manifest = ecosystem === "cargo" ? "Cargo.toml" : "package.json";
     if (path.posix.basename(file) !== manifest || !text.includes("tauri"))
       return false;
+    if (
+      ecosystem !== "cargo" &&
+      javascriptEcosystem(directoryOf(file), files) !== ecosystem
+    )
+      return false;
     const manifestValue: unknown =
       ecosystem === "cargo" ? parseToml(text) : JSON.parse(text);
     if (owns(manifestValue)) return true;
