@@ -66,8 +66,8 @@ describe("shared toolchain policy", () => {
     expect(oxlintPackage).toEqual(
       expect.objectContaining({
         peerDependencies: {
-          oxlint: ">=1.87.0 <2",
-          "oxlint-tsgolint": ">=7.0.2003 <8",
+          oxlint: `>=${toolchainPolicy.oxlint} <2`,
+          "oxlint-tsgolint": `>=${toolchainPolicy["oxlint-tsgolint"]} <8`,
           vite: builtVite,
         },
         peerDependenciesMeta: {

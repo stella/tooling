@@ -146,14 +146,14 @@
     "@stll/typescript-config": "workspace:*",
     "@types/picomatch": "4.0.3",
     "@types/semver": "7.8.0",
-    "oxlint": "1.87.0",
+    "oxlint": "1.89.0",
     "unplugin-dts": "1.1.2",
     "vite": "8.3.5",
     "vite-plugin-dts": "5.1.2"
   },
   "peerDependencies": {
-    "oxlint": ">=1.87.0 <2",
-    "oxlint-tsgolint": ">=7.0.2003 <8",
+    "oxlint": ">=1.89.0 <2",
+    "oxlint-tsgolint": ">=7.0.2005 <8",
     "vite": "8.3.5"
   },
   "peerDependenciesMeta": {
