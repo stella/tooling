@@ -114,8 +114,8 @@
       "version": "v7.0.0"
     },
     "astral-sh/setup-uv": {
-      "sha": "c18668ad3cf93ea998bef934396af7bb5c839dc7",
-      "version": "v10.2.0"
+      "sha": "07a047e608db84b3d8c06cd9a7c7dcc9c355c18e",
+      "version": "v10.3.2"
     },
     "actions/cache": {
       "sha": "55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
