@@ -1182,3 +1182,24 @@ another input. The published CLI embeds the canonical `rust/` templates and
 merges policy into Cargo, Cargo aliases, rustfmt, and Clippy configuration.
 Unrelated TOML values survive; comments and layout are canonicalized.
 See [Rust adoption](../../rust/README.md) for workspace members and exceptions.
+
+### Formatter checkout boundaries and staged selectors
+
+A root `.prettierrc.yml` containing only an empty mapping (`{}`) may stop Bun's ancestor formatter lookup. It declares no options; the shared `[fmt]` table in `bunfig.toml` remains the style owner. Nonempty and nested formatter configurations remain rejected.
+
+Repositories with a tested staged-path selector can declare its contract explicitly:
+
+```json
+{
+  "formatterStagedSelector": {
+    "script": "scripts/precommit-paths.ts",
+    "reason": "Select author-written staged paths, including merge resolutions."
+  }
+}
+```
+
+The script must be tracked, regular and readable without symlinks. The pre-commit command must use exactly `files: bun scripts/precommit-paths.ts` with `run: bun fmt --staged --ignore-unknown {files}` (the `--ignore-unknown` flag is optional), without an additional `glob`, `exclude`, `skip` or `root`. The declaration records repository ownership of the selector's semantics; static inspection does not prove that its output includes every staged path. Keep behavioral tests with that owner. CI still requires a whole-repository `bun fmt --check` without path operands.
+
+Lint inventory follows literal `cd <workspace> && ...` changes only within declared workspace directories. Literal `bun --cwd=<workspace> run <script>` preparation expands the target workspace's script and its Bun lifecycle, retaining any nested lint scopes. Dynamic paths, directory escapes, symlinks, cycles and ambiguous directory control flow remain rejected.
+
+A repository-owned CI pool can declare `formatterCheckSource` with `source`, `workflow`, `job`, `runner`, `argument` and `reason`. For example, a tracked `.github/checks/policy.yml` containing `run: bun fmt --check` is connected to a tracked `scripts/check-pool.ts` by the named workflow job's literal `bun scripts/check-pool.ts run policy` invocation (`runner` is that script and `argument` is `policy`). All three files must be tracked regular files without symlinks. Assignment prefixes and `exec` are accepted; documentation strings, different jobs or arguments, missing sources and narrowed format commands are rejected. The declaration records the repository's tested runner-to-source execution contract; it does not execute or prove the custom runner's implementation.

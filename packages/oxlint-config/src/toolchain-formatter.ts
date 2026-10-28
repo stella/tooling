@@ -10,6 +10,7 @@ import {
   isLefthookConfigPath,
   isShellScript,
 } from "./toolchain-inputs";
+import { decodeShellWord, shellCommandSegments } from "./toolchain-packages";
 import { workspaceContains } from "./toolchain-workspaces";
 
 export const formatterRule = "formatter-policy" as const;
@@ -337,10 +338,184 @@ const checkFormatConfig = (
   return errors;
 };
 
+export const parseFormatterStagedSelector = (input: unknown) => {
+  if (input === undefined) return undefined;
+  if (
+    !record(input) ||
+    Object.keys(input).some((key) => key !== "script" && key !== "reason") ||
+    typeof input["script"] !== "string" ||
+    typeof input["reason"] !== "string" ||
+    input["reason"].trim() === "" ||
+    !/^[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*\.(?:ts|mts|js|mjs)$/.test(
+      input["script"],
+    ) ||
+    input["script"].split("/").some((part) => part === "." || part === "..")
+  )
+    throw new Error(
+      "formatterStagedSelector requires a normalized script path and nonempty reason",
+    );
+  return { script: input["script"], reason: input["reason"] };
+};
+
+const hasDeclaredStagedCommand = (input: unknown, script: string): boolean => {
+  if (Array.isArray(input))
+    return input.some((value) => hasDeclaredStagedCommand(value, script));
+  if (!record(input)) return false;
+  if (
+    input["files"] === `bun ${script}` &&
+    typeof input["run"] === "string" &&
+    !["glob", "exclude", "skip", "root"].some((key) => input[key] !== undefined)
+  ) {
+    const words = shellWords(input["run"]);
+    if (
+      words[0] === "bun" &&
+      words[1] === "fmt" &&
+      words.at(-1) === "{files}" &&
+      words.slice(2, -1).includes("--staged") &&
+      words
+        .slice(2, -1)
+        .every((word) => word === "--staged" || word === "--ignore-unknown")
+    )
+      return true;
+  }
+  return Object.values(input).some((value) =>
+    hasDeclaredStagedCommand(value, script),
+  );
+};
+
+export const parseFormatterCheckSource = (input: unknown) => {
+  if (input === undefined) return undefined;
+  const keys = ["source", "workflow", "job", "runner", "argument", "reason"];
+  if (
+    !record(input) ||
+    Object.keys(input).some((key) => !keys.includes(key)) ||
+    keys.some(
+      (key) => typeof input[key] !== "string" || input[key].trim() === "",
+    )
+  )
+    throw new Error(
+      "formatterCheckSource requires source, workflow, job, runner, argument and reason strings",
+    );
+  const { source, workflow, job, runner, argument, reason } = input;
+  if (
+    typeof source !== "string" ||
+    typeof workflow !== "string" ||
+    typeof job !== "string" ||
+    typeof runner !== "string" ||
+    typeof argument !== "string" ||
+    typeof reason !== "string"
+  )
+    throw new Error("Invalid formatter check source");
+  if (
+    ![source, runner].every(
+      (value) =>
+        /^[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*$/.test(value) &&
+        !value.split("/").some((part) => part === "." || part === ".."),
+    ) ||
+    !/^\.github\/workflows\/[A-Za-z0-9_-]+\.ya?ml$/.test(workflow) ||
+    !/\.ya?ml$/.test(source) ||
+    !/\.(?:ts|mts|js|mjs)$/.test(runner) ||
+    !/^[A-Za-z0-9_:-]+$/.test(argument)
+  )
+    throw new Error(
+      "formatterCheckSource requires normalized tracked YAML/source paths and a literal runner argument",
+    );
+  return { source, workflow, job, runner, argument, reason };
+};
+
+const declaredCheckCommands = (
+  files: Record<string, string>,
+  declaration: NonNullable<ReturnType<typeof parseFormatterCheckSource>>,
+) => {
+  if (
+    [declaration.source, declaration.workflow, declaration.runner].some(
+      (file) => files[file] === undefined,
+    )
+  )
+    return [];
+  try {
+    const workflow = parseDocument(files[declaration.workflow] ?? "");
+    const source = parseDocument(files[declaration.source] ?? "");
+    if (workflow.errors.length > 0 || source.errors.length > 0) return [];
+    const value: unknown = workflow.toJS();
+    if (!record(value) || !record(value["jobs"])) return [];
+    const job = value["jobs"][declaration.job];
+    const rootDirectory = (entry: unknown) =>
+      !record(entry) ||
+      entry["working-directory"] === undefined ||
+      entry["working-directory"] === ".";
+    const defaultRoot = (entry: unknown) =>
+      !record(entry) ||
+      !record(entry["defaults"]) ||
+      rootDirectory(entry["defaults"]["run"]);
+    if (
+      !record(job) ||
+      !Array.isArray(job["steps"]) ||
+      !defaultRoot(value) ||
+      !defaultRoot(job)
+    )
+      return [];
+    const commands = job["steps"].flatMap((step) =>
+      record(step) && typeof step["run"] === "string" && rootDirectory(step)
+        ? [step["run"]]
+        : [],
+    );
+    const invoked = commands.some(
+      (command) =>
+        !shellCommandSegments(command).some((raw) =>
+          raw.some((word) =>
+            ["cd", "pushd", "popd"].includes(decodeShellWord(word)),
+          ),
+        ) &&
+        shellCommandSegments(command).some((raw) => {
+          const words = raw.map(decodeShellWord);
+          while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words.at(0) ?? ""))
+            words.shift();
+          if (words.at(0) === "exec") words.shift();
+          return (
+            JSON.stringify(words) ===
+            JSON.stringify([
+              "bun",
+              declaration.runner,
+              "run",
+              declaration.argument,
+            ])
+          );
+        }),
+    );
+    const checks: unknown = source.toJS();
+    if (!invoked || !record(checks) || !Array.isArray(checks["checks"]))
+      return [];
+    return checks["checks"].flatMap((check) =>
+      record(check) && typeof check["run"] === "string" && rootDirectory(check)
+        ? [check["run"]]
+        : [],
+    );
+  } catch {
+    return [];
+  }
+};
+
 type CheckFormatterOptions = {
   files: Record<string, string>;
   policy: FormatterPolicy;
   usesBun: boolean;
+  stagedSelector?: ReturnType<typeof parseFormatterStagedSelector>;
+  checkSource?: ReturnType<typeof parseFormatterCheckSource>;
+};
+
+// Bun's formatter searches ancestor Prettier configuration even across checkout
+// boundaries. An empty root mapping stops that search without owning any style.
+const isFormatterBoundary = (file: string, text: string) => {
+  if (file !== ".prettierrc.yml") return false;
+  const document = parseDocument(text);
+  if (document.errors.length > 0) return false;
+  try {
+    const value: unknown = document.toJS();
+    return record(value) && Object.keys(value).length === 0;
+  } catch {
+    return false;
+  }
 };
 
 /** bun fmt is the only formatter: one config table, staged hooks and a full CI check. */
@@ -348,14 +523,30 @@ export const checkFormatter = ({
   files,
   policy,
   usesBun,
+  stagedSelector,
+  checkSource,
 }: CheckFormatterOptions): Diagnostic[] => {
   const diagnostics: Diagnostic[] = [];
   const add = (file: string, line: number, message: string) =>
     diagnostics.push({ rule: formatterRule, path: file, line, message });
   const workflowCommands: string[] = [];
+  if (checkSource !== undefined) {
+    const commands = declaredCheckCommands(files, checkSource);
+    if (!commands.some((command) => isBunFormat(command, "--check")))
+      add(
+        "stll-toolchain.json",
+        1,
+        "formatterCheckSource requires tracked regular source and runner files, an exact workflow job invocation, and a whole-repository bun fmt --check command",
+      );
+    else workflowCommands.push(...commands);
+  }
+  let stagedSelectorUsed = false;
   for (const [file, text] of Object.entries(files)) {
     const name = path.posix.basename(file);
-    if (isFormatterConfigPath(file))
+    if (
+      isFormatterConfigPath(file) &&
+      !(usesBun && isFormatterBoundary(file, text))
+    )
       add(
         file,
         1,
@@ -431,7 +622,13 @@ export const checkFormatter = ({
       if (automation === "workflow") workflowCommands.push(...commands);
       if (isLefthookConfigPath(file) && usesBun) {
         const preCommit = record(parsed) ? parsed["pre-commit"] : undefined;
+        const declared =
+          stagedSelector !== undefined &&
+          files[stagedSelector.script] !== undefined &&
+          hasDeclaredStagedCommand(preCommit, stagedSelector.script);
+        stagedSelectorUsed ||= declared;
         if (
+          !declared &&
           !commandLines(runValues(preCommit)).some((line) =>
             isBunFormat(line, "--staged"),
           )
@@ -472,6 +669,12 @@ export const checkFormatter = ({
       ".github/workflows",
       1,
       "a workflow must run bun fmt --check over the whole repository",
+    );
+  if (stagedSelector !== undefined && !stagedSelectorUsed)
+    add(
+      "stll-toolchain.json",
+      1,
+      "formatterStagedSelector must name a tracked regular script used by an exact pre-commit bun fmt --staged {files} command without additional path filters",
     );
   return diagnostics;
 };

@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { lstatSync, readFileSync } from "node:fs";
+import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -246,8 +246,9 @@ export const checkNodeProjects = ({
     typeof lintInventoryCommands
   >["commands"][number] & { cwd: string })[] = [];
   const activeBuilds = new Set<string>();
+  const activeScripts = new Set<string>();
   const workspaceLifecycle = (directory: string): ScriptLifecycleContext => {
-    const nestedLifecycle = { ...lifecycle };
+    const nestedLifecycle = { ...lifecycle, directory };
     for (const [key, name] of [
       ["npmrc", ".npmrc"],
       ["pnpmWorkspace", "pnpm-workspace.yaml"],
@@ -268,6 +269,50 @@ export const checkNodeProjects = ({
     return nestedLifecycle;
   };
   const lifecycle: ScriptLifecycleContext = {
+    directory: ".",
+    assertDirectory: (directory) => {
+      if (directory !== "." && !workspaceMembers(false).has(directory))
+        throw new Error(
+          `Lint directory must name a declared workspace: ${directory}`,
+        );
+      const target = path.resolve(realpathSync(root), directory);
+      if (realpathSync(target) !== target)
+        throw new Error(`Lint directory must not cross symlinks: ${directory}`);
+    },
+    invokeBunScript: (directory, script) => {
+      const pkg =
+        directory === "." ? manifest : workspaceMembers(false).get(directory);
+      if (pkg === undefined)
+        throw new Error(`Missing workspace script owner: ${directory}`);
+      const scripts = record(pkg) ? pkg["scripts"] : undefined;
+      if (
+        (!record(scripts) || typeof scripts[script] !== "string") &&
+        scriptSourceKind(script) !== undefined
+      )
+        return;
+      const key = `${directory}:${script}`;
+      if (activeScripts.has(key))
+        throw new Error(`Cyclic workspace script delegation: ${key}`);
+      activeScripts.add(key);
+      try {
+        const nested = lintInventoryCommands(pkg, true, {
+          ...workspaceLifecycle(directory),
+          entryScript: script,
+          entryManager: "bun",
+        });
+        if (nested.workspaceTask || nested.errors.length > 0)
+          throw new Error(
+            `${key}: ${nested.workspaceTask ? "nested workspace lint delegation is unsupported" : nested.errors.join("; ")}`,
+          );
+        for (const command of nested.commands)
+          filteredCommands.push({
+            ...command,
+            cwd: path.join(root, command.directory ?? directory),
+          });
+      } finally {
+        activeScripts.delete(key);
+      }
+    },
     packageManager: record(manifest) ? manifest["packageManager"] : undefined,
     npmrc: lifecycleFile(root, ".npmrc", trackedFiles),
     pnpmWorkspace: lifecycleFile(root, "pnpm-workspace.yaml", trackedFiles),
@@ -312,8 +357,8 @@ export const checkNodeProjects = ({
           );
         for (const command of nested.commands)
           filteredCommands.push({
-            cwd: path.join(root, directory),
             ...command,
+            cwd: path.join(root, command.directory ?? directory),
           });
       } finally {
         activeBuilds.delete(directory);
@@ -334,8 +379,8 @@ export const checkNodeProjects = ({
       "bin/oxlint",
     );
     const commands = inventory.commands.map((command) => ({
-      cwd: root,
       ...command,
+      cwd: path.join(root, command.directory ?? "."),
     }));
     if (inventory.workspaceTask) {
       for (const [directory, workspace] of workspaceMembers(
@@ -357,7 +402,10 @@ export const checkNodeProjects = ({
         if (nested.errors.length > 0)
           throw new Error(`${file}: ${nested.errors.join("; ")}`);
         for (const command of nested.commands)
-          commands.push({ cwd: path.join(root, directory), ...command });
+          commands.push({
+            ...command,
+            cwd: path.join(root, command.directory ?? directory),
+          });
       }
       if (commands.length === 0 && filteredCommands.length === 0)
         throw new Error("workspace lint task has no declared oxlint commands");

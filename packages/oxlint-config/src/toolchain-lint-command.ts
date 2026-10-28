@@ -1,4 +1,10 @@
-import { decodeShellWord, shellCommandSegments } from "./toolchain-packages";
+import path from "node:path";
+
+import {
+  decodeShellWord,
+  shellCommandSegments,
+  shellTokens,
+} from "./toolchain-packages";
 import { scriptSourceKind } from "./toolchain-script-extensions";
 import {
   rootScriptManager,
@@ -144,6 +150,7 @@ const inventoryArguments = (raw: readonly string[]) => {
 };
 
 type LintInventoryCommand = {
+  directory?: string;
   runtime: "node" | "bun";
   args: string[];
 };
@@ -152,12 +159,16 @@ type LintInventoryCommand = {
 export const lintInventoryCommands = (
   manifest: unknown,
   forceEnabled = false,
-  context: ScriptLifecycleContext & { entryScript?: string } = {},
+  context: ScriptLifecycleContext & {
+    entryScript?: string;
+    entryManager?: string;
+  } = {},
 ) => {
   const commands: LintInventoryCommand[] = [];
   const errors: string[] = [];
   const workspaceTasks = new Set<string>();
   const filteredBuilds = new Set<string>();
+  const workspaceScripts = new Set<string>();
   const declaresEngine =
     record(manifest) &&
     [manifest["dependencies"], manifest["devDependencies"]].some(
@@ -195,10 +206,87 @@ export const lintInventoryCommands = (
       return;
     }
     active.add(name);
-    for (const raw of shellCommandSegments(source)) {
+    let directory = context.directory ?? ".";
+    const segments = shellCommandSegments(source).filter(
+      (segment) => segment.length > 0,
+    );
+    const tokens = shellTokens(source);
+    // Flattened nested shell bodies do not share their parent's working directory.
+    // Directory tracking is deliberately limited to a literal top-level && chain.
+    const tracksDirectory =
+      tokens.every((token) =>
+        token.kind === "word"
+          ? literalWord(token.value)
+          : token.kind === "boundary" && token.value === "&&",
+      ) &&
+      segments.length ===
+        tokens.filter((token) => token.kind === "boundary").length + 1;
+    for (const raw of segments) {
       if (raw.length === 0) continue;
       const words = raw.map(decodeShellWord);
       const first = words.at(0);
+      if (
+        first === "cd" &&
+        raw.length === 2 &&
+        raw.every(literalWord) &&
+        tracksDirectory
+      ) {
+        const target = words.at(1);
+        try {
+          if (
+            target === undefined ||
+            target.startsWith("-") ||
+            path.posix.isAbsolute(target) ||
+            context.assertDirectory === undefined
+          )
+            throw new Error(
+              "Literal cd requires verified workspace directory context",
+            );
+          const resolved = path.posix.normalize(
+            path.posix.join(directory, target),
+          );
+          context.assertDirectory(resolved);
+          directory = resolved;
+        } catch (error) {
+          errors.push(
+            `${name}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+        continue;
+      }
+      if (
+        first === "bun" &&
+        words.at(1)?.startsWith("--cwd=") &&
+        words.at(2) === "run" &&
+        raw.length === 4 &&
+        raw.every(literalWord)
+      ) {
+        try {
+          const target = words.at(1)?.slice("--cwd=".length);
+          const script = words.at(3);
+          if (
+            !target ||
+            path.posix.isAbsolute(target) ||
+            !script ||
+            context.assertDirectory === undefined ||
+            context.invokeBunScript === undefined
+          )
+            throw new Error(
+              "Bun --cwd scripts require verified workspace lifecycle context",
+            );
+          const resolved = path.posix.normalize(
+            path.posix.join(directory, target),
+          );
+          context.assertDirectory(resolved);
+          context.invokeBunScript(resolved, script);
+          workspaceScripts.add(`${resolved}:${script}`);
+        } catch (error) {
+          errors.push(
+            `${name}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+        continue;
+      }
       if (first === "cd" || first === "pushd" || first === "popd") {
         errors.push(
           `${name}: changing directories is unsupported for lint inventory`,
@@ -258,6 +346,7 @@ export const lintInventoryCommands = (
         if (
           target !== undefined &&
           first === "bun" &&
+          directory === (context.directory ?? ".") &&
           scriptSourceKind(target) !== undefined &&
           typeof scripts[target] !== "string"
         ) {
@@ -274,7 +363,23 @@ export const lintInventoryCommands = (
           continue;
         }
         const alias = words.at(2);
-        if (alias !== undefined) invoke({ name: alias, manager: first });
+        if (alias !== undefined) {
+          if (directory === (context.directory ?? "."))
+            invoke({ name: alias, manager: first });
+          else if (first === "bun" && context.invokeBunScript !== undefined) {
+            try {
+              context.invokeBunScript(directory, alias);
+              workspaceScripts.add(`${directory}:${alias}`);
+            } catch (error) {
+              errors.push(
+                `${name}: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            }
+          } else
+            errors.push(
+              `${name}: changed-directory script requires verified Bun lifecycle context`,
+            );
+        }
         continue;
       }
       let offset: number | undefined;
@@ -335,6 +440,7 @@ export const lintInventoryCommands = (
         commands.push({
           runtime: first === "bun" ? "bun" : "node",
           args: inventory.args,
+          ...(directory === (context.directory ?? ".") ? {} : { directory }),
         });
     }
     active.delete(name);
@@ -375,7 +481,7 @@ export const lintInventoryCommands = (
   };
   invoke({
     name: context.entryScript ?? "lint",
-    manager: rootScriptManager(manifest, context),
+    manager: context.entryManager ?? rootScriptManager(manifest, context),
   });
   const workspaceTask = workspaceTasks.size > 0;
   if (
@@ -383,6 +489,7 @@ export const lintInventoryCommands = (
     commands.length === 0 &&
     !workspaceTask &&
     filteredBuilds.size === 0 &&
+    workspaceScripts.size === 0 &&
     errors.length === 0
   )
     return { commands, errors, enabled: false, workspaceTask };
@@ -390,6 +497,7 @@ export const lintInventoryCommands = (
     commands.length === 0 &&
     !workspaceTask &&
     filteredBuilds.size === 0 &&
+    workspaceScripts.size === 0 &&
     context.entryScript === undefined
   )
     errors.push("root lint scripts contain no supported oxlint invocation");

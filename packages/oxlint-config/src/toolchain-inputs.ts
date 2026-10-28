@@ -114,6 +114,7 @@ export const isShellScript = (file: string, text = "") =>
 export const toolchainInputKind = (file: string, text = "") => {
   if (
     file === "bunfig.toml" ||
+    file === ".prettierrc.yml" ||
     file === cloudSetupPath ||
     file === cloudClaudeSettingsPath ||
     file === "Cargo.lock" ||

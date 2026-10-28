@@ -674,3 +674,44 @@ test("pnpm delegated settings cannot hide lifecycle hooks", () => {
     }
   }
 });
+
+test("literal successful directory changes preserve the inventory working directory", () => {
+  const context = {
+    directory: "apps/api",
+    assertDirectory: (directory: string) => {
+      if (![".", "apps/api"].includes(directory))
+        throw new Error("unknown directory");
+    },
+  };
+  expect(
+    lintInventoryCommands(
+      manifest({
+        lint: "cd ../.. && bun --bun oxlint -c oxlint.config.ts apps/api",
+      }),
+      true,
+      context,
+    ).commands,
+  ).toEqual([
+    {
+      runtime: "bun",
+      args: ["-c", "oxlint.config.ts", "apps/api"],
+      directory: ".",
+    },
+  ]);
+  for (const command of [
+    "cd ../..; oxlint .",
+    "cd ../.. || oxlint .",
+    "(cd ../..) && oxlint .",
+    "cd $ROOT && oxlint .",
+    "cd /tmp && oxlint .",
+    "cd ../../../ && oxlint .",
+    "pushd ../.. && oxlint .",
+    "bash -c 'cd ../.. && oxlint src' && bash -c 'oxlint scripts'",
+    "sh -c 'cd ../.. && oxlint src' && oxlint scripts",
+    "echo $(cd ../..) && oxlint scripts",
+  ])
+    expect(
+      lintInventoryCommands(manifest({ lint: command }), true, context).errors
+        .length,
+    ).toBeGreaterThan(0);
+});

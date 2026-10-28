@@ -41,7 +41,12 @@ import {
   type ResolvedEngineFloor,
   resolveEngineFloor,
 } from "./toolchain-engine-floors";
-import { checkFormatter, formatterRule } from "./toolchain-formatter";
+import {
+  checkFormatter,
+  formatterRule,
+  parseFormatterCheckSource,
+  parseFormatterStagedSelector,
+} from "./toolchain-formatter";
 import { toolchainInputKind } from "./toolchain-inputs";
 import { checkNodeProjects, nodeProjectRule } from "./toolchain-node-projects";
 import {
@@ -104,12 +109,14 @@ export const parseToolchainConfiguration = (input: unknown) => {
         key !== "rustExceptions" &&
         key !== "rustInstallFixtures" &&
         key !== "dependabotIgnores" &&
-        key !== "typescriptAllowlist",
+        key !== "typescriptAllowlist" &&
+        key !== "formatterStagedSelector" &&
+        key !== "formatterCheckSource",
     ) ||
     (input["optOuts"] !== undefined && !array(input["optOuts"]))
   )
     throw new Error(
-      "stll-toolchain.json accepts only optOuts, cloud, engineFloors, dynamicSelectors, consumerChecks, rustExceptions, rustInstallFixtures, dependabotIgnores and typescriptAllowlist declarations",
+      "stll-toolchain.json accepts only optOuts, cloud, engineFloors, dynamicSelectors, consumerChecks, rustExceptions, rustInstallFixtures, dependabotIgnores, typescriptAllowlist, formatterStagedSelector and formatterCheckSource declarations",
     );
   const disabled = new Set<string>();
   const optOuts = input["optOuts"] ?? [];
@@ -155,6 +162,12 @@ export const parseToolchainConfiguration = (input: unknown) => {
   }
   return {
     disabled,
+    formatterCheckSource: parseFormatterCheckSource(
+      input["formatterCheckSource"],
+    ),
+    formatterStagedSelector: parseFormatterStagedSelector(
+      input["formatterStagedSelector"],
+    ),
     rustExceptions: parseRustExceptions(input["rustExceptions"]),
     rustInstallFixtures: parseRustInstallFixtures(input["rustInstallFixtures"]),
     cloud: parseCloudSetup(input["cloud"]),
@@ -345,6 +358,46 @@ export const checkToolchain = ({
       });
     }
   }
+  const checkSource = configuration.formatterCheckSource;
+  if (checkSource !== undefined) {
+    for (const source of [
+      checkSource.source,
+      checkSource.workflow,
+      checkSource.runner,
+    ]) {
+      const content = readSourceApiInput({
+        root,
+        source,
+        tracked: trackedFiles,
+      });
+      if (content !== undefined) files[source] = content;
+      else
+        diagnostics.push({
+          rule: "configuration",
+          path: source,
+          line: 1,
+          message:
+            "Formatter CI source evidence must be tracked, readable, regular and free of symlinks",
+        });
+    }
+  }
+  const stagedSelector = configuration.formatterStagedSelector;
+  if (stagedSelector !== undefined) {
+    const content = readSourceApiInput({
+      root,
+      source: stagedSelector.script,
+      tracked: trackedFiles,
+    });
+    if (content !== undefined) files[stagedSelector.script] = content;
+    else
+      diagnostics.push({
+        rule: "configuration",
+        path: stagedSelector.script,
+        line: 1,
+        message:
+          "Formatter staged selector must be tracked, readable, regular and free of symlinks",
+      });
+  }
   for (const entry of configuration.typescriptAllowlist) {
     if (entry.kind !== "source-api") continue;
     for (const source of entry.sources) {
@@ -453,7 +506,13 @@ export const checkToolchain = ({
     }
   });
   diagnostics.push(
-    ...checkFormatter({ files, policy: policy.formatter, usesBun }),
+    ...checkFormatter({
+      files,
+      policy: policy.formatter,
+      usesBun,
+      stagedSelector,
+      checkSource,
+    }),
   );
   if (usesBun || files["bunfig.toml"] !== undefined) {
     try {

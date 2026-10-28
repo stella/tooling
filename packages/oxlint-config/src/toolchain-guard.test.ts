@@ -1250,3 +1250,43 @@ test("historical install declarations must match a tracked install probe", () =>
       }),
     );
 });
+
+test("staged selector declarations cannot use untracked source evidence", () => {
+  const selector = "scripts/select-staged.ts";
+  const configuration = JSON.stringify({
+    formatterStagedSelector: {
+      script: selector,
+      reason: "Author-written staged paths.",
+    },
+  });
+  const files = {
+    "stll-toolchain.json": configuration,
+    "lefthook.yml": `pre-commit:\n  commands:\n    format:\n      files: bun ${selector}\n      run: bun fmt --staged {files}\n`,
+  };
+  expect(fixture(files, { [selector]: "export {};" })).toContainEqual(
+    expect.objectContaining({ rule: "configuration", path: selector }),
+  );
+  expect(
+    fixture({ ...files, [selector]: "export {};" }).filter(
+      ({ rule }) => rule === "configuration",
+    ),
+  ).toEqual([]);
+});
+
+test("root formatter boundary contents survive the real tracked-input reader", () => {
+  const files = {
+    "package.json": JSON.stringify({ packageManager: `bun@${toolchain.bun}` }),
+    ".prettierrc.yml": "{}\n",
+  };
+  expect(
+    fixture(files).filter(({ path: file }) => file === ".prettierrc.yml"),
+  ).toEqual([]);
+  expect(
+    fixture({ ...files, ".prettierrc.yml": "semi: false\n" }),
+  ).toContainEqual(
+    expect.objectContaining({
+      path: ".prettierrc.yml",
+      rule: "formatter-policy",
+    }),
+  );
+});
