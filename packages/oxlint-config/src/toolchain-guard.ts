@@ -58,6 +58,10 @@ import {
   checkRustExceptionExpiry,
   parseRustExceptions,
 } from "./toolchain-rust";
+import {
+  checkRustInstallFixtureExpiry,
+  parseRustInstallFixtures,
+} from "./toolchain-rust-fixtures";
 import { parseToolchainPolicy } from "./toolchain-schema";
 
 export const toolchainRules = [
@@ -97,13 +101,14 @@ export const parseToolchainConfiguration = (input: unknown) => {
         key !== "dynamicSelectors" &&
         key !== "consumerChecks" &&
         key !== "rustExceptions" &&
+        key !== "rustInstallFixtures" &&
         key !== "dependabotIgnores" &&
         key !== "typescriptAllowlist",
     ) ||
     (input["optOuts"] !== undefined && !array(input["optOuts"]))
   )
     throw new Error(
-      "stll-toolchain.json accepts only optOuts, cloud, engineFloors, dynamicSelectors, consumerChecks, rustExceptions, dependabotIgnores and typescriptAllowlist declarations",
+      "stll-toolchain.json accepts only optOuts, cloud, engineFloors, dynamicSelectors, consumerChecks, rustExceptions, rustInstallFixtures, dependabotIgnores and typescriptAllowlist declarations",
     );
   const disabled = new Set<string>();
   const optOuts = input["optOuts"] ?? [];
@@ -150,6 +155,7 @@ export const parseToolchainConfiguration = (input: unknown) => {
   return {
     disabled,
     rustExceptions: parseRustExceptions(input["rustExceptions"]),
+    rustInstallFixtures: parseRustInstallFixtures(input["rustInstallFixtures"]),
     cloud: parseCloudSetup(input["cloud"]),
     engineFloors: parseEngineFloors(input["engineFloors"]),
     dynamicSelectors: parseDynamicSelectors(input["dynamicSelectors"]),
@@ -299,11 +305,20 @@ export const checkToolchain = ({
         JSON.parse(files["stll-toolchain.json"]),
       );
       dynamicSelectors = configuration.dynamicSelectors;
-      const expiry = checkRustExceptionExpiry({
+      const rustExpiry = checkRustExceptionExpiry({
         exceptions: configuration.rustExceptions,
         now,
         scope: expiryScope,
       });
+      const fixtureExpiry = checkRustInstallFixtureExpiry({
+        fixtures: configuration.rustInstallFixtures,
+        now,
+        scope: expiryScope,
+      });
+      const expiry = {
+        errors: [...rustExpiry.errors, ...fixtureExpiry.errors],
+        warnings: [...rustExpiry.warnings, ...fixtureExpiry.warnings],
+      };
       for (const message of expiry.errors)
         diagnostics.push({
           rule: "configuration",
@@ -464,6 +479,9 @@ export const checkToolchain = ({
     }
     diagnostics.push(...checkNodeProjects({ root, manifest, trackedFiles }));
   }
+  const usedRustFixtures = new Set<
+    (typeof configuration.rustInstallFixtures)[number]
+  >();
   for (const [file, text] of Object.entries(files))
     diagnostics.push(
       ...checkRuntimeFile({
@@ -475,6 +493,8 @@ export const checkToolchain = ({
         },
         trackedFiles,
         rustExceptions: configuration.rustExceptions,
+        rustInstallFixtures: configuration.rustInstallFixtures,
+        onRustInstallFixture: (entry) => usedRustFixtures.add(entry),
         dynamicSelectors: dynamicSelectors.filter(
           (entry) => entry.path === file,
         ),
@@ -490,6 +510,15 @@ export const checkToolchain = ({
         readFile: (target) => files[target],
       }),
     );
+  for (const entry of configuration.rustInstallFixtures) {
+    if (!usedRustFixtures.has(entry))
+      diagnostics.push({
+        rule: "configuration",
+        path: "stll-toolchain.json",
+        line: 1,
+        message: `Rust install fixture ${entry.path}:${entry.pin} must match a tracked rustup toolchain install probe`,
+      });
+  }
   for (const entry of engineFloors)
     if (!exercisedFloors.has(entry) || mismatchedFloors.has(entry))
       diagnostics.push({

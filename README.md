@@ -146,6 +146,34 @@ expired exceptions follow the quarantine expiry scope below. Floating channels, 
 opt-outs fail validation. The same exception applies to toolchain files,
 workflow Rust inputs and environments, Cargo/rustup commands and Rust images.
 
+Historical offline installation fixtures use the narrower `rustInstallFixtures`
+declaration. Each entry has exactly `path`, `pin`, `reason`, `tracking` and
+`expires`:
+
+```json
+{
+  "rustInstallFixtures": [
+    {
+      "path": "scripts/offline-smoke.sh",
+      "pin": "nightly-2026-04-16",
+      "reason": "Verify the retained offline seed; remove when that seed is retired",
+      "tracking": "https://github.com/owner/repository/issues/123",
+      "expires": "2026-11-11"
+    }
+  ]
+}
+```
+
+The path must identify one tracked `.sh` file, and the pin must be an exact stable
+release or dated nightly. Only `rustup toolchain install <pin>` in that file is
+accepted; `--default`, compiler execution, environment selectors, other files,
+workflows and container images still follow ordinary Rust policy. Missing or
+unused declarations fail. Expiry uses the same scope as `rustExceptions`.
+Document the fixture's removal condition in its reason and track its lifecycle
+with a GitHub issue or pull request. The declaration does not sandbox the script:
+the fixture must isolate its Rust home and disable network access itself. It is
+for checking historical installation assets, not selecting a live compiler.
+
 Hawk 0.1.11 is the current temporary Rust exception: its driver fails to build
 with 1.99.0 due to compiler-private API changes (E0061 and E0308). It uses
 1.97.1 until [tracking issue #99](https://github.com/stella/tooling/issues/99) is

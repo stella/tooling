@@ -28,6 +28,7 @@ import {
 } from "./toolchain-inputs";
 import { nodeSelectorMatches } from "./toolchain-node";
 import { checkRustReferences, type RustException } from "./toolchain-rust";
+import type { RustInstallFixture } from "./toolchain-rust-fixtures";
 import {
   checkWorkflowTrust,
   workflowTrustRules,
@@ -83,6 +84,8 @@ type CheckRuntimeFileOptions = {
   dynamicSelectors?: readonly DynamicSelector[] | undefined;
   onDynamicSelector?: ((entry: DynamicSelector) => void) | undefined;
   rustExceptions?: readonly RustException[] | undefined;
+  rustInstallFixtures?: readonly RustInstallFixture[] | undefined;
+  onRustInstallFixture?: ((entry: RustInstallFixture) => void) | undefined;
   engineFloors?: readonly ResolvedEngineFloor[] | undefined;
   onEngineFloor?:
     | ((floor: ResolvedEngineFloor, status: "matched" | "mismatch") => void)
@@ -305,6 +308,8 @@ export const checkRuntimeFile = ({
   dynamicSelectors = [],
   onDynamicSelector,
   rustExceptions = [],
+  rustInstallFixtures = [],
+  onRustInstallFixture,
   engineFloors = [],
   onEngineFloor,
 }: CheckRuntimeFileOptions): RuntimeDiagnostic[] => {
@@ -314,6 +319,8 @@ export const checkRuntimeFile = ({
     text,
     rust: policy.rust,
     exceptions: rustExceptions,
+    installFixtures: rustInstallFixtures,
+    onInstallFixture: onRustInstallFixture,
   });
   const name = path.posix.basename(file);
   const lines = text.split(/\r?\n/);

@@ -1221,3 +1221,32 @@ test("stll-toolchain.json Dependabot ignores cannot claim shared pins", () => {
     { rule: "configuration", path: "stll-toolchain.json" },
   ]);
 }, 15_000);
+
+test("historical install declarations must match a tracked install probe", () => {
+  const declaration = {
+    path: "scripts/offline.sh",
+    pin: "1.96.0",
+    reason: "Verify retained offline seed",
+    tracking: "https://github.com/stella/tooling/issues/123",
+    expires: "2099-01-01",
+  };
+  const config = JSON.stringify({ rustInstallFixtures: [declaration] });
+  const source = "rustup toolchain install 1.96.0 --component clippy";
+  expect(
+    fixture({ "stll-toolchain.json": config, [declaration.path]: source }),
+  ).toEqual([]);
+  for (const sources of [
+    {},
+    { "scripts/other.sh": source },
+    { [declaration.path]: "rustup toolchain install 1.99.0" },
+  ])
+    expect(
+      fixture({ "stll-toolchain.json": config, ...sources }),
+    ).toContainEqual(
+      expect.objectContaining({
+        rule: "configuration",
+        path: "stll-toolchain.json",
+        message: expect.stringContaining("must match a tracked"),
+      }),
+    );
+});
