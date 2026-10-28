@@ -1272,3 +1272,21 @@ test("staged selector declarations cannot use untracked source evidence", () => 
     ),
   ).toEqual([]);
 });
+
+test("root formatter boundary contents survive the real tracked-input reader", () => {
+  const files = {
+    "package.json": JSON.stringify({ packageManager: `bun@${toolchain.bun}` }),
+    ".prettierrc.yml": "{}\n",
+  };
+  expect(
+    fixture(files).filter(({ path: file }) => file === ".prettierrc.yml"),
+  ).toEqual([]);
+  expect(
+    fixture({ ...files, ".prettierrc.yml": "semi: false\n" }),
+  ).toContainEqual(
+    expect.objectContaining({
+      path: ".prettierrc.yml",
+      rule: "formatter-policy",
+    }),
+  );
+});

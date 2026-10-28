@@ -1164,3 +1164,33 @@ test("cross-workspace Bun scripts retain their own lint scopes and cd scopes res
     ).toBe(true);
   });
 }, 15_000);
+
+test("changed-directory file-shaped aliases resolve from the target manifest", () => {
+  withInventoryFixture((root, trackedFiles) => {
+    const manifest = {
+      ...fixtureManifest,
+      packageManager: "bun@1.4.4",
+      workspaces: ["packages/*"],
+      scripts: { lint: "oxlint scripts && cd packages/foo && bun run lint.ts" },
+    };
+    const write = (file: string, contents: string) => {
+      mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+      writeFileSync(path.join(root, file), contents);
+      trackedFiles.add(file);
+    };
+    write("package.json", JSON.stringify(manifest));
+    write(
+      "packages/foo/package.json",
+      JSON.stringify({
+        name: "@fixture/foo",
+        scripts: { "lint.ts": "oxlint -c ../../.oxlintrc.json src" },
+      }),
+    );
+    write("packages/foo/src/orphan.ts", "export const value = 1;");
+    write("packages/foo/tsconfig.json", '{"files":[]}');
+    trackedFiles.add(".oxlintrc.json");
+    expect(checkNodeProjects({ root, manifest, trackedFiles })).toContainEqual(
+      expect.objectContaining({ path: "packages/foo/src/orphan.ts" }),
+    );
+  });
+}, 15_000);

@@ -334,6 +334,7 @@ export const lintInventoryCommands = (
         if (
           target !== undefined &&
           first === "bun" &&
+          directory === (context.directory ?? ".") &&
           scriptSourceKind(target) !== undefined &&
           typeof scripts[target] !== "string"
         ) {

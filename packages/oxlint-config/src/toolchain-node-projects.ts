@@ -284,6 +284,12 @@ export const checkNodeProjects = ({
         directory === "." ? manifest : workspaceMembers(false).get(directory);
       if (pkg === undefined)
         throw new Error(`Missing workspace script owner: ${directory}`);
+      const scripts = record(pkg) ? pkg["scripts"] : undefined;
+      if (
+        (!record(scripts) || typeof scripts[script] !== "string") &&
+        scriptSourceKind(script) !== undefined
+      )
+        return;
       const key = `${directory}:${script}`;
       if (activeScripts.has(key))
         throw new Error(`Cyclic workspace script delegation: ${key}`);
