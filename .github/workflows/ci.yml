@@ -192,11 +192,11 @@ jobs:
           persist-credentials: false
 
       - name: Install stable Rust toolchain
-        run: rustup toolchain install 1.99.0 --profile minimal
+        run: rustup toolchain install 1.99.1 --profile minimal
 
       - name: Test stable source lint
         env:
-          RUSTUP_TOOLCHAIN: "1.99.0"
+          RUSTUP_TOOLCHAIN: "1.99.1"
         run: cargo test --manifest-path rust-lints/stella_source_lint/Cargo.toml --locked
 
   hawk-compatibility:
