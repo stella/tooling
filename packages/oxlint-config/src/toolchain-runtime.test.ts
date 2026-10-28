@@ -825,7 +825,7 @@ test("workflow and composite local actions share checkout source provenance", ()
       expect(reports).toEqual([
         {
           path: file,
-          line: file === "action.yml" ? 6 : 7,
+          line: 6,
           tool: "action",
           selector: "source/action",
           checkoutPath: "source",

@@ -574,8 +574,30 @@ test("deepest checkout owns sparse validation independently of ancestor checkout
     "          path: snapshot\n",
     "          path: snapshot\n          ref: '${{ inputs.ref }}'\n",
   );
-  expect(check(delegatedAction).diagnostics).toMatchObject([
-    { rule: "action-pins" },
+  const reports: unknown[] = [];
+  expect(
+    checkRuntimeFile({
+      file,
+      text: delegatedAction,
+      policy,
+      trackedFiles: new Set(),
+      readFile: () => {
+        throw new Error("Delegated source must not read the inspected tree");
+      },
+      onDelegated: (report) => reports.push(report),
+    }),
+  ).toEqual([]);
+  expect(reports).toMatchObject([
+    {
+      tool: "bun",
+      selector: "snapshot/package.json",
+      ref: "${{ inputs.ref }}",
+    },
+    {
+      tool: "action",
+      selector: "snapshot/.github/actions/example",
+      ref: "${{ inputs.ref }}",
+    },
   ]);
   for (const sparse of ["package.json", "src", "!package.json"]) {
     expect(

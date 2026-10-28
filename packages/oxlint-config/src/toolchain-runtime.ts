@@ -1525,6 +1525,10 @@ export const checkRuntimeFile = ({
         selector === undefined ||
         unknownCheckoutDestination ||
         binding?.source === "untrusted" ||
+        (binding?.source === "delegated" &&
+          !/^(?:inputs\.[A-Za-z_][A-Za-z0-9_]*|github\.event\.workflow_run\.head_sha)$/.test(
+            dynamicRefBody(binding.ref) ?? "",
+          )) ||
         hasAmbiguousCheckoutWriters(selector, providers)
       ) {
         add({
