@@ -1,5 +1,13 @@
 # @stll/test-kit
 
+## 0.4.1
+
+### Patch Changes
+
+- [#242](https://github.com/stella/tooling/pull/242) [`6755ea1`](https://github.com/stella/tooling/commit/6755ea12323e20c24835cc77040fe43fe3c5c2bd) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Validate the database-clock helpers with PGlite 0.5.11, including its readiness-aware close and extended-query protocol fixes.
+
+- [#242](https://github.com/stella/tooling/pull/242) [`6755ea1`](https://github.com/stella/tooling/commit/6755ea12323e20c24835cc77040fe43fe3c5c2bd) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Validate the database-clock SQL fragments against Drizzle 1.0 RC5 while retaining the optional RC4-compatible peer contract.
+
 ## 0.4.0
 
 ### Minor Changes

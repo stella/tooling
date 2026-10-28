@@ -1,5 +1,11 @@
 # @stll/oxlint-config
 
+## 3.2.1
+
+### Patch Changes
+
+- [#245](https://github.com/stella/tooling/pull/245) [`51a4412`](https://github.com/stella/tooling/commit/51a4412dfe02203c24a3495f14ec99405acb7527) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Pin Rust 1.99.1, including the x86_64 FFI bool return miscompilation fix, restored UEFI/embedded wcslen linkage, and the macOS rust-lld libLLVM rpath fix.
+
 ## 3.2.0
 
 ### Minor Changes
