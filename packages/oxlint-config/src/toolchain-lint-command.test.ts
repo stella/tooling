@@ -634,7 +634,11 @@ test("custom Yarn runtimes cannot inherit the stock Berry no-hooks policy", () =
 });
 
 test("the installed pnpm version has an explicit lifecycle contract", () => {
-  expect(pnpmLifecycleVersions).toContain(workspace.devDependencies.pnpm);
+  expect(
+    pnpmLifecycleVersions.some(
+      (version) => version === workspace.devDependencies.pnpm,
+    ),
+  ).toBe(true);
 });
 
 test("pnpm delegated settings cannot hide lifecycle hooks", () => {
