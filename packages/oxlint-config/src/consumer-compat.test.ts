@@ -133,10 +133,10 @@ describe("consumer compatibility declarations", () => {
       typeof metadata["bin"]["pnpm"] !== "string"
     )
       throw new Error("installed pnpm must match consumer policy");
-    const executable = path.resolve(
-      path.dirname(require.resolve("pnpm/package.json")),
-      metadata["bin"]["pnpm"],
-    );
+    const executable = await resolveInstalledManagerNodeEntry({
+      directory: path.dirname(require.resolve("pnpm/package.json")),
+      name: "pnpm",
+    });
     for (const source of ["pnpm", "bun"] as const) {
       const directory = await mkdtemp(
         path.join(tmpdir(), "consumer-catalog-staging-"),
@@ -329,8 +329,9 @@ describe("consumer compatibility declarations", () => {
           const packed = path.join(directory, name);
           await mkdir(packed);
           execFileSync(
-            executable,
+            "node",
             [
+              executable,
               "--config.ignore-scripts=true",
               "--config.manage-package-manager-versions=false",
               "pack",
