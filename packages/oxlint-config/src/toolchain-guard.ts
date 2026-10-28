@@ -63,6 +63,7 @@ import {
   parseRustInstallFixtures,
 } from "./toolchain-rust-fixtures";
 import { parseToolchainPolicy } from "./toolchain-schema";
+import { readSourceApiInput } from "./toolchain-typescript-source-api";
 
 export const toolchainRules = [
   ...new Set([
@@ -342,6 +343,25 @@ export const checkToolchain = ({
         line: 1,
         message: error instanceof Error ? error.message : String(error),
       });
+    }
+  }
+  for (const entry of configuration.typescriptAllowlist) {
+    if (entry.kind !== "source-api") continue;
+    for (const source of entry.sources) {
+      const content = readSourceApiInput({
+        root,
+        source,
+        tracked: trackedFiles,
+      });
+      if (content !== undefined) files[source] = content;
+      else
+        diagnostics.push({
+          rule: "configuration",
+          path: source,
+          line: 1,
+          message:
+            "TypeScript source API evidence must be tracked, readable, regular and free of symlinks",
+        });
     }
   }
   const cloud = configuration.cloud;
