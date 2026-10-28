@@ -715,3 +715,55 @@ test("literal successful directory changes preserve the inventory working direct
         .length,
     ).toBeGreaterThan(0);
 });
+
+test("conditional Bun generators inherit the successful outer directory without hiding their script", () => {
+  for (const variable of ["TURBO_HASH", "_CACHE_2", "GENERATOR_READY"]) {
+    const invoked: string[] = [];
+    const inventory = lintInventoryCommands(
+      manifest({
+        lint: `cd ../.. && ([ -n "$${variable}" ] || bun run generate) && bun --bun oxlint -c oxlint.config.ts --type-aware apps/web`,
+      }),
+      true,
+      {
+        directory: "apps/web",
+        assertDirectory: (directory) => {
+          if (directory !== ".") throw new Error("unexpected workspace");
+        },
+        invokeBunScript: (directory, script) =>
+          invoked.push(`${directory}:${script}`),
+      },
+    );
+    expect(inventory.errors).toEqual([]);
+    expect(invoked).toEqual([".:generate"]);
+    expect(inventory.commands).toEqual([
+      {
+        runtime: "bun",
+        args: ["-c", "oxlint.config.ts", "apps/web"],
+        directory: ".",
+      },
+    ]);
+  }
+});
+
+test("conditional generator inventory rejects substitutions, directory mutations, and ambiguous shell flow", () => {
+  for (const command of [
+    'cd ../.. && ([ -n "$(touch marker)" ] || bun run generate) && oxlint apps/web',
+    'cd ../.. && ([ -n "$TURBO_HASH" ] || cd apps/api) && oxlint apps/web',
+    'cd ../.. && ([ -n "$TURBO_HASH" ] || bun run "$SCRIPT") && oxlint apps/web',
+    'cd ../.. && ([ -n "$TURBO_HASH" ] || bun run generate extra) && oxlint apps/web',
+    'cd ../.. && ([ -n "$TURBO_HASH" ] || bun run generate; cd apps/api) && oxlint apps/web',
+    'cd ../.. || ([ -n "$TURBO_HASH" ] || bun run generate) && oxlint apps/web',
+    "bash -c 'cd ../.. && ([ -n \"$TURBO_HASH\" ] || bun run generate) && oxlint apps/web'",
+  ]) {
+    const inventory = lintInventoryCommands(
+      manifest({ lint: command, generate: "echo generated" }),
+      true,
+      {
+        directory: "apps/web",
+        assertDirectory: () => {},
+        invokeBunScript: () => {},
+      },
+    );
+    expect(inventory.errors.length).toBeGreaterThan(0);
+  }
+});
