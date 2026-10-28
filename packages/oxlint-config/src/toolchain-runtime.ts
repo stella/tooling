@@ -1091,7 +1091,7 @@ export const checkRuntimeFile = ({
     path.posix.normalize(prefix).replace(/\/$/, "") || ".";
   type RuntimeReferenceOptions = {
     value: unknown;
-    tool: "node" | "python" | "bun" | "action";
+    tool: "node" | "python" | "bun";
     line: number;
   };
   const checkoutProvidersFor = (selector: string | undefined) => {
