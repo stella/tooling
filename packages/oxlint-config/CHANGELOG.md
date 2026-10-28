@@ -1,5 +1,13 @@
 # @stll/oxlint-config
 
+## 3.2.0
+
+### Minor Changes
+
+- [#240](https://github.com/stella/tooling/pull/240) [`26b6db4`](https://github.com/stella/tooling/commit/26b6db4bd2e18b6f6bf698ad6fe4249f9446e4bf) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Support the verified pnpm 12.15.0 lifecycle implementation alongside existing 12.9.1 consumers. Refuse delegated workspace settings until their lifecycle ownership can be resolved, so includes cannot hide pre/post hooks.
+
+- [#241](https://github.com/stella/tooling/pull/241) [`a261f35`](https://github.com/stella/tooling/commit/a261f354b3f22de92ce2a16d331641c332174aec) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Allow exact TypeScript installs used by first-party compiler API scripts through explicit source-api declarations backed by tracked value importers. Keep dependency-owned declarations compatible and reject stale, cross-workspace, type-only, missing or symlinked importer evidence.
+
 ## 3.1.0
 
 ### Minor Changes
