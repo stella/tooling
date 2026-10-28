@@ -207,7 +207,21 @@ export const lintInventoryCommands = (
     }
     active.add(name);
     let directory = context.directory ?? ".";
-    for (const raw of shellCommandSegments(source)) {
+    const segments = shellCommandSegments(source).filter(
+      (segment) => segment.length > 0,
+    );
+    const tokens = shellTokens(source);
+    // Flattened nested shell bodies do not share their parent's working directory.
+    // Directory tracking is deliberately limited to a literal top-level && chain.
+    const tracksDirectory =
+      tokens.every((token) =>
+        token.kind === "word"
+          ? literalWord(token.value)
+          : token.kind === "boundary" && token.value === "&&",
+      ) &&
+      segments.length ===
+        tokens.filter((token) => token.kind === "boundary").length + 1;
+    for (const raw of segments) {
       if (raw.length === 0) continue;
       const words = raw.map(decodeShellWord);
       const first = words.at(0);
@@ -215,9 +229,7 @@ export const lintInventoryCommands = (
         first === "cd" &&
         raw.length === 2 &&
         raw.every(literalWord) &&
-        shellTokens(source).every(
-          (token) => token.kind !== "boundary" || token.value === "&&",
-        )
+        tracksDirectory
       ) {
         const target = words.at(1);
         try {

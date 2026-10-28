@@ -706,6 +706,9 @@ test("literal successful directory changes preserve the inventory working direct
     "cd /tmp && oxlint .",
     "cd ../../../ && oxlint .",
     "pushd ../.. && oxlint .",
+    "bash -c 'cd ../.. && oxlint src' && bash -c 'oxlint scripts'",
+    "sh -c 'cd ../.. && oxlint src' && oxlint scripts",
+    "echo $(cd ../..) && oxlint scripts",
   ])
     expect(
       lintInventoryCommands(manifest({ lint: command }), true, context).errors
