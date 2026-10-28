@@ -48,6 +48,10 @@ import {
   parseFormatterStagedSelector,
 } from "./toolchain-formatter";
 import { toolchainInputKind } from "./toolchain-inputs";
+import {
+  nodeCompatibilityProblem,
+  parseNodeCompatibility,
+} from "./toolchain-node-compatibility";
 import { checkNodeProjects, nodeProjectRule } from "./toolchain-node-projects";
 import {
   checkPackageFiles,
@@ -105,6 +109,7 @@ export const parseToolchainConfiguration = (input: unknown) => {
         key !== "cloud" &&
         key !== "engineFloors" &&
         key !== "dynamicSelectors" &&
+        key !== "nodeCompatibility" &&
         key !== "consumerChecks" &&
         key !== "rustExceptions" &&
         key !== "rustInstallFixtures" &&
@@ -116,7 +121,7 @@ export const parseToolchainConfiguration = (input: unknown) => {
     (input["optOuts"] !== undefined && !array(input["optOuts"]))
   )
     throw new Error(
-      "stll-toolchain.json accepts only optOuts, cloud, engineFloors, dynamicSelectors, consumerChecks, rustExceptions, rustInstallFixtures, dependabotIgnores, typescriptAllowlist, formatterStagedSelector and formatterCheckSource declarations",
+      "stll-toolchain.json accepts only optOuts, cloud, engineFloors, dynamicSelectors, nodeCompatibility, consumerChecks, rustExceptions, rustInstallFixtures, dependabotIgnores, typescriptAllowlist, formatterStagedSelector and formatterCheckSource declarations",
     );
   const disabled = new Set<string>();
   const optOuts = input["optOuts"] ?? [];
@@ -173,6 +178,7 @@ export const parseToolchainConfiguration = (input: unknown) => {
     cloud: parseCloudSetup(input["cloud"]),
     engineFloors: parseEngineFloors(input["engineFloors"]),
     dynamicSelectors: parseDynamicSelectors(input["dynamicSelectors"]),
+    nodeCompatibility: parseNodeCompatibility(input["nodeCompatibility"]),
     consumerChecks: parseConsumerChecks(input["consumerChecks"]),
     dependabotIgnores: parseDependabotIgnores(input["dependabotIgnores"]),
     typescriptAllowlist: parseTypescriptAllowlist(input["typescriptAllowlist"]),
@@ -561,6 +567,21 @@ export const checkToolchain = ({
   const usedRustFixtures = new Set<
     (typeof configuration.rustInstallFixtures)[number]
   >();
+  const compatibilityMatches = new Map<
+    (typeof configuration.nodeCompatibility)[number],
+    number
+  >();
+  const validCompatibility = configuration.nodeCompatibility.filter((entry) => {
+    const problem = nodeCompatibilityProblem(entry, files);
+    if (problem === undefined) return true;
+    diagnostics.push({
+      rule: "configuration",
+      path: "stll-toolchain.json",
+      line: 1,
+      message: problem,
+    });
+    return false;
+  });
   for (const [file, text] of Object.entries(files))
     diagnostics.push(
       ...checkRuntimeFile({
@@ -571,6 +592,12 @@ export const checkToolchain = ({
           packages: { ...policy.packages, typescript: policy.typescript },
         },
         trackedFiles,
+        nodeCompatibility: validCompatibility,
+        onNodeCompatibility: (entry) =>
+          compatibilityMatches.set(
+            entry,
+            (compatibilityMatches.get(entry) ?? 0) + 1,
+          ),
         rustExceptions: configuration.rustExceptions,
         rustInstallFixtures: configuration.rustInstallFixtures,
         onRustInstallFixture: (entry) => usedRustFixtures.add(entry),
@@ -598,6 +625,14 @@ export const checkToolchain = ({
         message: `Rust install fixture ${entry.path}:${entry.pin} must match a tracked rustup toolchain install probe`,
       });
   }
+  for (const entry of validCompatibility)
+    if (compatibilityMatches.get(entry) !== 1)
+      diagnostics.push({
+        rule: "configuration",
+        path: "stll-toolchain.json",
+        line: 1,
+        message: `Node compatibility ${entry.workflow}:${entry.job}:${entry.step} must match exactly one setup-node step`,
+      });
   for (const entry of engineFloors)
     if (!exercisedFloors.has(entry) || mismatchedFloors.has(entry))
       diagnostics.push({

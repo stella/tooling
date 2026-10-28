@@ -27,6 +27,7 @@ import {
   isMiseConfigPath,
 } from "./toolchain-inputs";
 import { nodeSelectorMatches } from "./toolchain-node";
+import type { NodeCompatibility } from "./toolchain-node-compatibility";
 import { checkRustReferences, type RustException } from "./toolchain-rust";
 import type { RustInstallFixture } from "./toolchain-rust-fixtures";
 import {
@@ -82,6 +83,8 @@ type CheckRuntimeFileOptions = {
   repository?: string | undefined;
   onDelegated?: ((report: RuntimeDelegation) => void) | undefined;
   dynamicSelectors?: readonly DynamicSelector[] | undefined;
+  nodeCompatibility?: readonly NodeCompatibility[] | undefined;
+  onNodeCompatibility?: ((entry: NodeCompatibility) => void) | undefined;
   onDynamicSelector?: ((entry: DynamicSelector) => void) | undefined;
   rustExceptions?: readonly RustException[] | undefined;
   rustInstallFixtures?: readonly RustInstallFixture[] | undefined;
@@ -306,6 +309,8 @@ export const checkRuntimeFile = ({
   repository,
   onDelegated,
   dynamicSelectors = [],
+  nodeCompatibility = [],
+  onNodeCompatibility,
   onDynamicSelector,
   rustExceptions = [],
   rustInstallFixtures = [],
@@ -1773,6 +1778,26 @@ export const checkRuntimeFile = ({
         return;
     }
     const literal = getInput(node, `${tool}-version`);
+    const compatibility = nodeCompatibility.find(
+      (entry) =>
+        entry.workflow === file &&
+        currentLocation === `jobs.${entry.job}.steps.${entry.step}`,
+    );
+    if (tool === "node" && compatibility !== undefined) {
+      if (
+        getInput(node, "node-version-file") === undefined &&
+        isScalar(literal) &&
+        literal.value === compatibility.version
+      )
+        onNodeCompatibility?.(compatibility);
+      else
+        add({
+          rule: "runtime-workflow",
+          line,
+          message: `Node compatibility step must select exact version ${compatibility.version} without a version-file selector`,
+        });
+      return;
+    }
     if (tool === "node" && currentEngineFloor !== undefined) {
       const reference = getInput(node, "node-version-file");
       if (
