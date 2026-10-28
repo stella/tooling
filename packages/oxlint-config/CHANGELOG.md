@@ -1,5 +1,15 @@
 # @stll/oxlint-config
 
+## 3.0.0
+
+### Major Changes
+
+- [#234](https://github.com/stella/tooling/pull/234) [`5f47504`](https://github.com/stella/tooling/commit/5f475045cbbfc13080ff1f7c0c1e5c9e3190da81) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Update the shared Oxlint and plugin SDK pin to 1.89.0 and tsgolint to 7.0.2005. Keep published peer floors aligned with the tested toolchain. The updates preserve lone surrogates in property names and fix circular-alias handling in no-deprecated.
+
+### Patch Changes
+
+- [#234](https://github.com/stella/tooling/pull/234) [`5f47504`](https://github.com/stella/tooling/commit/5f475045cbbfc13080ff1f7c0c1e5c9e3190da81) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Refresh the shared setup-uv action pin to v10.3.2, including its newer uv checksum inventory.
+
 ## 2.1.3
 
 ### Patch Changes

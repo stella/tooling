@@ -1,5 +1,11 @@
 # @stll/oxlint-plugin
 
+## 0.7.0
+
+### Minor Changes
+
+- [#234](https://github.com/stella/tooling/pull/234) [`5f47504`](https://github.com/stella/tooling/commit/5f475045cbbfc13080ff1f7c0c1e5c9e3190da81) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Update the shared Oxlint and plugin SDK pin to 1.89.0 and tsgolint to 7.0.2005. Keep published peer floors aligned with the tested toolchain. The updates preserve lone surrogates in property names and fix circular-alias handling in no-deprecated.
+
 ## 0.6.4
 
 ### Patch Changes
