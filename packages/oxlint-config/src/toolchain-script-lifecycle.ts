@@ -82,6 +82,9 @@ const yamlSettings = (
   return settings;
 };
 
+// Existing consumers on 12.9.1 retain their verified lifecycle behavior.
+export const pnpmLifecycleVersions = ["12.9.1", "12.15.0"] as const;
+
 const pnpmHooksEnabled = (
   manifest: Record<string, unknown>,
   context: ScriptLifecycleContext,
@@ -93,9 +96,15 @@ const pnpmHooksEnabled = (
     .flatMap((field) => (record(field) ? [field["pnpm"]] : []))
     .find((value) => typeof value === "string");
   const version = declared?.at(1) === "pnpm" ? declared.at(2) : dependency;
-  if (version !== "12.9.1")
-    throw new Error("pnpm lifecycle discovery requires declared pnpm@12.9.1");
+  if (!pnpmLifecycleVersions.some((supported) => version === supported))
+    throw new Error(
+      `pnpm lifecycle discovery requires declared pnpm@${pnpmLifecycleVersions.join(" or pnpm@")}`,
+    );
   const settings = yamlSettings(context.pnpmWorkspace, "pnpm");
+  if ("include" in settings)
+    throw new Error(
+      "Delegated pnpm settings require explicit lifecycle discovery support",
+    );
   const enabled = settings["enablePrePostScripts"];
   if (enabled === undefined) return true;
   if (typeof enabled !== "boolean")

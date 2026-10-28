@@ -6,7 +6,7 @@ import path from "node:path";
 import {
   consumerCommandEnvironment,
   packConsumerArtifacts,
-  resolveInstalledManagerBin,
+  resolveInstalledManagerNodeEntry,
 } from "../packages/oxlint-config/src/consumer-compat";
 import { discoverConsumerPackages } from "../packages/oxlint-config/src/consumer-compat-config";
 import policy from "../packages/oxlint-config/toolchain.json";
@@ -165,7 +165,7 @@ jobs:
   const version = execFileSync(
     tools.node,
     [
-      await resolveInstalledManagerBin({
+      await resolveInstalledManagerNodeEntry({
         directory: path.join(packing, "release-packer/node_modules/pnpm"),
         name: "pnpm",
       }),

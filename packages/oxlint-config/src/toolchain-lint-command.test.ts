@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test";
 
+import workspace from "../../../package.json";
 import { lintInventoryCommands } from "./toolchain-lint-command";
 import { scriptSourceExtensions } from "./toolchain-script-extensions";
+import { pnpmLifecycleVersions } from "./toolchain-script-lifecycle";
 
 const manifest = (scripts: Record<string, string>) => ({
   devDependencies: { "oxlint-tsgolint": "7.0.2003" },
@@ -449,6 +451,7 @@ test("script aliases discover the stages actually run by each declared manager",
     ["npm", "12.2.0", true],
     ["bun", "1.4.3", true],
     ["pnpm", "12.9.1", true],
+    ["pnpm", workspace.devDependencies.pnpm, true],
     ["yarn", "4.11.0", false],
   ] as const) {
     const result = lintInventoryCommands({
@@ -627,5 +630,47 @@ test("custom Yarn runtimes cannot inherit the stock Berry no-hooks policy", () =
       "Custom Yarn executables or plugins require explicit lifecycle discovery support",
     );
     expect(result.commands).toEqual([]);
+  }
+});
+
+test("the installed pnpm version has an explicit lifecycle contract", () => {
+  expect(
+    pnpmLifecycleVersions.some(
+      (version) => version === workspace.devDependencies.pnpm,
+    ),
+  ).toBe(true);
+});
+
+test("pnpm delegated settings cannot hide lifecycle hooks", () => {
+  for (const version of pnpmLifecycleVersions) {
+    for (const include of [
+      "null",
+      "[]",
+      "./settings.yaml",
+      "{ './settings.yaml': ['enablePrePostScripts'] }",
+      "{ '@example/config': ['enablePrePostScripts'] }",
+    ]) {
+      const result = lintInventoryCommands(
+        {
+          ...manifest({
+            lint: "pnpm run core",
+            core: "oxlint main.mjs",
+            precore: "oxlint before.mjs",
+          }),
+          packageManager: `pnpm@${version}`,
+        },
+        false,
+        {
+          pnpmWorkspace: {
+            type: "tracked",
+            source: `include: ${include}\nenablePrePostScripts: false\n`,
+          },
+        },
+      );
+      expect(result.commands).toEqual([]);
+      expect(result.errors.join("\n")).toContain(
+        "Delegated pnpm settings require explicit lifecycle discovery support",
+      );
+    }
   }
 });

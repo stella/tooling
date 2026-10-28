@@ -722,7 +722,7 @@ Wildcard exports exclude directory entries and treat only JavaScript-like
 matches as scripts. Licenses and other extensionless wildcard matches remain
 opaque; an import that reaches extensionless code still traverses its closure.
 
-The consumer policy pins Node 22.23.3, npm 12.2.0, pnpm 12.9.1, and TypeScript
+The consumer policy pins Node 22.23.3, npm 12.2.0, pnpm 12.15.0, and TypeScript
 6.0.3 independently of the development toolchain. Published engines and TypeScript
 peers must support the consumer versions; ranges may include newer versions.
 Bun runtime/compiler requirements are rejected. JSON and declaration-only packages

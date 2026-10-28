@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import policy from "../toolchain.json";
+import { resolveInstalledManagerNodeEntry } from "./consumer-compat";
 import {
   publishConfigOverrideKeys,
   resolveManifestContract,
@@ -21,7 +22,7 @@ import {
 const object = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-const pnpmExecutable = () => {
+const pnpmExecutable = async () => {
   const packageFile = createRequire(import.meta.url).resolve(
     "pnpm/package.json",
   );
@@ -35,10 +36,13 @@ const pnpmExecutable = () => {
     throw new Error(
       `pack contract fixture requires pnpm ${policy.consumerPnpm}`,
     );
-  return path.resolve(path.dirname(packageFile), installed["bin"]["pnpm"]);
+  return resolveInstalledManagerNodeEntry({
+    directory: path.dirname(packageFile),
+    name: "pnpm",
+  });
 };
 
-test("pnpm pack preserves the modeled published contract projection", () => {
+test("pnpm pack preserves the modeled published contract projection", async () => {
   const root = mkdtempSync(path.join(tmpdir(), "publish-contract-pack-"));
   try {
     mkdirSync(path.join(root, "dist"));
@@ -89,8 +93,9 @@ test("pnpm pack preserves the modeled published contract projection", () => {
     ).toEqual([...publishConfigOverrideKeys].sort());
     writeFileSync(path.join(root, "package.json"), JSON.stringify(manifest));
     execFileSync(
-      pnpmExecutable(),
+      "node",
       [
+        await pnpmExecutable(),
         "--config.ignore-scripts=true",
         "--config.manage-package-manager-versions=false",
         "pack",
