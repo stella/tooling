@@ -1,5 +1,11 @@
 # @stll/oxlint-config
 
+## 3.4.0
+
+### Minor Changes
+
+- [#250](https://github.com/stella/tooling/pull/250) [`01277ef`](https://github.com/stella/tooling/commit/01277ef39b60a90a5aa39d84d8c03d60861d73b9) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Allow exact, step-scoped Node compatibility targets within a published package's engines.node range without changing the repository runtime policy or minimum-engine checks.
+
 ## 3.3.0
 
 ### Minor Changes
