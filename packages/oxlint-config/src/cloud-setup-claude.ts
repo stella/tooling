@@ -125,8 +125,8 @@ fi`,
 // context, so failures exit 0 with guidance. Hooks share CLAUDE_ENV_FILE and
 // may run concurrently, so this hook replaces only its own snapshot and
 // appends one stable source line to the shared file once. A rename onto an
-// existing directory moves the file into it and succeeds, so the snapshot
-// must be a regular file before and after the rename.
+// existing directory must fail atomically, even if the destination changes
+// after inspection. The cloud runtime provides GNU coreutils.
 const sessionStartHook = (script: string) =>
   ({
     matcher: "",
@@ -169,7 +169,7 @@ $cloud_shell_exports"
     fi
     cloud_env_temporary="$(umask 077; mktemp "\${cloud_env_snapshot}.XXXXXX")" || cloud_setup_incomplete 'session environment could not be prepared; check its write access and rerun start'
     printf '%s\\n' "$cloud_session_exports" > "$cloud_env_temporary" || { rm -f -- "$cloud_env_temporary"; cloud_setup_incomplete 'session environment could not be prepared; check its write access and rerun start'; }
-    mv -f -- "$cloud_env_temporary" "$cloud_env_snapshot" || { rm -f -- "$cloud_env_temporary"; cloud_setup_incomplete 'session environment could not be persisted; check its write access and rerun start'; }
+    mv -fT -- "$cloud_env_temporary" "$cloud_env_snapshot" || { rm -f -- "$cloud_env_temporary"; cloud_setup_incomplete 'session environment could not be persisted; check its write access and rerun start'; }
     [ -f "$cloud_env_snapshot" ] && [ ! -L "$cloud_env_snapshot" ] || cloud_setup_incomplete "session environment snapshot must be a regular file; remove $cloud_env_snapshot and rerun start"
     cloud_env_source=". '$cloud_env_snapshot'"
     if [ ! -f "$CLAUDE_ENV_FILE" ] || ! grep -Fqx -- "$cloud_env_source" "$CLAUDE_ENV_FILE"; then
@@ -220,6 +220,19 @@ const previousCloudSessionStartHooks = [
   currentMainSessionStartHook(`bash "$CLAUDE_PROJECT_DIR/${cloudSetupPath}"`),
   releasedTemporaryFileHook(`bash "$CLAUDE_PROJECT_DIR/${cloudSetupPath}"`),
   releasedSnapshotHook(`bash "$CLAUDE_PROJECT_DIR/${cloudSetupPath}"`),
+  // Releases through 3.0.0 checked the destination before a directory-following move.
+  {
+    matcher: "",
+    hooks: [
+      {
+        type: "command",
+        command: cloudSessionStartHook.hooks[0].command.replace(
+          "mv -fT --",
+          "mv -f --",
+        ),
+      },
+    ],
+  },
 ];
 export const cloudAttribution = { commit: "", pr: "" } as const;
 

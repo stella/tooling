@@ -27,6 +27,19 @@ import {
 } from "./cloud-setup-claude";
 import { cloudShellProfilePath } from "./cloud-setup-shell";
 
+// GNU mv -T is supplied by the Linux runtime. On macOS use rename(2),
+// preserving its atomic non-directory destination behavior and exact arguments.
+const commandForHost = (command: string) => {
+  if (process.platform !== "darwin") return command;
+  const executable = "'" + process.execPath.replaceAll("'", "'\\''") + "'";
+  return `mv() {
+    if [ "$1" != -fT ]; then command mv "$@"; return; fi
+    [ "$2" = -- ] && [ "$#" = 4 ] || return 98
+    ${executable} -e 'require("node:fs").renameSync(process.argv[1], process.argv[2])' "$3" "$4"
+  }
+${command}`;
+};
+
 const settingsWith = (entries: readonly unknown[]) =>
   JSON.stringify({
     attribution: cloudAttribution,
@@ -145,6 +158,18 @@ test("Claude settings merge replaces shipped exact hook forms in place and reach
     releasedHook,
     releasedProjectHook,
     previouslyCurrentHook,
+    {
+      matcher: "",
+      hooks: [
+        {
+          type: "command",
+          command: cloudSessionStartHook.hooks[0].command.replace(
+            "mv -fT --",
+            "mv -f --",
+          ),
+        },
+      ],
+    },
   ]) {
     const merged = mergeCloudClaudeSettings(
       JSON.stringify({
@@ -255,7 +280,10 @@ test("Claude SessionStart reports remote startup failure as visible context and 
       delete env["CLAUDE_ENV_FILE"];
       env["CLAUDE_PROJECT_DIR"] = root;
       if (remote !== undefined) env["CLAUDE_CODE_REMOTE"] = remote;
-      const result = spawnSync("bash", ["-c", command], { cwd: root, env });
+      const result = spawnSync("bash", ["-c", commandForHost(command)], {
+        cwd: root,
+        env,
+      });
       expect(result.status).toBe(0);
       if (remote === "true") {
         expect(result.stdout.toString()).toContain(
@@ -299,7 +327,7 @@ test("remote Claude SessionStart resolves the setup script from the project root
       profile,
     );
     const env = { ...process.env, CLAUDE_ENV_FILE: environment };
-    const result = spawnSync("bash", ["-c", command], {
+    const result = spawnSync("bash", ["-c", commandForHost(command)], {
       cwd: subdirectory,
       env: { ...env, CLAUDE_CODE_REMOTE: "true", CLAUDE_PROJECT_DIR: root },
       encoding: "utf8",
@@ -366,7 +394,7 @@ test("Claude SessionStart persists literal pinned exports after start while reta
     };
     for (const remote of ["", "false", "TRUE", "true"]) {
       writeFileSync(environment, original);
-      const result = spawnSync("/bin/bash", ["-c", command], {
+      const result = spawnSync("/bin/bash", ["-c", commandForHost(command)], {
         cwd: root,
         env: { ...env, CLAUDE_CODE_REMOTE: remote },
         encoding: "utf8",
@@ -386,7 +414,7 @@ test("Claude SessionStart persists literal pinned exports after start while reta
       environment,
       `${readFileSync(environment, "utf8")}export LATER=kept\n`,
     );
-    const rerun = spawnSync("/bin/bash", ["-c", command], {
+    const rerun = spawnSync("/bin/bash", ["-c", commandForHost(command)], {
       cwd: root,
       env: { ...env, CLAUDE_CODE_REMOTE: "true" },
       encoding: "utf8",
@@ -421,7 +449,7 @@ test("Claude SessionStart persists literal pinned exports after start while reta
     );
 
     writeFileSync(environment, original);
-    const failed = spawnSync("/bin/bash", ["-c", command], {
+    const failed = spawnSync("/bin/bash", ["-c", commandForHost(command)], {
       cwd: root,
       env: { ...env, CLAUDE_CODE_REMOTE: "true", START_EXIT: "7" },
     });
@@ -435,7 +463,7 @@ test("Claude SessionStart persists literal pinned exports after start while reta
     for (const content of [undefined, "", "\n"]) {
       if (content === undefined) rmSync(profile);
       else writeFileSync(profile, content);
-      const missing = spawnSync("/bin/bash", ["-c", command], {
+      const missing = spawnSync("/bin/bash", ["-c", commandForHost(command)], {
         cwd: root,
         env: { ...env, CLAUDE_CODE_REMOTE: "true" },
         encoding: "utf8",
@@ -507,16 +535,20 @@ test("SessionStart reads, writes and replacement fail visibly without changing e
     ];
     for (const { failure, reason } of failures) {
       writeFileSync(environment, original);
-      const result = spawnSync("bash", ["-c", `${failure}\n${command}`], {
-        cwd: root,
-        env: {
-          ...process.env,
-          CLAUDE_CODE_REMOTE: "true",
-          CLAUDE_PROJECT_DIR: root,
-          CLAUDE_ENV_FILE: environment,
+      const result = spawnSync(
+        "bash",
+        ["-c", commandForHost(`${failure}\n${command}`)],
+        {
+          cwd: root,
+          env: {
+            ...process.env,
+            CLAUDE_CODE_REMOTE: "true",
+            CLAUDE_PROJECT_DIR: root,
+            CLAUDE_ENV_FILE: environment,
+          },
+          encoding: "utf8",
         },
-        encoding: "utf8",
-      });
+      );
       expect(result.status).toBe(0);
       expect(result.stdout).toContain(
         "Cloud setup could not establish a verified session environment",
@@ -558,37 +590,63 @@ test("SessionStart refuses a snapshot destination that is not a regular file ins
         create: () => symlinkSync(join(outside, "file"), snapshot),
       },
     ];
-    for (const { name, create } of targets) {
+    const races = [
+      { name: "concurrent directory", race: 'mkdir -- "$cloud_env_snapshot"' },
+      {
+        name: "concurrent directory symlink",
+        race: 'ln -s -- "$FIXTURE_OUTSIDE" "$cloud_env_snapshot"',
+      },
+    ];
+    for (const target of [...targets, ...races]) {
+      const { name } = target;
       rmSync(snapshot, { recursive: true, force: true });
       rmSync(outside, { recursive: true, force: true });
       mkdirSync(outside);
       writeFileSync(join(outside, "file"), "unchanged\n");
       writeFileSync(environment, original);
-      create();
-      const result = spawnSync("bash", ["-c", command], {
+      const raced = "race" in target;
+      if (!raced) target.create();
+      const execution = raced
+        ? command.replace("mv -fT --", `${target.race}; mv -fT --`)
+        : command;
+      const result = spawnSync("bash", ["-c", commandForHost(execution)], {
         cwd: root,
         env: {
           ...process.env,
           CLAUDE_CODE_REMOTE: "true",
           CLAUDE_PROJECT_DIR: root,
           CLAUDE_ENV_FILE: environment,
+          FIXTURE_OUTSIDE: outside,
         },
         encoding: "utf8",
       });
       expect(result.status, name).toBe(0);
-      expect(result.stdout, name).toContain(
-        "Cloud setup could not establish a verified session environment",
-      );
-      expect(result.stderr, name).toContain(
-        "session environment snapshot must be a regular file",
-      );
-      // The shared file gains no source line for a target it cannot load.
-      expect(readFileSync(environment, "utf8"), name).toBe(original);
+      if (name === "concurrent directory symlink") {
+        expect(result.stdout, name).toBe("");
+        expect(result.stderr, name).toBe("");
+        expect(readFileSync(environment, "utf8"), name).toBe(
+          `${original}\n. '${snapshot}'\n`,
+        );
+        expect(readFileSync(snapshot, "utf8"), name).toBe(
+          "export FIXTURE_SNAPSHOT=ready\n",
+        );
+      } else {
+        expect(result.stdout, name).toContain(
+          "Cloud setup could not establish a verified session environment",
+        );
+        expect(result.stderr, name).toContain(
+          raced
+            ? "session environment could not be persisted"
+            : "session environment snapshot must be a regular file",
+        );
+        expect(readFileSync(environment, "utf8"), name).toBe(original);
+      }
       expect(readdirSync(outside), name).toEqual(["file"]);
       expect(readFileSync(join(outside, "file"), "utf8"), name).toBe(
         "unchanged\n",
       );
-      if (name === "directory") expect(readdirSync(snapshot), name).toEqual([]);
+      if (name === "directory" || name === "concurrent directory")
+        expect(readdirSync(snapshot), name).toEqual([]);
       expect(
         readdirSync(root).filter((entry) =>
           entry.startsWith("claude.env.stll-cloud."),
