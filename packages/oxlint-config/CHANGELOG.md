@@ -1,5 +1,11 @@
 # @stll/oxlint-config
 
+## 3.4.1
+
+### Patch Changes
+
+- [#253](https://github.com/stella/tooling/pull/253) [`1c24849`](https://github.com/stella/tooling/commit/1c2484950d53df15b47df725db40d044488b2001) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Remove previous managed Node and Bun runtime directories from inherited shell paths when applying the current runtime selectors. Preserve unrelated paths and repeated-startup idempotence.
+
 ## 3.4.0
 
 ### Minor Changes
