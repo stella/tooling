@@ -173,7 +173,7 @@ export const parseTypescriptAllowlist = (
             source !== ".." &&
             !source.startsWith("../") &&
             !source.includes("\\") &&
-            !/[?*{}\[\]]/.test(source) &&
+            !/[?*{}[\]]/.test(source) &&
             /\.[cm]?[jt]sx?$/.test(source) &&
             !/\.d\.[cm]?ts$/.test(source) &&
             !source
