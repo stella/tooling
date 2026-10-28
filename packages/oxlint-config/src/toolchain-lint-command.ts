@@ -87,6 +87,57 @@ const literalWord = (raw: string) => {
   return quote === undefined;
 };
 
+// The environment guard may skip its generator, but inventory must include
+// that script's possible lint scopes. This bounded group cannot change the
+// parent's directory or evaluate command substitutions in its condition.
+const includeConditionalBunScripts = (source: string) => {
+  const tokens = shellTokens(source);
+  let result = "";
+  let consumed = 0;
+  for (let index = 0; index < tokens.length; index++) {
+    const group = tokens.slice(index, index + 10);
+    const [
+      open,
+      test,
+      flag,
+      variable,
+      closeTest,
+      otherwise,
+      bun,
+      run,
+      script,
+      close,
+    ] = group;
+    if (
+      open?.kind !== "boundary" ||
+      open.value !== "(" ||
+      test?.kind !== "word" ||
+      test.value !== "[" ||
+      flag?.kind !== "word" ||
+      flag.value !== "-n" ||
+      variable?.kind !== "word" ||
+      !/^"\$[A-Za-z_][A-Za-z0-9_]*"$/u.test(variable.value) ||
+      closeTest?.kind !== "word" ||
+      closeTest.value !== "]" ||
+      otherwise?.kind !== "boundary" ||
+      otherwise.value !== "||" ||
+      bun?.kind !== "word" ||
+      bun.value !== "bun" ||
+      run?.kind !== "word" ||
+      run.value !== "run" ||
+      script?.kind !== "word" ||
+      !literalWord(script.value) ||
+      close?.kind !== "boundary" ||
+      close.value !== ")"
+    )
+      continue;
+    result += source.slice(consumed, open.index) + `bun run ${script.value}`;
+    consumed = close.index + 1;
+    index += group.length - 1;
+  }
+  return result + source.slice(consumed);
+};
+
 const inventoryArguments = (raw: readonly string[]) => {
   const args: string[] = [];
   let threadsSeen = false;
@@ -207,10 +258,11 @@ export const lintInventoryCommands = (
     }
     active.add(name);
     let directory = context.directory ?? ".";
-    const segments = shellCommandSegments(source).filter(
+    const inventorySource = includeConditionalBunScripts(source);
+    const segments = shellCommandSegments(inventorySource).filter(
       (segment) => segment.length > 0,
     );
-    const tokens = shellTokens(source);
+    const tokens = shellTokens(inventorySource);
     // Flattened nested shell bodies do not share their parent's working directory.
     // Directory tracking is deliberately limited to a literal top-level && chain.
     const tracksDirectory =
