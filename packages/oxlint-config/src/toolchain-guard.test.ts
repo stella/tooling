@@ -926,6 +926,51 @@ test("engine floor configuration is closed, scoped and independent of optional o
     expect(() => parseToolchainConfiguration({ engineFloors })).toThrow();
 }, 15_000);
 
+test("Node compatibility declarations bind one tracked published package and exact step", () => {
+  const setup = policy.actions["actions/setup-node"];
+  if (setup === undefined) throw new Error("Missing setup-node policy");
+  const entry = {
+    package: "packages/cli",
+    workflow: ".github/workflows/publish.yml",
+    job: "pack",
+    step: "smoke",
+    version: "22.23.4",
+    reason: "Exercise supported Node compatibility.",
+  };
+  const step = `      - id: smoke\n        uses: actions/setup-node@${setup.sha} # ${setup.version}\n        with: {node-version: 22.23.4}\n`;
+  const configured = (steps: string, range = ">=20") =>
+    fixture({
+      "package.json": JSON.stringify({
+        private: true,
+        workspaces: ["packages/*"],
+      }),
+      "packages/cli/package.json": JSON.stringify({
+        name: "@example/cli",
+        version: "1.0.0",
+        engines: { node: range },
+      }),
+      [entry.workflow]: `jobs:\n  pack:\n    steps:\n${steps}`,
+      "stll-toolchain.json": JSON.stringify({
+        nodeCompatibility: [entry],
+        optOuts: [
+          {
+            rule: "runtime-workflow",
+            reason: "Configuration proof remains mandatory.",
+          },
+        ],
+      }),
+    }).filter(({ rule }) => rule === "configuration");
+  expect(configured(step)).toEqual([]);
+  for (const changed of [
+    "",
+    step + step,
+    step.replace("id: smoke", "id: other"),
+    step.replace("22.23.4", "22.23.3"),
+  ])
+    expect(configured(changed).length).toBeGreaterThan(0);
+  expect(configured(step, ">=24").length).toBeGreaterThan(0);
+}, 15_000);
+
 test("dynamic selector declarations fail when absent, stale, duplicated by aliases or static", () => {
   const file = ".github/workflows/example.yml";
   const entry = {

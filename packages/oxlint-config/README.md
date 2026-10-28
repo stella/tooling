@@ -188,6 +188,34 @@ Missing packages or jobs, private packages, absent setup-node selectors and
 floor mismatches fail configuration validation. `optOuts` is optional when
 only `engineFloors` is declared.
 
+A published-package smoke test may intentionally exercise a supported Node
+major above its minimum and below the repository runtime. Declare that exact
+step with `nodeCompatibility` instead of mislabeling it as an engine-floor test:
+
+```json
+{
+  "nodeCompatibility": [
+    {
+      "package": "packages/cli",
+      "workflow": ".github/workflows/publish.yml",
+      "job": "pack",
+      "step": "node-smoke",
+      "version": "22.23.4",
+      "reason": "Exercise the packed CLI on a supported older Node major."
+    }
+  ]
+}
+```
+
+The tracked package must be published and its `engines.node` range must contain
+the exact stable patch. Only the named `setup-node` step can select that version,
+using a literal `node-version`; the declaration and workflow must match.
+Expressions, a simultaneous version-file selector, stale or duplicate locations,
+and out-of-range versions fail. Action pins remain enforced. Other steps and the
+repository's runtime files retain the shared policy. `engineFloors` continues
+to verify the actual minimum major, and `consumerChecks` keeps its separate
+packed-consumer workflow contract.
+
 A runtime image or Bun source selected by an expression can have a scoped,
 reviewed `dynamicSelectors` declaration instead of a whole-rule opt-out:
 
