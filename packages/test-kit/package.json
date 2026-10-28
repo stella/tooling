@@ -54,7 +54,7 @@
   "devDependencies": {
     "@electric-sql/pglite": "0.5.11",
     "@stll/typescript-config": "workspace:*",
-    "drizzle-orm": "1.0.0-rc.4"
+    "drizzle-orm": "1.0.0-rc.5"
   },
   "peerDependencies": {
     "drizzle-orm": ">=1.0.0-rc.4 <2"
