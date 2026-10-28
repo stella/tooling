@@ -24,15 +24,23 @@ const profile = renderCloudShellProfile({
 });
 
 test("managed PATH prepending is an idempotent projection that preserves every unrelated entry", () => {
+  const previous = [
+    "/opt/stll-cloud/node/22.23.4/bin",
+    "/opt/stll-cloud/node/26.9.0/bin",
+    "/opt/stll-cloud/bun/1.4.2",
+  ];
   const entries = [
     "",
     "/usr/bin",
     "/opt/old-bun",
     "/opt/old-node",
+    "/opt/stll-cloud/node-tools/bin",
+    "/opt/stll-cloud/bun-tools",
     "/tmp/space dir",
     "/tmp/$literal",
     "/tmp/'quote",
     ...managed,
+    ...previous,
   ];
   let seed = 12345;
   for (let sample = 0; sample < 100; sample++) {
@@ -45,7 +53,9 @@ test("managed PATH prepending is an idempotent projection that preserves every u
     }
     const expected = [
       ...managed,
-      ...path.filter((entry) => !managed.includes(entry)),
+      ...path.filter(
+        (entry) => !managed.includes(entry) && !previous.includes(entry),
+      ),
     ].join(":");
     const result = Bun.spawnSync(
       [
