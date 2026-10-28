@@ -495,7 +495,7 @@ Script inventory includes automatic pre/post stages of literal package-manager
 `run` aliases and the root lint script. Declare the root `packageManager` when
 root hooks exist; workspace lint tasks inherit it. npm and Bun run those hooks;
 tracked project `.npmrc` `ignore-scripts=true` suppresses npm hooks. Pinned pnpm
-12.9.1 defaults to running them and reads the boolean `enablePrePostScripts` from
+12.9.1 and 12.15.0 default to running them and reads the boolean `enablePrePostScripts` from
 tracked `pnpm-workspace.yaml`; it skips a hook whose name already occurs in the
 main script body, matching that version's behavior. Yarn Berry (declared major
 2, 3 or 4) does not run arbitrary pre/post hooks. Unknown manager flavors,
@@ -733,7 +733,7 @@ resolved JavaScript targets, and entry points. `stll-publish-contract --write`
 records an explicit contract decision as a reviewable diff; it also validates
 consumer support and cannot accept development-only requirements.
 
-The consumer policy pins Node 22.23.3, npm 12.2.0, pnpm 12.9.1, and TypeScript
+The consumer policy pins Node 22.23.3, npm 12.2.0, pnpm 12.15.0, and TypeScript
 6.0.3 independently of the development toolchain. Published engines and TypeScript
 peers must support the consumer versions; ranges may include newer versions.
 An absent `engines.node` is unrestricted, matching package-manager semantics; a
