@@ -68,6 +68,10 @@
     "26.10.0": {
       "amd64": "ca70e9e349de048b9522abb3adc05b3bd6f43c5ffd3ec57916c7da292f59f022",
       "arm64": "7a6353f63eb3d04765004b4adf172616243e4522434635cb1d26288658b04ab5"
+    },
+    "26.12.1": {
+      "amd64": "6170b2d474e1c626f43cff3adc118df9fe3b573258a4fc3d850c8dbc6b079bbd",
+      "arm64": "42aa04922591ee5d4dbc7740d452621acf28508239daa512f5ee8c47ee224fdb"
     }
   },
   "postgres": "18",

@@ -78,7 +78,8 @@ The Node policy is `26.x`: selectors must select major 26. Bare major,
 major wildcard, minor and stable patch selectors within that major are allowed;
 open ranges, other majors, prereleases and floating aliases fail.
 Release and publish workflows use exact patch version-file selectors for
-reproducible builds; this repository pins `.node-version` to `26.10.0`.
+reproducible builds; this repository’s exact version is tracked in
+[`.node-version`](.node-version).
 The series policy accepts that patch without weakening release validation.
 Runtime images may retain a full SHA256 digest alongside an exact stable patch
 tag: Node must be inside its policy series and match tracked root `.node-version`
