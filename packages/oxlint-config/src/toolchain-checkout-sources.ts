@@ -1,5 +1,10 @@
 import path from "node:path";
 
+import {
+  checkoutActionRef,
+  literalSparseCheckoutPath,
+} from "./toolchain-checkout-syntax";
+
 export type CheckoutSource = {
   path: string;
   job: string;
@@ -132,7 +137,7 @@ export const proveCheckoutSource = ({
   if (
     !record(consumer) ||
     !record(checkout) ||
-    checkout["uses"] !== `actions/checkout@${checkoutSha}` ||
+    checkoutActionRef(checkout["uses"]) !== checkoutSha ||
     Object.hasOwn(checkout, "continue-on-error")
   )
     return false;
@@ -161,11 +166,7 @@ export const proveCheckoutSource = ({
   const prefix = path.posix.normalize(declaration.destination);
   if (prefix !== "." && !selected.startsWith(`${prefix}/`)) return false;
   for (const step of steps.slice(checkoutIndex + 1, consumerIndex)) {
-    if (
-      !record(step) ||
-      typeof step["uses"] !== "string" ||
-      !step["uses"].startsWith("actions/checkout@")
-    )
+    if (!record(step) || checkoutActionRef(step["uses"]) === undefined)
       continue;
     const withOptions = step["with"];
     const other = record(withOptions) ? (withOptions["path"] ?? ".") : ".";
@@ -189,7 +190,7 @@ export const proveCheckoutSource = ({
       .filter(Boolean);
     if (
       patterns.length === 0 ||
-      patterns.some((value) => !repositoryPath(value))
+      patterns.some((value) => !literalSparseCheckoutPath(value))
     )
       return false;
     const relative =

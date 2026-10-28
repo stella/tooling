@@ -15,6 +15,10 @@ import {
   proveCheckoutSource,
 } from "./toolchain-checkout-sources";
 import {
+  checkoutActionRef,
+  literalSparseCheckoutPath,
+} from "./toolchain-checkout-syntax";
+import {
   containerDocumentImages,
   isComposeDefinitionPath,
   isKubernetesDefinitionPath,
@@ -1488,8 +1492,6 @@ export const checkRuntimeFile = ({
     while (position < entry.length) {
       const start = entry.indexOf("${{", position);
       const literal = entry.slice(position, start < 0 ? entry.length : start);
-      if (/[!$*?[\]\\:]/.test(literal) || literal.split("/").includes(".."))
-        return false;
       literalPath += literal;
       if (start < 0) break;
       const expression = expressionAt(entry, start);
@@ -1497,7 +1499,7 @@ export const checkRuntimeFile = ({
       literalPath += "expression";
       position = expression.end;
     }
-    return staticRepositoryPath(literalPath);
+    return literalSparseCheckoutPath(literalPath);
   };
   const checkoutPrefixOf = (node: unknown) => {
     const destination = getInput(node, "path");
@@ -1908,7 +1910,7 @@ export const checkRuntimeFile = ({
       if (
         !isScalar(uses) ||
         typeof uses.value !== "string" ||
-        !uses.value.toLowerCase().startsWith("actions/checkout@")
+        checkoutActionRef(uses.value) === undefined
       )
         continue;
       const prefix = checkoutPrefixOf(step);

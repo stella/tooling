@@ -90,6 +90,18 @@ test("every changed source field fails closed", () => {
 });
 
 test("intervening overlapping or unknown writers cannot be waived", () => {
+  for (const action of [
+    "actions/checkout",
+    "Actions/Checkout",
+    "ACTIONS/CHECKOUT",
+  ])
+    expect(
+      prove([
+        checkout,
+        { ...checkout, id: "other", uses: `${action}@${sha}` },
+        consumer,
+      ]),
+    ).toBe(false);
   for (const destination of [
     ".",
     ".github",
@@ -115,6 +127,44 @@ test("intervening overlapping or unknown writers cannot be waived", () => {
         ...checkout,
         id: "other",
         with: { ...checkout.with, path: "unrelated" },
+      },
+      consumer,
+    ]),
+  ).toBe(true);
+});
+
+test("sparse coverage rejects every nonliteral pattern even with a matching parent", () => {
+  for (const pattern of [
+    "!.github/actions/build",
+    ".github/**",
+    ".github/[ab]",
+    "${{ inputs.paths }}",
+    "../.github",
+    "\\.github",
+  ])
+    expect(
+      prove([
+        {
+          ...checkout,
+          with: {
+            ...checkout.with,
+            "sparse-checkout-cone-mode": false,
+            "sparse-checkout": `.github\n${pattern}`,
+          },
+        },
+        consumer,
+      ]),
+    ).toBe(false);
+  expect(
+    prove([
+      {
+        ...checkout,
+        uses: `Actions/Checkout@${sha}`,
+        with: {
+          ...checkout.with,
+          "sparse-checkout-cone-mode": false,
+          "sparse-checkout": ".github/actions",
+        },
       },
       consumer,
     ]),
