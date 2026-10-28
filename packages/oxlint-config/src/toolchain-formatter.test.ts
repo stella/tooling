@@ -467,6 +467,7 @@ test("delegated CI formatting requires declared files and an executable workflow
     "bun scripts/other.ts run policy",
     "bun scripts/check-pool.ts run other",
     "bun scripts/check-pool.ts run $JOB",
+    "cd packages/core && bun scripts/check-pool.ts run policy",
   ]) {
     expect(
       checkFormatter({
@@ -513,7 +514,8 @@ test("delegated CI formatting requires declared files and an executable workflow
     checkFormatter({
       files: {
         ...files,
-        ".github/checks/policy.yml": "checks:\n  - run: bun fmt --check src/\n",
+        ".github/checks/policy.yml":
+          "checks:\n  - run: cd packages/core && bun fmt --check\n",
       },
       policy,
       usesBun: true,

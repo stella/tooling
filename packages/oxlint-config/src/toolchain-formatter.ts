@@ -460,22 +460,28 @@ const declaredCheckCommands = (
         ? [step["run"]]
         : [],
     );
-    const invoked = commands.some((command) =>
-      shellCommandSegments(command).some((raw) => {
-        const words = raw.map(decodeShellWord);
-        while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words.at(0) ?? ""))
-          words.shift();
-        if (words.at(0) === "exec") words.shift();
-        return (
-          JSON.stringify(words) ===
-          JSON.stringify([
-            "bun",
-            declaration.runner,
-            "run",
-            declaration.argument,
-          ])
-        );
-      }),
+    const invoked = commands.some(
+      (command) =>
+        !shellCommandSegments(command).some((raw) =>
+          raw.some((word) =>
+            ["cd", "pushd", "popd"].includes(decodeShellWord(word)),
+          ),
+        ) &&
+        shellCommandSegments(command).some((raw) => {
+          const words = raw.map(decodeShellWord);
+          while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words.at(0) ?? ""))
+            words.shift();
+          if (words.at(0) === "exec") words.shift();
+          return (
+            JSON.stringify(words) ===
+            JSON.stringify([
+              "bun",
+              declaration.runner,
+              "run",
+              declaration.argument,
+            ])
+          );
+        }),
     );
     const checks: unknown = source.toJS();
     if (!invoked || !record(checks) || !Array.isArray(checks["checks"]))
@@ -526,7 +532,7 @@ export const checkFormatter = ({
   const workflowCommands: string[] = [];
   if (checkSource !== undefined) {
     const commands = declaredCheckCommands(files, checkSource);
-    if (!commandLines(commands).some((line) => isBunFormat(line, "--check")))
+    if (!commands.some((command) => isBunFormat(command, "--check")))
       add(
         "stll-toolchain.json",
         1,
@@ -537,7 +543,10 @@ export const checkFormatter = ({
   let stagedSelectorUsed = false;
   for (const [file, text] of Object.entries(files)) {
     const name = path.posix.basename(file);
-    if (isFormatterConfigPath(file) && !isFormatterBoundary(file, text))
+    if (
+      isFormatterConfigPath(file) &&
+      !(usesBun && isFormatterBoundary(file, text))
+    )
       add(
         file,
         1,
