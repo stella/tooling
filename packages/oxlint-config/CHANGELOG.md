@@ -1,5 +1,11 @@
 # @stll/oxlint-config
 
+## 3.2.2
+
+### Patch Changes
+
+- [#246](https://github.com/stella/tooling/pull/246) [`21cd8df`](https://github.com/stella/tooling/commit/21cd8dfc1d9a02e2ad387babe5549a9e3070021e) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Add verified Node 26.12.1 Linux archive checksums so cloud setup can install the security release on amd64 and arm64. Keep the existing 26.10.0 archive entries for consumers that still select that exact version.
+
 ## 3.2.1
 
 ### Patch Changes
