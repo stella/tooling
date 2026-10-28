@@ -30,3 +30,12 @@ export const sparseCheckoutPaths = (value: string) =>
     .split(/\r?\n/)
     .map((entry) => entry.trim().replace(/^\//, ""))
     .filter((entry) => entry !== "");
+
+type CheckoutContainment = { destination: string; selector: string };
+export const checkoutContains = ({
+  destination,
+  selector,
+}: CheckoutContainment) =>
+  destination === "." ||
+  selector === destination ||
+  selector.startsWith(`${destination}/`);

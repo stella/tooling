@@ -16,6 +16,7 @@ import {
 } from "./toolchain-checkout-sources";
 import {
   checkoutActionRef,
+  checkoutContains,
   literalSparseCheckoutPath,
   normalizeCheckoutPath,
   selfCheckoutRepository,
@@ -1123,12 +1124,7 @@ export const checkRuntimeFile = ({
     if (selector === undefined) return checkoutBindings;
     let deepest: CheckoutBinding | undefined;
     for (const entry of checkoutBindings) {
-      if (
-        entry.path !== "." &&
-        selector !== entry.path &&
-        !selector.startsWith(`${entry.path}/`)
-      )
-        continue;
+      if (!checkoutContains({ destination: entry.path, selector })) continue;
       if (
         deepest === undefined ||
         (entry.path !== "." &&

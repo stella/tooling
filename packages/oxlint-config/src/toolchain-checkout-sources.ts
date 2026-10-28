@@ -2,6 +2,7 @@ import path from "node:path";
 
 import {
   checkoutActionRef,
+  checkoutContains,
   literalSparseCheckoutPath,
   normalizeCheckoutPath,
   selfCheckoutRepository,
@@ -219,7 +220,17 @@ export const proveCheckoutSource = ({
     return false;
   const selected = normalizeCheckoutPath(selector);
   const prefix = normalizeCheckoutPath(declaration.destination);
-  if (prefix !== "." && !selected.startsWith(`${prefix}/`)) return false;
+  if (!checkoutContains({ destination: prefix, selector: selected }))
+    return false;
+  if (selected === prefix) {
+    const uses = consumer["uses"];
+    if (
+      typeof uses !== "string" ||
+      !uses.startsWith("./") ||
+      normalizeCheckoutPath(uses.slice(2)) !== selected
+    )
+      return false;
+  }
   for (const step of steps.slice(checkoutIndex + 1, consumerIndex)) {
     if (!record(step) || checkoutActionRef(step["uses"]) === undefined)
       continue;
