@@ -11,6 +11,10 @@ import {
 } from "yaml";
 
 import {
+  type CheckoutSource,
+  proveCheckoutSource,
+} from "./toolchain-checkout-sources";
+import {
   containerDocumentImages,
   isComposeDefinitionPath,
   isKubernetesDefinitionPath,
@@ -85,6 +89,8 @@ type CheckRuntimeFileOptions = {
   dynamicSelectors?: readonly DynamicSelector[] | undefined;
   nodeCompatibility?: readonly NodeCompatibility[] | undefined;
   onNodeCompatibility?: ((entry: NodeCompatibility) => void) | undefined;
+  checkoutSources?: readonly CheckoutSource[] | undefined;
+  onCheckoutSource?: ((entry: CheckoutSource) => void) | undefined;
   onDynamicSelector?: ((entry: DynamicSelector) => void) | undefined;
   rustExceptions?: readonly RustException[] | undefined;
   rustInstallFixtures?: readonly RustInstallFixture[] | undefined;
@@ -311,6 +317,8 @@ export const checkRuntimeFile = ({
   dynamicSelectors = [],
   nodeCompatibility = [],
   onNodeCompatibility,
+  checkoutSources = [],
+  onCheckoutSource,
   onDynamicSelector,
   rustExceptions = [],
   rustInstallFixtures = [],
@@ -1143,6 +1151,41 @@ export const checkRuntimeFile = ({
           selector.startsWith(`${prefix}/`)),
     );
   };
+  let reviewedWorkflow: unknown;
+  const reviewedCheckout = (
+    selector: string,
+    tool: RuntimeDelegation["tool"],
+    line: number,
+  ) => {
+    const entry = checkoutSources.find(
+      (candidate) =>
+        candidate.path === file &&
+        currentLocation === `jobs.${candidate.job}.steps.${candidate.consumer}`,
+    );
+    const checkoutSha = policy.actions["actions/checkout"]?.sha;
+    if (
+      entry === undefined ||
+      checkoutSha === undefined ||
+      !proveCheckoutSource({
+        declaration: entry,
+        workflow: reviewedWorkflow,
+        checkoutSha,
+        selector,
+        repository,
+      })
+    )
+      return false;
+    onCheckoutSource?.(entry);
+    onDelegated?.({
+      path: file,
+      line,
+      tool,
+      selector,
+      checkoutPath: entry.destination,
+      ref: entry.ref,
+    });
+    return true;
+  };
   const checkReference = ({ value, tool, line }: RuntimeReferenceOptions) => {
     const selectors = {
       node: [".node-version", ".nvmrc"],
@@ -1154,6 +1197,12 @@ export const checkRuntimeFile = ({
     const selector = staticRepositoryPath(value)
       ? path.posix.normalize(value)
       : undefined;
+    if (
+      selector !== undefined &&
+      allowed.includes(path.posix.basename(selector)) &&
+      reviewedCheckout(selector, tool, line)
+    )
+      return;
     const providers = checkoutProvidersFor(selector);
     const binding = selector === undefined ? undefined : providers.at(-1);
     const dynamicSource = providers.some((entry) => entry.dynamicSource);
@@ -1531,6 +1580,8 @@ export const checkRuntimeFile = ({
       const selector = staticRepositoryPath(value)
         ? path.posix.normalize(value)
         : undefined;
+      if (selector !== undefined && reviewedCheckout(selector, "action", line))
+        return;
       const providers = checkoutProvidersFor(selector);
       const binding = selector === undefined ? undefined : providers.at(-1);
       if (
@@ -1889,6 +1940,7 @@ export const checkRuntimeFile = ({
   try {
     // Resolve aliases first with an expansion bound before visiting executable fields.
     const workflow = document.toJS({ maxAliasCount: 100 });
+    reviewedWorkflow = workflow;
     if (automationKind === "workflow") {
       for (const finding of checkWorkflowTrust(workflow)) {
         const jobNode = getNode(

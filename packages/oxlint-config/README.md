@@ -254,6 +254,40 @@ literal-ref checkouts, incorrect action pins and conditional/error-tolerant
 checkouts still fail. Local-action provenance is independent of these declarations.
 Review the producer named in the reason whenever the selector changes.
 
+Historical release consumers and delegated jobs can bind a reviewed checkout
+selection explicitly when the default current-source proof cannot resolve it:
+
+```json
+{
+  "checkoutSources": [
+    {
+      "path": ".github/workflows/release.yml",
+      "job": "build",
+      "checkout": "release-source",
+      "consumer": "build-release",
+      "destination": ".",
+      "ref": "${{ needs.resolve.outputs.sha }}",
+      "condition": null,
+      "selector": ".github/actions/build",
+      "reason": "The resolver verifies the release commit; build its action from that exact snapshot."
+    }
+  ]
+}
+```
+
+Both step IDs must be unique in the named job. The reference, destination and
+checkout condition must match exactly; a conditional checkout requires the
+consumer to have the identical condition. The selected checkout must precede
+the consumer, use the approved checkout pin and the same repository, retain
+cleaning, and omit `continue-on-error`. A later overlapping or unknown checkout
+destination before the consumer invalidates the proof. An earlier writer is
+allowed only because the selected checkout replaces it; writers after the
+consumer do not affect its selection. Sparse paths must include the selected
+file or action directory without expressions or glob patterns. Version-file
+selectors still require the tool's supported filename. This declaration reports
+runtime delegation; it does not claim a historical manifest uses today's pin.
+Unused, changed, or ambiguous declarations fail configuration validation.
+
 Run the installed checker from the repository root in CI:
 
 ```sh

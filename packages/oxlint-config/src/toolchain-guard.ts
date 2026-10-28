@@ -22,6 +22,7 @@ import type { ExpiryScope } from "./dated-entry-scope";
 import { readGitTrackedOutput } from "./git-tracked-output";
 import { checkRepositoryQuarantine } from "./quarantine-policy";
 import { repositoryBun } from "./toolchain-bun";
+import { parseCheckoutSources } from "./toolchain-checkout-sources";
 import {
   checkConsumerChecks,
   parseConsumerChecks,
@@ -110,6 +111,7 @@ export const parseToolchainConfiguration = (input: unknown) => {
         key !== "engineFloors" &&
         key !== "dynamicSelectors" &&
         key !== "nodeCompatibility" &&
+        key !== "checkoutSources" &&
         key !== "consumerChecks" &&
         key !== "rustExceptions" &&
         key !== "rustInstallFixtures" &&
@@ -121,7 +123,7 @@ export const parseToolchainConfiguration = (input: unknown) => {
     (input["optOuts"] !== undefined && !array(input["optOuts"]))
   )
     throw new Error(
-      "stll-toolchain.json accepts only optOuts, cloud, engineFloors, dynamicSelectors, nodeCompatibility, consumerChecks, rustExceptions, rustInstallFixtures, dependabotIgnores, typescriptAllowlist, formatterStagedSelector and formatterCheckSource declarations",
+      "stll-toolchain.json accepts only optOuts, cloud, engineFloors, dynamicSelectors, nodeCompatibility, checkoutSources, consumerChecks, rustExceptions, rustInstallFixtures, dependabotIgnores, typescriptAllowlist, formatterStagedSelector and formatterCheckSource declarations",
     );
   const disabled = new Set<string>();
   const optOuts = input["optOuts"] ?? [];
@@ -179,6 +181,7 @@ export const parseToolchainConfiguration = (input: unknown) => {
     engineFloors: parseEngineFloors(input["engineFloors"]),
     dynamicSelectors: parseDynamicSelectors(input["dynamicSelectors"]),
     nodeCompatibility: parseNodeCompatibility(input["nodeCompatibility"]),
+    checkoutSources: parseCheckoutSources(input["checkoutSources"]),
     consumerChecks: parseConsumerChecks(input["consumerChecks"]),
     dependabotIgnores: parseDependabotIgnores(input["dependabotIgnores"]),
     typescriptAllowlist: parseTypescriptAllowlist(input["typescriptAllowlist"]),
@@ -582,6 +585,9 @@ export const checkToolchain = ({
     });
     return false;
   });
+  const usedCheckoutSources = new Set<
+    (typeof configuration.checkoutSources)[number]
+  >();
   for (const [file, text] of Object.entries(files))
     diagnostics.push(
       ...checkRuntimeFile({
@@ -598,6 +604,8 @@ export const checkToolchain = ({
             entry,
             (compatibilityMatches.get(entry) ?? 0) + 1,
           ),
+        checkoutSources: configuration.checkoutSources,
+        onCheckoutSource: (entry) => usedCheckoutSources.add(entry),
         rustExceptions: configuration.rustExceptions,
         rustInstallFixtures: configuration.rustInstallFixtures,
         onRustInstallFixture: (entry) => usedRustFixtures.add(entry),
@@ -632,6 +640,14 @@ export const checkToolchain = ({
         path: "stll-toolchain.json",
         line: 1,
         message: `Node compatibility ${entry.workflow}:${entry.job}:${entry.step} must match exactly one setup-node step`,
+      });
+  for (const entry of configuration.checkoutSources)
+    if (!usedCheckoutSources.has(entry))
+      diagnostics.push({
+        rule: "configuration",
+        path: "stll-toolchain.json",
+        line: 1,
+        message: `checkout source ${entry.path}:${entry.job}:${entry.consumer} must prove its exact selected writer and consumer`,
       });
   for (const entry of engineFloors)
     if (!exercisedFloors.has(entry) || mismatchedFloors.has(entry))
