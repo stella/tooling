@@ -1,3 +1,4 @@
+import { conditionRequires } from "./toolchain-conditions";
 import {
   decodeShellWord,
   shellCommandSegments,
@@ -6,49 +7,6 @@ import {
 
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
-
-// Split only boolean operators outside parentheses and quoted string literals.
-const booleanParts = (source: string, operator: "&&" | "||") => {
-  const parts: string[] = [];
-  let depth = 0;
-  let quoted = false;
-  let start = 0;
-  for (let index = 0; index < source.length; index++) {
-    const character = source[index];
-    if (character === "'") {
-      if (quoted && source[index + 1] === "'") index++;
-      else quoted = !quoted;
-    }
-    if (quoted) continue;
-    if (character === "(") depth++;
-    if (character === ")") depth--;
-    if (depth === 0 && source.slice(index, index + 2) === operator) {
-      parts.push(source.slice(start, index));
-      start = index + 2;
-      index++;
-    }
-  }
-  parts.push(source.slice(start));
-  return parts;
-};
-
-const withoutOuterParentheses = (source: string): string => {
-  if (!source.startsWith("(") || !source.endsWith(")")) return source;
-  let depth = 0;
-  let quoted = false;
-  for (let index = 0; index < source.length; index++) {
-    const character = source[index];
-    if (character === "'") {
-      if (quoted && source[index + 1] === "'") index++;
-      else quoted = !quoted;
-    }
-    if (quoted) continue;
-    if (character === "(") depth++;
-    if (character === ")") depth--;
-    if (depth === 0 && index !== source.length - 1) return source;
-  }
-  return withoutOuterParentheses(source.slice(1, -1).trim());
-};
 
 // A sufficient static proof, not an evaluator for arbitrary Actions expressions.
 // Unknown predicates can never authorize repository execution before trust.
@@ -62,34 +20,19 @@ const excludesUntrusted = ({
   event,
   allowTrust = true,
 }: TrustConditionOptions): boolean => {
-  if (condition === false) return true;
-  if (typeof condition !== "string") return false;
-  const source = withoutOuterParentheses(
-    condition
-      .trim()
-      .replace(/^\$\{\{([\s\S]*)\}\}$/u, "$1")
-      .trim(),
-  );
-  const alternatives = booleanParts(source, "||");
-  if (alternatives.length > 1)
-    return alternatives.every((part) =>
-      excludesUntrusted({ condition: part, event, allowTrust }),
+  return conditionRequires(condition, (source) => {
+    const trustComparison =
+      /^needs\.trust-check\.outputs\.trusted\s*==\s*'([^']*)'$/u.exec(source);
+    if (allowTrust && trustComparison?.at(1)?.toLowerCase() === "true")
+      return true;
+    const comparison = /^github\.event_name\s*(==|!=)\s*'([^']+)'$/u.exec(
+      source,
     );
-  const conjuncts = booleanParts(source, "&&");
-  if (conjuncts.length > 1)
-    return conjuncts.some((part) =>
-      excludesUntrusted({ condition: part, event, allowTrust }),
-    );
-  const trustComparison =
-    /^needs\.trust-check\.outputs\.trusted\s*==\s*'([^']*)'$/u.exec(source);
-  if (allowTrust && trustComparison?.at(1)?.toLowerCase() === "true")
-    return true;
-  if (source === "false") return true;
-  const comparison = /^github\.event_name\s*(==|!=)\s*'([^']+)'$/u.exec(source);
-  if (comparison === null) return false;
-  // Actions compares string values without regard to case.
-  const equal = comparison.at(2)?.toLowerCase() === event.toLowerCase();
-  return comparison.at(1) === "==" ? !equal : equal;
+    if (comparison === null) return false;
+    // Actions compares string values without regard to case.
+    const equal = comparison.at(2)?.toLowerCase() === event.toLowerCase();
+    return comparison.at(1) === "==" ? !equal : equal;
+  });
 };
 
 // This is a deliberately small proof language for pre-trust metadata commands.

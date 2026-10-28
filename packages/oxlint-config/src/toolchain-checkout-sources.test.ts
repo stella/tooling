@@ -398,3 +398,23 @@ test("directory-only sparse equality covers a local action directory", () => {
     ]),
   ).toBe(true);
 });
+
+test("status-overriding consumers must prove the selected checkout succeeded on every branch", () => {
+  const succeeded = "steps.source.outcome == 'success'";
+  for (const condition of [
+    `${succeeded} && !cancelled()`,
+    `always() && (${succeeded})`,
+    `(${succeeded} && inputs.one) || (${succeeded} && inputs.two)`,
+    `\${{ !cancelled() && (${succeeded}) && steps.install.outcome == 'success' }}`,
+  ])
+    expect(prove([checkout, { ...consumer, if: condition }])).toBe(true);
+  for (const condition of [
+    `${succeeded} || always()`,
+    `!(${succeeded}) && always()`,
+    `always() && steps.other.outcome == 'success'`,
+    `always() && steps.source.conclusion == 'success'`,
+    `always() && ('${succeeded.replaceAll("'", "''")}')`,
+    `always() && ((${succeeded} && inputs.one) || inputs.two)`,
+  ])
+    expect(prove([checkout, { ...consumer, if: condition }])).toBe(false);
+});

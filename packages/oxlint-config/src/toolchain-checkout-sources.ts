@@ -8,6 +8,7 @@ import {
   selfCheckoutRepository,
   sparseCheckoutPaths,
 } from "./toolchain-checkout-syntax";
+import { conditionRequires } from "./toolchain-conditions";
 
 export type CheckoutSource = {
   path: string;
@@ -215,7 +216,14 @@ export const proveCheckoutSource = ({
     declaration.condition === null &&
     consumerCondition !== undefined &&
     (typeof consumerCondition !== "string" ||
-      !stableCheckoutCondition(consumerCondition, steps, consumerIndex))
+      (!stableCheckoutCondition(consumerCondition, steps, consumerIndex) &&
+        !conditionRequires(consumerCondition, (source) => {
+          const match =
+            /^steps\.([A-Za-z_][\w-]*)\.outcome\s*==\s*'success'$/i.exec(
+              source,
+            );
+          return match?.at(1) === declaration.checkout;
+        })))
   )
     return false;
   const selected = normalizeCheckoutPath(selector);

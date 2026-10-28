@@ -280,7 +280,9 @@ checkout condition must match exactly; a conditional checkout requires the
 consumer to have the identical condition with immutable operands. Step-output
 references must name a unique producer before the checkout; mutable contexts,
 status functions and dynamic property access are rejected. Consumers of an
-unconditional checkout also cannot override its implicit success requirement. The selected checkout must precede
+unconditional checkout may override implicit success only when every condition
+branch requires `steps.<selected-checkout-id>.outcome == 'success'`. This allows
+post-failure checks to retain their source identity. The selected checkout must precede
 the consumer, use the approved checkout pin and the same repository, retain
 cleaning, and omit `continue-on-error`. A later overlapping or unknown checkout
 destination before the consumer invalidates the proof. An earlier writer is
