@@ -1,5 +1,17 @@
 # @stll/oxlint-config
 
+## 3.1.0
+
+### Minor Changes
+
+- [#238](https://github.com/stella/tooling/pull/238) [`7128fe4`](https://github.com/stella/tooling/commit/7128fe4447559328512810332c35b58fa16a85a8) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Support exact tracked historical Rust installation fixtures without exempting live compiler selectors. Reject unused declarations and apply scoped expiry checks.
+
+### Patch Changes
+
+- [#237](https://github.com/stella/tooling/pull/237) [`c5f0ea7`](https://github.com/stella/tooling/commit/c5f0ea7c63a182d1a1d2463c1b8a0b00009543d4) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Publish cloud session snapshots without following a concurrently replaced destination directory. Preserve regeneration of previously emitted hooks.
+
+- [#235](https://github.com/stella/tooling/pull/235) [`bc2b34b`](https://github.com/stella/tooling/commit/bc2b34bcb48237000736b702859f24a25672b84c) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Report same-repository local actions from an unambiguous delegated checkout as delegated source validation, matching runtime-file selectors. Keep foreign, conditional, ambiguous, and dynamic-destination checkout sources rejected.
+
 ## 3.0.0
 
 ### Major Changes
