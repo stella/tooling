@@ -11,3 +11,6 @@ export const literalSparseCheckoutPath = (value: string) =>
   !/[!$*?[\]\\:]/.test(value) &&
   !path.posix.isAbsolute(value) &&
   !value.split("/").includes("..");
+
+export const normalizeCheckoutPath = (prefix: string) =>
+  path.posix.normalize(prefix).replace(/\/$/, "") || ".";

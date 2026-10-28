@@ -17,6 +17,7 @@ import {
 import {
   checkoutActionRef,
   literalSparseCheckoutPath,
+  normalizeCheckoutPath,
 } from "./toolchain-checkout-syntax";
 import {
   containerDocumentImages,
@@ -1111,8 +1112,6 @@ export const checkRuntimeFile = ({
     !value.includes(":") &&
     !path.posix.isAbsolute(value) &&
     !value.split("/").includes("..");
-  const normalizeCheckoutPath = (prefix: string) =>
-    path.posix.normalize(prefix).replace(/\/$/, "") || ".";
   type RuntimeReferenceOptions = {
     value: unknown;
     tool: "node" | "python" | "bun";

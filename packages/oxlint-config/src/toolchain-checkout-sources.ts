@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   checkoutActionRef,
   literalSparseCheckoutPath,
+  normalizeCheckoutPath,
 } from "./toolchain-checkout-syntax";
 
 export type CheckoutSource = {
@@ -208,8 +209,16 @@ export const proveCheckoutSource = ({
     !stableCheckoutCondition(declaration.condition, steps, checkoutIndex)
   )
     return false;
-  const selected = path.posix.normalize(selector);
-  const prefix = path.posix.normalize(declaration.destination);
+  const consumerCondition = consumer["if"];
+  if (
+    declaration.condition === null &&
+    consumerCondition !== undefined &&
+    (typeof consumerCondition !== "string" ||
+      !stableCheckoutCondition(consumerCondition, steps, consumerIndex))
+  )
+    return false;
+  const selected = normalizeCheckoutPath(selector);
+  const prefix = normalizeCheckoutPath(declaration.destination);
   if (prefix !== "." && !selected.startsWith(`${prefix}/`)) return false;
   for (const step of steps.slice(checkoutIndex + 1, consumerIndex)) {
     if (!record(step) || checkoutActionRef(step["uses"]) === undefined)
@@ -218,7 +227,7 @@ export const proveCheckoutSource = ({
     const other = record(withOptions) ? (withOptions["path"] ?? ".") : ".";
     // Unknown destinations can shadow any selector, even when conditionally written.
     if (!repositoryPath(other)) return false;
-    const otherPrefix = path.posix.normalize(other);
+    const otherPrefix = normalizeCheckoutPath(other);
     if (
       otherPrefix === "." ||
       selected === otherPrefix ||

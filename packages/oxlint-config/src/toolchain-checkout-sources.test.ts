@@ -77,6 +77,26 @@ test("exact reviewed selection permits historical source and sequential replacem
   ).toBe(true);
 });
 
+test("consumers cannot override the selected checkout success requirement", () => {
+  for (const condition of [
+    "always()",
+    "failure()",
+    "cancelled()",
+    "${{ !cancelled() }}",
+  ])
+    expect(
+      prove([
+        { ...checkout, id: "old", with: { ref: "main" } },
+        { run: "exit 1" },
+        checkout,
+        { ...consumer, if: condition },
+      ]),
+    ).toBe(false);
+  expect(
+    prove([checkout, { ...consumer, if: "github.event_name == 'push'" }]),
+  ).toBe(true);
+});
+
 test("conditional checkout proofs require immutable operands available before checkout", () => {
   const condition = "steps.resolve.outputs.build == 'true'";
   const declared = { ...declaration, condition };
@@ -169,7 +189,10 @@ test("intervening overlapping or unknown writers cannot be waived", () => {
     ).toBe(false);
   for (const destination of [
     ".",
+    "./",
     ".github",
+    ".github/",
+    "./.github//",
     ".github/actions/build",
     ".github/actions/build/nested",
     "${{ inputs.path }}",
