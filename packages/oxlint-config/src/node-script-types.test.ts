@@ -13,7 +13,7 @@ import {
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { API } from "tsrs/unstable/async";
+import { API } from "tsrs/async";
 
 const require = createRequire(import.meta.url);
 const configDirectory = path.resolve(
