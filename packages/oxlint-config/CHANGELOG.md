@@ -1,5 +1,11 @@
 # @stll/oxlint-config
 
+## 3.5.1
+
+### Patch Changes
+
+- [#262](https://github.com/stella/tooling/pull/262) [`547b98a`](https://github.com/stella/tooling/commit/547b98a4f196d7c21defc122fa70e47fcc289a5b) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Move to tsrs 0.20.1, which publishes Intel macOS and Windows x64 binaries, and read its Node API from `tsrs/async` instead of the removed `tsrs/unstable/async` path.
+
 ## 3.5.0
 
 ### Minor Changes
