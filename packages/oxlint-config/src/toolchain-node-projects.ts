@@ -123,7 +123,7 @@ type ProjectConfig = {
 const resolveProjectApi = (root: string) => {
   for (const base of [import.meta.url, path.join(root, "package.json")])
     try {
-      return pathToFileURL(createRequire(base).resolve("tsrs/unstable/async"))
+      return pathToFileURL(createRequire(base).resolve("tsrs/async"))
         .href;
     } catch (error) {
       const code = record(error) ? error["code"] : undefined;
