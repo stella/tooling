@@ -1930,7 +1930,7 @@ export const checkRuntimeFile = ({
   };
   try {
     // Resolve aliases first with an expansion bound before visiting executable fields.
-    const workflow = document.toJS({ maxAliasCount: 100 });
+    const workflow: unknown = document.toJS({ maxAliasCount: 100 });
     reviewedWorkflow = workflow;
     if (automationKind === "workflow") {
       for (const finding of checkWorkflowTrust(workflow)) {

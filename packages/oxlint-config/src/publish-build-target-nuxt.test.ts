@@ -25,6 +25,22 @@ import {
   nuxtModuleTargetTargets,
 } from "./publish-build-target-nuxt-helper";
 
+// `typeof === "function"` narrows to `Function`, whose calls return `any`.
+const callable = (
+  value: unknown,
+): value is (...parameters: readonly unknown[]) => unknown =>
+  typeof value === "function";
+
+const property = (value: unknown, ...keys: readonly string[]): unknown => {
+  let current = value;
+  for (const key of keys)
+    current =
+      typeof current === "object" && current !== null
+        ? Reflect.get(current, key)
+        : undefined;
+  return current;
+};
+
 test("Nuxt module and runtime targets are resolved independently", () => {
   expect(
     resolvedNuxtTarget({
@@ -261,10 +277,7 @@ test.skipIf(
         nuxtModuleTarget: makeTarget,
         isNuxtModuleTargetHook: recognizeTarget,
       } = module;
-      if (
-        typeof makeTarget !== "function" ||
-        typeof recognizeTarget !== "function"
-      )
+      if (!callable(makeTarget) || !callable(recognizeTarget))
         throw new Error("Built Nuxt helper exports must be functions");
       return {
         nuxtModuleTarget: makeTarget,
@@ -285,11 +298,19 @@ test.skipIf(
         cjsConfig,
         `const {nuxtModuleTarget}=require(${JSON.stringify(builtCjsHelper)}); module.exports={hooks:{'build:before':nuxtModuleTarget('es2022')}};`,
       );
-      const esmHook: unknown = (await import(pathToFileURL(esmConfig).href))
-        .default.hooks["build:before"];
-      const cjsHook: unknown = createRequire(import.meta.url)(cjsConfig).hooks[
-        "build:before"
-      ];
+      const esmConfigModule: unknown = await import(
+        pathToFileURL(esmConfig).href
+      );
+      const cjsConfigModule: unknown = createRequire(import.meta.url)(
+        cjsConfig,
+      );
+      const esmHook = property(
+        esmConfigModule,
+        "default",
+        "hooks",
+        "build:before",
+      );
+      const cjsHook = property(cjsConfigModule, "hooks", "build:before");
       expect(esmHelper.isNuxtModuleTargetHook(cjsHook)).toBe(true);
       expect(cjsHelper.isNuxtModuleTargetHook(esmHook)).toBe(true);
       expect(

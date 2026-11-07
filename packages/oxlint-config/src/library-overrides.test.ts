@@ -6,7 +6,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { library } from "./index";
+import {
+  library,
+  libraryOverrides,
+  libraryRules,
+  unsafeAnyRules,
+} from "./index";
 
 const oxlintBin = fileURLToPath(
   new URL("./bin/oxlint", import.meta.resolve("oxlint/package.json")),
@@ -69,3 +74,21 @@ test("test overrides reach nested test folders and every module extension", asyn
     await rm(directory, { recursive: true, force: true });
   }
 }, 15_000);
+
+test("unsafe any rules are on, relaxed for test matchers and off in JavaScript", () => {
+  expect(libraryRules).toEqual(expect.objectContaining(unsafeAnyRules));
+  const [tests, javascript] = libraryOverrides;
+  expect(tests?.rules).toEqual(
+    expect.objectContaining({
+      "typescript/no-unsafe-argument": "off",
+      "typescript/no-unsafe-assignment": "off",
+    }),
+  );
+  expect(tests?.rules).not.toHaveProperty(["typescript/no-unsafe-call"]);
+  expect(javascript?.files).toEqual(["**/*.{js,jsx,mjs,cjs}"]);
+  expect(javascript?.rules).toEqual(
+    Object.fromEntries(
+      Object.keys(unsafeAnyRules).map((rule) => [rule, "off"]),
+    ),
+  );
+});

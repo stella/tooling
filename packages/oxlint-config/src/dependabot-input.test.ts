@@ -18,12 +18,17 @@ test.each(supportedDependabotEcosystems)(
       updates: [{ ecosystem, directories: ["/"] }],
     });
     const output = generateDependabotConfig({ files: {}, policy, updates });
-    expect(parseDocument(output).toJS().updates).toEqual([
+    const rendered: unknown = parseDocument(output).toJS();
+    expect(rendered).toEqual(
       expect.objectContaining({
-        "package-ecosystem": ecosystem,
-        directory: "/",
+        updates: [
+          expect.objectContaining({
+            "package-ecosystem": ecosystem,
+            directory: "/",
+          }),
+        ],
       }),
-    ]);
+    );
   },
 );
 

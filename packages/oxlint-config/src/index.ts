@@ -62,6 +62,18 @@ export const reactCompilerRules = {
   "react/void-use-memo": "error",
 } satisfies Rules;
 
+// `no-explicit-any` stops only a written `any`. These stop one that arrives
+// from `JSON.parse`, untyped libraries or an unresolved import from flowing
+// into typed code. Exported so a consumer can turn them off for directories
+// that are not clean yet and remove that override as each one is fixed.
+export const unsafeAnyRules = {
+  "typescript/no-unsafe-argument": "error",
+  "typescript/no-unsafe-assignment": "error",
+  "typescript/no-unsafe-call": "error",
+  "typescript/no-unsafe-member-access": "error",
+  "typescript/no-unsafe-return": "error",
+} satisfies Rules;
+
 export const libraryRules = {
   "no-console": "off",
   "no-shadow": "error",
@@ -106,6 +118,7 @@ export const libraryRules = {
   "oxc/branches-sharing-code": "error",
 
   "typescript/no-explicit-any": "error",
+  ...unsafeAnyRules,
   "typescript/no-dynamic-delete": "error",
   "typescript/no-misused-promises": [
     "error",
@@ -262,7 +275,20 @@ export const libraryOverrides = [
       "no-console": "off",
       "require-await": "off",
       "no-non-null-assertion": "off",
+      // Asymmetric matchers such as `expect.stringContaining()` are typed
+      // `any`, so passing or storing one is the normal way to write a test.
+      // Calling, indexing or returning an `any` is still reported.
+      "typescript/no-unsafe-argument": "off",
+      "typescript/no-unsafe-assignment": "off",
     },
+  },
+  {
+    // JavaScript has no annotation to turn an `any` into `unknown`, so these
+    // rules could only be silenced there, not satisfied.
+    files: ["**/*.{js,jsx,mjs,cjs}"],
+    rules: Object.fromEntries(
+      Object.keys(unsafeAnyRules).map((rule) => [rule, "off" as const]),
+    ),
   },
 ] satisfies OxlintOverride[];
 

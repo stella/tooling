@@ -66,7 +66,7 @@ const basePackage = (root: string, base: string, pkg: Package) => {
     ]).trim() === ""
   )
     return undefined;
-  const packageJson = JSON.parse(
+  const packageJson: unknown = JSON.parse(
     git(root, ["show", `${base}:${relativeManifest}`]),
   );
   if (typeof packageJson !== "object" || packageJson === null)

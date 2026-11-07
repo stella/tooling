@@ -218,7 +218,7 @@ export default {
             }
             const headIsContinuation = isJsxExpressionContinuation(node);
             for (let i = 0; i < quasis.length; i++) {
-              const quasi = quasis[i];
+              const quasi: unknown = quasis[i];
               const value = quasiText(quasi);
               if (value === null) {
                 continue;

@@ -120,7 +120,9 @@ const withIgnore = (
     throw new Error("generated Dependabot configuration has no updates");
   const { updates } = parsed;
   if (!Array.isArray(updates)) throw new Error("updates must be an array");
-  for (const update of updates) {
+  // `Array.isArray` narrows to `any[]`; read each entry as `unknown`.
+  const entries: readonly unknown[] = updates;
+  for (const update of entries) {
     if (
       typeof update !== "object" ||
       update === null ||

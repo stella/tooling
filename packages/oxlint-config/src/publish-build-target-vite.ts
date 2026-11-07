@@ -13,6 +13,14 @@ const supportedViteVersion = "8.3.5";
 const declarationHelperImport = "@stll/oxlint-config/declaration-only-dts";
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+// `Array.isArray` narrows to `any[]` and `typeof === "function"` to
+// `Function`; these keep values read from untyped ASTs and configs `unknown`.
+const array = (value: unknown): value is readonly unknown[] =>
+  Array.isArray(value);
+const callable = (
+  value: unknown,
+): value is (...parameters: readonly unknown[]) => unknown =>
+  typeof value === "function";
 
 type WalkAstOptions = {
   value: unknown;
@@ -48,12 +56,9 @@ const astLiteral = (value: unknown): unknown => {
     (typeof value["value"] === "string" || typeof value["value"] === "boolean")
   )
     return value["value"];
-  if (value["type"] === "ArrayExpression" && Array.isArray(value["elements"]))
+  if (value["type"] === "ArrayExpression" && array(value["elements"]))
     return value["elements"].map(astLiteral);
-  if (
-    value["type"] === "ObjectExpression" &&
-    Array.isArray(value["properties"])
-  ) {
+  if (value["type"] === "ObjectExpression" && array(value["properties"])) {
     const entries: [string, unknown][] = [];
     for (const property of value["properties"]) {
       if (
@@ -96,7 +101,7 @@ export const reviewedDtsConfiguration = ({
     transformSync(source, { loader, format: "esm", target: "esnext" }).code,
     { ecmaVersion: "latest", sourceType: "module" },
   );
-  if (!record(ast) || !Array.isArray(ast["body"]))
+  if (!record(ast) || !array(ast["body"]))
     throw new Error("Invalid Vite configuration AST");
   const bindings = new Set<string>();
   const defineConfigBindings = new Set<string>();
@@ -116,7 +121,7 @@ export const reviewedDtsConfiguration = ({
         throw new Error(
           "Raw declaration emitters cannot accompany the reviewed helper",
         );
-      if (Array.isArray(statement["specifiers"]))
+      if (array(statement["specifiers"]))
         for (const specifier of statement["specifiers"]) {
           if (!record(specifier)) continue;
           const local = astName(specifier["local"]);
@@ -140,7 +145,7 @@ export const reviewedDtsConfiguration = ({
     }
     if (
       statement["type"] === "VariableDeclaration" &&
-      Array.isArray(statement["declarations"])
+      array(statement["declarations"])
     )
       for (const declaration of statement["declarations"])
         if (record(declaration))
@@ -149,7 +154,7 @@ export const reviewedDtsConfiguration = ({
       exported = statement["declaration"];
     if (
       statement["type"] === "ExportNamedDeclaration" &&
-      Array.isArray(statement["specifiers"])
+      array(statement["specifiers"])
     )
       for (const specifier of statement["specifiers"])
         if (record(specifier) && astName(specifier["exported"]) === "default")
@@ -165,14 +170,14 @@ export const reviewedDtsConfiguration = ({
     record(exported) &&
     exported["type"] === "CallExpression" &&
     defineConfigBindings.has(String(astName(exported["callee"]))) &&
-    Array.isArray(exported["arguments"]) &&
+    array(exported["arguments"]) &&
     exported["arguments"].length === 1
   )
     exported = exported["arguments"].at(0);
   if (
     !record(exported) ||
     exported["type"] !== "ObjectExpression" ||
-    !Array.isArray(exported["properties"])
+    !array(exported["properties"])
   )
     throw new Error(
       "Declaration helper requires a directly exported static Vite configuration",
@@ -191,7 +196,7 @@ export const reviewedDtsConfiguration = ({
     property["kind"] !== "init" ||
     !record(property["value"]) ||
     property["value"]["type"] !== "ArrayExpression" ||
-    !Array.isArray(property["value"]["elements"])
+    !array(property["value"]["elements"])
   )
     throw new Error("Declaration helper requires a literal plugins array");
   const calls = property["value"]["elements"]
@@ -210,7 +215,7 @@ export const reviewedDtsConfiguration = ({
   if (
     calls.length !== 1 ||
     !record(call) ||
-    !Array.isArray(call["arguments"]) ||
+    !array(call["arguments"]) ||
     call["arguments"].length !== 1
   )
     throw new Error("Declare exactly one direct declaration helper call");
@@ -231,7 +236,7 @@ export const reviewedDtsConfiguration = ({
   if (
     !record(argument) ||
     argument["type"] !== "ObjectExpression" ||
-    !Array.isArray(argument["properties"])
+    !array(argument["properties"])
   )
     throw new Error("Declaration helper options must be a literal object");
   const directoryProperties = argument["properties"].filter(
@@ -369,13 +374,13 @@ const plugins = (config: unknown): unknown[] => {
     ];
   if (
     !record(environment) ||
-    !Array.isArray(environment["plugins"]) ||
-    !Array.isArray(config["plugins"])
+    !array(environment["plugins"]) ||
+    !array(config["plugins"])
   )
     throw new Error("Missing resolved Vite environment plugins");
   const options = config["build"]["rolldownOptions"];
   const extra = record(options) ? options["plugins"] : undefined;
-  if (extra !== undefined && !Array.isArray(extra))
+  if (extra !== undefined && !array(extra))
     throw new Error(
       "Dynamic Vite rolldown plugins require a supported target resolver",
     );
@@ -674,7 +679,7 @@ export const resolveVitePublishTarget = async (
   const tool: unknown = await import(
     pathToFileURL(realpathSync(require.resolve("vite"))).href
   );
-  if (!record(tool) || typeof tool["resolveConfig"] !== "function")
+  if (!record(tool) || !callable(tool["resolveConfig"]))
     throw new Error(
       "Installed Vite does not expose its configuration resolver",
     );
@@ -729,7 +734,7 @@ export const resolveVitePublishTarget = async (
     const vue: unknown = await import(
       pathToFileURL(realpathSync(require.resolve("@vitejs/plugin-vue"))).href
     );
-    if (!record(vue) || typeof vue["default"] !== "function")
+    if (!record(vue) || !callable(vue["default"]))
       throw new Error("Invalid installed Vue plugin factory");
     const plugin: unknown = vue["default"]();
     if (!record(plugin)) throw new Error("Invalid installed Vue plugin");

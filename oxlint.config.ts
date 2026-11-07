@@ -1,4 +1,4 @@
-import { library } from "./packages/oxlint-config/src/index";
+import { library, unsafeAnyRules } from "./packages/oxlint-config/src/index";
 import {
   bunTestHygienePluginSpecifiers,
   bunTestHygieneRules,
@@ -9,6 +9,10 @@ import {
   testReliabilityPluginSpecifiers,
   testReliabilityRules,
 } from "./packages/oxlint-plugin/src/index";
+
+const unsafeAnyOff = Object.fromEntries(
+  Object.keys(unsafeAnyRules).map((rule) => [rule, "off" as const]),
+);
 
 export default library({
   ignorePatterns: [
@@ -24,11 +28,17 @@ export default library({
   ],
   overrides: [
     {
+      // Preset fixtures call undeclared framework hooks and JSX on purpose.
+      files: ["packages/oxlint-config/fixtures/**/*.{ts,tsx}"],
+      rules: unsafeAnyOff,
+    },
+    {
       // Oxlint presents plugin AST nodes as intentionally untyped values.
-      // Type-aware condition rules cannot add safety inside the visitor
-      // implementation; the passive fixtures prove rule behavior.
+      // Type-aware any-flow and condition rules cannot add safety inside the
+      // visitor implementation; the passive fixtures prove rule behavior.
       files: ["packages/oxlint-plugin/src/**/*.ts"],
       rules: {
+        ...unsafeAnyOff,
         "typescript/strict-boolean-expressions": "off",
         "typescript/no-unnecessary-condition": "off",
       },
@@ -53,6 +63,9 @@ export default library({
         "import/no-duplicates": "off",
         "typescript/no-unnecessary-template-expression": "off",
         "typescript/prefer-promise-reject-errors": "off",
+        // Fixtures reference undeclared globals such as `React` and `expect`,
+        // so their values have no resolved type.
+        ...unsafeAnyOff,
       },
     },
     {

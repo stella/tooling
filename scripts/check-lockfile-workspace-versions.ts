@@ -26,8 +26,14 @@ import { syncWorkspaceToolchainPins } from "./lib/toolchain-workspace-versions";
 
 const ROOT = join(import.meta.dirname, "..");
 
-const readJson = async (path: string): Promise<Record<string, unknown>> =>
-  JSON.parse(await Bun.file(path).text());
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const readJson = async (path: string): Promise<Record<string, unknown>> => {
+  const value: unknown = JSON.parse(await Bun.file(path).text());
+  if (!isRecord(value)) throw new Error(`${path} must contain a JSON object`);
+  return value;
+};
 
 const packagesDir = join(ROOT, "packages");
 const entries = await readdir(packagesDir, { withFileTypes: true });
