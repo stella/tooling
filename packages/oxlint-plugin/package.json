@@ -180,7 +180,7 @@
   "devDependencies": {
     "@oxlint/plugins": "1.89.0",
     "@stll/typescript-config": "workspace:*",
-    "@types/node": "26.6.5"
+    "@types/node": "26.6.6"
   },
   "peerDependencies": {
     "@oxlint/plugins": ">=1.89.0 <2",
