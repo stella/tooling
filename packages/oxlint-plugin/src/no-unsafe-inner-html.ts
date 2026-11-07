@@ -34,8 +34,12 @@
 // function can be named `sanitizeHtml`. Add explicit provenance at the sink
 // until the codebase has a branded SafeHtml boundary.
 
-import type { Scope, Variable } from "@oxlint/plugins";
-import { eslintCompatPlugin, type Plugin } from "@oxlint/plugins";
+import {
+  eslintCompatPlugin,
+  type Plugin,
+  type Scope,
+  type Variable,
+} from "@oxlint/plugins";
 
 import type { AstNode, LiteralArgumentResolution } from "./utils.ts";
 import {

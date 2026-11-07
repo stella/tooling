@@ -1130,7 +1130,7 @@ const parseSnapshot = (snapshot: GitSnapshot): ParsedSnapshot => {
     } else if (name === ".npmrc") {
       for (const line of text.split(/\r?\n/)) {
         if (!/^\s*(?:use-node-version|node-version)\s*=/i.test(line)) continue;
-        if (/\$\{/.test(line))
+        if (line.includes("${"))
           throw new Error("Unclassifiable npm Node selector");
         const selector =
           /^\s*(?:use-node-version|node-version)\s*=\s*(.*?)\s*$/i.exec(

@@ -151,8 +151,8 @@ test("malformed packed JavaScript retains its import parser cause and member pat
         readPackedSyntaxFiles(archive),
         (error: unknown) =>
           error instanceof SyntaxError &&
-          /Packed runtime import syntax package\/dist\/chunks\/hidden\.mjs:/.test(
-            error.message,
+          error.message.includes(
+            "Packed runtime import syntax package/dist/chunks/hidden.mjs:",
           ) &&
           error.cause instanceof SyntaxError,
       );

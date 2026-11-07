@@ -257,7 +257,7 @@ const parseSettings = (text: string) => {
     return settings;
   } catch (error) {
     if (error instanceof SyntaxError)
-      throw new Error("settings must contain valid JSON");
+      throw new Error("settings must contain valid JSON", { cause: error });
     throw error;
   }
 };

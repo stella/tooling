@@ -44,6 +44,7 @@ const readClaudeSettings = async (destination: string) => {
   } catch (error) {
     throw new Error(
       `cannot safely merge ${cloudClaudeSettingsPath}: ${error instanceof Error ? error.message : String(error)}; ${cloudSessionStartFix}`,
+      { cause: error },
     );
   }
 };

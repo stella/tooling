@@ -1,5 +1,4 @@
-import { eslintCompatPlugin, type Plugin } from "@oxlint/plugins";
-import type { Ranged } from "@oxlint/plugins";
+import { eslintCompatPlugin, type Plugin, type Ranged } from "@oxlint/plugins";
 
 import { getImportedName, getPropertyName, isIdentifier } from "./utils.ts";
 
@@ -236,7 +235,7 @@ const plugin: Plugin = eslintCompatPlugin({
 
               if (
                 callee.type === "MemberExpression" &&
-                callee.computed === false &&
+                !callee.computed &&
                 isIdentifier(callee.object) &&
                 routeQueryHelperNamespaces.has(callee.object.name)
               ) {

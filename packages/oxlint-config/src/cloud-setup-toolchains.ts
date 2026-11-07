@@ -10,8 +10,8 @@ import {
   cloudExtraTools,
   isCloudPackageTool,
   parseCloudRustNames,
+  type parseCloudSetup,
 } from "./cloud-setup-schema";
-import type { parseCloudSetup } from "./cloud-setup-schema";
 import type { RustException } from "./toolchain-rust";
 
 type ResolveCloudToolchainsOptions = {

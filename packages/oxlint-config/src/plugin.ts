@@ -20,7 +20,7 @@ const isAstNode = (node: unknown): node is AstNode =>
   typeof node === "object" &&
   node !== null &&
   "type" in node &&
-  typeof (node as { type: unknown }).type === "string";
+  typeof node.type === "string";
 
 const isStringLiteral = (node: unknown): node is AstNode & { value: string } =>
   isAstNode(node) &&
