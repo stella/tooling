@@ -124,7 +124,7 @@ export const declarationOnlyDts = ({
     async configResolved(config) {
       if (
         realpathSync(config.root) !== root ||
-        config.build.write === false ||
+        !config.build.write ||
         config.build.watch
       )
         throw new Error(

@@ -72,6 +72,27 @@ export const libraryRules = {
   "no-loop-func": "error",
   "no-nested-ternary": "error",
   "no-void": ["error", { allowAsStatement: true }],
+  // `== null` stays allowed as the one idiomatic nullish check.
+  eqeqeq: ["error", "always", { null: "ignore" }],
+  "no-var": "error",
+  "prefer-const": "error",
+  // Bug-shaped constructs outside oxlint's default correctness category.
+  // Switch fallthrough is left to `noFallthroughCasesInSwitch` in the shared
+  // tsconfig; oxlint's rule misreads commented empty cases.
+  "no-case-declarations": "error",
+  "default-case-last": "error",
+  "array-callback-return": "error",
+  "no-self-compare": "error",
+  "no-unneeded-ternary": "error",
+  "no-useless-concat": "error",
+  "no-useless-constructor": "error",
+  // Rethrowing a new error must keep the original as `cause`.
+  "preserve-caught-error": "error",
+  // String-evaluated code and prototype tampering.
+  "no-implied-eval": "error",
+  "no-new-func": "error",
+  "no-extend-native": "error",
+  "no-proto": "error",
   // Callback expressions should stay lexically scoped; avoids accidental `this` rebinding.
   "prefer-arrow-callback": "error",
   "stella-lowercase/stella-lowercase": "error",
@@ -117,7 +138,28 @@ export const libraryRules = {
     { ignorePrimitives: { string: true, boolean: true } },
   ],
   "typescript/only-throw-error": "error",
+  // Rejections follow the same Error-only contract as `throw`.
+  "typescript/prefer-promise-reject-errors": "error",
+  "typescript/use-unknown-in-catch-callback-variable": "error",
   "typescript/return-await": ["error", "error-handling-correctness-only"],
+  // Bare `@ts-ignore`/`@ts-nocheck` hide type errors; `@ts-expect-error`
+  // needs a description and fails once the error it covers is gone.
+  "typescript/ban-ts-comment": "error",
+  "typescript/no-require-imports": "error",
+  "typescript/no-empty-object-type": "error",
+  "typescript/no-unsafe-function-type": "error",
+  "typescript/no-unnecessary-type-constraint": "error",
+  "typescript/no-confusing-non-null-assertion": "error",
+  "typescript/no-deprecated": "error",
+  "typescript/no-unnecessary-type-assertion": "error",
+  "typescript/no-unnecessary-template-expression": "error",
+  "typescript/no-unnecessary-boolean-literal-compare": "error",
+  "typescript/restrict-plus-operands": "error",
+  "typescript/no-unsafe-enum-comparison": "error",
+  "typescript/no-mixed-enums": "error",
+  "typescript/prefer-includes": "error",
+  "typescript/prefer-string-starts-ends-with": "error",
+  "typescript/prefer-find": "error",
 
   "unicorn/no-useless-undefined": "off",
   "unicorn/prefer-array-find": "error",
@@ -130,18 +172,35 @@ export const libraryRules = {
   "unicorn/no-nested-ternary": "off",
   // `Array.from({ length }).fill(obj)` shares one reference across every slot.
   "unicorn/no-array-fill-with-reference-type": "error",
+  "unicorn/prefer-node-protocol": "error",
+  "unicorn/prefer-array-flat-map": "error",
+  // `instanceof Array`/`String` fails across realms and for primitives.
+  "unicorn/no-instanceof-builtins": "error",
+  "unicorn/no-accessor-recursion": "error",
+  "unicorn/require-post-message-target-origin": "error",
+
+  "oxc/misrefactored-assign-op": "error",
 
   "import/no-cycle": "error",
+  "import/no-duplicates": "error",
+  "import/no-self-import": "error",
+  "import/no-absolute-path": "error",
+  "import/no-empty-named-blocks": "error",
   "import/consistent-type-specifier-style": "off",
   // Keep a blank line after the import block so it stays visually separate from module body.
   "import/newline-after-import": "error",
 
   "promise/always-return": "error",
   "promise/no-return-in-finally": "error",
+  "promise/no-multiple-resolved": "error",
   "promise/prefer-await-to-then": "off",
   "promise/prefer-await-to-callbacks": "off",
   "promise/avoid-new": "off",
 
+  // None of these are on in `library()` itself (oxlint enables only the
+  // correctness category). They stay listed because consumers spread
+  // `libraryRules` over broader presets such as Ultracite, where these
+  // opinionated rules are on and would otherwise apply.
   "sort-keys": "off",
   "no-plusplus": "off",
   "no-inline-comments": "off",
@@ -163,36 +222,42 @@ export const libraryRules = {
 
 // Applied only to the consumer-selected React files.
 export const reactRules = {
-  // Enabling the `react` plugin turns on its whole correctness-category
-  // rule set at "warn" by default, not just the React Compiler categories.
-  // Only the compiler categories are deliberate additions here, so the rest
-  // are turned off to keep this package's blast radius scoped; lift any of
-  // these independently if a future change wants them.
+  // Enabling the `react` plugin turns on its whole correctness category.
+  // These two duplicate other checks: the compiler's dependency rules
+  // replace `exhaustive-deps`, and TypeScript reports undefined JSX names.
   "react/exhaustive-deps": "off",
-  "react/forward-ref-uses-ref": "off",
-  "react/jsx-key": "off",
-  "react/jsx-no-duplicate-props": "off",
   "react/jsx-no-undef": "off",
-  "react/jsx-props-no-spread-multi": "off",
-  "react/no-children-prop": "off",
-  "react/no-danger-with-children": "off",
-  "react/no-did-mount-set-state": "off",
-  "react/no-did-update-set-state": "off",
-  "react/no-direct-mutation-state": "off",
-  "react/no-find-dom-node": "off",
-  "react/no-is-mounted": "off",
-  "react/no-render-return-value": "off",
-  "react/no-string-refs": "off",
-  "react/no-this-in-sfc": "off",
-  "react/no-unsafe": "off",
-  "react/no-will-update-set-state": "off",
-  "react/void-dom-elements-no-children": "off",
+  // The rest of the category reports real bugs (missing keys, duplicate
+  // props, mutated state, removed React APIs), so it stays on as errors.
+  "react/forward-ref-uses-ref": "error",
+  "react/jsx-key": "error",
+  "react/jsx-no-duplicate-props": "error",
+  "react/jsx-props-no-spread-multi": "error",
+  "react/no-children-prop": "error",
+  "react/no-danger-with-children": "error",
+  "react/no-did-mount-set-state": "error",
+  "react/no-did-update-set-state": "error",
+  "react/no-direct-mutation-state": "error",
+  "react/no-find-dom-node": "error",
+  "react/no-is-mounted": "error",
+  "react/no-render-return-value": "error",
+  "react/no-string-refs": "error",
+  "react/no-this-in-sfc": "error",
+  "react/no-unsafe": "error",
+  "react/no-will-update-set-state": "error",
+  "react/void-dom-elements-no-children": "error",
   ...reactCompilerRules,
 } satisfies Rules;
 
 export const libraryOverrides = [
   {
-    files: ["**/*.{test,spec}.{ts,tsx,js,jsx}", "__test__/**", "__tests__/**"],
+    // Override globs are anchored at the config directory, so test folders
+    // need a leading `**/` to match inside packages.
+    files: [
+      "**/*.{test,spec}.{ts,tsx,mts,cts,js,jsx,mjs,cjs}",
+      "**/__test__/**",
+      "**/__tests__/**",
+    ],
     rules: {
       "no-console": "off",
       "require-await": "off",

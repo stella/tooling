@@ -160,6 +160,7 @@ export const assertPackedArtifactSyntax = ({
     } catch (error) {
       throw new Error(
         `Packed JavaScript ${file} exceeds its declared syntax target: ${String(error)}`,
+        { cause: error },
       );
     }
   }
@@ -215,6 +216,7 @@ export const checkPackedJavaScriptWithNode = async ({
       } catch (error) {
         throw new Error(
           `Packed JavaScript ${file} is incompatible with consumer Node ${node}: ${String(error)}`,
+          { cause: error },
         );
       }
     }

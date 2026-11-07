@@ -562,7 +562,7 @@ test("Docker RUN and ENV instructions retain Rust pin enforcement", () => {
   const instructions = [
     (pin: string) => `RUN rustup default ${pin}`,
     (pin: string) => `RUN --mount=type=cache,target=/cache cargo +${pin} test`,
-    (pin: string) => ["RUN rustup toolchain add " + "\\", pin].join("\n"),
+    (pin: string) => ["RUN rustup toolchain add \\", pin].join("\n"),
     (pin: string) => `RUN ["rustup", "default", "${pin}"]`,
     (pin: string) => `RUN ["sh", "-c", "rustup default ${pin}"]`,
     (pin: string) => `RUN [ -f Cargo.toml ] && cargo +${pin} test`,

@@ -25,15 +25,10 @@ export default library({
   overrides: [
     {
       // Oxlint presents plugin AST nodes as intentionally untyped values.
-      // Type-aware any-flow and condition rules cannot add safety inside the
-      // visitor implementation; the passive fixtures prove rule behavior.
+      // Type-aware condition rules cannot add safety inside the visitor
+      // implementation; the passive fixtures prove rule behavior.
       files: ["packages/oxlint-plugin/src/**/*.ts"],
       rules: {
-        "typescript/no-unsafe-assignment": "off",
-        "typescript/no-unsafe-member-access": "off",
-        "typescript/no-unsafe-call": "off",
-        "typescript/no-unsafe-return": "off",
-        "typescript/no-unsafe-argument": "off",
         "typescript/strict-boolean-expressions": "off",
         "typescript/no-unnecessary-condition": "off",
       },
@@ -52,6 +47,12 @@ export default library({
         "typescript/no-confusing-void-expression": "off",
         "unicorn/no-useless-spread": "off",
         "no-sparse-arrays": "off",
+        // Fixtures spell out the import, URL and rejection shapes the
+        // test-reliability rules detect, including unidiomatic ones.
+        "unicorn/prefer-node-protocol": "off",
+        "import/no-duplicates": "off",
+        "typescript/no-unnecessary-template-expression": "off",
+        "typescript/prefer-promise-reject-errors": "off",
       },
     },
     {

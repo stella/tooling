@@ -201,6 +201,7 @@ export const runTypecheckProbe = async ({
     controller.signal.throwIfAborted();
     let onAbort: (() => void) | undefined;
     const aborted = new Promise<never>((_done, reject) => {
+      // oxlint-disable-next-line typescript/prefer-promise-reject-errors -- the abort reason is forwarded as given
       onAbort = () => reject(controller.signal.reason);
       controller.signal.addEventListener("abort", onAbort, { once: true });
     });

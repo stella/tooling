@@ -104,7 +104,7 @@ const interpreterCommands = [
     `${interpreter} --import=./scripts/register.mjs --test`,
     `${interpreter} --loader=./scripts/loader.mjs --test`,
     `${interpreter} --input-type=module`,
-    `${interpreter}`,
+    interpreter,
     `${interpreter} --version --require=./scripts/register.cjs`,
   ]),
   ...["python", "python2", "python3", "python3.13"].flatMap((interpreter) => [
@@ -112,7 +112,7 @@ const interpreterCommands = [
     `${interpreter} -m pytest`,
     `${interpreter} -c 'import unittest; unittest.main(module=None)'`,
     `${interpreter} -v`,
-    `${interpreter}`,
+    interpreter,
     `${interpreter} -`,
     `${interpreter} --version -m pytest`,
   ]),

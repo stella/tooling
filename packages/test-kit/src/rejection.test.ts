@@ -7,6 +7,7 @@ describe("rejectionOf", () => {
   test("returns the exact reason a promise rejects with", async () => {
     const reason = new TypeError("bad input");
     expect(await rejectionOf(Promise.reject(reason))).toBe(reason);
+    // oxlint-disable-next-line typescript/prefer-promise-reject-errors -- non-Error reasons must pass through unchanged
     expect(await rejectionOf(Promise.reject("plain string"))).toBe(
       "plain string",
     );

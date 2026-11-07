@@ -20,7 +20,7 @@ export const isAstNode = (node: unknown): node is AstNode =>
   typeof node === "object" &&
   node !== null &&
   "type" in node &&
-  typeof (node as { type: unknown }).type === "string" &&
+  typeof node.type === "string" &&
   "range" in node;
 
 export const isIdentifier = (
