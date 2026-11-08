@@ -262,22 +262,35 @@ export const reactRules = {
   ...reactCompilerRules,
 } satisfies Rules;
 
+// Override globs are anchored at the config directory, so test folders need a
+// leading `**/` to match inside packages.
+const libraryTestFiles = [
+  "**/*.{test,spec}.{ts,tsx,mts,cts,js,jsx,mjs,cjs}",
+  "**/__test__/**",
+  "**/__tests__/**",
+];
+
 export const libraryOverrides = [
   {
-    // Override globs are anchored at the config directory, so test folders
-    // need a leading `**/` to match inside packages.
-    files: [
-      "**/*.{test,spec}.{ts,tsx,mts,cts,js,jsx,mjs,cjs}",
-      "**/__test__/**",
-      "**/__tests__/**",
-    ],
+    files: libraryTestFiles,
     rules: {
       "no-console": "off",
       "require-await": "off",
       "no-non-null-assertion": "off",
-      // Asymmetric matchers such as `expect.stringContaining()` are typed
-      // `any`, so passing or storing one is the normal way to write a test.
-      // Calling, indexing or returning an `any` is still reported.
+    },
+  },
+] satisfies OxlintOverride[];
+
+// Scoped relaxations of `unsafeAnyRules`. They stay separate from
+// `libraryOverrides` so a config that takes these rules from another preset
+// keeps its own scope; spread both exports together.
+export const unsafeAnyOverrides = [
+  {
+    // Asymmetric matchers such as `expect.stringContaining()` are typed `any`,
+    // so passing or storing one is the normal way to write a test. Calling,
+    // indexing or returning an `any` is still reported.
+    files: libraryTestFiles,
+    rules: {
       "typescript/no-unsafe-argument": "off",
       "typescript/no-unsafe-assignment": "off",
     },
@@ -296,6 +309,7 @@ export const library = (options: LibraryOptions = {}): OxlintConfig => {
   const plugins = new Set([...libraryPlugins, ...(options.plugins ?? [])]);
   const presetOverrides = [
     ...libraryOverrides,
+    ...unsafeAnyOverrides,
     ...(options.react === undefined
       ? []
       : [

@@ -66,7 +66,9 @@ React diagnostics.
 The preset reports `any` flowing into typed code through the
 `typescript/no-unsafe-*` rules, exported as `unsafeAnyRules`. Test files allow
 passing and storing `any` values such as asymmetric matchers, and JavaScript
-files are exempt. To adopt the rules gradually, turn them off for directories
+files are exempt; both exemptions are exported as `unsafeAnyOverrides`. A
+config that spreads `libraryRules` and `libraryOverrides` instead of calling
+`library()` adds `...unsafeAnyOverrides` next to them. To adopt the rules gradually, turn them off for directories
 that are not clean yet and delete the override as each one is fixed:
 
 ```ts
