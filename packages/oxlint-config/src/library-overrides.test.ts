@@ -6,7 +6,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { library } from "./index";
+import {
+  library,
+  libraryOverrides,
+  libraryRules,
+  unsafeAnyOverrides,
+  unsafeAnyRules,
+} from "./index";
 
 const oxlintBin = fileURLToPath(
   new URL("./bin/oxlint", import.meta.resolve("oxlint/package.json")),
@@ -69,3 +75,27 @@ test("test overrides reach nested test folders and every module extension", asyn
     await rm(directory, { recursive: true, force: true });
   }
 }, 15_000);
+
+test("unsafe any rules are on, relaxed for test matchers and off in JavaScript, only through their own overrides", () => {
+  expect(libraryRules).toEqual(expect.objectContaining(unsafeAnyRules));
+  const [tests, javascript] = unsafeAnyOverrides;
+  expect(tests?.files).toEqual(libraryOverrides[0]?.files);
+  expect(tests?.rules).toEqual(
+    expect.objectContaining({
+      "typescript/no-unsafe-argument": "off",
+      "typescript/no-unsafe-assignment": "off",
+    }),
+  );
+  expect(tests?.rules).not.toHaveProperty(["typescript/no-unsafe-call"]);
+  // Configs that spread `libraryOverrides` over a preset with its own
+  // any-flow scope must not have those rules relaxed.
+  expect(
+    libraryOverrides.flatMap((override) => Object.keys(override.rules)),
+  ).not.toEqual(expect.arrayContaining(Object.keys(unsafeAnyRules)));
+  expect(javascript?.files).toEqual(["**/*.{js,jsx,mjs,cjs}"]);
+  expect(javascript?.rules).toEqual(
+    Object.fromEntries(
+      Object.keys(unsafeAnyRules).map((rule) => [rule, "off"]),
+    ),
+  );
+});

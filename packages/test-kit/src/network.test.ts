@@ -425,9 +425,9 @@ describe("network guard", () => {
     if (typeof connect !== "function") {
       throw new TypeError("Socket#connect is not a function");
     }
-    expect(() => Reflect.apply(connect, socket, [normalised])).toThrow(
-      NetworkAccessError,
-    );
+    expect(() => {
+      Reflect.apply(connect, socket, [normalised]);
+    }).toThrow(NetworkAccessError);
   });
 
   test("Bun.connect to a remote host rejects", async () => {

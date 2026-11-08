@@ -37,7 +37,10 @@ test("an owned plugin release can update policy after consuming its changeset", 
     workspaceVersions: new Map([["@stll/oxlint-plugin", "0.3.0"]]),
   });
   expect(result.text).not.toBe(sourcePolicy);
-  expect(JSON.parse(result.text)["@stll/oxlint-plugin"]).toBe("0.3.0");
+  const versions: unknown = JSON.parse(result.text);
+  expect(versions).toEqual(
+    expect.objectContaining({ "@stll/oxlint-plugin": "0.3.0" }),
+  );
   const generated = new Set(
     releaseGeneratedPaths(["oxlint-config", "oxlint-plugin"]),
   );

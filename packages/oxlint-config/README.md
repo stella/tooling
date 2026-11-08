@@ -63,6 +63,29 @@ breaking: `libraryRules` and `libraryPlugins` are now framework-neutral. Import
 `reactRules` and add `"react"` to the plugins of a file-scoped override to retain
 React diagnostics.
 
+The preset reports `any` flowing into typed code through the
+`typescript/no-unsafe-*` rules, exported as `unsafeAnyRules`. Test files allow
+passing and storing `any` values such as asymmetric matchers, and JavaScript
+files are exempt; both exemptions are exported as `unsafeAnyOverrides`. A
+config that spreads `libraryRules` and `libraryOverrides` instead of calling
+`library()` adds `...unsafeAnyOverrides` next to them. To adopt the rules gradually, turn them off for directories
+that are not clean yet and delete the override as each one is fixed:
+
+```ts
+import { library, unsafeAnyRules } from "@stll/oxlint-config";
+
+export default library({
+  overrides: [
+    {
+      files: ["packages/legacy/**"],
+      rules: Object.fromEntries(
+        Object.keys(unsafeAnyRules).map((rule) => [rule, "off" as const]),
+      ),
+    },
+  ],
+});
+```
+
 ## Shared toolchain and Bun
 
 `@stll/oxlint-config/toolchain.json` is a versioned policy for package pins,

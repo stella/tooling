@@ -13,6 +13,12 @@ import {
   snapshotDeclarationDirectory,
 } from "./publish-build-target-vite-dts";
 
+// `typeof === "function"` narrows to `Function`, whose calls return `any`.
+const callable = (
+  value: unknown,
+): value is (...parameters: readonly unknown[]) => unknown =>
+  typeof value === "function";
+
 const directories: string[] = [];
 afterEach(() => {
   for (const directory of directories.splice(0))
@@ -191,7 +197,7 @@ test("the emission ledger rejects deferred JavaScript and foreign asset updates"
   // The native bundler context is withheld, not forwarded.
   expect(Reflect.get(context, "getNativeBuildContext")).toBeUndefined();
   const emit = context["emitFile"];
-  if (typeof emit !== "function") throw new Error("Missing fixture emitFile");
+  if (!callable(emit)) throw new Error("Missing fixture emitFile");
   expect(() =>
     emit({ type: "asset", fileName: "index.js", source: "deferred" }),
   ).toThrow("Declaration plugin");
@@ -203,8 +209,7 @@ test("the emission ledger rejects deferred JavaScript and foreign asset updates"
   expect(reference).toBe("asset-0");
   expect(() => ledger.audit()).not.toThrow();
   const update = context["setAssetSource"];
-  if (typeof update !== "function")
-    throw new Error("Missing fixture setAssetSource");
+  if (!callable(update)) throw new Error("Missing fixture setAssetSource");
   expect(() => update(reference, "updated declaration")).not.toThrow();
   expect(() => update("foreign", "modified JS")).toThrow("foreign");
   expect(() => Reflect.get(context, "emitChunk")).toThrow("Declaration plugin");
@@ -221,7 +226,7 @@ test("a shared emitter ledger audits deferred references in output hooks", async
   };
   const context = ledger.wrapContext(host);
   const emit = context["emitFile"];
-  if (typeof emit !== "function") throw new Error("Missing fixture emitFile");
+  if (!callable(emit)) throw new Error("Missing fixture emitFile");
   emit({ type: "asset", fileName: "index.d.ts" });
   const guarded = guardDeclarationHook({
     hook: () => undefined,

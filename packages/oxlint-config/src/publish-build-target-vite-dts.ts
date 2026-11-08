@@ -11,10 +11,10 @@ const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 const staticEntries = (value: unknown): [string, unknown][] => {
-  if (
-    !record(value) ||
-    ![Object.prototype, null].includes(Object.getPrototypeOf(value))
-  )
+  const prototype: unknown = record(value)
+    ? Object.getPrototypeOf(value)
+    : undefined;
+  if (!record(value) || (prototype !== Object.prototype && prototype !== null))
     throw new Error("Declaration plugin options must be plain static records");
   return Reflect.ownKeys(value).map((key) => {
     const descriptor = Object.getOwnPropertyDescriptor(value, key);
@@ -384,7 +384,8 @@ const dataEntries = (value: Record<string, unknown>, keys: string[]) =>
       throw new Error("Invalid reviewed declaration hook");
     if (!("value" in descriptor))
       throw new Error("Declaration hooks cannot contain accessors");
-    return [key, descriptor.value] as const;
+    const entry: unknown = descriptor.value;
+    return [key, entry] as const;
   });
 
 /**

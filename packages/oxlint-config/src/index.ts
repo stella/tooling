@@ -62,6 +62,18 @@ export const reactCompilerRules = {
   "react/void-use-memo": "error",
 } satisfies Rules;
 
+// `no-explicit-any` stops only a written `any`. These stop one that arrives
+// from `JSON.parse`, untyped libraries or an unresolved import from flowing
+// into typed code. Exported so a consumer can turn them off for directories
+// that are not clean yet and remove that override as each one is fixed.
+export const unsafeAnyRules = {
+  "typescript/no-unsafe-argument": "error",
+  "typescript/no-unsafe-assignment": "error",
+  "typescript/no-unsafe-call": "error",
+  "typescript/no-unsafe-member-access": "error",
+  "typescript/no-unsafe-return": "error",
+} satisfies Rules;
+
 export const libraryRules = {
   "no-console": "off",
   "no-shadow": "error",
@@ -106,6 +118,7 @@ export const libraryRules = {
   "oxc/branches-sharing-code": "error",
 
   "typescript/no-explicit-any": "error",
+  ...unsafeAnyRules,
   "typescript/no-dynamic-delete": "error",
   "typescript/no-misused-promises": [
     "error",
@@ -249,15 +262,17 @@ export const reactRules = {
   ...reactCompilerRules,
 } satisfies Rules;
 
+// Override globs are anchored at the config directory, so test folders need a
+// leading `**/` to match inside packages.
+const libraryTestFiles = [
+  "**/*.{test,spec}.{ts,tsx,mts,cts,js,jsx,mjs,cjs}",
+  "**/__test__/**",
+  "**/__tests__/**",
+];
+
 export const libraryOverrides = [
   {
-    // Override globs are anchored at the config directory, so test folders
-    // need a leading `**/` to match inside packages.
-    files: [
-      "**/*.{test,spec}.{ts,tsx,mts,cts,js,jsx,mjs,cjs}",
-      "**/__test__/**",
-      "**/__tests__/**",
-    ],
+    files: libraryTestFiles,
     rules: {
       "no-console": "off",
       "require-await": "off",
@@ -266,10 +281,35 @@ export const libraryOverrides = [
   },
 ] satisfies OxlintOverride[];
 
+// Scoped relaxations of `unsafeAnyRules`. They stay separate from
+// `libraryOverrides` so a config that takes these rules from another preset
+// keeps its own scope; spread both exports together.
+export const unsafeAnyOverrides = [
+  {
+    // Asymmetric matchers such as `expect.stringContaining()` are typed `any`,
+    // so passing or storing one is the normal way to write a test. Calling,
+    // indexing or returning an `any` is still reported.
+    files: libraryTestFiles,
+    rules: {
+      "typescript/no-unsafe-argument": "off",
+      "typescript/no-unsafe-assignment": "off",
+    },
+  },
+  {
+    // JavaScript has no annotation to turn an `any` into `unknown`, so these
+    // rules could only be silenced there, not satisfied.
+    files: ["**/*.{js,jsx,mjs,cjs}"],
+    rules: Object.fromEntries(
+      Object.keys(unsafeAnyRules).map((rule) => [rule, "off" as const]),
+    ),
+  },
+] satisfies OxlintOverride[];
+
 export const library = (options: LibraryOptions = {}): OxlintConfig => {
   const plugins = new Set([...libraryPlugins, ...(options.plugins ?? [])]);
   const presetOverrides = [
     ...libraryOverrides,
+    ...unsafeAnyOverrides,
     ...(options.react === undefined
       ? []
       : [

@@ -24,7 +24,10 @@ const parseBase = (args: string[]) => {
   throw new Error("Usage: stll-engine-support --base <git ref>");
 };
 
-const packageNodeRange = ({ packageJson }: Package) => {
+// Base manifests come from `git show` and are only known to be objects.
+type Manifest = { readonly packageJson: object };
+
+const packageNodeRange = ({ packageJson }: Manifest) => {
   const engines = "engines" in packageJson ? packageJson.engines : undefined;
   return typeof engines === "object" &&
     engines !== null &&
@@ -34,10 +37,16 @@ const packageNodeRange = ({ packageJson }: Package) => {
     : undefined;
 };
 
-const publishedPackages = (packages: Package[], ignored: Set<string>) => {
+const publishedPackages = (
+  packages: readonly Manifest[],
+  ignored: Set<string>,
+) => {
   const collected = new Map<string, EnginePackage>();
   for (const pkg of packages) {
-    const { name, private: isPrivate } = pkg.packageJson;
+    const { packageJson } = pkg;
+    const name = "name" in packageJson ? packageJson.name : undefined;
+    const isPrivate =
+      "private" in packageJson ? packageJson.private : undefined;
     if (isPrivate === true || typeof name !== "string") continue;
     if (collected.has(name))
       throw new Error(`Duplicate published package name: ${name}`);
@@ -66,7 +75,7 @@ const basePackage = (root: string, base: string, pkg: Package) => {
     ]).trim() === ""
   )
     return undefined;
-  const packageJson = JSON.parse(
+  const packageJson: unknown = JSON.parse(
     git(root, ["show", `${base}:${relativeManifest}`]),
   );
   if (typeof packageJson !== "object" || packageJson === null)
