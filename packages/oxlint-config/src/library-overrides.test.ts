@@ -18,18 +18,22 @@ const oxlintBin = fileURLToPath(
   new URL("./bin/oxlint", import.meta.resolve("oxlint/package.json")),
 );
 
-test("test overrides reach nested test folders and every module extension", async () => {
+test("test and CommonJS overrides reach nested folders and every module extension", async () => {
   const directory = await mkdtemp(join(tmpdir(), "library-overrides-"));
   try {
-    const source = "export const size = (value?: string) => value!.length;\n";
-    const files = [
-      "packages/core/src/size.ts",
-      "packages/core/__tests__/size.ts",
-      "packages/core/__test__/size.ts",
-      "packages/core/src/size.test.mts",
-      "packages/core/src/size.spec.cts",
-    ];
-    for (const file of files) {
+    const size = "export const size = (value?: string) => value!.length;\n";
+    const required =
+      'const path = require("node:path");\n\nmodule.exports = path;\n';
+    const files = {
+      "packages/core/src/size.ts": size,
+      "packages/core/__tests__/size.ts": size,
+      "packages/core/__test__/size.ts": size,
+      "packages/core/src/size.test.mts": size,
+      "packages/core/src/size.spec.cts": size,
+      "packages/core/src/load.js": required,
+      "packages/core/scripts/load.cjs": required,
+    };
+    for (const [file, source] of Object.entries(files)) {
       await mkdir(join(directory, file, ".."), { recursive: true });
       await writeFile(join(directory, file), source);
     }
@@ -67,9 +71,13 @@ test("test overrides reach nested test folders and every module extension", asyn
         ? `${String(diagnostic.code)} ${String(diagnostic.filename)}`
         : diagnostic,
     );
-    expect(flagged).toEqual([
-      "typescript(no-non-null-assertion) packages/core/src/size.ts",
-    ]);
+    expect(flagged).toHaveLength(2);
+    expect(flagged).toEqual(
+      expect.arrayContaining([
+        "typescript(no-non-null-assertion) packages/core/src/size.ts",
+        "typescript(no-require-imports) packages/core/src/load.js",
+      ]),
+    );
     expect(exitCode).toBe(1);
   } finally {
     await rm(directory, { recursive: true, force: true });

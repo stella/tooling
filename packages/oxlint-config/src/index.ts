@@ -279,6 +279,11 @@ export const libraryOverrides = [
       "no-non-null-assertion": "off",
     },
   },
+  {
+    // CommonJS modules have no static `import`.
+    files: ["**/*.cjs"],
+    rules: { "typescript/no-require-imports": "off" },
+  },
 ] satisfies OxlintOverride[];
 
 // Scoped relaxations of `unsafeAnyRules`. They stay separate from
