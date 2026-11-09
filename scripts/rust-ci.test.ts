@@ -108,8 +108,10 @@ test("the required-check workflows handle merge groups and use the reviewed veri
   expect(cla["on"]["pull_request_target"]).toEqual({
     types: ["opened", "synchronize", "reopened", "ready_for_review"],
   });
-  expect(cla["jobs"]["cla"]["uses"]).toBe(
-    "stella/.github/.github/workflows/cla.yml@04c86bb54f4ae022354d72f8a40400bc7cf7428c",
+  // The pin itself belongs to Dependabot; the contract is the reviewed
+  // reusable workflow at an immutable commit.
+  expect(cla["jobs"]["cla"]["uses"]).toMatch(
+    /^stella\/\.github\/\.github\/workflows\/cla\.yml@[0-9a-f]{40}$/u,
   );
   expect(cla["jobs"]["cla"]["if"]).toContain(
     "github.event_name == 'merge_group'",
