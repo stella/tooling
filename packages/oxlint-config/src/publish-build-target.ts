@@ -13,7 +13,7 @@ import {
   resolveManifestContract,
 } from "./publish-contract";
 
-const supportedTsdownVersion = "0.23.1";
+const supportedTsdownVersion = "0.23.5";
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 

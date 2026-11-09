@@ -52,7 +52,7 @@
     "better-result": "3.0.1"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "0.5.11",
+    "@electric-sql/pglite": "0.5.15",
     "@stll/typescript-config": "workspace:*",
     "drizzle-orm": "1.0.0-rc.5"
   },
