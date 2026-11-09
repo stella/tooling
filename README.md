@@ -348,7 +348,7 @@ Every repository that uses these configs follows one toolchain:
   them points tsdown at tsrs instead:
   `dts: { generator: "tsgo", tsgo: { path: <tsrs bin> } }`.
 - **Compiler-API code does not import `typescript`.** Programs, the type
-  checker and tsconfig resolution use `tsrs` `0.20.1-ts7.1.0-beta`
+  checker and tsconfig resolution use `tsrs` `0.21.0-ts7.1.0-beta`
   through its async API only (`import { API } from "tsrs/async"`; close
   the API with `await api.close()` on every path). The `tsrs` CLI accepts
   `--noEmit`, `--pretty false`, `-p`, `--build --force`, `--listFilesOnly`,
