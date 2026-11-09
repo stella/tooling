@@ -348,7 +348,7 @@ Every repository that uses these configs follows one toolchain:
   them points tsdown at tsrs instead:
   `dts: { generator: "tsgo", tsgo: { path: <tsrs bin> } }`.
 - **Compiler-API code does not import `typescript`.** Programs, the type
-  checker and tsconfig resolution use `tsrs` `0.20.1-ts7.1.0-beta`
+  checker and tsconfig resolution use `tsrs` `0.21.0-ts7.1.0-beta`
   through its async API only (`import { API } from "tsrs/async"`; close
   the API with `await api.close()` on every path). The `tsrs` CLI accepts
   `--noEmit`, `--pretty false`, `-p`, `--build --force`, `--listFilesOnly`,
@@ -743,7 +743,7 @@ Bun runtime/compiler requirements are rejected. JSON and declaration-only packag
 record `{"type":"types-only"}` explicitly.
 
 Build adapters use the installed configuration loaders and bind their behavior to
-tsdown 0.23.1, Vite 8.3.5, or @nuxt/module-builder 1.0.3 (unbuild 3.6.1 and
+tsdown 0.23.5, Vite 8.3.5, or @nuxt/module-builder 1.0.3 (unbuild 3.6.1 and
 mkdist 2.4.1). They record final transform targets, including separate Nuxt module
 and runtime entries. No syntax lowering records `esnext`.
 Only exact single build invocations (`tsdown`, `vite build`, or
