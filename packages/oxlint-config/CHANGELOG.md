@@ -1,5 +1,17 @@
 # @stll/oxlint-config
 
+## 4.1.0
+
+### Minor Changes
+
+- [#275](https://github.com/stella/tooling/pull/275) [`b1d5fa2`](https://github.com/stella/tooling/commit/b1d5fa2a035ba8c5256a266bbb3252b0d1a599c5) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Update the shared lint and package-manager pins, add reviewed tsdown 0.23.7 and Vite 8.3.7 build adapters, and recognize tsdown's declaration-only option. Refresh the type-checker and Temporal runtime dependencies.
+
+  Support checksum-pinned wasm-bindgen CLI 0.2.130 for matching Cargo workspaces.
+
+### Patch Changes
+
+- [#270](https://github.com/stella/tooling/pull/270) [`4f6bd91`](https://github.com/stella/tooling/commit/4f6bd9190d010c36074b608986fd97f04a47585e) Thanks [@jan-kubica](https://github.com/jan-kubica)! - `@stll/oxlint-config` moves to tsrs 0.21.0 and semver 7.8.6, and its publish target resolver supports tsdown 0.23.5. `@stll/time` moves to temporal-polyfill 1.0.7.
+
 ## 4.0.0
 
 ### Major Changes
