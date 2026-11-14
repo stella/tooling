@@ -152,8 +152,8 @@
     "vite-plugin-dts": "5.1.2"
   },
   "peerDependencies": {
-    "oxlint": ">=1.89.0 <2",
-    "oxlint-tsgolint": ">=7.0.2005 <8",
+    "oxlint": ">=1.93.0 <2",
+    "oxlint-tsgolint": ">=7.0.2006 <8",
     "vite": "8.3.5 || 8.3.7"
   },
   "peerDependenciesMeta": {

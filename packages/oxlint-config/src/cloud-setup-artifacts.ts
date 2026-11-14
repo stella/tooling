@@ -43,8 +43,7 @@ const wasmBindgen0129 = {
   version: "0.2.129",
   amd64: {
     url: "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/0.2.129/wasm-bindgen-0.2.129-x86_64-unknown-linux-musl.tar.gz",
-    sha256:
-      "82d12bb940e2d4e72e0d5605387fc1b8ca179044e012b620f0ce4e7440e8320e",
+    sha256: "82d12bb940e2d4e72e0d5605387fc1b8ca179044e012b620f0ce4e7440e8320e",
     archive: "tar.gz",
     binaries: {
       "wasm-bindgen-test-runner":
@@ -56,14 +55,12 @@ const wasmBindgen0129 = {
   },
   arm64: {
     url: "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/0.2.129/wasm-bindgen-0.2.129-aarch64-unknown-linux-musl.tar.gz",
-    sha256:
-      "2ed4351c35dd9440308bbb02767d47ea278efe851a52465300f3c94f5b6c2a87",
+    sha256: "2ed4351c35dd9440308bbb02767d47ea278efe851a52465300f3c94f5b6c2a87",
     archive: "tar.gz",
     binaries: {
       "wasm-bindgen-test-runner":
         "wasm-bindgen-0.2.129-aarch64-unknown-linux-musl/wasm-bindgen-test-runner",
-      wasm2es6js:
-        "wasm-bindgen-0.2.129-aarch64-unknown-linux-musl/wasm2es6js",
+      wasm2es6js: "wasm-bindgen-0.2.129-aarch64-unknown-linux-musl/wasm2es6js",
       "wasm-bindgen":
         "wasm-bindgen-0.2.129-aarch64-unknown-linux-musl/wasm-bindgen",
     },
