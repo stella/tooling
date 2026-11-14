@@ -1,5 +1,12 @@
 # @stll/test-kit
 
+## 0.4.3
+
+### Patch Changes
+
+- Updated dependencies [[`b1d5fa2`](https://github.com/stella/tooling/commit/b1d5fa2a035ba8c5256a266bbb3252b0d1a599c5), [`4f6bd91`](https://github.com/stella/tooling/commit/4f6bd9190d010c36074b608986fd97f04a47585e)]:
+  - @stll/time@0.4.3
+
 ## 0.4.2
 
 ### Patch Changes

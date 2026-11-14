@@ -1,5 +1,13 @@
 # @stll/oxlint-plugin
 
+## 0.7.2
+
+### Patch Changes
+
+- [#275](https://github.com/stella/tooling/pull/275) [`b1d5fa2`](https://github.com/stella/tooling/commit/b1d5fa2a035ba8c5256a266bbb3252b0d1a599c5) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Update the shared lint and package-manager pins, add reviewed tsdown 0.23.7 and Vite 8.3.7 build adapters, and recognize tsdown's declaration-only option. Refresh the type-checker and Temporal runtime dependencies.
+
+  Support checksum-pinned wasm-bindgen CLI 0.2.130 for matching Cargo workspaces.
+
 ## 0.7.1
 
 ### Patch Changes
