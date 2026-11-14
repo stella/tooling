@@ -9,7 +9,7 @@ import { reviewedViteDtsOptions } from "./publish-build-target-vite-dts";
 import { declarationOnlyDts } from "./publish-build-target-vite-dts-helper";
 import type { PublishTarget } from "./publish-contract";
 
-const supportedViteVersion = "8.3.5";
+export const supportedViteVersions = ["8.3.5", "8.3.7"];
 const declarationHelperImport = "@stll/oxlint-config/declaration-only-dts";
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -672,9 +672,12 @@ export const resolveVitePublishTarget = async (
   const metadata: unknown = JSON.parse(
     readFileSync(require.resolve("vite/package.json"), "utf8"),
   );
-  if (!record(metadata) || metadata["version"] !== supportedViteVersion)
+  if (
+    !record(metadata) ||
+    !supportedViteVersions.some((version) => metadata["version"] === version)
+  )
     throw new Error(
-      `Publish target resolver supports Vite ${supportedViteVersion}; review the adapter before changing build tools`,
+      `Publish target resolver supports Vite ${supportedViteVersions.join(" or ")}; review the adapter before changing build tools`,
     );
   const tool: unknown = await import(
     pathToFileURL(realpathSync(require.resolve("vite"))).href

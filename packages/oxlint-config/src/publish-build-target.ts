@@ -13,9 +13,17 @@ import {
   resolveManifestContract,
 } from "./publish-contract";
 
-const supportedTsdownVersion = "0.23.5";
+const supportedTsdownVersions = ["0.23.5", "0.23.7"];
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+const tsdownDeclarationsOnly = (value: unknown) => {
+  const isRecord = (input: unknown): input is Record<string, unknown> =>
+    typeof input === "object" && input !== null && !Array.isArray(input);
+  return (
+    isRecord(value) &&
+    ["dtsOnly", "emitDtsOnly", "dtsInput"].some((key) => value[key] === true)
+  );
+};
 
 const targets = (value: unknown): string[] => {
   if (value === undefined) return ["esnext"];
@@ -126,8 +134,7 @@ export const resolvedTsdownTarget = (configs: unknown): PublishTarget => {
     if (!record(config))
       throw new Error("Invalid resolved tsdown configuration");
     assertTsdownBuildExtensions(config);
-    if (record(config["dts"]) && config["dts"]["emitDtsOnly"] === true)
-      continue;
+    if (tsdownDeclarationsOnly(config["dts"])) continue;
     javascript = true;
     const input = config["inputOptions"];
     if (input !== undefined && !record(input))
@@ -253,9 +260,12 @@ export const resolvePublishBuildTarget = async (
   const metadata: unknown = JSON.parse(
     readFileSync(require.resolve("tsdown/package.json"), "utf8"),
   );
-  if (!record(metadata) || metadata["version"] !== supportedTsdownVersion)
+  if (
+    !record(metadata) ||
+    !supportedTsdownVersions.some((version) => metadata["version"] === version)
+  )
     throw new Error(
-      `Publish target resolver supports tsdown ${supportedTsdownVersion}; review the adapter before changing build tools`,
+      `Publish target resolver supports tsdown ${supportedTsdownVersions.join(" or ")}; review the adapter before changing build tools`,
     );
   const loaderRequire = createRequire(import.meta.url);
   // Register tsx in the isolated Node process before any config imports. The
@@ -306,6 +316,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 const { directory, configFile, toolUrl, resultFile } = JSON.parse(process.argv[1]);
 const record = value => typeof value === 'object' && value !== null && !Array.isArray(value);
+const tsdownDeclarationsOnly = ${tsdownDeclarationsOnly.toString()};
 const tool = await import(toolUrl);
 if (typeof tool.resolveUserConfig !== 'function')
   throw new Error('Installed tsdown does not expose its configuration resolver');
@@ -343,7 +354,7 @@ for (const config of configs) {
     if (target !== undefined && !nonemptyIdentifiers(target) &&
         !(Array.isArray(target) && target.length > 0 && Array.from(target).every(nonemptyIdentifiers)))
       throw new Error('Build tool returned an unsupported resolved JavaScript target');
-    resolved.push({ target, dts: { emitDtsOnly: record(entry.dts) && entry.dts.emitDtsOnly === true } });
+    resolved.push({ target, dts: { dtsOnly: tsdownDeclarationsOnly(entry.dts) } });
   }
 }
 writeFileSync(resultFile, JSON.stringify(resolved));

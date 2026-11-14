@@ -8,9 +8,9 @@
     }
   },
   "typescript": "7.0.2",
-  "oxlint": "1.89.0",
-  "@oxlint/plugins": "1.89.0",
-  "oxlint-tsgolint": "7.0.2005",
+  "oxlint": "1.93.0",
+  "@oxlint/plugins": "1.93.0",
+  "oxlint-tsgolint": "7.0.2006",
   "formatter": {
     "command": "bun fmt",
     "ignorePatterns": [
@@ -114,12 +114,12 @@
       "version": "v7.1.0"
     },
     "actions/setup-python": {
-      "sha": "5fda3b95a4ea91299a34e894583c3862153e4b97",
-      "version": "v7.0.0"
+      "sha": "6d4fd22b20465ccc0f7354476588e8df7c9ca0e0",
+      "version": "v7.1.0"
     },
     "astral-sh/setup-uv": {
-      "sha": "07a047e608db84b3d8c06cd9a7c7dcc9c355c18e",
-      "version": "v10.3.2"
+      "sha": "68559e99cc807c1eb7e9238fd43a15bba460eec2",
+      "version": "v10.3.3"
     },
     "actions/cache": {
       "sha": "55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
@@ -142,7 +142,7 @@
       "version": "v8.0.2"
     },
     "stella/.github/.github/workflows/package-consumer-compat.yml": {
-      "sha": "042f4554090fd805c92e950ff3a0fd0ddd2eefbc",
+      "sha": "28dce62a9e1916b19ce03c8c47a1c44e1a145fdf",
       "version": "v1"
     }
   },
@@ -170,6 +170,6 @@
   },
   "consumerNode": "22.23.3",
   "consumerNpm": "12.2.0",
-  "consumerPnpm": "12.15.0",
+  "consumerPnpm": "12.18.0",
   "consumerTypescript": "6.0.3"
 }

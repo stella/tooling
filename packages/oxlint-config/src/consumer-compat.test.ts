@@ -1437,6 +1437,7 @@ test("installed manager bins come from declared package metadata across versions
       ["10.0.0", "bin/pnpm.cjs"],
       ["12.9.1", "bin/pnpm.mjs"],
       ["12.15.0", "pnpm"],
+      ["12.18.0", "pnpm"],
     ]) {
       if (version === undefined || selector === undefined)
         throw new Error("missing manager fixture");
@@ -1446,7 +1447,7 @@ test("installed manager bins come from declared package metadata across versions
         path.join(directory, selector),
         "console.log('declared bin');\n",
       );
-      const entry = version === "12.15.0" ? "bin/pnpm.mjs" : selector;
+      const entry = selector === "pnpm" ? "bin/pnpm.mjs" : selector;
       if (entry !== selector)
         await writeFile(
           path.join(directory, entry),

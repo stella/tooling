@@ -39,6 +39,34 @@ const wasmBindgen0126 = {
   },
 } as const satisfies CloudSetupArtifactRelease;
 
+const wasmBindgen0129 = {
+  version: "0.2.129",
+  amd64: {
+    url: "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/0.2.129/wasm-bindgen-0.2.129-x86_64-unknown-linux-musl.tar.gz",
+    sha256: "82d12bb940e2d4e72e0d5605387fc1b8ca179044e012b620f0ce4e7440e8320e",
+    archive: "tar.gz",
+    binaries: {
+      "wasm-bindgen-test-runner":
+        "wasm-bindgen-0.2.129-x86_64-unknown-linux-musl/wasm-bindgen-test-runner",
+      wasm2es6js: "wasm-bindgen-0.2.129-x86_64-unknown-linux-musl/wasm2es6js",
+      "wasm-bindgen":
+        "wasm-bindgen-0.2.129-x86_64-unknown-linux-musl/wasm-bindgen",
+    },
+  },
+  arm64: {
+    url: "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/0.2.129/wasm-bindgen-0.2.129-aarch64-unknown-linux-musl.tar.gz",
+    sha256: "2ed4351c35dd9440308bbb02767d47ea278efe851a52465300f3c94f5b6c2a87",
+    archive: "tar.gz",
+    binaries: {
+      "wasm-bindgen-test-runner":
+        "wasm-bindgen-0.2.129-aarch64-unknown-linux-musl/wasm-bindgen-test-runner",
+      wasm2es6js: "wasm-bindgen-0.2.129-aarch64-unknown-linux-musl/wasm2es6js",
+      "wasm-bindgen":
+        "wasm-bindgen-0.2.129-aarch64-unknown-linux-musl/wasm-bindgen",
+    },
+  },
+} as const satisfies CloudSetupArtifactRelease;
+
 /** Pinned upstream Linux artifacts, verified against their published SHA-256 sums. */
 export const cloudSetupArtifacts = {
   "rustup-init": {
@@ -101,32 +129,32 @@ export const cloudSetupArtifacts = {
     },
   },
   "wasm-bindgen-cli": {
-    version: "0.2.129",
+    version: "0.2.130",
     amd64: {
-      url: "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/0.2.129/wasm-bindgen-0.2.129-x86_64-unknown-linux-musl.tar.gz",
+      url: "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/0.2.130/wasm-bindgen-0.2.130-x86_64-unknown-linux-musl.tar.gz",
       sha256:
-        "82d12bb940e2d4e72e0d5605387fc1b8ca179044e012b620f0ce4e7440e8320e",
+        "9687f3bb551b9f66f37ed32a40d7913a00f7962db653054e56857bc306c3227f",
       archive: "tar.gz",
       binaries: {
         "wasm-bindgen-test-runner":
-          "wasm-bindgen-0.2.129-x86_64-unknown-linux-musl/wasm-bindgen-test-runner",
-        wasm2es6js: "wasm-bindgen-0.2.129-x86_64-unknown-linux-musl/wasm2es6js",
+          "wasm-bindgen-0.2.130-x86_64-unknown-linux-musl/wasm-bindgen-test-runner",
+        wasm2es6js: "wasm-bindgen-0.2.130-x86_64-unknown-linux-musl/wasm2es6js",
         "wasm-bindgen":
-          "wasm-bindgen-0.2.129-x86_64-unknown-linux-musl/wasm-bindgen",
+          "wasm-bindgen-0.2.130-x86_64-unknown-linux-musl/wasm-bindgen",
       },
     },
     arm64: {
-      url: "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/0.2.129/wasm-bindgen-0.2.129-aarch64-unknown-linux-musl.tar.gz",
+      url: "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/0.2.130/wasm-bindgen-0.2.130-aarch64-unknown-linux-musl.tar.gz",
       sha256:
-        "2ed4351c35dd9440308bbb02767d47ea278efe851a52465300f3c94f5b6c2a87",
+        "99ffc93ce80081b91632e2b539b782821a8f3439ab0fddc645287462b2f55d3d",
       archive: "tar.gz",
       binaries: {
         "wasm-bindgen-test-runner":
-          "wasm-bindgen-0.2.129-aarch64-unknown-linux-musl/wasm-bindgen-test-runner",
+          "wasm-bindgen-0.2.130-aarch64-unknown-linux-musl/wasm-bindgen-test-runner",
         wasm2es6js:
-          "wasm-bindgen-0.2.129-aarch64-unknown-linux-musl/wasm2es6js",
+          "wasm-bindgen-0.2.130-aarch64-unknown-linux-musl/wasm2es6js",
         "wasm-bindgen":
-          "wasm-bindgen-0.2.129-aarch64-unknown-linux-musl/wasm-bindgen",
+          "wasm-bindgen-0.2.130-aarch64-unknown-linux-musl/wasm-bindgen",
       },
     },
   },
@@ -164,6 +192,7 @@ export type CloudSetupArchitecture = keyof Omit<
 /** Explicit releases whose CLI must match a project's wasm-bindgen crate exactly. */
 export const wasmBindgenArtifactReleases = [
   wasmBindgen0126,
+  wasmBindgen0129,
   cloudSetupArtifacts["wasm-bindgen-cli"],
 ] as const;
 

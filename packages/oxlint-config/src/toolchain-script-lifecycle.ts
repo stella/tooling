@@ -86,7 +86,7 @@ const yamlSettings = (
 };
 
 // Existing consumers on 12.9.1 retain their verified lifecycle behavior.
-export const pnpmLifecycleVersions = ["12.9.1", "12.15.0"] as const;
+export const pnpmLifecycleVersions = ["12.9.1", "12.15.0", "12.18.0"] as const;
 
 const pnpmHooksEnabled = (
   manifest: Record<string, unknown>,

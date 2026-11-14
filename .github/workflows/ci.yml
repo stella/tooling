@@ -33,7 +33,7 @@ jobs:
 
       - name: Enforce release intent
         # The repository owner publishes this versioned shared contract.
-        uses: stella/.github/.github/actions/changeset-policy@6a095097f5f9dc7e157ced38f978802d335baf08
+        uses: stella/.github/.github/actions/changeset-policy@28dce62a9e1916b19ce03c8c47a1c44e1a145fdf
         with:
           release-paths: ${{ steps.release-packages.outputs.release-paths }}
           generated-paths: ${{ steps.release-packages.outputs.generated-paths }}
@@ -211,14 +211,14 @@ jobs:
           ref: ae63e774bca2a22878c88e165bb60f2d9a12027e
           persist-credentials: false
 
-      - name: Install documented Hawk compiler exception
-        run: rustup toolchain install 1.97.1 --profile minimal --component rustc-dev
+      - name: Install shared Hawk compiler
+        run: rustup toolchain install 1.99.1 --profile minimal --component rustc-dev
 
       - name: Build pinned Hawk
         # Hawk's documented source install requires rustc_private opt-in.
         env:
           RUSTC_BOOTSTRAP: "1"
-        run: cargo +1.97.1 install cargo-hawk --version 0.1.11 --locked --root "$RUNNER_TEMP/hawk"
+        run: cargo +1.99.1 install cargo-hawk --version 0.1.17 --locked --root "$RUNNER_TEMP/hawk"
 
       - name: Check consumer crate with the Hawk compiler
         env:
@@ -232,4 +232,4 @@ jobs:
           lib = "stella_regex_set"
           reason = "Shared native library compatibility probe"
           HAWK_CONFIG
-          cargo +1.97.1 hawk check --target-dir "$RUNNER_TEMP/hawk-target" -A hawk::dead_public -A hawk::unnecessary_public
+          cargo +1.99.1 hawk check --target-dir "$RUNNER_TEMP/hawk-target" -A hawk::dead_public -A hawk::unnecessary_public
