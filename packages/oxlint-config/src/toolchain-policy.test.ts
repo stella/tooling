@@ -66,7 +66,9 @@ describe("shared toolchain policy", () => {
     // Published peers must accept exactly the adapter versions we reviewed,
     // including the exact version exercised by the current build.
     expect(builtVite).toEqual(expect.stringMatching(/^\d+\.\d+\.\d+$/));
-    expect(supportedViteVersions).toContain(builtVite);
+    expect(supportedViteVersions.some((version) => version === builtVite)).toBe(
+      true,
+    );
 
     expect(oxlintPackage).toEqual(
       expect.objectContaining({
