@@ -9,7 +9,7 @@ import { reviewedViteDtsOptions } from "./publish-build-target-vite-dts";
 import { declarationOnlyDts } from "./publish-build-target-vite-dts-helper";
 import type { PublishTarget } from "./publish-contract";
 
-const supportedViteVersions = ["8.3.5", "8.3.7"];
+export const supportedViteVersions = ["8.3.5", "8.3.7"];
 const declarationHelperImport = "@stll/oxlint-config/declaration-only-dts";
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);

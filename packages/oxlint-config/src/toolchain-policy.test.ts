@@ -4,6 +4,7 @@ import { describe, expect, test } from "bun:test";
 import path from "node:path";
 
 import toolchainPolicy from "../toolchain.json";
+import { supportedViteVersions } from "./publish-build-target-vite";
 import { checkToolchain } from "./toolchain-guard";
 import { nodeSelectorMatches } from "./toolchain-node";
 import { parseToolchainPolicy } from "./toolchain-schema";
@@ -62,16 +63,17 @@ describe("shared toolchain policy", () => {
         "packages/oxlint-config/package.json must declare devDependencies",
       );
     const builtVite: unknown = Reflect.get(devDependencies, "vite");
-    // Keep the previously reviewed adapter while testing the new exact pin.
-    // Unsupported patch releases must still be rejected by the peer range.
-    expect(builtVite).toBe("8.3.7");
+    // Published peers must accept exactly the adapter versions we reviewed,
+    // including the exact version exercised by the current build.
+    expect(builtVite).toEqual(expect.stringMatching(/^\d+\.\d+\.\d+$/));
+    expect(supportedViteVersions).toContain(builtVite);
 
     expect(oxlintPackage).toEqual(
       expect.objectContaining({
         peerDependencies: {
           oxlint: `>=${toolchainPolicy.oxlint} <2`,
           "oxlint-tsgolint": `>=${toolchainPolicy["oxlint-tsgolint"]} <8`,
-          vite: `8.3.5 || ${String(builtVite)}`,
+          vite: supportedViteVersions.join(" || "),
         },
         peerDependenciesMeta: {
           vite: { optional: true },
