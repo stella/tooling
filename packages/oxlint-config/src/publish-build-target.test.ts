@@ -81,6 +81,8 @@ test("resolved targets preserve every emitted configuration and final override",
       { target: ["node20.19.0"] },
       { target: ["node26"], inputOptions: { transform: { target: "node22" } } },
       { target: ["node26"], dts: { emitDtsOnly: true } },
+      { target: ["node24"], dts: { dtsOnly: true } },
+      { target: ["node25"], dts: { dtsInput: true } },
       { target: undefined },
     ]),
   ).toEqual({
@@ -89,6 +91,14 @@ test("resolved targets preserve every emitted configuration and final override",
   });
   expect(
     resolvedTsdownTarget([{ target: ["node26"], dts: { emitDtsOnly: true } }]),
+  ).toEqual({ type: "types-only" });
+  expect(
+    resolvedTsdownTarget([{ target: ["node26"], dts: { dtsOnly: true } }]),
+  ).toEqual({ type: "types-only" });
+  expect(
+    resolvedTsdownTarget([
+      { target: ["node26"], dts: { dtsOnly: false, emitDtsOnly: true } },
+    ]),
   ).toEqual({ type: "types-only" });
   for (const inputOptions of [() => ({}), [], "dynamic"])
     expect(() => resolvedTsdownTarget([{ inputOptions }])).toThrow(

@@ -178,7 +178,7 @@
     "typecheck": "bun check --no-pretty --all --project=tsconfig.json"
   },
   "devDependencies": {
-    "@oxlint/plugins": "1.89.0",
+    "@oxlint/plugins": "1.93.0",
     "@stll/typescript-config": "workspace:*",
     "@types/node": "26.6.6"
   },

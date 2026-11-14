@@ -143,11 +143,13 @@ export const resolveInstalledManagerNodeEntry = async ({
   if (typeof selector !== "string" || selector.length === 0)
     throw new Error(`Installed ${name} package must declare its ${name} bin`);
   const root = await realpath(directory);
-  // pnpm 12.15 publishes a native executable as its declared bin. Its
+  // pnpm 12.15 and 12.18 publish a native executable as their declared bin. The
   // documented Corepack entry retains Node execution and finds the same binary.
   let nodeSelector = selector;
   if (name === "pnpm" && selector === "pnpm") {
-    if (manifest["version"] !== "12.15.0")
+    if (
+      !["12.15.0", "12.18.0"].some((version) => manifest["version"] === version)
+    )
       throw new Error(
         "Unsupported native pnpm entry; verify its Node launcher contract",
       );
