@@ -938,15 +938,22 @@ test.each([
   ["on: pull_request_target\n", 1],
   ["on: [push, pull_request_target]\n", 1],
   ["'on':\n  push:\n  'pull_request_target':\n    types: [opened]\n", 3],
-])("workflow-trigger rejects pull_request_target in every trigger form: %p", (triggers, line) => {
-  const file = ".github/workflows/any.yml";
-  const findings = check(
-    file,
-    `${triggers}jobs:\n  echo: {runs-on: ubuntu-latest, steps: [{run: 'echo ok'}]}\n`,
-  ).filter(({ rule }) => rule === "workflow-trigger");
-  expect(findings).toMatchObject([{ rule: "workflow-trigger", path: file, line }]);
-  expect(findings[0]?.message).toContain("GitHub restricts it on public repositories");
-});
+])(
+  "workflow-trigger rejects pull_request_target in every trigger form: %p",
+  (triggers, line) => {
+    const file = ".github/workflows/any.yml";
+    const findings = check(
+      file,
+      `${triggers}jobs:\n  echo: {runs-on: ubuntu-latest, steps: [{run: 'echo ok'}]}\n`,
+    ).filter(({ rule }) => rule === "workflow-trigger");
+    expect(findings).toMatchObject([
+      { rule: "workflow-trigger", path: file, line },
+    ]);
+    expect(findings[0]?.message).toContain(
+      "GitHub restricts it on public repositories",
+    );
+  },
+);
 
 test("workflow trust diagnostics locate non-Bun manager commands", () => {
   const file = ".github/workflows/ci.yml";

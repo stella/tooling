@@ -245,12 +245,7 @@ test("Docker line decisions cover unresolved FROM values only", () => {
 });
 
 test("event-specific source refs never classify a PR head as inspected source", () => {
-  for (const event of [
-    "push",
-    "merge_group",
-    "pull_request",
-    "workflow_run",
-  ]) {
+  for (const event of ["push", "merge_group", "pull_request", "workflow_run"]) {
     const source = (ref: string) =>
       `on: ${event}\njobs:\n  example:\n    steps:\n      - uses: ${action("actions/checkout")}\n        with: {ref: '${ref}'}\n      - uses: ./.github/actions/example\n`;
     expect(check(source("${{ github.sha }}")).diagnostics).toEqual([]);
@@ -283,11 +278,7 @@ test("dynamic refs retain static sparse requirements and root-anchored manifest 
 });
 
 test("PR-head manifest selectors delegate without reading the inspected manifest", () => {
-  for (const event of [
-    "pull_request",
-    "push",
-    "merge_group",
-  ])
+  for (const event of ["pull_request", "push", "merge_group"])
     for (const ref of [
       "${{ github.event.pull_request.head.sha }}",
       "${{ github.event.pull_request.head.ref }}",
