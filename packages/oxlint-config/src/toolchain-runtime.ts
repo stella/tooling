@@ -1929,24 +1929,51 @@ export const checkRuntimeFile = ({
       currentLocation = undefined;
     }
   };
+  if (automationKind === "workflow") {
+    // Read triggers from the syntax tree, not the alias expansion below, so
+    // a workflow that exceeds the expansion bound still reports a banned
+    // trigger that no runtime-workflow opt-out can hide.
+    let triggers: unknown;
+    try {
+      triggers = getNode(document.contents, "on");
+    } catch {
+      triggers = undefined;
+    }
+    const scalarValue = (node: unknown) =>
+      isScalar(node) && typeof node.value === "string" ? [node.value] : [];
+    let declared: unknown;
+    if (isMap(triggers))
+      declared = Object.fromEntries(
+        triggers.items.flatMap((pair) =>
+          scalarValue(pair.key).map((event) => [event, null]),
+        ),
+      );
+    else if (isSeq(triggers))
+      declared = triggers.items.flatMap((item) => {
+        try {
+          return scalarValue(resolveNode(item));
+        } catch {
+          return [];
+        }
+      });
+    else declared = scalarValue(triggers).at(0);
+    for (const { event, message } of checkWorkflowTriggers({ on: declared })) {
+      const key = isMap(triggers)
+        ? triggers.items.find((pair) => scalarValue(pair.key).at(0) === event)
+            ?.key
+        : undefined;
+      add({
+        rule: "workflow-trigger",
+        line: nodeLine(key ?? triggers ?? document.contents),
+        message,
+      });
+    }
+  }
   try {
     // Resolve aliases first with an expansion bound before visiting executable fields.
     const workflow: unknown = document.toJS({ maxAliasCount: 100 });
     reviewedWorkflow = workflow;
     if (automationKind === "workflow") {
-      for (const { event, message } of checkWorkflowTriggers(workflow)) {
-        const triggers = getNode(document.contents, "on");
-        const key = isMap(triggers)
-          ? triggers.items.find(
-              (pair) => isScalar(pair.key) && pair.key.value === event,
-            )?.key
-          : undefined;
-        add({
-          rule: "workflow-trigger",
-          line: nodeLine(key ?? triggers),
-          message,
-        });
-      }
       for (const finding of checkWorkflowTrust(workflow)) {
         const jobNode = getNode(
           getNode(document.contents, "jobs"),

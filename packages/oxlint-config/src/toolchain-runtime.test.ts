@@ -955,6 +955,22 @@ test.each([
   },
 );
 
+test("workflow-trigger reports pull_request_target even past the alias expansion bound", () => {
+  const file = ".github/workflows/any.yml";
+  const references = Array.from(
+    { length: 101 },
+    (_, index) => `  copy${index}: *shared\n`,
+  ).join("");
+  const findings = check(
+    file,
+    `on:\n  pull_request_target:\n    types: [opened]\nx-shared: &shared {a: 1}\nx-copies:\n${references}jobs:\n  echo: {runs-on: ubuntu-latest, steps: [{run: 'echo ok'}]}\n`,
+  );
+  expect(findings.map(({ rule }) => rule)).toContain("runtime-workflow");
+  expect(
+    findings.filter(({ rule }) => rule === "workflow-trigger"),
+  ).toMatchObject([{ rule: "workflow-trigger", path: file, line: 2 }]);
+});
+
 test("workflow trust diagnostics locate non-Bun manager commands", () => {
   const file = ".github/workflows/ci.yml";
   for (const command of ["npm test", "pnpm install", "yarn test"]) {
