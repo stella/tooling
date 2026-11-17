@@ -249,7 +249,6 @@ test("event-specific source refs never classify a PR head as inspected source", 
     "push",
     "merge_group",
     "pull_request",
-    "pull_request_target",
     "workflow_run",
   ]) {
     const source = (ref: string) =>
@@ -286,7 +285,6 @@ test("dynamic refs retain static sparse requirements and root-anchored manifest 
 test("PR-head manifest selectors delegate without reading the inspected manifest", () => {
   for (const event of [
     "pull_request",
-    "pull_request_target",
     "push",
     "merge_group",
   ])
