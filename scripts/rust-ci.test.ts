@@ -105,8 +105,10 @@ test("the required-check workflows handle merge groups and use the reviewed veri
   )
     throw new Error("Missing CLA workflow contract");
   expect(cla["on"]["merge_group"]).toEqual({ types: ["checks_requested"] });
-  expect(cla["on"]["pull_request_target"]).toEqual({
-    types: ["opened", "synchronize", "reopened", "ready_for_review"],
+  expect(cla["on"]).not.toHaveProperty("pull_request_target");
+  expect(cla["on"]["workflow_run"]).toEqual({
+    workflows: ["CLA Request"],
+    types: ["completed"],
   });
   // The pin itself belongs to Dependabot; the contract is the reviewed
   // reusable workflow at an immutable commit.
@@ -116,10 +118,11 @@ test("the required-check workflows handle merge groups and use the reviewed veri
   expect(cla["jobs"]["cla"]["if"]).toContain(
     "github.event_name == 'merge_group'",
   );
-  expect(cla["permissions"]).toEqual({
+  expect(cla["permissions"]).toEqual({});
+  expect(cla["jobs"]["cla"]["permissions"]).toEqual({
     contents: "read",
+    checks: "write",
     issues: "write",
     "pull-requests": "read",
-    checks: "write",
   });
 }, 15_000);

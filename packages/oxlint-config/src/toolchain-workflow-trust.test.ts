@@ -527,7 +527,7 @@ test("the documented workflow example obeys the trust contract", () => {
     if (!isRecord(detector))
       throw new Error("documented detector job is missing");
     const sample = {
-      on: ["pull_request", "pull_request_target"],
+      on: ["pull_request"],
       jobs: {
         "trust-check": {
           "runs-on": "ubuntu-latest",

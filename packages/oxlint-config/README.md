@@ -410,9 +410,10 @@ fixtures do not. Package-manager selection follows the nearest declaration or lo
 workspace members share their owner's update entry. Bundler `Gemfile`/`Gemfile.lock`
 and Composer `composer.json`/`composer.lock` declare roots at their own directories.
 
-`rust-version`, `node-engine`, `workflow-trust`, `type-aware-projects`,
-`cloud-setup-drift` and `quarantine-policy` are mandatory: opt-outs cannot
-bypass them (Rust uses expiring `rustExceptions` instead).
+`rust-version`, `node-engine`, `workflow-trust`, `workflow-trigger`,
+`type-aware-projects`, `cloud-setup-drift` and `quarantine-policy` are
+mandatory: opt-outs cannot bypass them (Rust uses expiring `rustExceptions`
+instead).
 
 Opt-outs apply to the entire repository for that rule. Unknown or duplicate
 rules, empty reasons, and malformed configuration fail validation. See the
@@ -977,6 +978,14 @@ exits successfully even when history is unreadable, reporting `changed: true`
 and `status: "unreadable"`. Use `changed` to force the full CI depth on both
 pull requests and merge-queue runs. An unreadable snapshot never skips checks.
 
+The mandatory `workflow-trigger` rule rejects the `pull_request_target`
+trigger in every workflow, with no allowlist: it runs base-repository code with
+secrets on pull request events, and GitHub restricts it on public repositories.
+Use an unprivileged `pull_request` workflow and, only for a step that needs
+secrets or write access, a separate `workflow_run` workflow that treats the
+first run's output as untrusted data (see the CLA and provenance workflows in
+`stella/.github`).
+
 Run repository-installed tools only after the workflow's existing trust decision.
 The mandatory `workflow-trust` rule applies to PR workflows declaring a
 `trust-check` job. Repository execution requires a direct dependency and a
@@ -1057,8 +1066,7 @@ check-changes:
   needs: [trust-check]
   if: >-
     always() && !cancelled()
-    && ((github.event_name != 'pull_request'
-         && github.event_name != 'pull_request_target')
+    && (github.event_name != 'pull_request'
         || needs.trust-check.outputs.trusted == 'true')
   runs-on: ubuntu-latest
   steps:

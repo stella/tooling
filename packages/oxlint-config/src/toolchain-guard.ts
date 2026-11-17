@@ -157,6 +157,10 @@ export const parseToolchainConfiguration = (input: unknown) => {
       throw new Error(
         "workflow-trust cannot be opted out; repository commands must follow the declared trust decision",
       );
+    if (entry["rule"] === "workflow-trigger")
+      throw new Error(
+        "workflow-trigger cannot be opted out; pull_request_target has no allowlist",
+      );
     if (entry["rule"] === "cloud-setup-drift")
       throw new Error(
         "cloud-setup-drift cannot be opted out; generated setup must match shared policy",

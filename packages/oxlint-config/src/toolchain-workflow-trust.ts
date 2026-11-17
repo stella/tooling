@@ -316,7 +316,10 @@ const safeEnvironment = (value: unknown) =>
 const configuredShell = (value: unknown) =>
   record(value) && record(value["run"]) ? value["run"]["shell"] : undefined;
 
-export const workflowTrustRules = ["workflow-trust"] as const;
+export const workflowTrustRules = [
+  "workflow-trust",
+  "workflow-trigger",
+] as const;
 
 type WorkflowTrustFinding = {
   job: string;
@@ -332,6 +335,24 @@ const workflowEvents = (triggers: unknown): unknown[] => {
   if (record(triggers)) return Object.keys(triggers);
   return [];
 };
+
+// pull_request_target runs base-repository workflow code with secrets and a
+// write token on events that fork pull requests control, and GitHub restricts
+// it on public repositories. There is no allowlist: an unprivileged
+// pull_request workflow plus, where a step needs privilege, a workflow_run
+// workflow that treats the first run's output as untrusted data replaces it.
+export const bannedWorkflowTriggers = {
+  pull_request_target:
+    "pull_request_target is banned: it runs base-repository code with secrets on pull request events and GitHub restricts it on public repositories; use pull_request, plus a workflow_run workflow for any step that needs secrets or write access",
+} as const satisfies Record<string, string>;
+
+/** Name every banned trigger a workflow declares. */
+export const checkWorkflowTriggers = (workflow: unknown) =>
+  record(workflow)
+    ? Object.entries(bannedWorkflowTriggers)
+        .filter(([event]) => workflowEvents(workflow["on"]).includes(event))
+        .map(([event, message]) => ({ event, message }))
+    : [];
 
 /** Enforce a workflow's declared trust boundary before repository dependency execution. */
 export const checkWorkflowTrust = (workflow: unknown) => {
