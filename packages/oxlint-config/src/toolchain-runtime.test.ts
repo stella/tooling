@@ -893,6 +893,12 @@ const cases = [
     pass: "on: pull_request\njobs:\n  trust-check: {runs-on: ubuntu-latest, steps: [{run: 'echo trusted'}]}\n  detector:\n    needs: trust-check\n    if: needs.trust-check.outputs.trusted == 'true'\n    steps: [{run: 'bunx --no-install stll-toolchain-changed --since origin/main'}]\n",
     fail: "on: pull_request\njobs:\n  trust-check: {runs-on: ubuntu-latest, steps: [{run: 'echo trusted'}]}\n  detector:\n    steps: [{run: 'bunx --no-install stll-toolchain-changed --since origin/main'}]\n",
   },
+  {
+    rule: "workflow-trigger",
+    file: ".github/workflows/cla.yml",
+    pass: "on:\n  workflow_run:\n    workflows: [CLA Request]\n    types: [completed]\njobs:\n  cla: {runs-on: ubuntu-latest, steps: [{run: 'echo verified'}]}\n",
+    fail: "on:\n  issue_comment:\n  pull_request_target:\n    types: [opened]\njobs:\n  cla: {runs-on: ubuntu-latest, steps: [{run: 'echo verified'}]}\n",
+  },
 ] satisfies {
   rule: (typeof runtimeRules)[number];
   file: string;
@@ -926,6 +932,20 @@ jobs:
   expect(
     check(file, gated).filter(({ rule }) => rule === "workflow-trust"),
   ).toEqual([]);
+});
+
+test.each([
+  ["on: pull_request_target\n", 1],
+  ["on: [push, pull_request_target]\n", 1],
+  ["'on':\n  push:\n  'pull_request_target':\n    types: [opened]\n", 3],
+])("workflow-trigger rejects pull_request_target in every trigger form: %p", (triggers, line) => {
+  const file = ".github/workflows/any.yml";
+  const findings = check(
+    file,
+    `${triggers}jobs:\n  echo: {runs-on: ubuntu-latest, steps: [{run: 'echo ok'}]}\n`,
+  ).filter(({ rule }) => rule === "workflow-trigger");
+  expect(findings).toMatchObject([{ rule: "workflow-trigger", path: file, line }]);
+  expect(findings[0]?.message).toContain("GitHub restricts it on public repositories");
 });
 
 test("workflow trust diagnostics locate non-Bun manager commands", () => {

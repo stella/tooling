@@ -383,6 +383,7 @@ test("permitted named rules have reasoned opt-outs; mandatory and malformed choi
       rule === "cloud-setup-drift" ||
       rule === "type-aware-projects" ||
       rule === "workflow-trust" ||
+      rule === "workflow-trigger" ||
       rule === "quarantine-policy"
     ) {
       expect(() =>

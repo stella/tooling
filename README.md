@@ -900,8 +900,7 @@ check-changes:
   needs: [trust-check]
   if: >-
     always() && !cancelled()
-    && ((github.event_name != 'pull_request'
-         && github.event_name != 'pull_request_target')
+    && (github.event_name != 'pull_request'
         || needs.trust-check.outputs.trusted == 'true')
   runs-on: ubuntu-latest
   steps:

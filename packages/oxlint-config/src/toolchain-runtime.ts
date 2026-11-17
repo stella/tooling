@@ -43,6 +43,7 @@ import type { NodeCompatibility } from "./toolchain-node-compatibility";
 import { checkRustReferences, type RustException } from "./toolchain-rust";
 import type { RustInstallFixture } from "./toolchain-rust-fixtures";
 import {
+  checkWorkflowTriggers,
   checkWorkflowTrust,
   workflowTrustRules,
 } from "./toolchain-workflow-trust";
@@ -1933,6 +1934,19 @@ export const checkRuntimeFile = ({
     const workflow: unknown = document.toJS({ maxAliasCount: 100 });
     reviewedWorkflow = workflow;
     if (automationKind === "workflow") {
+      for (const { event, message } of checkWorkflowTriggers(workflow)) {
+        const triggers = getNode(document.contents, "on");
+        const key = isMap(triggers)
+          ? triggers.items.find(
+              (pair) => isScalar(pair.key) && pair.key.value === event,
+            )?.key
+          : undefined;
+        add({
+          rule: "workflow-trigger",
+          line: nodeLine(key ?? triggers),
+          message,
+        });
+      }
       for (const finding of checkWorkflowTrust(workflow)) {
         const jobNode = getNode(
           getNode(document.contents, "jobs"),
