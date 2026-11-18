@@ -345,8 +345,8 @@ Every repository that uses these configs follows one toolchain:
   shared list of such tools.
 - **Declarations** built with tsdown use `dts: { generator: "oxc" }`, which
   needs explicit types on exported declarations. A package that cannot provide
-  them points tsdown at tsrs instead:
-  `dts: { generator: "tsgo", tsgo: { path: <tsrs bin> } }`.
+  them points tsdown at tsrs instead: `dts: { generator: "tsrs" }`. The
+  `tsgo` generator with a tsrs binary path needs an installed TypeScript 7.0.
 - **Compiler-API code does not import `typescript`.** Programs, the type
   checker and tsconfig resolution use `tsrs` `0.21.0-ts7.1.0-beta`
   through its async API only (`import { API } from "tsrs/async"`; close
