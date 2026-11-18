@@ -119,7 +119,7 @@ Missing packages or jobs, private packages, absent setup-node selectors and
 floor mismatches fail configuration validation. `optOuts` is optional when
 only `engineFloors` is declared.
 
-The Rust stable pin is `1.99.0`. Floating channels and off-pin Rust references
+The Rust stable pin is `1.100.0`. Floating channels and off-pin Rust references
 fail the shared check. Cargo `rust-version` declarations remain minimum support
 versions and may be lower than the shared pin. Rust setup actions
 (`dtolnay/rust-toolchain` and `actions-rust-lang/setup-rust-toolchain`) require
@@ -179,7 +179,7 @@ Hawk 0.1.11 is the current temporary Rust exception: its driver fails to build
 with 1.99.0 due to compiler-private API changes (E0061 and E0308). It uses
 1.97.1 until [tracking issue #99](https://github.com/stella/tooling/issues/99) is
 resolved, with the exception expiring on 2026-11-11. The stable source checker
-and all ordinary Rust work use the shared 1.99.0 pin. Consumer repositories that
+and all ordinary Rust work use the shared pin. Consumer repositories that
 run Hawk need the same exact, tracked exception declaration.
 
 `engines.node` and `requires-python` are support ranges: they must include the

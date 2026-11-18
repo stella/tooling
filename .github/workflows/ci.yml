@@ -192,11 +192,11 @@ jobs:
           persist-credentials: false
 
       - name: Install stable Rust toolchain
-        run: rustup toolchain install 1.99.1 --profile minimal
+        run: rustup toolchain install 1.100.0 --profile minimal
 
       - name: Test stable source lint
         env:
-          RUSTUP_TOOLCHAIN: "1.99.1"
+          RUSTUP_TOOLCHAIN: "1.100.0"
         run: cargo test --manifest-path rust-lints/stella_source_lint/Cargo.toml --locked
 
   hawk-compatibility:
@@ -212,13 +212,13 @@ jobs:
           persist-credentials: false
 
       - name: Install shared Hawk compiler
-        run: rustup toolchain install 1.99.1 --profile minimal --component rustc-dev
+        run: rustup toolchain install 1.100.0 --profile minimal --component rustc-dev
 
       - name: Build pinned Hawk
         # Hawk's documented source install requires rustc_private opt-in.
         env:
           RUSTC_BOOTSTRAP: "1"
-        run: cargo +1.99.1 install cargo-hawk --version 0.1.17 --locked --root "$RUNNER_TEMP/hawk"
+        run: cargo +1.100.0 install cargo-hawk --version 0.1.17 --locked --root "$RUNNER_TEMP/hawk"
 
       - name: Check consumer crate with the Hawk compiler
         env:
@@ -232,4 +232,4 @@ jobs:
           lib = "stella_regex_set"
           reason = "Shared native library compatibility probe"
           HAWK_CONFIG
-          cargo +1.99.1 hawk check --target-dir "$RUNNER_TEMP/hawk-target" -A hawk::dead_public -A hawk::unnecessary_public
+          cargo +1.100.0 hawk check --target-dir "$RUNNER_TEMP/hawk-target" -A hawk::dead_public -A hawk::unnecessary_public
