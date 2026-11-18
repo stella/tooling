@@ -1026,9 +1026,17 @@ test("declared inventory runtimes load real configs independently of the checker
       naming: "checker.mjs",
       target: "node",
       // tsrs resolves at run time, from the installation the checker runs in.
-      external: ["tsrs", "tsrs/*"],
+      // oxc-parser loads a native binding, so it stays a dependency of the
+      // checker, as in the published package.
+      external: ["tsrs", "tsrs/*", "oxc-parser"],
     });
     expect(build.success).toBe(true);
+    mkdirSync(path.join(bundleRoot, "node_modules"));
+    symlinkSync(
+      path.join(import.meta.dir, "../node_modules/oxc-parser"),
+      path.join(bundleRoot, "node_modules/oxc-parser"),
+      "dir",
+    );
     withInventoryFixture((root, trackedFiles) => {
       // The bundle sits outside the package, so tsrs resolves from the
       // repository: link the package's own installed tsrs.
