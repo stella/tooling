@@ -1,5 +1,11 @@
 # @stll/test-kit
 
+## 0.4.4
+
+### Patch Changes
+
+- [#279](https://github.com/stella/tooling/pull/279) [`34f2068`](https://github.com/stella/tooling/commit/34f206842db8a965c036eeee454d80eb3d40a274) Thanks [@jan-kubica](https://github.com/jan-kubica)! - The README explains how a test's own timeout interacts with `bun test --timeout`: the test's number replaces the command's in either direction, so a long test sized from a workstation run can fail on slower CI runners inside a budget the command allows. It recommends one budget sized from CI durations and per-phase hang guards with `settledWithin`.
+
 ## 0.4.3
 
 ### Patch Changes

@@ -1,5 +1,17 @@
 # @stll/oxlint-config
 
+## 4.2.0
+
+### Minor Changes
+
+- [#276](https://github.com/stella/tooling/pull/276) [`343472c`](https://github.com/stella/tooling/commit/343472cf62def03d6f91c2331ed5a615e3125e90) Thanks [@jan-kubica](https://github.com/jan-kubica)! - `stll-toolchain-check` rejects the `pull_request_target` workflow trigger with the new mandatory `workflow-trigger` rule. It has no allowlist or opt-out: use an unprivileged `pull_request` workflow and, only for a step that needs secrets or write access, a separate `workflow_run` workflow that treats the first run's output as untrusted data.
+
+- [#280](https://github.com/stella/tooling/pull/280) [`10c8001`](https://github.com/stella/tooling/commit/10c800190f4c2b835009a1227cab1ea658dee5fa) Thanks [@jan-kubica](https://github.com/jan-kubica)! - Pins the shared Rust toolchain, the generated cloud setup and the owner CI jobs to 1.100.0. Consumers that pin Rust 1.99.1 in toolchain files, workflows, commands or images must move to 1.100.0 or declare a tracked `rustExceptions` entry.
+
+### Patch Changes
+
+- [#232](https://github.com/stella/tooling/pull/232) [`19dc99d`](https://github.com/stella/tooling/commit/19dc99d30ad539d2b1fff4c5bbed173936abb18b) Thanks [@jan-kubica](https://github.com/jan-kubica)! - The Vite publish target resolver reads the declaration helper's config with oxc-parser instead of stripping TypeScript with esbuild and parsing with acorn, and the toolchain check reads declared TypeScript API importers the same way, so `esbuild` is no longer a direct dependency. A config that exports `defineConfig(...)` through a local constant is now recognized, and a value import of `vite-plugin-dts` or `unplugin-dts` beside the helper fails even when unused.
+
 ## 4.1.0
 
 ### Minor Changes
