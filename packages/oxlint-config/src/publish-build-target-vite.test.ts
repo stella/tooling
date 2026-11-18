@@ -56,6 +56,65 @@ export default defineConfig({ plugins: [declarations({ directory: import.meta.di
     ).toThrow();
 });
 
+test("declaration helper configuration reads TypeScript syntax without a type-stripping compiler", () => {
+  const source = `import type { UserConfig } from 'vite';
+import { type PluginOption, defineConfig } from 'vite';
+import { declarationOnlyDts } from '@stll/oxlint-config/declaration-only-dts';
+import type { PluginOptions } from 'vite-plugin-dts';
+interface Extra { value: string }
+declare const injected: PluginOption;
+const config: UserConfig = defineConfig<UserConfig>({
+  plugins: [declarationOnlyDts({ directory: import.meta.dirname!, include: ['src/**/*'] as string[] })],
+} satisfies UserConfig);
+type Helper = typeof declarationOnlyDts;
+class Runner { run(declarationOnlyDts: string): void; run(value: string): void {} }
+export default config;`;
+  for (const loader of ["ts", "js"] as const) {
+    const input =
+      loader === "ts"
+        ? source
+        : `import { defineConfig } from 'vite';
+import { declarationOnlyDts } from '@stll/oxlint-config/declaration-only-dts';
+const config = defineConfig({ plugins: [declarationOnlyDts({ directory: import.meta.dirname, include: ['src/**/*'] })] });
+export default config;`;
+    expect(
+      reviewedDtsConfiguration({
+        source: input,
+        directory: "/package",
+        loader,
+      }),
+    ).toEqual({ include: ["src/**/*"] });
+  }
+  expect(
+    reviewedDtsConfiguration({
+      source: source
+        .replace("const config: UserConfig", "export const config: UserConfig")
+        .replace("export default config;", "export { config as default };"),
+      directory: "/package",
+      loader: "ts",
+    }),
+  ).toEqual({ include: ["src/**/*"] });
+  for (const [mutation, message] of [
+    [
+      source.replace("import type { PluginOptions }", "import raw"),
+      "Raw declaration emitters cannot accompany the reviewed helper",
+    ],
+    [
+      source
+        .replace("plugins: [", "plugins: [[")
+        .replace("as string[] })]", "as string[] })]]"),
+      "Declare exactly one direct declaration helper call",
+    ],
+  ] as const)
+    expect(() =>
+      reviewedDtsConfiguration({
+        source: mutation,
+        directory: "/package",
+        loader: "ts",
+      }),
+    ).toThrow(message);
+});
+
 test("Vite native callbacks are version-profile-bound at their exact option paths", () => {
   const callback = () => undefined;
   for (const [name, field] of [

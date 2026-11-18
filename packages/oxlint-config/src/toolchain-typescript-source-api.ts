@@ -1,7 +1,6 @@
-import { parse } from "acorn";
-import { transformSync } from "esbuild";
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
+import { parseSync } from "oxc-parser";
 
 /** Read only explicitly declared, tracked regular source files in the checkout. */
 type SourceApiInputOptions = {
@@ -40,23 +39,27 @@ export const sourceApiImportProblem = ({
   if (content === undefined)
     return "must be a tracked, readable regular source file without symlinks";
   try {
-    const { code } = transformSync(content, {
-      sourcefile: source,
-      loader: source.endsWith("x") ? "tsx" : "ts",
-      format: "esm",
-      tsconfigRaw: { compilerOptions: { verbatimModuleSyntax: true } },
-      logLevel: "silent",
-    });
-    const program = parse(code, {
-      ecmaVersion: "latest",
+    const lang = source.endsWith("x") ? "tsx" : "ts";
+    const { program, errors } = parseSync(source, content, {
+      lang,
       sourceType: "module",
+      // Early errors such as a top-level `break` come from the semantic pass.
+      showSemanticErrors: true,
     });
+    if (errors.length > 0)
+      return "cannot parse the declared compiler API importer";
+    // A value import keeps at least one binding that is not `type`-only.
     if (
       program.body.some(
         (node) =>
           node.type === "ImportDeclaration" &&
+          node.importKind !== "type" &&
           node.source.value === name &&
-          node.specifiers.length > 0,
+          node.specifiers.some(
+            (specifier) =>
+              specifier.type !== "ImportSpecifier" ||
+              specifier.importKind !== "type",
+          ),
       )
     )
       return undefined;

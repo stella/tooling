@@ -274,6 +274,7 @@ test("source API declarations bind exact installs to tracked value importers", (
     'import ts from "typescript";',
     'import { type Program } from "typescript6";',
     "import {",
+    'import ts from "typescript6"; console.log(ts.version); break;',
   ]) {
     expect(
       typescriptDiagnostics(
