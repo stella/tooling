@@ -19,7 +19,7 @@
     },
     "packages/oxlint-config": {
       "name": "@stll/oxlint-config",
-      "version": "4.1.0",
+      "version": "4.2.0",
       "bin": {
         "stll-cloud-setup": "./dist/cloud-setup-cli.mjs",
         "stll-consumer-compat": "./dist/consumer-compat-cli.mjs",
@@ -80,7 +80,7 @@
     },
     "packages/test-kit": {
       "name": "@stll/test-kit",
-      "version": "0.4.3",
+      "version": "0.4.4",
       "dependencies": {
         "@stll/time": "0.4.3",
         "better-result": "3.0.1",
