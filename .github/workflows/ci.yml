@@ -218,7 +218,7 @@ jobs:
         # Hawk's documented source install requires rustc_private opt-in.
         env:
           RUSTC_BOOTSTRAP: "1"
-        run: cargo +1.100.0 install cargo-hawk --version 0.1.17 --locked --root "$RUNNER_TEMP/hawk"
+        run: cargo +1.100.0 install cargo-hawk --version 0.1.18 --locked --root "$RUNNER_TEMP/hawk"
 
       - name: Check consumer crate with the Hawk compiler
         env:
