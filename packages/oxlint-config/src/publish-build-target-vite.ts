@@ -74,6 +74,13 @@ const typeDeclarations: ReadonlySet<unknown> = new Set([
 ]);
 const typeOnly = (value: unknown): boolean => {
   if (!record(value)) return false;
+  // An overload signature is a method whose value has no body.
+  if (
+    value["type"] === "MethodDefinition" &&
+    record(value["value"]) &&
+    value["value"]["type"] === "TSEmptyBodyFunctionExpression"
+  )
+    return true;
   if (
     typeDeclarations.has(value["type"]) ||
     value["declare"] === true ||
@@ -209,11 +216,17 @@ export const reviewedDtsConfiguration = ({
             defineConfigBindings.add(local);
         }
     }
+    // `export const config = ...` keeps its declaration inside the export.
+    const variables =
+      statement["type"] === "ExportNamedDeclaration"
+        ? statement["declaration"]
+        : statement;
     if (
-      statement["type"] === "VariableDeclaration" &&
-      array(statement["declarations"])
+      record(variables) &&
+      variables["type"] === "VariableDeclaration" &&
+      array(variables["declarations"])
     )
-      for (const declaration of statement["declarations"])
+      for (const declaration of variables["declarations"])
         if (record(declaration))
           initializers.set(astName(declaration["id"]), declaration["init"]);
     if (statement["type"] === "ExportDefaultDeclaration")

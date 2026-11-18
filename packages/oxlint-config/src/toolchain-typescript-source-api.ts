@@ -43,6 +43,8 @@ export const sourceApiImportProblem = ({
     const { program, errors } = parseSync(source, content, {
       lang,
       sourceType: "module",
+      // Early errors such as a top-level `break` come from the semantic pass.
+      showSemanticErrors: true,
     });
     if (errors.length > 0)
       return "cannot parse the declared compiler API importer";
