@@ -17,6 +17,7 @@ bun add -d @stll/test-kit
 | Wait for something that happens                    | `deferred()`, `waitForEvent()`, `waitForAbort()`                                    | sleeping and hoping                                          |
 | Wait for state without an event (a row, a file)    | `waitFor(probe, { description })`                                                   | a hand-written poll loop                                     |
 | A deadline that only catches hangs                 | `settledWithin(promise, { description })`                                           | `Promise.race` with a short timer as an assertion            |
+| A long test's own budget                           | the CI command's `bun test --timeout`; per phase, `settledWithin` with `timeoutMs`  | a per-test timeout sized from one workstation run            |
 | A private directory per test                       | `useTestTmpDir()`, `withTestTmpDir()`, `await using dir = await createTestTmpDir()` | `mkdtemp(tmpdir())` and manual cleanup                       |
 | No outbound network                                | preload `@stll/test-kit/forbid-network`, or `installNetworkGuard()`                 | relying on the CI network                                    |
 | No inherited proxy settings during a network guard | `installNetworkGuard()` hides and later restores proxy environment variables        | treating sandbox proxy settings as test network access       |
@@ -41,6 +42,25 @@ Every wait takes a `description`. The hang guard (4 s by default, below
 a suite raises that timeout) fails with "waiting for <description>", so a stuck test
 says what it was waiting for. The guard is never a statement about speed: do
 not shorten it to assert that something is fast. Assert work counts instead.
+
+## Test timeouts
+
+A test's own timeout (`test(name, fn, ms)`, `{ timeout: ms }`, a hook's
+timeout or `setDefaultTimeout`) replaces `bun test --timeout` for that test,
+in either direction. A long test that declares less than the command running
+it is held to the smaller number, and nothing reports the conflict.
+
+A test timeout is a hang guard like the waits above, not a statement about
+speed. Hosted runners take the same work two to three times longer than a
+quiet run, so:
+
+- Size a long test's budget from its CI durations with headroom (about 2.5x
+  the slowest passing run), never from one workstation measurement.
+- Keep one number. When the CI command sets `--timeout`, a test either
+  declares nothing or declares at least that budget.
+- Split a long test into phases and give each a hang guard with
+  `settledWithin(phase, { description, timeoutMs })`, so a stuck run says
+  which phase hung instead of hitting the test's total.
 
 ## Rejections
 
