@@ -1,15 +1,8 @@
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
-import path from "node:path";
 import { defineConfig } from "tsdown";
 
 // About 200 exported declarations here rely on inferred types, which the oxc
 // generator cannot emit; tsrs emits them from the program instead.
-const tsrs = path.join(
-  path.dirname(createRequire(import.meta.url).resolve("tsrs/package.json")),
-  "bin/tsrs",
-);
-
 export default defineConfig({
   define: {
     STLL_RUST_TEMPLATES: JSON.stringify(
@@ -49,7 +42,7 @@ export default defineConfig({
     "src/wasi-loader-normalizer-cli.ts",
   ],
   format: ["esm", "cjs"],
-  dts: { generator: "tsgo", tsgo: { path: tsrs } },
+  dts: { generator: "tsrs" },
   clean: true,
   sourcemap: true,
   hash: false,
