@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["stella"]
 description = "Stable Rust source policy checks for stella repositories"
 edition = "2024"
-rust-version = "1.99.0"
+rust-version = "1.100.0"
 publish = false
 
 [dependencies]
