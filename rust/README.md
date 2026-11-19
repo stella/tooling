@@ -96,10 +96,7 @@ Use the exact stable Rust pin in `packages/oxlint-config/toolchain.json`.
 Optional fuzzing can use `cargo fuzz run <target> -s none` on stable Rust;
 ordinary CI retains the deterministic unit and source-lint checks above.
 
-Hawk 0.1.11 requires the temporary exact Rust 1.97.1 exception documented in
-[tracking issue #99](https://github.com/stella/tooling/issues/99). Declare it in
-`stll-toolchain.json` with the compatibility reason, tracking URL and expiry
-2026-11-11; retain the shared stable pin for ordinary Rust checks.
+Hawk 0.1.18 builds with the shared stable pin, so it needs no Rust exception.
 
 Generated comments record the exact policy leaves owned by the current release.
 Later generation removes those leaves before applying the new template, so
