@@ -134,7 +134,7 @@
     "@changesets/read": "1.0.1",
     "@manypkg/get-packages": "3.1.0",
     "acorn": "8.19.0",
-    "oxc-parser": "0.155.0",
+    "oxc-parser": "0.158.0",
     "picomatch": "4.0.7",
     "semver": "7.8.6",
     "smol-toml": "1.9.1",
@@ -148,7 +148,7 @@
     "@types/semver": "7.8.0",
     "oxlint": "1.93.0",
     "unplugin-dts": "1.1.2",
-    "vite": "8.3.7",
+    "vite": "8.3.8",
     "vite-plugin-dts": "5.1.2"
   },
   "peerDependencies": {
